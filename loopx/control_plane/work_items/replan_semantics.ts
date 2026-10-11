@@ -103,14 +103,26 @@ function lifecycleSource(request: JsonObject): JsonObject {
   const admitted = typeof request.guard_recorded_at === "string"
     ? parseTodoTimestampMicros(request.guard_recorded_at) : null;
   if (!agent || admitted === null || !Array.isArray(request.items)) return {items: [], settled: false};
+  // Canonical Todo updates use whole seconds. A closeout in the admission
+  // second is possible; the exact obligation digest must still prove identity.
+  // Older terminal rows were already absent from the admitted frontier.
+  const admissionSecond = admitted / 1_000_000n * 1_000_000n;
   const items = request.items.map(object).filter(item => {
     const completed = typeof item.completed_at === "string" ? parseTodoTimestampMicros(item.completed_at) : null;
+    const updated = typeof item.updated_at === "string" ? parseTodoTimestampMicros(item.updated_at) : null;
     return item.status === "done" && item.done === true &&
       (item.archive_state ?? "active") === "active" && item.task_class === "advancement_task" &&
       item.claimed_by === agent && item.last_actor_agent_id === agent &&
       completed !== null && completed <= admitted &&
       strings(item.successor_todo_ids).length === 0 && !item.superseded_by &&
-      (item.no_followup !== true || item.completion_recovery === "lifecycle_reentry_terminal_closeout");
+      (item.no_followup !== true || (item.completion_recovery === "lifecycle_reentry_terminal_closeout" &&
+        updated !== null && updated >= admissionSecond));
+  }).sort((left, right) => {
+    // Terminal reentry changes updated_at, never the original completed_at.
+    // Restore the original summary's ordering before its three-trigger bound.
+    const a = parseTodoTimestampMicros(String(left.completed_at))!;
+    const b = parseTodoTimestampMicros(String(right.completed_at))!;
+    return a === b ? Number(right.index ?? 0) - Number(left.index ?? 0) : a > b ? -1 : 1;
   });
   const settled = items.length > 0 && items.slice(0, 3).every(item =>
     item.no_followup === true && item.completion_continuation === "no_followup" &&
