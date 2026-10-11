@@ -123,12 +123,11 @@ def test_short_reply_handoff_preserves_source_and_returns_once(
         answer = answer_lark_goal_topic(**options)
         assert "**已转交给 `worker`。**" in answer
         assert "是否已开始处理尚未核实" in answer
-        if context_state == "near_record_limit":
-            assert "完整简报已投递" in answer
-        else:
-            assert handoff_target["brief"]["purpose"] in answer
-            assert handoff_target["brief"]["context"] not in answer
-            assert "Do not publish." in answer
+        # The audience-processed model answer survives the handoff. The full
+        # brief is read back from the recipient inbox, not duplicated in Chat.
+        assert answer.startswith("Preparing handoff.\n\n")
+        assert answer.count("Preparing handoff.") == 1
+        assert handoff_target["brief"]["context"] not in answer
         entry, = pending(tmp_path, **target)["items"]
         assert entry["brief"] == handoff_target["brief"]
         forwarded = entry["message"]

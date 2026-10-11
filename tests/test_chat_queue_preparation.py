@@ -6,6 +6,7 @@ import runpy
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 
 import pytest
@@ -252,8 +253,8 @@ def test_stop_wins_over_late_preparation_failure(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("delay_stage", ["context", "provider"])
-def test_http_stop_remains_effective_after_worker_wait_expires(tmp_path, monkeypatch, delay_stage):
-    """A late worker cannot dispatch or hand off after the stop receipt commits."""
+def test_http_stop_retains_fence_until_late_worker_acknowledges(tmp_path, monkeypatch, delay_stage):
+    """A failed stop retains authority; retry settles only after the worker exits."""
     import loopx.chat_coordination as coordination
     from loopx.capabilities import manager_context
 
@@ -304,17 +305,27 @@ def test_http_stop_remains_effective_after_worker_wait_expires(tmp_path, monkeyp
             f"http://127.0.0.1:{server.server_port}/api/chat/sessions/{sid}/turns/{tid}/interrupt",
             data=b"{}", headers={"Content-Type": "application/json"}, method="POST",
         )
+        with pytest.raises(urllib.error.HTTPError) as rejected:
+            urllib.request.urlopen(request, timeout=10)
+        assert rejected.value.code == 424
+        rejected.value.close()
+        assert not old_worker_done.is_set(), "the late worker must still be blocked"
+        assert (sid, tid) in runtime.cancelled_turns
+        assert store.load_turn(sid, tid)["status"] == "interrupting"
+        assert store.load_session(sid)["active_turn_id"] == tid
+        assert not any(e["kind"] == "turn.interrupted" for e in store.events_after(sid, tid, None))
+        replay, created = runtime.submit_turn(session_id=sid, client_turn_id="old-request", message="Old request", work_dir=tmp_path, objective="Research")
+        assert not created and replay["status"] == "interrupting"
+        release.set()
+        assert old_worker_done.wait(3)
         with urllib.request.urlopen(request, timeout=10) as response:
             assert response.status == 200
             assert json.load(response)["status"] == "interrupted"
-        assert not old_worker_done.is_set(), "the late worker must still be blocked"
         assert (sid, tid) not in runtime.cancelled_turns
-        fresh, _ = runtime.submit_turn(session_id=sid, client_turn_id="fresh-request", message="Fresh request", work_dir=tmp_path, objective="Research")
-        assert runtime.wait_for_turn(session_id=sid, turn_id=fresh["turn_id"], timeout_sec=3)["response"]["message"] == "Fresh result"
         replay, created = runtime.submit_turn(session_id=sid, client_turn_id="old-request", message="Old request", work_dir=tmp_path, objective="Research")
         assert not created and replay["status"] == "interrupted"
-        release.set()
-        assert old_worker_done.wait(3)
+        fresh, _ = runtime.submit_turn(session_id=sid, client_turn_id="fresh-request", message="Fresh request", work_dir=tmp_path, objective="Research")
+        assert runtime.wait_for_turn(session_id=sid, turn_id=fresh["turn_id"], timeout_sec=3)["response"]["message"] == "Fresh result"
         assert len(dispatches) == (1 if delay_stage == "context" else 2)
         assert handoffs == []
         assert store.load_turn(sid, tid)["status"] == "interrupted"
