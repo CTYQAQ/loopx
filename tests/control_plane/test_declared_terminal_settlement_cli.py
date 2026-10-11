@@ -5,6 +5,7 @@ import json
 import shlex
 import subprocess
 import sys
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -13,11 +14,12 @@ import test_quota_settlement_cli as cli
 from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
 
 from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+from loopx.control_plane.coordination.local_authority_shadow_projection import canonical_bytes
 from loopx.control_plane.quota.settlement import read_heartbeat_settlement
 from loopx.control_plane.todos.markdown import render_todo_markdown
 
 
-def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str):
+def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, *, historical_terminals: int = 0):
     # Scope managed Effect discovery as well as provider data for both arms.
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     project, runtime, registry_path = cli._write_fixture(tmp_path)
@@ -25,6 +27,20 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str):
     state.write_text(state.read_text().replace(
         "required_capabilities=filesystem_write", "required_capabilities=shell%2Cfilesystem_write "
         f"claimed_by={cli.AGENT_ID} required_write_scopes=src/**",
+    ))
+    # Initial synthetic authority, never edits to an admitted or active Goal.
+    # These same-Agent terminal rows are absent from the later admission source.
+    state.write_text(state.read_text() + "".join(
+        f"\n- [x] Previously accepted source {index}.\n"
+        f"  <!-- loopx:todo todo_id=todo_historical_{index} status=done "
+        f"task_class=advancement_task claimed_by={cli.AGENT_ID} "
+        f"last_actor_agent_id={cli.AGENT_ID} no_followup=true "
+        "completion_continuation=no_followup "
+        "completion_recovery=lifecycle_reentry_terminal_closeout "
+        f"completion_turn_key=historical-completion-{index} "
+        "completed_at=2001-01-01T00%3A00%3A00Z "
+        "updated_at=2001-01-01T00%3A00%3A01Z -->\n"
+        for index in range(historical_terminals)
     ))
     registry = json.loads(registry_path.read_text())
     registry["goals"][0]["coordination"]["write_scope"] = ["src/**"]
@@ -46,10 +62,17 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str):
 
     code, listed = run("todo", "list", "--goal-id", cli.GOAL_ID)
     assert code == 0, listed
+    projection = build_todo_runtime_shadow_projection(
+        goal_id=cli.GOAL_ID, todos=listed["todos"], handoff_mode="hard_lease", leases=[],
+    )
+    # Actor audit is canonical-only; legacy Markdown import cannot author it.
+    historical = [row for row in projection["todos"] if row["todo_id"].startswith("todo_historical_")]
+    assert len(historical) == historical_terminals
+    for row in historical:
+        row["last_actor_agent_id"] = cli.AGENT_ID
+    projection["todo_read_model"]["records_sha256"] = sha256(canonical_bytes(projection["todos"])).hexdigest()
     initialize_canonical_authority(
-        runtime, cli.GOAL_ID, build_todo_runtime_shadow_projection(
-            goal_id=cli.GOAL_ID, todos=listed["todos"], handoff_mode="hard_lease", leases=[],
-        ), state_path=state, provider=provider,
+        runtime, cli.GOAL_ID, projection, state_path=state, provider=provider,
     )
     code, acquired = run(
         "task-lease", "acquire", "--goal-id", cli.GOAL_ID, "--todo-id", cli.TODO_ID,
@@ -237,10 +260,13 @@ def test_original_lease_and_failed_validator_remain_required_before_accounting(
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("historical_terminals", [0, 1, 4])
 def test_no_followup_transition_recovers_bound_review_through_writeback_and_single_debit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, historical_terminals: int,
 ) -> None:
-    project, _, runtime, _, run, lease, marker, _, _ = _fixture(tmp_path, monkeypatch, provider)
+    project, _, runtime, _, run, lease, marker, _, _ = _fixture(
+        tmp_path, monkeypatch, provider, historical_terminals=historical_terminals,
+    )
     def call(*args: str, expected: int = 0):
         code, payload = run(*args)
         assert code == expected, json.dumps(payload, ensure_ascii=False, indent=2)
@@ -267,6 +293,7 @@ def test_no_followup_transition_recovers_bound_review_through_writeback_and_sing
     admitted = call(*guard)
     identity = admitted["heartbeat_receipt"]["settlement_identity"]
     assert admitted["autonomous_replan_obligation"]["triggers"][0]["todo_id"] == cli.TODO_ID
+    assert len(admitted["autonomous_replan_obligation"]["triggers"]) == 1
     call("todo", "complete", "--goal-id", cli.GOAL_ID, "--todo-id", cli.TODO_ID,
          "--agent-id", cli.AGENT_ID, "--completion-identity-key", done["completion_identity_key"],
          "--no-follow-up", "--evidence", "Original declared source check passed.")
