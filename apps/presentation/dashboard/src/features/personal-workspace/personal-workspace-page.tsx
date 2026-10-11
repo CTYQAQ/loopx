@@ -2030,6 +2030,7 @@ export function PersonalWorkspacePage({
             managerChannelBinding={managerChannelBinding}
             managerRuntime={managerRuntime}
             mobileNavigationOpen={mobileSidebarOpen}
+            onOpenGoalDetails={selectedGoal ? () => setSelection({ kind: "goal", item: selectedGoal }) : undefined}
             onOpenGoalCapabilities={selectedGoal && !readOnly ? () => openSettings({ goalId: selectedGoal.goalId, kind: "settings", tab: "capabilities" }) : undefined}
             onOpenManagerSettings={!readOnly ? () => openSettings({ kind: "settings", tab: "steward" }) : undefined}
             onRefresh={callbacks.onRefresh ? () => void refreshWorkspace() : undefined}
@@ -2237,7 +2238,7 @@ export function PersonalWorkspacePage({
             {composerCollapsed && selectedGoal ? <>
               <button className="personal-composer-pill" data-testid="overview-composer-pill" type="button"
                 onClick={() => { setOverviewComposerOpen(true); window.requestAnimationFrame(() => composerRef.current?.focus()); }}>
-                <MessageCircleQuestion aria-hidden size={15} /><span>{t("composer.goalPlaceholder", { goal: selectedGoal.title })}</span>
+                <MessageCircleQuestion aria-hidden size={15} /><span>{t("composer.goalPrompt")}</span>
               </button>
             </> : null}
             {composerSuggestions}
