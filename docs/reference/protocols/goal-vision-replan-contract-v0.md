@@ -95,6 +95,25 @@ replan 持久记录已接受的 `new_runnable_successor` 后，新一轮 quota �
 Agent、匹配确切来源义务并通过准入。方案被替换或任务失效时恢复普通选择；
 显式选择、已绑定回执及现有 Gate 保持优先。纯文字 Vision 不能标识要推荐的任务。
 
+## Completed Todo lifecycle reentry
+
+An admitted lifecycle review retains its original Turn identity when its exact
+completed Todos are legally closed with `todo complete --no-follow-up`. The
+canonical completion identities and same-agent terminal-reentry facts must
+reconstruct the admitted obligation; ambiguous or changed sources fail closed.
+The shared typed replan owner projects settlement only, with a fresh
+evidence-linked Vision/path writeback still required before one quota debit.
+No original validator is rerun, no successor is executed in that Turn, and a
+new frontier remains the next Turn's responsibility. Lifecycle obligation
+identities now include Todo and completion identities; older ambiguous receipts
+are not rewritten or automatically admitted by this recovery.
+
+已准入的生命周期复核中，确切 Todo 合法执行 `--no-follow-up` 后，原轮身份保持
+不变。恢复须由同一 Agent 的规范终态及原完成身份重建原义务；来源不明确或
+变化时仍拒绝。恢复只允许收尾，仍须提交带证据的 Vision/path 回写后扣额一次；
+不重跑原验证、不在本轮执行后续任务，也不抹除下一轮的新验收缺口。该类义务
+身份增加 Todo 与完成身份，旧的模糊回执不会被改写或自动放行。
+
 ## CLI Budget
 
 Per-agent vision is an executable control-plane field, so the CLI/write API must

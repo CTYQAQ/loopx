@@ -234,3 +234,77 @@ def test_original_lease_and_failed_validator_remain_required_before_accounting(
     assert accepted["validation_receipt"]["validation_declaration_sha256"] == original["completion_validation_sha256"]
     assert marker.read_text() == "run\nrun\n", "one failed attempt, then one actual successful check"
     assert cli._spend_run_count(runtime) == 0
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_no_followup_transition_recovers_bound_review_through_writeback_and_single_debit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
+) -> None:
+    project, _, runtime, _, run, lease, marker, _, _ = _fixture(tmp_path, monkeypatch, provider)
+    def call(*args: str, expected: int = 0):
+        code, payload = run(*args)
+        assert code == expected, json.dumps(payload, ensure_ascii=False, indent=2)
+        return payload
+    binding = ("--agent-id", cli.AGENT_ID, "--todo-id", cli.TODO_ID,
+               "--turn-instance-id", cli.TURN_ID)
+    capabilities = ("--available-capability", "shell", "--available-capability", "filesystem_write")
+    call("quota", "should-run", "--codex-app", "--goal-id", cli.GOAL_ID,
+         "--scan-path", str(project), *binding, *capabilities)
+    done = call("todo", "complete", "--goal-id", cli.GOAL_ID, *binding, *lease,
+                "--evidence", "Original declared source check passed.")
+    before = call("todo", "list", "--goal-id", cli.GOAL_ID, "--todo-id", cli.TODO_ID)["todo"]
+    call("refresh-state", "--goal-id", cli.GOAL_ID, *binding,
+         "--classification", "declared_deliverable_complete", "--delivery-batch-scale", "implementation",
+         "--delivery-outcome", "outcome_progress", "--vision-state", "vision_closed",
+         "--vision-summary", "The original source deliverable passed.",
+         "--vision-acceptance", "Its original check, writeback and accounting are independently verified.",
+         "--no-global-sync", "--suppress-external-sinks")
+    call("quota", "spend-slot", "--goal-id", cli.GOAL_ID, *binding,
+         "--slots", "1", "--source", "heartbeat", "--execute", "--scan-path", str(project))
+    turn = "turn-original-lifecycle-review"
+    guard = ("quota", "should-run", "--runtime-profile", "generic_cli", "--goal-id", cli.GOAL_ID,
+             "--agent-id", cli.AGENT_ID, "--turn-instance-id", turn, "--scan-path", str(project), *capabilities)
+    admitted = call(*guard)
+    identity = admitted["heartbeat_receipt"]["settlement_identity"]
+    assert admitted["autonomous_replan_obligation"]["triggers"][0]["todo_id"] == cli.TODO_ID
+    call("todo", "complete", "--goal-id", cli.GOAL_ID, "--todo-id", cli.TODO_ID,
+         "--agent-id", cli.AGENT_ID, "--completion-identity-key", done["completion_identity_key"],
+         "--no-follow-up", "--evidence", "Original declared source check passed.")
+    recovered = call(*guard)
+    assert recovered["heartbeat_receipt"]["settlement_identity"] == identity
+    assert recovered.get("selected_todo") is None
+    assert recovered["replan_action_packet"]["settlement_only"] is True
+    assert recovered["replan_action_packet"]["writeback_contract"]["preferred_input"] == "evidence_linked_vision_path"
+    replan_binding = ("--agent-id", cli.AGENT_ID, "--replan-obligation-id", identity["replan_obligation_id"],
+                      "--turn-instance-id", turn)
+    spend = ("quota", "spend-slot", "--goal-id", cli.GOAL_ID, *replan_binding,
+             "--slots", "1", "--source", "heartbeat", "--execute", "--scan-path", str(project))
+    assert call(*spend, expected=1).get("appended") is not True
+    # A no-follow-up transition alone must not waive the acceptance checkpoint.
+    refresh = ("refresh-state", "--goal-id", cli.GOAL_ID, *replan_binding,
+               "--classification", "lifecycle_review", "--delivery-batch-scale", "implementation",
+               "--delivery-outcome", "outcome_progress", "--no-global-sync", "--suppress-external-sinks")
+    refused = call(*refresh, expected=1)
+    assert refused["ok"] is False
+    assert "vision" in str(refused).lower()
+    vision = {"state": "vision_closed", "summary": "Original outcome independently checked.",
+              "vision_patch": {"acceptance_summary": "Original source and declared check remain valid."},
+              "path_delta": {"outcome": "no_change", "prior_assumption": "Original source acceptance requires validation.",
+                             "observed_reality": "The declared validator and original settlement passed.",
+                             "retained": ["The independently validated source outcome"],
+                             "evidence_refs": ["original-source-validation"]}}
+    vision_file = tmp_path / "current-acceptance.json"
+    vision_file.write_text(json.dumps(vision))
+    refreshed = call(*refresh, "--agent-vision-json", str(vision_file))
+    assert refreshed["settlement_progress"]["state"] == "spend_required"
+    pending = call(*guard)
+    assert pending["heartbeat_receipt"]["settlement_identity"] == identity
+    assert pending["settlement_progress"]["state"] == "spend_required"
+    assert call(*spend)["appended"] is True
+    assert call(*spend)["appended"] is False
+    assert call(*guard)["effective_action"] == "heartbeat_settled_skip"
+    after = call("todo", "list", "--goal-id", cli.GOAL_ID, "--todo-id", cli.TODO_ID)["todo"]
+    for field in ("completed_at", "completion_turn_key", "completion_receipt_id", "completion_validation_sha256"):
+        assert before[field] == after[field]
+    assert marker.read_text() == "run\n"
+    assert cli._spend_run_count(runtime) == 2  # Original delivery plus the independently admitted review.

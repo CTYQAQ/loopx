@@ -356,3 +356,39 @@ test("vision ACK compares strict calendar timestamps at microsecond precision", 
       acceptance_gaps: [gap("2026-02-28T00:00:00Z")]}).acknowledged, false);
   }
 });
+
+
+test("canonical no-follow-up restores only its exact admitted review and still owes Vision", () => {
+  const id = "replan-1111111111111111", agent = "synthetic-agent";
+  const row = {todo_id: "todo_original", text: "Verify independent source", status: "done", done: true,
+    task_class: "advancement_task", claimed_by: agent, last_actor_agent_id: agent,
+    completed_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
+    completion_turn_key: "original-completion", no_followup: true, completion_continuation: "no_followup",
+    completion_recovery: "lifecycle_reentry_terminal_closeout"};
+  const original = {required: true, obligation_id: id, resolution_mode: "todo_lifecycle_settlement",
+    triggers: [{kind: "completed_advancement_without_successor", todo_id: row.todo_id,
+      completion_turn_key: row.completion_turn_key, agent_id: agent}]};
+  const candidate = {obligation: original, source_obligation: original, lifecycle_settled: true,
+    guard_recorded_at: "2026-08-01T00:00:01.123456Z", items: [row]};
+  const request = {operation: "receipt_bound_obligation", guard_scoped: true, replay_phase: "open",
+    selected_obligation_id: id, agent_id: agent, current_obligation: null, transition_candidates: [candidate]};
+  const result = projectReplanSemantics(request).obligation as JsonObject;
+  assert.equal(result.obligation_id, id);
+  assert.equal(result.resolution_mode, "receipt_bound_replan_settlement");
+  assert.deepEqual(result.todo_actions, []);
+  const packet = result.settlement_action_packet as JsonObject;
+  assert.equal(packet.settlement_only, true);
+  assert.equal(packet.semantic_delta, null);
+  assert.equal(projectReplanSemantics({operation: "qualify", obligation: result}).accepted, false);
+  assert.equal(projectReplanSemantics({operation: "qualify", obligation: result, agent_vision: vision}).accepted, true);
+  for (const change of [{status: "open"}, {done: false}, {claimed_by: "peer"}, {last_actor_agent_id: "peer"},
+    {no_followup: false}, {completion_continuation: "active_goal"}, {completion_recovery: null},
+    {completion_turn_key: "changed"}, {completed_at: "2026-08-01T00:00:02Z"},
+    {successor_todo_ids: ["todo_new"]}, {archive_state: "archived"}]) {
+    assert.throws(() => projectReplanSemantics({...request,
+      transition_candidates: [{...candidate, items: [{...row, ...change}]}]}), /identity conflicts/);
+  }
+  assert.throws(() => projectReplanSemantics({...request, guard_scoped: false}), /identity conflicts/);
+  assert.throws(() => projectReplanSemantics({...request,
+    selected_obligation_id: "replan-2222222222222222"}), /identity conflicts/);
+});

@@ -632,6 +632,7 @@ def build_live_quota_should_run_decision(
         receipt_bound_replay_phase=receipt_bound_replay_phase,
         receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
         receipt_bound_replan_guard_scoped=receipt_bound_replan_guard_scoped,
+        receipt_bound_guard_recorded_at=(settlement_readback.heartbeat_receipt or {}).get("recorded_at") if settlement_readback else None,
         turn_instance_id=turn_instance_id,
         runtime_root=runtime_root,
         workspace_path=workspace_path,
