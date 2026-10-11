@@ -1,4 +1,5 @@
 import { goalCreateRequest } from "./goal-create-request";
+import { todoCompletionPreviewFeedback } from "./todo-completion-feedback";
 import { readSteeringRequest, retainSteeringRequest, retireSteeringRequest } from "./steering-recovery";
 import { useConversationInputState } from "./use-conversation-input-state";
 import type { ConversationHistoryStatus } from "../../data/use-conversation-history";
@@ -1277,6 +1278,12 @@ export function PersonalWorkspacePage({
         ? await callbacks.onPreviewAction(request)
         : workspaceProposal(await previewTypedAction(request), t);
     } catch (error) {
+      const completionFeedback = todoCompletionPreviewFeedback(error, request, t);
+      if (completionFeedback !== null && error instanceof ChatApiError) {
+        // All Task entrypoints use this preview route. Keep the owner's code
+        // and diagnostics while explaining why this caller cannot complete.
+        throw new ChatApiError(completionFeedback, error.payload);
+      }
       if (!(error instanceof ChatApiError) || error.payload.error_code !== "action_preview_gate") throw error;
       const rawGate = error.payload.gate && typeof error.payload.gate === "object"
         ? error.payload.gate as Record<string, unknown>
