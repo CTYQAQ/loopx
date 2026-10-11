@@ -101,6 +101,12 @@ An admitted lifecycle review retains its original Turn identity when its exact
 completed Todos are legally closed with `todo complete --no-follow-up`. The
 canonical completion identities and same-agent terminal-reentry facts must
 reconstruct the admitted obligation; ambiguous or changed sources fail closed.
+Lifecycle reentry updates `updated_at`, preserving the original completion time,
+identity and validation evidence. Terminal rows closed before admission are
+excluded. Recovery restores original
+completion order before the bounded trigger selection; it does not order sources
+by their later closeout times. Whole-second Todo timestamps allow a same-second
+closeout candidate only when the original obligation digest still matches.
 The shared typed replan owner projects settlement only, with a fresh
 evidence-linked Vision/path writeback still required before one quota debit.
 No original validator is rerun, no successor is executed in that Turn, and a
@@ -111,6 +117,9 @@ are not rewritten or automatically admitted by this recovery.
 已准入的生命周期复核中，确切 Todo 合法执行 `--no-follow-up` 后，原轮身份保持
 不变。恢复须由同一 Agent 的规范终态及原完成身份重建原义务；来源不明确或
 变化时仍拒绝。恢复只允许收尾，仍须提交带证据的 Vision/path 回写后扣额一次；
+接续收尾更新 `updated_at`，保留原完成时间、身份及验证证据。准入前已收尾的
+历史记录须排除，来源按原完成顺序恢复后再截取触发项，不能按
+后来收尾的时间排序。Todo 时间戳精度为秒，同秒候选仍须匹配原义务摘要。
 不重跑原验证、不在本轮执行后续任务，也不抹除下一轮的新验收缺口。该类义务
 身份增加 Todo 与完成身份，旧的模糊回执不会被改写或自动放行。
 
