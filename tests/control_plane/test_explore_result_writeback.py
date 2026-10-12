@@ -30,22 +30,7 @@ ATTACHMENT = dict(
 
 
 def fixture(tmp_path, enabled=True):
-    from canonical_authority_fixture import initialize_canonical_authority
-    from loopx.control_plane.coordination.runtime_shadow import (
-        build_todo_runtime_shadow_projection,
-    )
-
     path = registry(tmp_path, graph=enabled, planning=enabled)
-    runtime = tmp_path / "runtime"
-    initialize_canonical_authority(
-        runtime,
-        "research",
-        build_todo_runtime_shadow_projection(
-            goal_id="research", todos=[], handoff_mode="soft_claim"
-        ),
-        state_path=tmp_path / "goal.md",
-        provider="file",
-    )
     todo = add_goal_todo(
         registry_path=path,
         goal_id="research",
@@ -56,7 +41,7 @@ def fixture(tmp_path, enabled=True):
     )
     return dict(
         registry_path=path,
-        runtime_root=runtime,
+        runtime_root=tmp_path / "runtime",
         goal_id="research",
         agent_id="worker",
         todo_id=todo["todo_id"],
