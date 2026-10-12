@@ -220,6 +220,7 @@ def qualify_replan_writeback(
     guard_capability: Mapping[str, Any] | None = None,
     receipt_bound_guard_recorded_at: str | None = None,
     replan_source_route: Mapping[str, Any] | None = None,
+    replan_explore_reader: Callable[[str, str | None], Mapping[str, Any] | None] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Return the shared open obligation and the writeback's typed delta.
 
@@ -295,6 +296,7 @@ def qualify_replan_writeback(
     if capability_evidence is not None:
         status_payload["bounded_research_frontier"] = capability_evidence.frontier
     context = build_goal_frontier_projection_context_from_status(
+        replan_explore_reader=replan_explore_reader,
         goal_id=goal_id,
         agent_id=safe_agent_id,
         status_payload=status_payload,
@@ -421,6 +423,7 @@ def enforce_open_replan_writeback(
     guard_capability: Mapping[str, Any] | None = None,
     effective_turn_cadence: dict[str, Any] | None = None,
     replan_source_route: Mapping[str, Any] | None = None,
+    replan_explore_reader: Callable[[str, str | None], Mapping[str, Any] | None] | None = None,
 ) -> dict[str, Any] | None:
     """Fail closed unless concrete typed evidence satisfies the selected replan.
 
@@ -449,7 +452,7 @@ def enforce_open_replan_writeback(
         capability_evidence=capability_evidence,
         guard_capability=guard_capability,
         receipt_bound_guard_recorded_at=receipt_bound_guard_recorded_at,
-        replan_source_route=replan_source_route,
+        replan_source_route=replan_source_route, replan_explore_reader=replan_explore_reader,
     )
     if not obligation:
         if isinstance(semantic_delta, dict) and semantic_delta.get("accepted") is True:
@@ -509,6 +512,7 @@ def qualify_refresh_replan_writeback(
     delivery_outcome: str | None,
     todo_fields: dict[str, Any] | None = None,
     replan_source_route: Mapping[str, Any] | None = None,
+    replan_explore_reader: Callable[[str, str | None], Mapping[str, Any] | None] | None = None,
     capability_evidence: CapabilityReplanEvidence | None = None,
     guard_capability: Mapping[str, Any] | None = None,
 ) -> RefreshReplanQualification:
@@ -580,7 +584,7 @@ def qualify_refresh_replan_writeback(
             settlement_guard_semantic_replan_obligation_id
         ),
         receipt_bound_guard_recorded_at=receipt_bound_guard_recorded_at,
-        replan_source_route=replan_source_route,
+        replan_source_route=replan_source_route, replan_explore_reader=replan_explore_reader,
     )
     if semantic_delta:
         if semantic_delta.get("retirement") and delivery_outcome != "outcome_gap":

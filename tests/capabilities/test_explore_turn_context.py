@@ -628,3 +628,21 @@ def test_optional_finding_digests_bind_full_scoped_evidence_without_changing_def
         goal_id="research", agent_id="worker", node_id="route", finding_id="counterexample",
         title="Scoped result", status="refuted", summary="Different input scope; same title/status."))
     assert explore_turn_context(**args, include_finding_digests=True)["graph"]["recent_findings"][0]["source_sha256"] != first
+
+
+def test_replan_explore_read_reports_unavailable_source_without_empty_evidence(monkeypatch, tmp_path):
+    from loopx.capabilities.explore import turn_context
+
+    calls = []
+    def unavailable(**kwargs):
+        calls.append(kwargs)
+        raise OSError("synthetic unavailable participant")
+
+    monkeypatch.setattr(turn_context, "explore_turn_context", unavailable)
+    assert turn_context.read_replan_explore_context(source_status={}, goal_id="goal-a", agent_id="agent-a") is None
+    assert calls == []
+    result = turn_context.read_replan_explore_context(
+        source_status={"registry": str(tmp_path / "registry.json"), "runtime_root": str(tmp_path / "runtime")},
+        goal_id="goal-a", agent_id="agent-a")
+    assert result == {"ok": False, "goal_id": "goal-a", "agent_id": "agent-a"}
+    assert len(calls) == 1 and calls[0]["include_finding_digests"] is True

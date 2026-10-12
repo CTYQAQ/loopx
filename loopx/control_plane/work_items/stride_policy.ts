@@ -146,7 +146,9 @@ function normalizeHistoricalStrideDecision(value: unknown, bounded: BoundedText)
     next_probe: {...probe, minimum_evidence: "Historical declaration did not record this field."}}, bounded);
   for (const axis of decisionSchema.axis_names) delete usage[`stride_decision.axis_reasons.${axis}`];
   delete usage["stride_decision.next_probe.minimum_evidence"];
-  return [{...input, axes: checked!.axes}, usage];
+  const normalizedProbe = checked!.next_probe as JsonObject;
+  return [{...input, axes: checked!.axes, next_probe: Object.fromEntries(
+    Object.keys(probe).map(field => [field, normalizedProbe[field]]))}, usage];
 }
 
 /** References into the existing scoped Explore view; no second graph or planner. */

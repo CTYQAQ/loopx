@@ -138,3 +138,18 @@ test("unrelated shared-pool churn keeps the evidence basis; changed scoped evide
   assert.notEqual(projectStrideExploreBasis({...source, graph: {writeback_results: [
     {...source.graph.writeback_results[0], summary: "Different inputs and evidence."}]}}, "goal-a", "agent-a")!.revision, first.revision);
 });
+
+
+test("historical off-mode probes preserve normalized text and its reported budget", () => {
+  const expected = {scope: "One complete experiment.", prediction: "Distinguish the remaining explanations.",
+    adoption_criterion: "Retain a validated gain.", cost_bound: "One bounded comparison."};
+  const historical = {schema_version: proposal.schema_version, strategy_version: proposal.strategy_version,
+    reference_context_id: proposal.reference_context_id, reference_obligation_id: proposal.reference_obligation_id,
+    basis: "unexplained_gap", next_probe: Object.fromEntries(Object.entries(expected)
+      .map(([key, value]) => [key, " ".repeat(4000) + value + " ".repeat(4000)]))};
+  const [normalized, usage] = normalizeStrideDecision(historical);
+  assert.deepEqual(normalized!.next_probe, expected);
+  for (const [key, value] of Object.entries(expected)) assert.equal(usage[`stride_decision.next_probe.${key}`], value.length);
+  const authored = buildVisionCheckpoint({...request, agent_vision_packet: {...packet, stride_decision: historical}});
+  assert.deepEqual((authored.agent_vision as Record<string, unknown>).stride_decision, normalized);
+});
