@@ -14,8 +14,9 @@ from uuid import uuid4
 from ...state_refresh import now_local
 from ..coordination.local_authority import (
     LOCAL_AUTHORITY_SOURCES,
+    LocalCoordinationAuthorityRejection,
     LocalCoordinationAuthorityUnavailable,
-    local_authority_is_promoted,
+    raise_canonical_write_failure,
     read_canonical_todos_if_promoted,
 )
 from ..effect_runtime import (
@@ -40,6 +41,7 @@ from .completion_validation_store import (
 from .completion_validation_projection import (
     completion_validation_declaration_sha256,
 )
+from .external_wait_contract import TodoExternalWaitAuthoringError
 from .path_resolution import resolve_todo_state_path
 from .monitor_metadata import MonitorPollObservation
 
@@ -158,9 +160,7 @@ def update_canonical_todo_if_promoted(
     expected_registry_sha256: str | None = None,
     monitor_observation: MonitorPollObservation | None = None,
     completion_validation_revision: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
-    if not local_authority_is_promoted(runtime_root=runtime_root, goal_id=goal_id):
-        return None
+) -> dict[str, Any]:
     # The witness brackets fact projection and is rechecked by the native
     # transaction. Reviewed edits additionally bind the preview's registry hash.
     with authority_registry_source(registry_path) as registry_source:
@@ -246,15 +246,57 @@ def update_canonical_todo_if_promoted(
             timeout=CANONICAL_AUTHORITY_WRITE_TIMEOUT_SECONDS,
         )
     if isinstance(result, dict):
+        raise_canonical_write_failure(
+            result,
+            goal_id=goal_id,
+            operation="todo_update",
+        )
         failure = completion_validation_failure(result, goal_id=goal_id, todo_id=todo_id, dry_run=dry_run)
         if failure is not None:
             return failure
     # Keep the public lookup-error contract, without a second pre-transaction read.
     if isinstance(result, dict) and result.get("status") == "failed":
-        if result.get("reason_code") == "todo_not_found":
+        reason_code = str(result.get("reason_code") or "")
+        if reason_code.startswith("external_wait_"):
+            resume_when = str((planning_intent or {}).get("resume_when") or "")
+            resume_kind, separator, dependency_id = resume_when.partition(":")
+            raw_successors = (planning_intent or {}).get("successor_todo_ids")
+            raise TodoExternalWaitAuthoringError(
+                str(result.get("reason") or "external-wait Todo update was rejected"),
+                code=reason_code,
+                monitor_todo_id=(
+                    dependency_id
+                    if separator and resume_kind == "monitor_changed"
+                    else None
+                ),
+                successor_todo_ids=(
+                    [str(item) for item in raw_successors]
+                    if isinstance(raw_successors, list)
+                    else None
+                ),
+            )
+        if reason_code == "todo_not_found":
             raise ValueError("Todo is missing from canonical authority")
-        if result.get("reason_code") == "todo_role_mismatch":
+        if reason_code == "todo_role_mismatch":
             raise ValueError("Todo does not have the requested role")
+        if reason_code == "coordination_operation_identity_mismatch":
+            raise LocalCoordinationAuthorityRejection(
+                "monitor effect identity is already bound to a different observation",
+                code=reason_code,
+                payload=result,
+            )
+        if reason_code == "update_owner_mismatch":
+            raise LocalCoordinationAuthorityRejection(
+                "Todo claimed_by does not grant this actor update authority",
+                code=reason_code,
+                payload=result,
+            )
+        if result.get("failure_kind") == "decision_rejection":
+            raise LocalCoordinationAuthorityRejection(
+                str(result.get("reason") or "canonical Todo update was rejected"),
+                code=reason_code or "todo_update_rejected",
+                payload=result,
+            )
     if isinstance(result, dict) and (
         result.get("status") == "missing"
         and result.get("source_authority") in LOCAL_AUTHORITY_SOURCES

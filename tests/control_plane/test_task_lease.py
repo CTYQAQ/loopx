@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -19,10 +17,8 @@ from loopx.control_plane.work_items.task_lease import (
     release_task_lease,
     renew_task_lease,
     task_lease_owner_constraint,
-    transfer_task_lease,
     write_scopes_overlap,
 )
-from loopx.todos import add_goal_todo
 
 
 @pytest.mark.parametrize("raw", [None, b'{"status":"active"}', b"{broken", b"\xff"],
@@ -173,170 +169,6 @@ def test_bool_disguised_lease_integers_fail_closed() -> None:
         assert error.value.code == "corrupt_lease"
 
 
-def test_retained_task_lease_lifecycle_preserves_versions(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = datetime(2026, 7, 13, tzinfo=timezone.utc)
-    monkeypatch.setattr(task_lease, "now_utc", lambda: now)
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    state = repo / "ACTIVE_GOAL_STATE.md"
-    state.write_text(
-        "---\n"
-        "goal_id: goal-a\n"
-        "updated_at: 2026-07-13T00:00:00+00:00\n"
-        "---\n\n"
-        "## Agent Todo\n\n",
-        encoding="utf-8",
-    )
-    registry_path = tmp_path / "registry.json"
-    runtime_root = tmp_path / "runtime"
-    registry_path.write_text(
-        json.dumps(
-            {
-                "common_runtime_root": str(runtime_root),
-                "goals": [
-                    {
-                        "id": "goal-a",
-                        "domain": "harness_self_improvement",
-                        "status": "active",
-                        "repo": str(repo),
-                        "state_file": state.name,
-                        "adapter": {"kind": "harness_self_improvement"},
-                        "coordination": {
-                            "agent_model": "peer_v1",
-                            "registered_agents": ["agent-a", "agent-b"],
-                        },
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    todo = add_goal_todo(
-        registry_path=registry_path,
-        goal_id="goal-a",
-        role="agent",
-        text="Exercise the retained task-lease lifecycle.",
-        task_class="advancement_task",
-    )
-    todo_id = str(todo["todo_id"])
-    lease_path = task_lease.task_lease_path(
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        todo_id=todo_id,
-    )
-    task_lease.write_lease(
-        lease_path,
-        task_lease.build_lease(
-            goal_id="goal-a",
-            todo_id=todo_id,
-            owner="agent-a",
-            idempotency_key="turn-1",
-            write_scopes=["loopx/**"],
-            acquire_ttl_seconds=120,
-            version=1,
-            lease_epoch=1,
-            acquired_at=now.isoformat().replace("+00:00", "Z"),
-            updated_at=now.isoformat().replace("+00:00", "Z"),
-            expires_at=(now + timedelta(seconds=120))
-            .isoformat()
-            .replace("+00:00", "Z"),
-        ),
-    )
-
-    with pytest.raises(TaskLeaseError) as renew_without_version:
-        renew_task_lease(
-            registry_path=registry_path,
-            runtime_root=runtime_root,
-            goal_id="goal-a",
-            todo_id=todo_id,
-            owner="agent-a",
-            idempotency_key="turn-1",
-        )
-    assert renew_without_version.value.code == "version_required"
-
-    with pytest.raises(TaskLeaseError) as transfer_without_version:
-        transfer_task_lease(
-            registry_path=registry_path,
-            runtime_root=runtime_root,
-            goal_id="goal-a",
-            todo_id=todo_id,
-            owner="agent-a",
-            idempotency_key="turn-1",
-            new_owner="agent-b",
-            new_idempotency_key="turn-2",
-        )
-    assert transfer_without_version.value.code == "version_required"
-
-    renewed = renew_task_lease(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        todo_id=todo_id,
-        owner="agent-a",
-        idempotency_key="turn-1",
-        expected_version=1,
-    )
-    assert renewed["lease"]["version"] == 2
-    assert renewed["lease"]["lease_epoch"] == 1
-
-    transferred = transfer_task_lease(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        todo_id=todo_id,
-        owner="agent-a",
-        idempotency_key="turn-1",
-        new_owner="agent-b",
-        new_idempotency_key="turn-2",
-        expected_version=2,
-    )
-    assert transferred["lease"]["owner"] == "agent-b"
-    assert transferred["lease"]["version"] == 3
-    assert transferred["lease"]["lease_epoch"] == 2
-
-    released = release_task_lease(
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        todo_id=todo_id,
-        owner="agent-b",
-        idempotency_key="turn-2",
-        expected_version=3,
-    )
-    assert released["released"] is True
-    assert released["lease"]["status"] == "released"
-    assert released["lease"]["released_at"] == now.isoformat().replace("+00:00", "Z")
-    assert released["lease"]["updated_at"] == released["lease"]["released_at"]
-    assert task_lease.lease_is_active(released["lease"], at=now) is False
-    persisted_path = Path(str(released["lease_path"]))
-    assert persisted_path.exists()
-    assert task_lease.read_lease(persisted_path) == released["lease"]
-
-    replayed_release = release_task_lease(
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        todo_id=todo_id,
-        owner="agent-b",
-        idempotency_key="turn-2",
-        expected_version=3,
-    )
-    assert replayed_release["released"] is True
-    assert replayed_release["idempotent"] is True
-    assert replayed_release["lease"] == released["lease"]
-
-    with pytest.raises(TaskLeaseError) as missing_version:
-        release_task_lease(
-            runtime_root=runtime_root,
-            goal_id="goal-a",
-            todo_id=todo_id,
-            owner="agent-b",
-            idempotency_key="turn-2",
-        )
-    assert missing_version.value.code == "version_required"
-
-
 def test_lifecycle_mutation_fails_closed_without_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -380,7 +212,7 @@ def test_lifecycle_mutation_fails_closed_without_registry(
             expected_version=1,
         )
 
-    assert error.value.code == "todo_not_found"
+    assert error.value.code == "goal_not_found"
     assert task_lease.read_lease(lease_path) == before
 
 
@@ -425,167 +257,6 @@ def test_legacy_generation_and_unrelated_ttl_do_not_block_release(
         expected_version=7,
     )
     assert released["lease"]["lease_epoch"] == 1
-
-
-def test_holder_verify_transport_retry_reuses_one_fence_operation_id(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    registry_path = tmp_path / "registry.json"
-    registry_path.write_text("{}", encoding="utf-8")
-    authority = {
-        "handoff_mode": "hard_lease",
-        "registered_agent_candidates": [["agent-a"]],
-        "todos": [
-            {
-                "todo_id": "todo_retry",
-                "status": "open",
-                "claimed_by": "agent-a",
-                "excluded_agents": [],
-            }
-        ],
-        "todo_projection_error": None,
-        "source_receipts": [],
-    }
-    monkeypatch.setattr(
-        task_lease_acquire_adapter,
-        "task_lease_acquire_authority_facts",
-        lambda **_kwargs: authority,
-    )
-    seen_operation_ids: list[str] = []
-
-    def retrying_effect_runtime_result(
-        _method: str,
-        params: dict[str, Any],
-        *,
-        timeout: float,
-    ) -> dict[str, Any]:
-        assert timeout == 15.0
-        operation_id = params.get("fence_operation_id")
-        assert isinstance(operation_id, str)
-        seen_operation_ids.append(operation_id)
-        if len(seen_operation_ids) == 1:
-            return {
-                "ok": False,
-                "schema_version": "task_lease_v0",
-                "action": "holder_verify",
-                "error": "authority changed while the response was in flight",
-                "error_code": "authority_source_changed",
-            }
-        return {
-            "ok": True,
-            "schema_version": "task_lease_v0",
-            "action": "holder_verify",
-            "fence": {
-                "schema_version": "task_lease_v0",
-                "checked": True,
-                "active": True,
-                "owner": "agent-a",
-                "version": 1,
-                "lease_epoch": 1,
-                "lock_token": "held-token",
-                "fence_operation_id": operation_id,
-            },
-        }
-
-    import loopx.control_plane.effect_runtime as effect_runtime
-
-    monkeypatch.setattr(
-        effect_runtime,
-        "effect_runtime_result",
-        retrying_effect_runtime_result,
-    )
-
-    first = task_lease_acquire_adapter.execute_native_task_lease_lifecycle(
-        runtime_root=tmp_path / "runtime",
-        registry_path=registry_path,
-        goal_id="goal-a",
-        todo_id="todo_retry",
-        operation="holder_verify",
-        owner="agent-a",
-    )
-    second = task_lease_acquire_adapter.execute_native_task_lease_lifecycle(
-        runtime_root=tmp_path / "runtime",
-        registry_path=registry_path,
-        goal_id="goal-a",
-        todo_id="todo_retry",
-        operation="holder_verify",
-        owner="agent-a",
-    )
-
-    assert len(seen_operation_ids) == 3
-    assert seen_operation_ids[0] == seen_operation_ids[1]
-    assert seen_operation_ids[0] != seen_operation_ids[2]
-    assert first["fence"]["fence_operation_id"] == seen_operation_ids[0]
-    assert second["fence"]["fence_operation_id"] == seen_operation_ids[2]
-
-
-def test_failed_fence_close_abandons_its_owned_cross_runtime_lock(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runtime_root = tmp_path / "runtime"
-    token = "held-fence-token"
-    lock_target = task_lease.task_lease_lock_path(
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-    )
-    effect_lock = Path(f"{lock_target}.ts-effect.lock")
-    close_calls = 0
-
-    monkeypatch.setattr(
-        task_lease,
-        "runtime_root_from_registry",
-        lambda _registry_path, _override: runtime_root,
-    )
-
-    def failing_lifecycle(**kwargs: Any) -> dict[str, Any]:
-        nonlocal close_calls
-        if kwargs["operation"] == "terminal_verify":
-            effect_lock.parent.mkdir(parents=True, exist_ok=True)
-            effect_lock.write_text(
-                json.dumps({"pid": os.getpid(), "token": token}),
-                encoding="utf-8",
-            )
-            return {
-                "ok": True,
-                "schema_version": "task_lease_v0",
-                "action": "terminal_verify",
-                "fence": {
-                    "schema_version": "task_lease_v0",
-                    "required": True,
-                    "active": True,
-                    "owner": "agent-a",
-                    "version": 1,
-                    "lease_epoch": 1,
-                    "execution_instance_verified": True,
-                    "lock_token": token,
-                    "fence_operation_id": "a" * 64,
-                },
-            }
-        close_calls += 1
-        raise RuntimeError("simulated managed-runtime transport loss")
-
-    monkeypatch.setattr(
-        task_lease,
-        "_execute_native_task_lease_lifecycle",
-        failing_lifecycle,
-    )
-
-    with task_lease.hold_task_lease_mutation_fence(
-        registry_path=tmp_path / "registry.json",
-        goal_id="goal-a",
-        todo_id="todo_target",
-        todo={"todo_id": "todo_target", "status": "open"},
-        actor_agent_id="agent-a",
-        idempotency_key="lease-a",
-        expected_version=1,
-    ) as fence:
-        task_lease.release_verified_task_lease_fence(fence, committed=True)
-        assert fence["released"] is False
-
-    assert close_calls == 1
-    assert not effect_lock.exists()
 
 
 @pytest.mark.parametrize(

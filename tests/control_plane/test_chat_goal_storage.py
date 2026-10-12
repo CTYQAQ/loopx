@@ -245,17 +245,23 @@ def test_a_preview_cannot_bypass_a_later_host_lease_and_requires_a_fresh_plan(ap
     assert read(runtime) == copied
 
 
-@pytest.fixture(params=[False, True], ids=["cold", "retained-capture"])
-def old_api(tmp_path, monkeypatch, request):
-    from tests.control_plane.test_cold_source_inspection import cold_workspace
+@pytest.fixture
+def old_api(tmp_path, monkeypatch):
     from tests.control_plane.shadow_e2e_fixture import workspace
 
     isolate_sqlite_runtime(tmp_path, monkeypatch)
-    ws = workspace(tmp_path) if request.param else cold_workspace(tmp_path)
-    if request.param:
-        ws.add("Private original history must stay on disk")
-        outbox = ws.runtime / "authority-shadow" / "outbox" / ws.goal / "todos"
-        (outbox / "original-unrecognized.json").write_bytes(b"{malformed original outbox")
+    ws = workspace(tmp_path, bootstrap=False)
+    registry = json.loads(ws.registry.read_text())
+    registry["goals"][0]["coordination"].pop("runtime_shadow")
+    ws.registry.write_text(json.dumps(registry))
+    ws.state.write_text(
+        "---\ngoal_id: goal-e2e\nhandoff_mode: soft_claim\n---\n"
+        "## Agent Todo\n- [ ] Keep active\n"
+        "  <!-- loopx:todo todo_id=todo_active role=agent status=open "
+        "claimed_by=agent-a -->\n"
+        "## Todo Archive\n- [x] Keep archived evidence\n"
+        "  <!-- loopx:todo todo_id=todo_archived role=agent status=done -->\n"
+    )
     directory = ws.runtime / "goals" / ws.goal / "task-leases"
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "removed.json").write_text(json.dumps({
@@ -280,7 +286,7 @@ def old_api(tmp_path, monkeypatch, request):
         assert "old-work" not in encoded and "malformed original outbox" not in encoded
         return response.status, result
 
-    yield call, ws, request.param
+    yield call, ws, False
     server.shutdown()
     thread.join(5)
     server.server_close()
@@ -300,11 +306,12 @@ def test_registered_old_source_read_failure_is_unavailable_and_recovers(old_api)
 
 
 def test_old_source_http_inventory_keeps_history_and_does_not_grant_import(old_api):
-    from tests.control_plane.test_cold_source_inspection import capture_bytes
-
     call, ws, captured = old_api
-    before = capture_bytes(ws)
     source = ws.state.read_bytes(), ws.registry.read_bytes()
+    leases = {
+        path: path.read_bytes()
+        for path in (ws.runtime / "goals" / ws.goal / "task-leases").glob("*.json")
+    }
     for _ in range(2):
         code, result = call()
         assert code == 200 and result["ok"], result
@@ -319,8 +326,8 @@ def test_old_source_http_inventory_keeps_history_and_does_not_grant_import(old_a
         assert old["writer_stop_verified"] is old["outbox_reconciliation_verified"] is old["import_ready"] is False
         assert result["authority_changed"] is result["execution_authority_granted"] is False
         assert "outbox_review" not in json.dumps(result)
-    assert before == capture_bytes(ws)
     assert source == (ws.state.read_bytes(), ws.registry.read_bytes())
+    assert leases == {path: path.read_bytes() for path in leases}
     assert not (ws.runtime / "authority").exists()
 
 

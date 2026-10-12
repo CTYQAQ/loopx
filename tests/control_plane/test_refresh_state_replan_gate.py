@@ -1042,6 +1042,21 @@ def test_todo_complete_then_refresh_cli_projects_direct_settlement(
         ),
         encoding="utf-8",
     )
+    from canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import (
+        build_todo_runtime_shadow_projection,
+    )
+
+    initialize_canonical_authority(
+        runtime_root,
+        GOAL_ID,
+        build_todo_runtime_shadow_projection(
+            goal_id=GOAL_ID,
+            todos=[],
+            handoff_mode="soft_claim",
+        ),
+        state_path=state,
+    )
     assert cli_main(
         [
             "--registry",

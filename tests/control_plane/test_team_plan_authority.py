@@ -1,4 +1,5 @@
 """Actual Chat entrypoint against a fenced FileAuthorityStore and projection IO."""
+import base64
 import hashlib
 import json
 import os
@@ -20,7 +21,10 @@ from loopx.control_plane.work_items.team_plan_adapter import team_plan_state_fin
 from loopx.control_plane.coordination.coordination_state_contract import (
     TODO_DOMAIN_READ_RECORD_SCHEMA_VERSION, TODO_DOMAIN_RECORD_FIELDS,
 )
-from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
+from loopx.control_plane.coordination.local_authority import (
+    CanonicalAuthorityRequired,
+    read_canonical_todos_if_promoted,
+)
 from loopx.control_plane.coordination.local_authority_shadow_projection import canonical_bytes
 from loopx.control_plane.todos import provider_projection
 
@@ -49,6 +53,63 @@ def canonical_team(tmp_path, request, monkeypatch):
     preview = service.preview({"action_kind": "team.plan", "summary": "Assign work", "context": {},
         "normalized_parameters": {"goal_id": "goal-a", "plan": plan}, "idempotency_key": "team-confirm"})
     return runtime, state, service, preview
+
+
+def test_unpromoted_team_plan_preview_requires_canonical_authority(tmp_path):
+    runtime = tmp_path / "runtime"
+    state = tmp_path / "state.md"
+    state.write_text("# Goal\n\n## Agent Todo\n\n")
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({
+        "common_runtime_root": str(runtime),
+        "goals": [{
+            "id": "goal-a",
+            "repo": str(tmp_path),
+            "state_file": state.name,
+            "coordination": {
+                "registered_agents": ["alpha"],
+                "agent_model": "peer_v1",
+            },
+        }],
+    }))
+    service = ChatActionService(
+        store=ChatActionStore(runtime / "chat/actions"),
+        registry_path=registry,
+    )
+    before = {
+        path: path.read_bytes()
+        for root in (tmp_path, runtime)
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+    with pytest.raises(CanonicalAuthorityRequired) as error:
+        service.preview({
+            "action_kind": "team.plan",
+            "summary": "Assign work",
+            "context": {},
+            "normalized_parameters": {
+                "goal_id": "goal-a",
+                "plan": _agent_plan(),
+            },
+            "idempotency_key": "unpromoted-team-plan",
+        })
+
+    assert error.value.code == "canonical_authority_required"
+    assert error.value.payload["operation"] == "team_plan"
+    assert error.value.payload["write_admitted"] is False
+    assert error.value.payload["decision_read_from_provider"] is False
+    assert error.value.payload["legacy_fallback_used"] is False
+    assert error.value.payload["recovery"] == {
+        "action": "migrate_goal_authority",
+        "backup_required": True,
+    }
+    assert {
+        path: path.read_bytes()
+        for root in (tmp_path, runtime)
+        for path in root.rglob("*")
+        if path.is_file()
+    } == before
 
 
 @pytest.mark.parametrize("source", ["state", "registry"])
@@ -334,7 +395,9 @@ def _capture_free_chat(team, tmp_path):
     package = package_root / "loopx"
     shutil.copytree(Path(loopx.__file__).parent, package,
                     ignore=shutil.ignore_patterns("__pycache__"))
-    (package / "control_plane/coordination/runtime_shadow_writer_adapter.py").unlink()
+    assert not (
+        package / "control_plane/coordination/runtime_shadow_writer_adapter.py"
+    ).exists()
     script = r'''
 import json, sys
 from pathlib import Path
@@ -447,7 +510,7 @@ def test_capture_free_chat_recovers_committed_projection(canonical_team, capture
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_capture_free_chat_preserves_pre_promotion_receipt(tmp_path, monkeypatch, provider):
     """Imported history remains readable without recreating or overwriting work."""
-    from loopx.todos import list_goal_todos
+    from loopx.control_plane.effect_runtime import effect_runtime_result
     from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 
     isolate_sqlite_runtime(tmp_path, monkeypatch)
@@ -460,21 +523,47 @@ def test_capture_free_chat_preserves_pre_promotion_receipt(tmp_path, monkeypatch
         "coordination": {"registered_agents": ["alpha"], "agent_model": "peer_v1"}}]}))
     service = ChatActionService(store=ChatActionStore(runtime / "chat/actions"), registry_path=registry)
     plan = _agent_plan()
-    preview = service.preview({"action_kind": "team.plan", "summary": "Assign work", "context": {},
-        "normalized_parameters": {"goal_id": "goal-a", "plan": plan}, "idempotency_key": "legacy-plan"})
-    applied = service.apply(preview["proposal_id"])["proposal"]
-    assert applied["status"] == "applied", applied
-    assert "loopx:team-plan:" in state.read_text()
-    rows = list_goal_todos(registry_path=registry, goal_id="goal-a")["todos"]
-    projection = build_todo_runtime_shadow_projection(goal_id="goal-a", todos=rows, handoff_mode="soft_claim")
+    historical_basis = "historical-team-plan-basis"
+    preview = service.store.create_preview(
+        action_kind="team.plan", summary="Assign work",
+        normalized_parameters={"goal_id": "goal-a", "plan": plan}, context={},
+        expected_state_fingerprint=historical_basis,
+        permission_classification="owner_confirmation_required",
+        validation_evidence=[], available_transitions=["apply"],
+        idempotency_key="legacy-plan",
+    )
+    planned = effect_runtime_result("work_items.team_plan.plan", {
+        "goal_id": "goal-a",
+        "plan": {**plan, "proposal_id": preview["proposal_id"]},
+        "actor_agent_id": None,
+        "registered_agents": ["alpha"],
+        "supported_action_kinds": ["implement"],
+        "observed_at": "2026-09-01T00:00:00Z",
+        "expected_state_fingerprint": historical_basis,
+        "current_state_fingerprint": historical_basis,
+        "todos": [],
+    })
+    receipt = planned["receipt"]
+    marker_id = receipt["operation_id"].split(":", 1)[1]
+    encoded_receipt = base64.b64encode(
+        json.dumps(receipt, separators=(",", ":")).encode()
+    ).decode()
+    state.write_text(
+        f"# Goal\n\n<!-- loopx:team-plan:{marker_id} {encoded_receipt} -->\n\n"
+        "## Agent Todo\n\n"
+    )
+    projection = build_todo_runtime_shadow_projection(
+        goal_id="goal-a", todos=planned["todos"], handoff_mode="soft_claim",
+    )
     initialize_canonical_authority(runtime, "goal-a", projection, state_path=state, provider=provider)
     invoke = _capture_free_chat((runtime, state, service, preview), tmp_path)
     later = invoke("preview", text="New work after import")
-    assert invoke("apply", proposal=later["proposal_id"])["proposal"]["status"] == "applied"
+    later_apply = invoke("apply", proposal=later["proposal_id"])
+    assert later_apply["proposal"]["status"] == "applied", later_apply["proposal"].get("failure")
     current = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
     display = state.read_bytes()
     replay = invoke("historical")
     assert replay["action"] == "reused"
-    assert replay["lane_todo_ids"] == applied["receipt"]["resource_ids"]["lane_todo_ids"]
+    assert replay["lane_todo_ids"] == planned["result"]["lane_todo_ids"]
     assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == current
     assert state.read_bytes() == display

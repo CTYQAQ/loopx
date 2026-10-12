@@ -952,6 +952,13 @@ def record_quota_monitor_poll_for_decision(
         )
         if isinstance(exc, _NativeMonitorPollRejected):
             payload["error_code"] = exc.diagnostic_code
+        else:
+            from ..coordination.local_authority import (
+                LocalCoordinationAuthorityRejection,
+            )
+
+            if isinstance(exc, LocalCoordinationAuthorityRejection):
+                payload["error_code"] = exc.code
         return payload
 
     if native.get("status") == "conflict":

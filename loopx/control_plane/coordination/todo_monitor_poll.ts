@@ -35,14 +35,32 @@ export interface CoordinationMonitorPollInput {
   now?: Date;
 }
 
-function failure(reason_code: string, reason: string): JsonObject & {schema_version: typeof COORDINATION_MONITOR_POLL_RESULT_SCHEMA} {
-  return {schema_version: COORDINATION_MONITOR_POLL_RESULT_SCHEMA, status: "failed", changed: false, reason_code, reason};
+type CoordinationMonitorPollFailureKind = "decision_rejection" | "protocol_failure";
+
+function failure(
+  reason_code: string,
+  reason: string,
+  kind: CoordinationMonitorPollFailureKind = "protocol_failure",
+): JsonObject & {schema_version: typeof COORDINATION_MONITOR_POLL_RESULT_SCHEMA} {
+  return {schema_version: COORDINATION_MONITOR_POLL_RESULT_SCHEMA, status: "failed",
+    changed: false, failure_kind: kind, reason_code, reason};
+}
+
+function rejection(
+  reason_code: string,
+  reason: string,
+): JsonObject & {schema_version: typeof COORDINATION_MONITOR_POLL_RESULT_SCHEMA} {
+  return failure(reason_code, reason, "decision_rejection");
 }
 
 function monitorReceipt(input: CoordinationMonitorPollInput, hash: string) {
   return new CoordinationCommandReceipt({result_schema: COORDINATION_MONITOR_POLL_RESULT_SCHEMA,
     identity: {schema_version: RECEIPT_SCHEMA, goal_id: input.goal_id,
-      operation_id: input.operation_id, request_sha256: hash}, failure,
+      operation_id: input.operation_id, request_sha256: hash},
+    failure: (code, reason) => failure(code, reason,
+      code === "coordination_operation_identity_mismatch"
+        ? "decision_rejection"
+        : "protocol_failure"),
     decode(original, phase) {
       const writeback = canonicalAuthorityObject(original.writeback, "Monitor writeback");
       if (writeback.schema_version !== "monitor_poll_todo_writeback_v0" ||
@@ -96,13 +114,15 @@ export async function executeCoordinationMonitorPoll(store: AuthorityStore,
   authoritySourcesCurrent: AuthoritySourceCheck = uncheckedAuthoritySource): Promise<JsonObject> {
   let input: NormalizedMonitorPollInput;
   try { input = normalize(raw); }
-  catch (error) { return failure("invalid_monitor_poll_request", String(error)); }
+  catch (error) { return rejection("invalid_monitor_poll_request", String(error)); }
   // Original wire identity, before any normalization/default route inference.
   const hash = monitorPollRequestHash(input);
   const receipt = monitorReceipt(input, hash);
   const previous = await receipt.read(store);
   if (previous) return previous;
-  if (!await authoritySourcesCurrent()) return failure(AUTHORITY_SOURCE_CHANGED.code, AUTHORITY_SOURCE_CHANGED.reason);
+  if (!await authoritySourcesCurrent()) {
+    return rejection(AUTHORITY_SOURCE_CHANGED.code, AUTHORITY_SOURCE_CHANGED.reason);
+  }
   const observation = await receipt.observe(store);
   if (observation.kind === "receipt") return observation.result;
   const head = observation.authority;
@@ -112,11 +132,13 @@ export async function executeCoordinationMonitorPoll(store: AuthorityStore,
   catch (error) {
     // Receipt lookup succeeded and planning failed before commit. Only this
     // boundary can certify no effect; outages and commit failures cannot.
-    return {...failure("monitor_poll_rejected", error instanceof Error ? error.message : String(error)),
+    return {...rejection("monitor_poll_rejected", error instanceof Error ? error.message : String(error)),
       no_effect: {schema_version: "monitor_poll_no_effect_v0", goal_id: input.goal_id,
         operation_id: input.operation_id, request_sha256: hash}};
   }
-  if (!await authoritySourcesCurrent()) return failure(AUTHORITY_SOURCE_CHANGED.code, AUTHORITY_SOURCE_CHANGED.reason);
+  if (!await authoritySourcesCurrent()) {
+    return rejection(AUTHORITY_SOURCE_CHANGED.code, AUTHORITY_SOURCE_CHANGED.reason);
+  }
   if (input.dry_run) return {schema_version: COORDINATION_MONITOR_POLL_RESULT_SCHEMA,
     status: "planned", changed: true, writeback: plan.writeback, provider_revision: head.provider_revision};
   const commit = prepareCoordinationProjectionCommit({goal_id: input.goal_id, operation_id: input.operation_id,

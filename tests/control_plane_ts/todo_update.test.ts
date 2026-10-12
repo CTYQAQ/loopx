@@ -183,6 +183,7 @@ test("planning intent cannot smuggle terminal, decision or observation writes", 
     const before = await store.loadAuthority();
     const result = await executeCoordinationTodoUpdate(store, {...request, planning_intent});
     assert.equal(result.status, "failed", JSON.stringify(planning_intent));
+    assert.equal(result.failure_kind, "decision_rejection");
     assert.deepEqual(await store.loadAuthority(), before);
     assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
   }
@@ -251,6 +252,63 @@ async function seeded(overrides: Record<string, unknown> = {}) {
     dry_run: false, now: new Date("2026-09-05T23:00:00Z")};
   return {store, request};
 }
+
+test("provider-first update preserves typed external-wait rejection codes", async () => {
+  const {store, request} = await seeded({
+    todo_id: "todo_waiting",
+    task_class: "advancement_task",
+  });
+  const head = await store.loadAuthority();
+  assert.equal(head.status, "loaded");
+  if (head.status !== "loaded") return;
+  const records = [
+    todo({todo_id: "todo_fallback", task_class: "advancement_task"}),
+    todo({todo_id: "todo_monitor", task_class: "continuous_monitor",
+      material_change_generation: 2}),
+    ...head.head.todos,
+  ];
+  await store.commitAuthority({
+    operation_id: "seed-external-wait-dependencies",
+    expected_provider_revision: head.provider_revision,
+    events: [],
+    receipts: [],
+    next_projection: {
+      ...head.head,
+      todos: records,
+      todo_read_model: {
+        schema_version: TODO_DOMAIN_READ_RECORD_SCHEMA,
+        todo_count: records.length,
+        records_sha256: canonicalAuthoritySha256(records),
+        contract_fields: [...TODO_DOMAIN_RECORD_CONTRACT.fields],
+      },
+    },
+  });
+  const before = await store.loadAuthority();
+  const cases: readonly [string, Record<string, unknown>, string][] = [
+    ["reject-external-wait-status", {
+      status: "blocked",
+      resume_when: "monitor_changed:todo_monitor",
+      successor_todo_ids: ["todo_fallback"],
+    }, "external_wait_todo_status_must_remain_open"],
+    ["reject-external-wait-successor", {
+      resume_when: "monitor_changed:todo_monitor",
+      successor_todo_ids: [],
+    }, "external_wait_successor_required"],
+  ];
+  for (const [operationId, planningIntent, reasonCode] of cases) {
+    const result = await executeCoordinationTodoUpdate(store, {
+      ...request,
+      todo_id: "todo_waiting",
+      operation_id: operationId,
+      patch: {},
+      clear_fields: [],
+      planning_intent: planningIntent,
+    });
+    assert.equal(result.reason_code, reasonCode, JSON.stringify(result));
+    assert.deepEqual(await store.loadAuthority(), before);
+    assert.equal((await store.readReceipt(operationId)).status, "missing");
+  }
+});
 
 async function boundUserAction(overrides: Record<string, unknown> = {}, leases: Record<string, unknown>[] = []) {
   const {store, request} = await seeded({role: "user", task_class: "user_action",

@@ -199,7 +199,6 @@ CONSUMER_MODULES = (
     "loopx.control_plane.todos.machine_section_projection",
     "loopx.control_plane.work_items.governed_transition_proposal",
     "loopx.control_plane.work_items.progress_review_policy",
-    "loopx.control_plane.work_items.task_lease",
     "loopx.domain_packs.issue_fix",
     "loopx.extensions.lark.document_comment_provider",
     "loopx.extensions.openviking_semantic_preference.history_export",

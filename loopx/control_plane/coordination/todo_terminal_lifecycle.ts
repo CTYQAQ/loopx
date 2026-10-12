@@ -1,6 +1,11 @@
 import {planUserCompletion, requireCompletionDecisionOutcome} from "../todos/user_completion.ts";
 import {AUTHORITY_SOURCE_CHANGED, uncheckedAuthoritySource, type AuthoritySourceCheck} from "./authority_source.ts";
-import {normalizeTodoUpdateInput, prepareUpdatedTodo, type CoordinationTodoUpdateInput, type TodoCompletionEdit} from "./todo_update_intent.ts";
+import {
+  normalizeTodoUpdateInput,
+  prepareUpdatedTodo,
+  type NormalizedCoordinationTodoUpdateInput,
+  type TodoCompletionEdit,
+} from "./todo_update_intent.ts";
 import {todoUpdateAdmissionRejection} from "./todo_update_admission.ts";
 import { createHash } from "node:crypto";
 import {acceptanceWorkGuard, acceptanceCompletionRequirements, validateAcceptanceCompletion,
@@ -1087,7 +1092,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
     }
     head = observation.authority;
   }
-  let update: CoordinationTodoUpdateInput | undefined;
+  let update: NormalizedCoordinationTodoUpdateInput | undefined;
   if (input.user_update !== undefined) {
     try {
       const edit = canonicalAuthorityObject(input.user_update, "User completion edit");
@@ -1458,6 +1463,14 @@ export async function executeCoordinationTodoTerminalLifecycle(
         provider_revision: head.provider_revision,
         cursor: head.cursor,
       };
+    }
+    if (completion.decision === "policy_reject") {
+      return terminalFailure(
+        "completion_policy_rejected",
+        completion.completion_policy_failure.summary,
+        {completion_policy_failure: completion.completion_policy_failure},
+        "decision_rejection",
+      );
     }
     if (completion.decision === "reject") {
       return terminalFailure(

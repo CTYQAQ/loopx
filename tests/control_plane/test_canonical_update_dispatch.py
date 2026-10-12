@@ -11,10 +11,11 @@ import pytest
 
 from canonical_authority_fixture import isolate_sqlite_runtime, promoted_create_fixture
 from loopx.control_plane.coordination.local_authority import (
+    CanonicalAuthorityRequired,
     LocalCoordinationAuthorityUnavailable,
     read_canonical_todos_if_promoted,
 )
-from loopx.todos import add_goal_todo, update_goal_todo
+from loopx.todos import add_goal_todo, complete_goal_todo, update_goal_todo
 
 
 @pytest.fixture(params=["file", "sqlite"])
@@ -27,14 +28,12 @@ def update_workspace(tmp_path, monkeypatch, request):
     return registry, runtime, state, created["todo_id"]
 
 
-@pytest.fixture(params=[False, True], ids=["writer-present", "writer-absent"])
-def cli_update(tmp_path, monkeypatch, request, update_workspace):
+@pytest.fixture
+def cli_update(tmp_path, monkeypatch, update_workspace):
     package_root = tmp_path / "package"
     package = package_root / "loopx"
     shutil.copytree(Path(__file__).resolve().parents[2] / "loopx", package,
                     ignore=shutil.ignore_patterns("__pycache__"))
-    if request.param:
-        (package / "control_plane/todos/line_update.py").unlink()
     provenance = tmp_path / "cli-origin.txt"
     (package_root / "sitecustomize.py").write_text(
         "import importlib.util\nfrom pathlib import Path\n"
@@ -135,7 +134,10 @@ def test_public_facade_empty_edits_use_the_typed_decoder(update_workspace):
         assert state.read_bytes() == display
 
 
-def test_unpromoted_facade_preserves_empty_edit_no_change(tmp_path):
+@pytest.mark.parametrize("dry_run", [False, True], ids=["execute", "dry-run"])
+def test_unpromoted_facade_rejects_create_and_update_without_writes(
+    tmp_path, dry_run,
+):
     project = tmp_path / "project"
     project.mkdir()
     state = project / "state.md"
@@ -144,11 +146,48 @@ def test_unpromoted_facade_preserves_empty_edit_no_change(tmp_path):
     registry.write_text(json.dumps({"schema_version": 1, "common_runtime_root": str(tmp_path / "runtime"),
         "goals": [{"id": "goal-a", "repo": str(project), "state_file": "state.md",
                    "coordination": {"registered_agents": ["agent-a"]}}]}))
-    created = add_goal_todo(registry_path=registry, goal_id="goal-a", role="agent",
-                            text="Keep legacy compatibility", agent_id="agent-a", note="Keep the note")
     before = state.read_bytes()
-    for intent in [{}, {"note": ""}, {"note": " \t\n"}]:
-        result = update_goal_todo(registry_path=registry, goal_id="goal-a", todo_id=created["todo_id"],
-                                 agent_id="agent-a", **intent)
-        assert result["ok"] and result["changed"] is False
-        assert state.read_bytes() == before
+    with pytest.raises(CanonicalAuthorityRequired) as create_error:
+        add_goal_todo(
+            registry_path=registry,
+            goal_id="goal-a",
+            role="agent",
+            text="Migrate before creating this Todo",
+            agent_id="agent-a",
+            dry_run=dry_run,
+        )
+    with pytest.raises(CanonicalAuthorityRequired) as update_error:
+        update_goal_todo(
+            registry_path=registry,
+            goal_id="goal-a",
+            todo_id="todo_existing",
+            note="Migrate before editing this Todo",
+            agent_id="agent-a",
+            dry_run=dry_run,
+        )
+    with pytest.raises(CanonicalAuthorityRequired) as terminal_error:
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id="goal-a",
+            todo_id="todo_existing",
+            agent_id="agent-a",
+            evidence="Migrate before completing this Todo",
+            no_followup=True,
+            dry_run=dry_run,
+        )
+    for error, operation in (
+        (create_error.value, "todo_create"),
+        (update_error.value, "todo_update"),
+        (terminal_error.value, "todo_terminal"),
+    ):
+        assert error.code == "canonical_authority_required"
+        assert error.payload["operation"] == operation
+        assert error.payload["write_admitted"] is False
+        assert error.payload["decision_read_from_provider"] is False
+        assert error.payload["legacy_fallback_used"] is False
+        assert error.payload["recovery"] == {
+            "action": "migrate_goal_authority",
+            "backup_required": True,
+        }
+    assert state.read_bytes() == before
+    assert not (tmp_path / "runtime" / "authority").exists()

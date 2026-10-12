@@ -189,6 +189,67 @@ def _run_cli(
     return result.returncode, json.loads(result.stdout)
 
 
+def _initialize_fixture_authority(
+    project: Path,
+    runtime: Path,
+    *,
+    provider: str = "file",
+    handoff_mode: str = "soft_claim",
+    leases: list[dict[str, Any]] | None = None,
+) -> None:
+    from canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import (
+        build_todo_runtime_shadow_projection,
+    )
+
+    state_path = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    summary = parse_active_state_todos(
+        state_path.read_text(encoding="utf-8"),
+        state_path=state_path,
+        item_limit=None,
+    )
+    todos = [
+        *(summary.get("user_todos", {}).get("items") or []),
+        *(summary.get("agent_todos", {}).get("items") or []),
+    ]
+    initialize_canonical_authority(
+        runtime,
+        GOAL_ID,
+        build_todo_runtime_shadow_projection(
+            goal_id=GOAL_ID,
+            todos=todos,
+            handoff_mode=handoff_mode,
+            leases=leases or [],
+        ),
+        state_path=state_path,
+        provider=provider,
+    )
+
+
+def _write_codex_heartbeat_rrule(codex_home: Path, rrule: str) -> None:
+    automation_path = codex_home / "automations" / "fixture" / "automation.toml"
+    automation_path.parent.mkdir(parents=True, exist_ok=True)
+    automation_path.write_text(
+        "\n".join(
+            [
+                "version = 1",
+                'id = "fixture"',
+                'kind = "heartbeat"',
+                'name = "Settlement CLI fixture"',
+                (
+                    f'prompt = "Advance `{GOAL_ID}` from active state. '
+                    f'Agent: `{AGENT_ID}`."'
+                ),
+                'status = "ACTIVE"',
+                f'rrule = "{rrule}"',
+                'target_thread_id = "settlement-cli-thread"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def _run_generated_cli(
     command: str,
     *,
@@ -850,6 +911,7 @@ def test_codex_app_refresh_stages_validated_memory_and_spend_finalizes_hook(
         ),
         encoding="utf-8",
     )
+    _initialize_fixture_authority(project, runtime)
     turn_id = "turn-reward-memory-app"
     binding = (
         "--agent-id",
@@ -992,6 +1054,7 @@ def test_typed_outcome_gap_settles_exact_turn_without_becoming_progress(
     )
     _configure_completion_validation_todo(project)
     _configure_selectable_alternative(project)
+    _initialize_fixture_authority(project, runtime)
     turn_id = "turn-typed-blocker-settlement"
     binding = (
         "--agent-id",
@@ -1077,22 +1140,6 @@ def test_typed_outcome_gap_settles_exact_turn_without_becoming_progress(
     )
     assert mismatch_rc == 1, mismatch
     assert "settlement binding does not match" in mismatch["error"]
-
-    unscheduled_rc, unscheduled = _run_cli(
-        registry_path,
-        runtime,
-        *common_refresh_args,
-        "--progress-result-class",
-        "blocked",
-        "--progress-blocker-id",
-        "blocker:runtime-boundary",
-        "--progress-evidence-id",
-        "evidence:runtime-boundary",
-        cwd=project,
-    )
-    assert unscheduled_rc == 1, unscheduled
-    assert "pending resume_when=resume_at" in unscheduled["error"]
-    assert _classification_count(runtime, "typed_blocker_writeback") == 0
 
     due_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).replace(
         microsecond=0
@@ -1204,6 +1251,7 @@ def test_typed_blocked_retry_without_successor_defers_the_only_todo(
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
     _configure_completion_validation_todo(project)
+    _initialize_fixture_authority(project, runtime)
     turn_id = "turn-typed-blocker-only-todo"
     binding = (
         "--agent-id", AGENT_ID,
@@ -1262,6 +1310,7 @@ def test_scheduler_cache_misses_after_todo_state_changes_without_run(
     tmp_path: Path,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
+    _initialize_fixture_authority(project, runtime)
     guard = (
         "quota",
         "should-run",
@@ -1302,7 +1351,16 @@ def test_scheduler_cache_misses_after_todo_state_changes_without_run(
         "resume_at:2099-01-01T00:00:00Z",
     )
     assert rc == 0, updated
-    assert updated["status"] == "deferred"
+    assert updated["status"] == "applied"
+    listed_rc, listed = _run_cli(
+        registry_path, runtime, "todo", "list", "--goal-id", GOAL_ID
+    )
+    assert listed_rc == 0, listed
+    deferred = next(
+        item for item in listed["todos"] if item["todo_id"] == TODO_ID
+    )
+    assert deferred["status"] == "deferred"
+    assert deferred["resume_when"] == "resume_at:2099-01-01T00:00:00Z"
     assert (index_path.read_bytes() if index_path.exists() else None) == index_before
 
     rc, refreshed = _run_cli(
@@ -1338,6 +1396,7 @@ def test_scheduler_cache_tracks_todo_changes_beyond_display_limit(
         state_path.read_text(encoding="utf-8").rstrip() + "\n" + tail_rows,
         encoding="utf-8",
     )
+    _initialize_fixture_authority(project, runtime)
     guard = (
         "quota",
         "should-run",
@@ -2264,6 +2323,7 @@ def test_recovery_does_not_bind_current_replan_and_reenters_same_turn(
     # append-only heartbeat receipt.  The same recovery Turn must then be able
     # to bind an independent successor instead of preserving an obsolete replan.
     state_path.write_text(state_before_replan, encoding="utf-8")
+    _initialize_fixture_authority(project, runtime)
 
     wait_rc, wait = _run_cli(
         registry_path,
@@ -2284,9 +2344,13 @@ def test_recovery_does_not_bind_current_replan_and_reenters_same_turn(
         ALTERNATIVE_TODO_ID,
     )
     assert wait_rc == 0, wait
-    assert wait["external_wait_transition"]["successor_todo_ids"] == [
-        ALTERNATIVE_TODO_ID
-    ]
+    listed_rc, listed = _run_cli(
+        registry_path, runtime, "todo", "list", "--goal-id", GOAL_ID
+    )
+    assert listed_rc == 0, listed
+    waiting = next(item for item in listed["todos"] if item["todo_id"] == TODO_ID)
+    assert waiting["resume_when"] == f"monitor_changed:{DUE_MONITOR_TODO_ID}"
+    assert waiting["successor_todo_ids"] == [ALTERNATIVE_TODO_ID]
 
     current_turn_id = recovery["heartbeat_receipt"]["turn_instance_id"]
     resumed_rc, resumed = _run_cli(
@@ -2462,7 +2526,7 @@ def test_prior_turn_with_several_receipts_recovers_once(tmp_path: Path) -> None:
     assert packet["prior_event_id"] == "multi-receipt-identity-upgrade"
 
 
-@pytest.mark.parametrize("provider", ["legacy", "file", "sqlite"])
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 @pytest.mark.parametrize("hidden_count", [0, 6])
 def test_prior_host_closeout_survives_hidden_todo_lifecycle(
     tmp_path: Path,
@@ -2570,7 +2634,7 @@ def test_prior_host_closeout_survives_hidden_todo_lifecycle(
     assert resumed["quota"]["spent_slots"] == prior["quota"]["spent_slots"]
 
 
-@pytest.mark.parametrize("provider", ["legacy", "file", "sqlite"])
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_prior_host_closeout_reads_archived_exact_todo(
     tmp_path: Path,
     provider: str,
@@ -2698,9 +2762,11 @@ def test_prior_host_closeout_reads_archived_exact_todo(
 
 def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
     _configure_read_only_todo(project)
+    _initialize_fixture_authority(project, runtime)
     binding = (
         "--agent-id",
         AGENT_ID,
@@ -2924,6 +2990,11 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     assert fresh_turn_rc == 0, fresh_turn
     assert fresh_turn["selected_todo"]["todo_id"] == successor_id
     fresh_ack_args = fresh_turn["scheduler_hint"]["app_automation"]["ack_hint"]["cli_args"]
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv("CODEX_THREAD_ID", "settlement-cli-thread")
+    applied_rrule_index = fresh_ack_args.index("--applied-rrule") + 1
+    _write_codex_heartbeat_rrule(codex_home, fresh_ack_args[applied_rrule_index])
     fresh_ack_rc, fresh_ack = _run_cli(registry_path, runtime, *fresh_ack_args)
     assert fresh_ack_rc == 0, fresh_ack
     assert fresh_ack["schema_version"] == "loopx_scheduler_host_followup_result_v0"
@@ -3118,6 +3189,7 @@ def test_same_turn_identityless_guard_upgrades_and_settles_full_chain(
         ),
         encoding="utf-8",
     )
+    _initialize_fixture_authority(project, runtime)
     binding = (
         "--agent-id",
         AGENT_ID,
@@ -4980,6 +5052,7 @@ def test_pending_action_selection_does_not_preempt_newly_due_monitor(
     assert "settlement_identity" not in first["heartbeat_receipt"]
 
     _append_newly_due_monitor(project)
+    _initialize_fixture_authority(project, runtime)
     selected_rc, selected = _run_cli(
         registry_path,
         runtime,
@@ -5157,6 +5230,7 @@ def test_pending_action_selection_can_bind_exact_newly_due_monitor(
     assert "settlement_identity" not in first["heartbeat_receipt"]
 
     _append_newly_due_monitor(project)
+    _initialize_fixture_authority(project, runtime)
     selected_rc, selected = _run_cli(
         registry_path,
         runtime,
@@ -5239,6 +5313,7 @@ def test_prior_monitor_turn_accepts_exact_committed_receipt(
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
     _append_newly_due_monitor(project)
+    _initialize_fixture_authority(project, runtime)
     prior_turn_id = "turn-monitor-exact-closeout"
     guard_args = (
         "quota",
@@ -5314,6 +5389,7 @@ def test_prior_monitor_turn_recovery_rejects_wrong_identity_receipt(
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
     _append_newly_due_monitor(project)
+    _initialize_fixture_authority(project, runtime)
     prior_turn_id = "turn-monitor-wrong-identity"
     guard_args = (
         "quota",
@@ -5420,6 +5496,7 @@ def test_receipt_bound_advancement_turn_records_multiple_due_monitors(
         ("todo_fixture_monitor_gamma", "monitor-gamma"),
     ]
     _append_due_monitors(project, monitors)
+    _initialize_fixture_authority(project, runtime)
     turn_instance_id = "turn-multiple-auxiliary-monitors"
     guard_args = (
         "quota",
@@ -5589,7 +5666,9 @@ def test_pending_action_selection_does_not_commit_after_new_user_gate(
 
 @pytest.mark.parametrize("write_vision", [True, False], ids=["qualified-vision", "missing-vision"])
 def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
-    tmp_path: Path, write_vision: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    write_vision: bool,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
     _configure_autonomous_replan_fixture(project, runtime, registry_path)
@@ -5605,6 +5684,7 @@ def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
         json.dumps(registry, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    _initialize_fixture_authority(project, runtime)
     turn_instance_id = "turn-autonomous-replan-settlement-1"
 
     guard_rc, guard = _run_cli(
@@ -5646,6 +5726,14 @@ def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
     assert original_scheduler_ack_args[:2] == ["quota", "scheduler-ack-current"]
     assert "--turn-instance-id" in original_scheduler_ack_args
     assert turn_instance_id in original_scheduler_ack_args
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv("CODEX_THREAD_ID", "settlement-cli-thread")
+    applied_rrule_index = original_scheduler_ack_args.index("--applied-rrule") + 1
+    _write_codex_heartbeat_rrule(
+        codex_home,
+        original_scheduler_ack_args[applied_rrule_index],
+    )
     actions = cli_channel["next_cli_actions"]
     refresh_command = next(action for action in actions if "refresh-state" in action)
     spend_command = next(action for action in actions if "spend-slot" in action)
@@ -6501,6 +6589,7 @@ def test_same_turn_receipt_replay_defers_newly_due_higher_priority_monitor(
     assert first["heartbeat_receipt"]["settlement_identity"]["todo_id"] == TODO_ID
 
     _append_newly_due_monitor(project)
+    _initialize_fixture_authority(project, runtime)
     capability_args = (
         "--available-capability",
         "network",
@@ -6656,7 +6745,7 @@ def test_same_turn_receipt_replay_defers_newly_due_higher_priority_monitor(
     assert resumed_turn["selected_todo"]["todo_id"] == DUE_MONITOR_TODO_ID
 
 
-@pytest.mark.parametrize("provider", ["legacy", "file", "sqlite"])
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_read_only_settlement_omits_non_causal_delivery_workspace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6669,10 +6758,9 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     def frozen_completion_clock(argv, *args, **kwargs):
         if isinstance(argv, list) and argv[1:3] == ["-m", "loopx.cli"]:
             program = (
-                "import loopx.control_plane.todos.legacy_mutation as legacy; "
                 "import loopx.control_plane.todos.provider_terminal_lifecycle as native; "
                 "clock=lambda:'2026-09-02T12:00:00+00:00'; "
-                "legacy.now_local=clock; native.now_local=clock; "
+                "native.now_local=clock; "
                 "from loopx.cli import main; raise SystemExit(main())"
             )
             argv = [argv[0], "-c", program, *argv[3:]]
@@ -6978,6 +7066,7 @@ def test_same_turn_terminal_receipt_replay_preempts_autonomous_replan(
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
     _configure_read_only_todo(project)
+    _initialize_fixture_authority(project, runtime)
     guard_args = (
         "quota",
         "should-run",
@@ -7087,6 +7176,7 @@ def test_settled_turn_defers_prior_unsettled_history_to_fresh_turn(
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
     _configure_selectable_alternative(project)
+    _initialize_fixture_authority(project, runtime)
     guard_args = (
         "quota",
         "should-run",
@@ -7221,122 +7311,3 @@ def test_settled_turn_defers_prior_unsettled_history_to_fresh_turn(
     assert fresh["unsettled_host_turn_recovery"]["binding_id"] == (
         ALTERNATIVE_TODO_ID
     )
-
-
-def test_legacy_read_only_workspace_mismatch_fails_then_corrects_from_todo_contract(
-    tmp_path: Path,
-) -> None:
-    project, runtime, registry_path = _write_fixture(tmp_path)
-    state_path = _configure_read_only_todo(project)
-    _initialize_git_checkout(project)
-    binding = (
-        "--agent-id",
-        AGENT_ID,
-        "--todo-id",
-        TODO_ID,
-        "--turn-instance-id",
-        TURN_ID,
-    )
-
-    guard_rc, guard = _run_cli(
-        registry_path,
-        runtime,
-        "quota",
-        "should-run",
-        "--codex-app",
-        "--goal-id",
-        GOAL_ID,
-        "--agent-id",
-        AGENT_ID,
-        "--turn-instance-id",
-        TURN_ID,
-        "--scan-path",
-        str(project),
-    )
-    assert guard_rc == 0, guard
-    _strip_heartbeat_workspace_causality(runtime)
-
-    complete_rc, complete = _run_cli(
-        registry_path,
-        runtime,
-        "todo",
-        "complete",
-        "--goal-id",
-        GOAL_ID,
-        "--todo-id",
-        TODO_ID,
-        "--agent-id",
-        AGENT_ID,
-        "--claimed-by",
-        AGENT_ID,
-        "--evidence",
-        "legacy read-only characterization validated",
-        "--no-follow-up",
-    )
-    assert complete_rc == 0, complete
-
-    refresh_rc, refresh = _run_cli(
-        registry_path,
-        runtime,
-        "refresh-state",
-        "--goal-id",
-        GOAL_ID,
-        "--classification",
-        "legacy_read_only_characterization_complete",
-        "--delivery-batch-scale",
-        "single_surface",
-        "--delivery-outcome",
-        "outcome_progress",
-        "--delivery-workspace-path",
-        str(project),
-        *binding,
-        "--no-global-sync",
-        "--suppress-external-sinks",
-    )
-    assert refresh_rc == 0, refresh
-    assert refresh["delivery_workspace"]["workspace_kind"] == "canonical_checkout"
-
-    causal_state = state_path.read_text(encoding="utf-8")
-    state_path.write_text(
-        causal_state.replace(
-            "continuation_policy=same_agent_non_delivery "
-            "required_capabilities=shell%2Cfilesystem_read ",
-            "",
-        ),
-        encoding="utf-8",
-    )
-    spend_args = (
-        "quota",
-        "spend-slot",
-        "--goal-id",
-        GOAL_ID,
-        "--slots",
-        "1",
-        "--source",
-        "heartbeat",
-        "--execute",
-        *binding,
-        "--scan-path",
-        str(project),
-    )
-    failed_rc, failed = _run_cli(registry_path, runtime, *spend_args)
-    assert failed_rc == 1, failed
-    assert failed["workspace_guard"]["current_workspace"] == "foreign_git_worktree"
-    assert _spend_run_count(runtime) == 0
-
-    state_path.write_text(causal_state, encoding="utf-8")
-    corrected_rc, corrected = _run_cli(registry_path, runtime, *spend_args)
-    replay_rc, replay = _run_cli(registry_path, runtime, *spend_args)
-
-    assert corrected_rc == 0, corrected
-    assert corrected["delivery_workspace_causality"]["source"] == (
-        "completed_todo_contract_fallback"
-    )
-    assert corrected["delivery_workspace_causality"]["requirement"] == ("not_required")
-    assert corrected["delivery_workspace_validated"] is False
-    assert replay_rc == 0, replay
-    assert replay["idempotent_replay"] is True
-    assert [
-        receipt["step_kind"] for receipt in replay["settlement_result"]["receipts"]
-    ] == ["validation", "durable_writeback", "quota_spend"]
-    assert _spend_run_count(runtime) == 1

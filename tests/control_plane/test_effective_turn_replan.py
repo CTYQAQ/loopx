@@ -17,6 +17,7 @@ from tests.control_plane.test_quota_settlement_cli import (
     GOAL_ID,
     TODO_ID,
     _configure_selectable_alternative,
+    _initialize_fixture_authority,
     ALTERNATIVE_TODO_ID,
 )
 from loopx.control_plane.work_items.replan_history_codec import (
@@ -312,6 +313,7 @@ def test_effective_cadence_rejects_invalid_units(invalid):
 def test_verified_negative_work_counts_without_a_score_gain(tmp_path: Path) -> None:
     project, runtime, registry = _write_fixture(tmp_path)
     _configure_selectable_alternative(project)
+    _initialize_fixture_authority(project, runtime)
     binding = (
         "--goal-id",
         GOAL_ID,

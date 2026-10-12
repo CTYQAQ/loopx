@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GOAL, TODO = "lease-recovery", "todo_lease_recovery"
 
 
-@pytest.fixture(params=["legacy", "file", "sqlite"])
+@pytest.fixture(params=["file", "sqlite"])
 def lease_cli(tmp_path, monkeypatch, request):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     project, runtime = tmp_path / "project with spaces", tmp_path / "runtime"
@@ -27,15 +27,14 @@ def lease_cli(tmp_path, monkeypatch, request):
         "id": GOAL, "repo": str(project), "state_file": state.name,
         "coordination": {"registered_agents": ["peer-a", "peer-b"]},
     }]}))
-    if request.param != "legacy":
-        initialize_canonical_authority(runtime, GOAL, build_todo_runtime_shadow_projection(
-            goal_id=GOAL, handoff_mode="hard_lease", leases=[], todos=[{
-                "schema_version": "todo_item_v0", "todo_id": TODO, "role": "agent",
-                "status": "open", "done": False, "text": "Verify a source artifact.",
-                "archive_state": "active", "source_section": "Agent Todo", "index": 1,
-                "task_class": "advancement_task", "claimed_by": "peer-a", "required_write_scopes": ["src/**"],
-            }]), state_path=state, provider=request.param)
-        state.unlink()
+    initialize_canonical_authority(runtime, GOAL, build_todo_runtime_shadow_projection(
+        goal_id=GOAL, handoff_mode="hard_lease", leases=[], todos=[{
+            "schema_version": "todo_item_v0", "todo_id": TODO, "role": "agent",
+            "status": "open", "done": False, "text": "Verify a source artifact.",
+            "archive_state": "active", "source_section": "Agent Todo", "index": 1,
+            "task_class": "advancement_task", "claimed_by": "peer-a", "required_write_scopes": ["src/**"],
+        }]), state_path=state, provider=request.param)
+    state.unlink()
     prefix = ["--registry", str(registry), "--runtime-root", str(runtime), "--format", "json"]
 
     def run(args, code=0):
@@ -149,7 +148,7 @@ def test_recovery_preserves_routing_and_repeatable_string_values():
     assert recovered.new_idempotency_key is None
 
 
-def test_transfer_repair_retains_explicit_claim_handover(lease_cli, request):
+def test_transfer_repair_retains_explicit_claim_handover(lease_cli):
     run, action, _, _ = lease_cli
     before = run(action("inspect"))["lease"]
     rejected = run(action("transfer", "--owner", "peer-a", "--idempotency-key", "original",
@@ -161,19 +160,13 @@ def test_transfer_repair_retains_explicit_claim_handover(lease_cli, request):
     assert "--transfer-claim" in repaired
     assert repaired[repaired.index("--expected-version") + 1] == "1"
     assert run(action("inspect"))["lease"] == before
-    if request.node.callspec.params["lease_cli"] == "legacy":
-        # Syntax repair cannot make atomic claim transfer available on legacy files.
-        denied = run(repaired, code=1)
-        assert denied["ok"] is False and "recovery" not in denied
-        assert run(action("inspect"))["lease"] == before
-    else:
-        transferred = run(repaired)
-        assert transferred["lease"]["owner"] == transferred["claimed_by"] == "peer-b"
-        assert transferred["lease"]["version"] == 2
-        assert transferred["lease"]["write_scopes"] == ["src/**"]
-        released = run(action("release", "--owner", "peer-b", "--idempotency-key", "receiver",
-                              "--expected-version", "2"))
-        assert released["lease"]["status"] == "released"
+    transferred = run(repaired)
+    assert transferred["lease"]["owner"] == transferred["claimed_by"] == "peer-b"
+    assert transferred["lease"]["version"] == 2
+    assert transferred["lease"]["write_scopes"] == ["src/**"]
+    released = run(action("release", "--owner", "peer-b", "--idempotency-key", "receiver",
+                          "--expected-version", "2"))
+    assert released["lease"]["status"] == "released"
 
 
 def test_grammar_rejection_precedes_runtime_resolution(monkeypatch):

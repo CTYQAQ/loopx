@@ -9,9 +9,11 @@ from ...agent_registry import registered_agent_ids_from_registry
 from ..coordination.authority_source_capture import authority_registry_source
 from ..coordination.local_authority import (
     LOCAL_AUTHORITY_SOURCES,
+    LocalCoordinationAuthorityRejection,
     LocalCoordinationAuthorityUnavailable,
-    local_authority_is_promoted,
+    raise_canonical_write_failure,
     read_canonical_todos_if_promoted,
+    require_canonical_authority,
 )
 from ..effect_runtime import (
     CANONICAL_AUTHORITY_WRITE_TIMEOUT_SECONDS,
@@ -24,7 +26,8 @@ from ..todos.provider_projection import settle_canonical_todo_projection
 
 def require_monitor_poll_source_available(*, runtime_root: Path, goal_id: str) -> None:
     """Fail closed on unavailable promoted authority before unrelated quota work."""
-    read_canonical_todos_if_promoted(runtime_root=runtime_root, goal_id=goal_id)
+    if read_canonical_todos_if_promoted(runtime_root=runtime_root, goal_id=goal_id) is None:
+        require_canonical_authority(goal_id=goal_id, operation="monitor_poll")
 
 
 def poll_canonical_monitor_if_promoted(
@@ -32,9 +35,7 @@ def poll_canonical_monitor_if_promoted(
     monitor_effect_id: str | None, agent_id: str | None,
     observation: dict[str, Any], intent: dict[str, Any],
     lease_proof: dict[str, Any] | None = None, gate_scope_guard: bool = False,
-) -> dict[str, Any] | None:
-    if not local_authority_is_promoted(runtime_root=runtime_root, goal_id=goal_id):
-        return None
+) -> dict[str, Any]:
     with authority_registry_source(registry_path) as registry_source:
         registered = registered_agent_ids_from_registry(registry_path, goal_id)
     result = effect_runtime_result("coordination.local_authority.monitor_poll", {
@@ -56,6 +57,30 @@ def poll_canonical_monitor_if_promoted(
         or result.get("legacy_fallback_used") is not False
         or not isinstance(result.get("writeback"), dict)):
         payload = result if isinstance(result, dict) else {}
+        raise_canonical_write_failure(
+            payload,
+            goal_id=goal_id,
+            operation="monitor_poll",
+        )
+        if (
+            payload.get("status") == "failed"
+            and payload.get("reason_code")
+            == "coordination_operation_identity_mismatch"
+        ):
+            raise LocalCoordinationAuthorityRejection(
+                "monitor effect identity is already bound to a different observation",
+                code="coordination_operation_identity_mismatch",
+                payload=payload,
+            )
+        if (
+            payload.get("status") == "failed"
+            and payload.get("failure_kind") == "decision_rejection"
+        ):
+            raise LocalCoordinationAuthorityRejection(
+                str(payload.get("reason") or "canonical Monitor poll was rejected"),
+                code=str(payload.get("reason_code") or "monitor_poll_rejected"),
+                payload=payload,
+            )
         raise LocalCoordinationAuthorityUnavailable(
             str(payload.get("reason") or "canonical Monitor transaction unavailable"),
             code=str(payload.get("reason_code") or "monitor_poll_unavailable"), payload=payload,

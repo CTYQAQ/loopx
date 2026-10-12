@@ -36,9 +36,14 @@ export interface CoordinationTodoUpdateInput {
   readonly lease_expected_version?: number | null;
   readonly planning_intent?: JsonObject;
   readonly completion?: JsonObject;
-  readonly monitor_observation?: MonitorPollObservation;
+  readonly monitor_observation?: JsonObject;
   readonly completion_validation_revision?: CompletionValidationRevision;
 }
+
+export type NormalizedCoordinationTodoUpdateInput =
+  Omit<CoordinationTodoUpdateInput, "monitor_observation"> & {
+    readonly monitor_observation?: MonitorPollObservation;
+  };
 
 /** Only edit intent crosses into the terminal owner; actor/lease authority is
  * carried once, in the enclosing terminal request. */
@@ -47,7 +52,9 @@ export type TodoCompletionEdit = Pick<CoordinationTodoUpdateInput,
   readonly validation_source_provider_revision?: string;
 };
 
-export function normalizeTodoUpdateInput(raw: CoordinationTodoUpdateInput): CoordinationTodoUpdateInput {
+export function normalizeTodoUpdateEnvelope(
+  raw: CoordinationTodoUpdateInput,
+): CoordinationTodoUpdateInput {
   if (raw.expected_provider_revision !== undefined) {
     requireAuthorityStoreId(raw.expected_provider_revision, "expected_provider_revision");
   }
@@ -88,7 +95,9 @@ export function normalizeTodoUpdateInput(raw: CoordinationTodoUpdateInput): Coor
   const patch = canonicalAuthorityObject(raw.patch, "Todo update patch");
   const clearFields = raw.clear_fields.map((field, index) =>
     requireAuthorityStoreId(field, `clear_fields[${index}]`));
-  const observation = raw.monitor_observation === undefined ? undefined : decodeMonitorPollObservation(raw.monitor_observation);
+  const observation = raw.monitor_observation === undefined
+    ? undefined
+    : canonicalAuthorityObject(raw.monitor_observation, "Monitor observation");
   const validationRevision = raw.completion_validation_revision === undefined
     ? undefined
     : decodeCompletionValidationRevision(raw.completion_validation_revision);
@@ -148,8 +157,22 @@ export function normalizeTodoUpdateInput(raw: CoordinationTodoUpdateInput): Coor
     patch, clear_fields: clearFields};
 }
 
+export function normalizeTodoUpdateInput(
+  raw: CoordinationTodoUpdateInput,
+): NormalizedCoordinationTodoUpdateInput {
+  const envelope = normalizeTodoUpdateEnvelope(raw);
+  const observation = envelope.monitor_observation === undefined
+    ? undefined
+    : decodeMonitorPollObservation(envelope.monitor_observation);
+  const {monitor_observation: _rawObservation, ...normalized} = envelope;
+  return {
+    ...normalized,
+    ...(observation === undefined ? {} : {monitor_observation: observation}),
+  };
+}
+
 export function prepareUpdatedTodo(
-  todo: JsonObject, input: CoordinationTodoUpdateInput, head: JsonObject, kind: "planning" | "user_completion" = "planning",
+  todo: JsonObject, input: NormalizedCoordinationTodoUpdateInput, head: JsonObject, kind: "planning" | "user_completion" = "planning",
 ): {next: JsonObject; changed: boolean; clearFields: string[]; monitorTransition?: JsonObject} {
   const next: JsonObject = {...todo, ...input.patch};
   for (const field of input.clear_fields) delete next[field];
