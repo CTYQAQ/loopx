@@ -125,7 +125,11 @@ cohort 采用及冻结 D2 证据保持独立。
 Monitor router 同样隔离活跃旧源 writer；历史回执 codec／replay 共用 scheduler
 只读 IO owner，原操作身份和决策继续归既有 TS batch。File/SQLite CLI 与正常
 wheel 删源检查须保留后来写入及原 successor；晋升后重放保持旧 outbox 静止，
-未晋升的 markerless batch 恢复保留原 drain。本批只移除 canonical 导入依赖，
+未晋升的 markerless batch 恢复保留原有界 drain。业务回执重放不保证 shadow
+立即追平：锁延期或 proof 预算耗尽时保留待处理证据，由独立的
+`authority-shadow drain` 恢复。恢复须保持原 source bytes、successor ID 和 quota
+effect 恰好一次；不能为追平而重放 writer 或扩大 inline 上限。
+本批只移除 canonical 导入依赖，
 不删除受支持的旧 writer；缺席臂复用上述 CLI 启动隔离，同时移除四个 shadow
 producer module。
 见[保留义务及回滚](../../reference/canonical-todo-completion-update.md#monitor-source-writer-isolation)。

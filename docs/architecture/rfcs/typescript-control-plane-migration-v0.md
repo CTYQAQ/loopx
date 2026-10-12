@@ -187,7 +187,12 @@ codec/replay has a small shared scheduler IO owner, while the existing TS batch
 still owns operation identity and decisions. File/SQLite CLI and normal-wheel
 source removal must preserve later canonical writes and original successors;
 promoted replay leaves old outbox bytes inert. Unpromoted markerless batch
-recovery retains its existing drain. This removes a canonical import dependency,
+recovery retains its existing bounded drain. Business-receipt replay does not
+guarantee shadow catch-up: lock deferral or an expired proof budget preserves
+pending evidence for an independent `authority-shadow drain`. Recovery keeps
+the original source bytes, successor IDs and once-only quota effect; it does
+not replay the writer to finish catch-up or increase the inline limits.
+This removes a canonical import dependency,
 not the supported legacy writer. The absent arm also removes all four shadow
 producer modules using the qualified CLI startup isolation above.
 [Retained duties and rollback](../../reference/canonical-todo-completion-update.md#monitor-source-writer-isolation).
