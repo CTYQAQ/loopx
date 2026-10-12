@@ -78,9 +78,11 @@ def test_stale_markdown_cannot_admit_terminal_or_blocked_work(tmp_path, provider
 
 @pytest.mark.parametrize("provider", ["legacy", "file", "sqlite"])
 def test_exact_selection_reaches_work_beyond_display_limits(tmp_path, provider):
-    project, runtime, registry, path, _ = _source(tmp_path, provider=provider)
+    project, runtime, registry, path, prefix = _source(tmp_path, provider=provider)
     if provider != "legacy":
-        path.unlink()  # Display is not a prerequisite for promoted admission.
+        # Goal intent remains readable, while its bounded Todo display cannot
+        # supply the exact candidate from the canonical provider.
+        path.write_text(prefix)
     code, guard = _guard(project, runtime, registry)
     assert code == 0, guard
     assert guard["decision"] == "run"
