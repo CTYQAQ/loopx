@@ -141,6 +141,76 @@ def _resolve_exact_project_binding(
     }
 
 
+def _bind_project_goal_storage(
+    *,
+    registry: dict[str, Any],
+    registry_path: Path,
+    runtime_root: Path | None,
+    project_id: str,
+    goal_id: str,
+    goal_record: dict[str, Any],
+    resolve_new_goal_storage_target: Callable[[Path], dict[str, Any]],
+) -> Path:
+    effective_root = resolve_runtime_root(
+        registry,
+        str(runtime_root) if runtime_root else None,
+        registry_path=registry_path,
+    )
+    existing_goal = next(
+        (
+            item
+            for item in registry.get("goals", [])
+            if isinstance(item, dict) and item.get("id") == goal_id
+        ),
+        None,
+    )
+    existing_target = (
+        (existing_goal.get("coordination") or {}).get("storage_target")
+        if existing_goal is not None
+        else None
+    )
+    resumable_creation = (
+        isinstance(existing_target, dict)
+        and existing_target.get("schema_version")
+        == "loopx_new_goal_storage_target_v1"
+        and isinstance(existing_goal.get("creation_operation_id"), str)
+        and existing_goal["creation_operation_id"] != ""
+    )
+    existing_authority = (
+        read_canonical_todos_if_promoted(
+            runtime_root=effective_root,
+            goal_id=goal_id,
+        )
+        if existing_goal is None or not resumable_creation
+        else None
+    )
+    if existing_goal is None and existing_authority is not None:
+        raise ValueError(
+            f"goal_id is already bound to canonical authority through another registry: {goal_id}"
+        )
+    if existing_goal is not None and existing_authority is None and not resumable_creation:
+        require_canonical_authority(goal_id=goal_id, operation="goal_create")
+    storage_target = (
+        existing_target
+        if existing_goal is not None
+        else resolve_new_goal_storage_target(effective_root)
+    )
+    if (
+        existing_goal is None
+        and (storage_target or {}).get("schema_version")
+        != "loopx_new_goal_storage_target_v1"
+    ):
+        require_canonical_authority(goal_id=goal_id, operation="goal_create")
+    if storage_target is not None:
+        goal_record.setdefault("coordination", {})["storage_target"] = storage_target
+    goal_record["creation_operation_id"] = (
+        (existing_goal or {}).get("creation_operation_id")
+        or "goal-create:project-register:"
+        + hashlib.sha256(f"{project_id}\0{goal_id}".encode()).hexdigest()[:24]
+    )
+    return effective_root
+
+
 def _register_project_goal_unlocked(
     *,
     registry_path: Path,
@@ -266,66 +336,14 @@ def _register_project_goal_unlocked(
         "registry_role": "project-local",
         "common_runtime_root": str(runtime_root or select_default_runtime_root()),
     }
-    effective_root = resolve_runtime_root(
-        initial_registry,
-        str(runtime_root) if runtime_root else None,
+    effective_root = _bind_project_goal_storage(
+        registry=initial_registry,
         registry_path=registry_path,
-    )
-    existing_goal_record = next(
-        (
-            item
-            for item in initial_registry.get("goals", [])
-            if isinstance(item, dict) and item.get("id") == goal_id
-        ),
-        None,
-    )
-    existing_target = (
-        (existing_goal_record.get("coordination") or {}).get("storage_target")
-        if existing_goal_record is not None
-        else None
-    )
-    resumable_creation = (
-        isinstance(existing_target, dict)
-        and existing_target.get("schema_version")
-        == "loopx_new_goal_storage_target_v1"
-        and isinstance(existing_goal_record.get("creation_operation_id"), str)
-        and existing_goal_record["creation_operation_id"] != ""
-    )
-    existing_authority = (
-        read_canonical_todos_if_promoted(
-            runtime_root=effective_root,
-            goal_id=goal_id,
-        )
-        if existing_goal_record is None or not resumable_creation
-        else None
-    )
-    if existing_goal_record is None and existing_authority is not None:
-        raise ValueError(
-            f"goal_id is already bound to canonical authority through another registry: {goal_id}"
-        )
-    if (
-        existing_goal_record is not None
-        and existing_authority is None
-        and not resumable_creation
-    ):
-        require_canonical_authority(goal_id=goal_id, operation="goal_create")
-    storage_target = (
-        existing_target
-        if existing_goal_record is not None
-        else resolve_new_goal_storage_target(effective_root)
-    )
-    if (
-        existing_goal_record is None
-        and (storage_target or {}).get("schema_version")
-        != "loopx_new_goal_storage_target_v1"
-    ):
-        require_canonical_authority(goal_id=goal_id, operation="goal_create")
-    if storage_target is not None:
-        goal_record.setdefault("coordination", {})["storage_target"] = storage_target
-    goal_record["creation_operation_id"] = (
-        (existing_goal_record or {}).get("creation_operation_id")
-        or "goal-create:project-register:"
-        + hashlib.sha256(f"{project_id}\0{goal_id}".encode()).hexdigest()[:24]
+        runtime_root=runtime_root,
+        project_id=project_id,
+        goal_id=goal_id,
+        goal_record=goal_record,
+        resolve_new_goal_storage_target=resolve_new_goal_storage_target,
     )
 
     changed = True

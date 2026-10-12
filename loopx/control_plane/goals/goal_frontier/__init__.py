@@ -43,9 +43,7 @@ from ..goal_vision_policy import (
     completed_todo_replan_threshold,
     goal_vision_repeats_advancement_until_closed,
 )
-from ..goal_vision_state import (
-    goal_vision_state_is_closed,
-)
+from ..goal_vision_state import goal_vision_state_is_closed
 from ..goal_vision_read_model import (
     VISION_ACCEPTANCE_GAP_TRIGGER as VISION_ACCEPTANCE_GAP_TRIGGER,
     VISION_SUCCESSOR_GAP_TRIGGER as VISION_SUCCESSOR_GAP_TRIGGER,
@@ -72,20 +70,15 @@ from .fallback_source import (
     declared_fallback_gap_from_agent_vision,
     parse_fallback_declarations,  # noqa: F401
 )
-from .long_todo_chain import (
-    LONG_TODO_CHAIN_TRIGGER,
-    evaluate_long_todo_chain,
-)
+from .long_todo_chain import LONG_TODO_CHAIN_TRIGGER, evaluate_long_todo_chain
 from .replan_rules import (
     GoalFrontierReplanFacts,
     GoalFrontierReplanRule,
     select_goal_frontier_replan_rule,
 )
 from .semantic_history import (
-    latest_agent_vision_from_runs as latest_agent_vision_from_runs,
-)
-from .semantic_history import (
     _latest_runs_for_goal,
+    latest_agent_vision_from_runs as latest_agent_vision_from_runs,
     latest_agent_vision_from_status_payload,
     latest_autonomous_replan_ack_from_status_payload,
     latest_missing_vision_checkpoint_from_status_payload,

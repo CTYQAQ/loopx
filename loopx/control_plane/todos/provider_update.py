@@ -177,6 +177,58 @@ def _publish_completion_validation_revision(
         )
 
 
+def _raise_public_update_rejection(
+    result: dict[str, Any],
+    *,
+    planning_intent: dict[str, Any] | None,
+) -> None:
+    if result.get("status") != "failed":
+        return
+    reason_code = str(result.get("reason_code") or "")
+    if reason_code.startswith("external_wait_"):
+        resume_when = str((planning_intent or {}).get("resume_when") or "")
+        resume_kind, separator, dependency_id = resume_when.partition(":")
+        raw_successors = (planning_intent or {}).get("successor_todo_ids")
+        raise TodoExternalWaitAuthoringError(
+            str(result.get("reason") or "external-wait Todo update was rejected"),
+            code=reason_code,
+            monitor_todo_id=(
+                dependency_id
+                if separator and resume_kind == "monitor_changed"
+                else None
+            ),
+            successor_todo_ids=(
+                [str(item) for item in raw_successors]
+                if isinstance(raw_successors, list)
+                else None
+            ),
+        )
+    if reason_code == "todo_not_found":
+        raise ValueError("Todo is missing from canonical authority")
+    if reason_code == "todo_role_mismatch":
+        raise ValueError("Todo does not have the requested role")
+    rejection_messages = {
+        "coordination_operation_identity_mismatch": (
+            "monitor effect identity is already bound to a different observation"
+        ),
+        "update_owner_mismatch": (
+            "Todo claimed_by does not grant this actor update authority"
+        ),
+    }
+    if reason_code in rejection_messages:
+        raise LocalCoordinationAuthorityRejection(
+            rejection_messages[reason_code],
+            code=reason_code,
+            payload=result,
+        )
+    if result.get("failure_kind") == "decision_rejection":
+        raise LocalCoordinationAuthorityRejection(
+            str(result.get("reason") or "canonical Todo update was rejected"),
+            code=reason_code or "todo_update_rejected",
+            payload=result,
+        )
+
+
 def update_canonical_todo_if_promoted(
     *, registry_path: Path, runtime_root: Path, goal_id: str, todo_id: str,
     actor_agent_id: str | None, role: str | None, text: str | None,
@@ -279,48 +331,8 @@ def update_canonical_todo_if_promoted(
         if failure is not None:
             return failure
     # Keep the public lookup-error contract, without a second pre-transaction read.
-    if isinstance(result, dict) and result.get("status") == "failed":
-        reason_code = str(result.get("reason_code") or "")
-        if reason_code.startswith("external_wait_"):
-            resume_when = str((planning_intent or {}).get("resume_when") or "")
-            resume_kind, separator, dependency_id = resume_when.partition(":")
-            raw_successors = (planning_intent or {}).get("successor_todo_ids")
-            raise TodoExternalWaitAuthoringError(
-                str(result.get("reason") or "external-wait Todo update was rejected"),
-                code=reason_code,
-                monitor_todo_id=(
-                    dependency_id
-                    if separator and resume_kind == "monitor_changed"
-                    else None
-                ),
-                successor_todo_ids=(
-                    [str(item) for item in raw_successors]
-                    if isinstance(raw_successors, list)
-                    else None
-                ),
-            )
-        if reason_code == "todo_not_found":
-            raise ValueError("Todo is missing from canonical authority")
-        if reason_code == "todo_role_mismatch":
-            raise ValueError("Todo does not have the requested role")
-        if reason_code == "coordination_operation_identity_mismatch":
-            raise LocalCoordinationAuthorityRejection(
-                "monitor effect identity is already bound to a different observation",
-                code=reason_code,
-                payload=result,
-            )
-        if reason_code == "update_owner_mismatch":
-            raise LocalCoordinationAuthorityRejection(
-                "Todo claimed_by does not grant this actor update authority",
-                code=reason_code,
-                payload=result,
-            )
-        if result.get("failure_kind") == "decision_rejection":
-            raise LocalCoordinationAuthorityRejection(
-                str(result.get("reason") or "canonical Todo update was rejected"),
-                code=reason_code or "todo_update_rejected",
-                payload=result,
-            )
+    if isinstance(result, dict):
+        _raise_public_update_rejection(result, planning_intent=planning_intent)
     if isinstance(result, dict) and (
         result.get("status") == "missing"
         and result.get("source_authority") in LOCAL_AUTHORITY_SOURCES
