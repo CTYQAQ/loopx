@@ -2,6 +2,8 @@
 
 Legacy records and their operation receipt share one atomic Markdown write.
 Promoted goals use the existing AuthorityStore transaction and projection outbox.
+Only the unpromoted branch loads capture and Markdown editing dependencies.
+Source locks and historical receipt readers remain shared IO.
 Neither adapter grants receiver adoption or execution authority.
 """
 from __future__ import annotations
@@ -25,25 +27,11 @@ from ...state_refresh import now_local
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 from ..runtime.public_safety import validate_public_safe_value
 from ..coordination.local_authority import read_canonical_todos_if_promoted
-from ..coordination.local_authority_shadow_adapter import effective_runtime_root
-from ..coordination.legacy_writer_fence import (
-    legacy_coordination_todo_lock_path, legacy_todo_write_transaction,
-)
+from ...paths import effective_runtime_root
+from ..coordination.legacy_writer_fence import legacy_coordination_todo_lock_path
 from ..coordination.shadow_management import shadow_maintenance_lock_target
-from ..coordination.runtime_shadow_writer_adapter import (
-    begin_todo_runtime_shadow_capture, write_captured_todo_state,
-    settle_todo_runtime_shadow_capture,
-)
 from ..todos.path_resolution import resolve_todo_state_path
-from ..runtime.document_io import verify_state_text_durable
-from ..todos.active_state_editing import (
-    insert_into_existing_section, insert_new_section, section_bounds,
-    replace_updated_at,
-)
-from ..todos.contract import (
-    TODO_ACTION_KIND_ADVANCEMENT_VALUES, format_todo_metadata_line,
-    parse_todo_metadata_line,
-)
+from ..todos.contract import TODO_ACTION_KIND_ADVANCEMENT_VALUES
 from ..todos.provider_projection import settle_canonical_todo_projection
 
 
@@ -52,6 +40,18 @@ class TeamPlanCommitError(ValueError):
         super().__init__(message)
         self.code = code
         self.current_fingerprint = current_fingerprint
+
+
+def write_captured_todo_state(capture: Any, *, runtime_root: Path, goal_id: str,
+                              state_path: Path, text: str) -> None:
+    """Keep the legacy batch IO seam available without importing its producer.
+
+    Existing failure/recovery callers instrument this seam; canonical commits
+    never call it. The capture owner still controls preparation and durability.
+    """
+    from ..coordination.runtime_shadow_writer_adapter import write_captured_todo_state as write
+
+    write(capture, runtime_root=runtime_root, goal_id=goal_id, state_path=state_path, text=text)
 
 
 def team_plan_state_fingerprint(
@@ -230,6 +230,19 @@ def apply_team_plan(
         result = dict(response["result"])
         result["projection_delivery"] = projected.get("projection_delivery")
         return result
+
+    # Only unpromoted Goals need the source writer and capture producer. Keep
+    # canonical replay and projection independent of this compatibility path.
+    from ..coordination.legacy_writer_fence import legacy_todo_write_transaction
+    from ..coordination.runtime_shadow_writer_adapter import (
+        begin_todo_runtime_shadow_capture, settle_todo_runtime_shadow_capture,
+    )
+    from ..runtime.document_io import verify_state_text_durable
+    from ..todos.active_state_editing import (
+        insert_into_existing_section, insert_new_section, section_bounds,
+        replace_updated_at,
+    )
+    from ..todos.contract import format_todo_metadata_line, parse_todo_metadata_line
 
     with exclusive_cross_runtime_file_lock(registry_path, operation="team_plan_commit"), \
             legacy_todo_write_transaction(registry_path, goal_id, state, agent_id,

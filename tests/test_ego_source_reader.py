@@ -268,7 +268,7 @@ def test_separate_reader_process_state_owns_separate_spaces(configured, monkeypa
     assert len(spaces) == 2  # The owner identity remains stable during recovery.
 
 
-@pytest.mark.parametrize("failure", ["user_control", "timeout", "ambiguous_creation"])
+@pytest.mark.parametrize("failure", ["user_control", "timeout"])
 def test_errors_do_not_create_replacement_spaces(configured, monkeypatch, failure):
     auto_config(monkeypatch)
     calls = []
@@ -285,6 +285,51 @@ def test_errors_do_not_create_replacement_spaces(configured, monkeypatch, failur
     assert not reader.read_public_url(URL)["ok"]
     assert not reader.read_public_url(URL)["ok"]
     assert sum('taskSpace("LoopX public-source reader ' in s for s in calls) == 1
+
+
+def test_lost_creation_receipt_recovers_exact_owned_space_without_recreation(configured, monkeypatch):
+    auto_config(monkeypatch)
+    calls = []
+    def run(executable, script, **_kwargs):
+        calls.append(script)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(executable, 30)
+        if "matches.map" in script:
+            assert json.dumps(reader._OWNED_SPACE.name) in script
+            return subprocess.CompletedProcess([], 0, reader.SPACE_MARKER + json.dumps({
+                "matches": [{"id": 19, "createdBy": "agent", "ownership": "agent"}]}), "")
+        assert "taskSpace(19)" in script
+        return response(extraction())
+    monkeypatch.setattr(reader, "_run", run)
+    assert reader.read_public_url(URL)["error"] == "browser_read_timeout"
+    assert reader.read_public_url(URL)["ok"]
+    assert reader._OWNED_SPACE.space == 19
+    assert len(calls) == 3
+    assert sum('taskSpace("LoopX public-source reader ' in s for s in calls) == 1
+    assert all("takeOver" not in s and "claimTaskSpace" not in s for s in calls)
+
+
+@pytest.mark.parametrize("matches", [
+    [], [{"id": 19, "createdBy": "agent", "ownership": "agent"}] * 2,
+    [{"id": 19, "createdBy": "user", "ownership": "agent"}],
+    [{"id": 19, "createdBy": "agent", "ownership": "agentDelegatedToUser"}],
+    [{"id": 19, "createdBy": "agent", "ownership": "inactive"}],
+    [{"id": True, "createdBy": "agent", "ownership": "agent"}],
+    [None], "not a list",
+])
+def test_uncertain_creation_lookup_never_claims_or_creates(configured, monkeypatch, matches):
+    auto_config(monkeypatch)
+    calls = []
+    def run(executable, script, **_kwargs):
+        calls.append(script)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(executable, 30)
+        assert "matches.map" in script and "taskSpace(" not in script
+        return subprocess.CompletedProcess([], 0, reader.SPACE_MARKER + json.dumps({"matches": matches}), "")
+    monkeypatch.setattr(reader, "_run", run)
+    assert reader.read_public_url(URL)["error"] == "browser_read_timeout"
+    assert reader.read_public_url(URL)["error"] == "source_reader_space_unavailable"
+    assert reader._OWNED_SPACE.space is None and len(calls) == 2
 
 
 @pytest.mark.parametrize("stderr", [False, True])
@@ -322,6 +367,79 @@ def test_shutdown_only_finishes_its_created_space_once(configured, monkeypatch, 
         assert "finish({keep:[]})" in calls[-1]
     else:
         assert not calls
+
+
+@pytest.mark.parametrize("ownership", [
+    "agent", "user", "agentDelegatedToUser", "inactive", "unassigned",
+    "unknown", "missing", "unreadable",
+])
+def test_shutdown_uses_live_control_not_creation_snapshot(configured, monkeypatch, ownership):
+    owned = reader._OwnedSpace()
+    owned.space = 19
+    owned.executable = str(configured)
+    observations = []
+
+    def run(_executable, script, **_kwargs):
+        # The handle retains the creation-time agent snapshot even when live
+        # control has changed. Resolve/finish calls are the guarded effects.
+        harness = (
+            "const calls=[];"
+            "async function listTaskSpaces(){"
+            f"const state={json.dumps(ownership)};"
+            "if(state==='unreadable')throw Error('connection lost');"
+            "return state==='missing'?[]:[{id:19,ownership:state}];}"
+            "async function taskSpace(){calls.push('resolve');return {"
+            "ownership:'agent',async finish(){calls.push('finish');}};}"
+            "try{" + script + "}catch(e){}"
+            "console.log(JSON.stringify(calls));"
+        )
+        result = subprocess.run(["node", "-e", harness], capture_output=True,
+                                text=True, check=True, timeout=10)
+        observations.append(json.loads(result.stdout))
+        return result
+
+    monkeypatch.setattr(reader, "_run", run)
+    owned.close()
+    owned.close()
+    assert observations == [["resolve", "finish"] if ownership == "agent" else []]
+
+
+@pytest.mark.parametrize("code,expected", [
+    ("EGO_TASK_SPACE_USER_IN_CONTROL", "source_reader_not_agent_owned"),
+    ("EGO_TASK_SPACE_INACTIVE", "source_reader_not_agent_owned"),
+    ("EGO_OPERATION_FAILED", "browser_read_failed"),
+])
+@pytest.mark.parametrize("stage", ["resolve", "navigate", "extract"])
+@pytest.mark.parametrize("image", [False, True])
+def test_native_control_race_survives_discarded_cli_output(
+    configured, monkeypatch, code, expected, stage, image,
+):
+    # Inventory still says Agent, but a later SDK boundary denies control.
+    # Run the production script in a real child. Model Ego's hard-stop sink,
+    # which discards all result markers and does not print error_code.
+    real_run = subprocess.run
+    trace = []
+    def run(args, **kwargs):
+        harness = (
+            "const code=" + json.dumps(code) + ";const stage=" + json.dumps(stage) + ";"
+            "function denied(){const e=Error('native wording changed');e.error_code=code;throw e;}"
+            "async function listTaskSpaces(){return [{id:7,ownership:'agent'}];}"
+            "async function taskSpace(){if(stage==='resolve')denied();return {page(){return {"
+            "async goto(){if(stage==='navigate')denied();},async waitForFunction(){},"
+            "async evaluate(){denied();},async screenshot(){throw Error('capture forbidden');}};}};}"
+            "(async()=>{" + args[3] + "})().catch(()=>{process.exitCode=1;});"
+        )
+        child = real_run(["node", "-e", harness], **kwargs)
+        trace.append(child.returncode)
+        # Neither code nor an extraction sentinel survives the real SDK sink.
+        return subprocess.CompletedProcess(args, child.returncode, "", "SDK hard stop guidance")
+    monkeypatch.setattr(reader.subprocess, "run", run)
+    if image:
+        result = json.loads(reader.read_public_image(URL, 0)[0].text)
+    else:
+        result = reader.read_public_url(URL)
+    assert result["ok"] is False and result["error"] == expected
+    assert trace == [1]  # No retry, new space, claim, takeover, or capture.
 
 
 def test_creation_and_read_share_one_timeout_budget(configured, monkeypatch):
@@ -374,7 +492,7 @@ def test_stdio_hosts_create_isolated_spaces_and_clean_up_on_eof(configured, monk
         assert len(scripts) == 4
         assert sum('taskSpace("LoopX public-source reader ' in s for s in scripts) == 1
         assert all(f"taskSpace({pid})" in s for s in scripts[1:])
-        assert scripts[-1].endswith("if(t.ownership==='agent')await t.finish({keep:[]});")
+        assert "listTaskSpaces()" in scripts[-1] and "finish({keep:[]})" in scripts[-1]
 
 
 @pytest.mark.parametrize("value", [
@@ -559,7 +677,7 @@ def test_text_read_exposes_image_indices_without_claiming_visual_read(configured
     assert result["images_read"] is False
 
 
-def run_generated_script(config, url, image, path, *, redirect=None, readiness=None,
+def run_generated_script(config, url, image, path, *, redirect=None, readiness=None, ownership="agent",
                          text="Source evidence"):
     """Execute the production script in Node, without the user's browser/Page."""
     import shutil
@@ -633,22 +751,44 @@ const page={async goto(url){href=new URL(redirect||url).href;},
   }
   if(!await this.evaluate(fn,arg))throw Error('not loaded');},
  async screenshot(options){captures++;fs.writeFileSync(options.path,Buffer.from(pixels,'base64'));}};
-async function taskSpace(){return {page(){return page;}};}
-(async()=>{await eval('(async()=>{'+source+'})()');
- console.log('SCRIPT_OBSERVATION:'+JSON.stringify({domReads,captures}));})()
- .catch(error=>{console.error(error);process.exitCode=1;});
+async function listTaskSpaces(){return [{id:spaceId,ownership}];}
+async function taskSpace(){if(ownership!=='agent')throw Error('Page must not resolve while user-owned');return {page(){return page;}};}
+(async()=>{await eval('(async()=>{'+source+'})()');})()
+ .catch(error=>{console.error(error);process.exitCode=1;})
+ .finally(()=>console.log('SCRIPT_OBSERVATION:'+JSON.stringify({domReads,captures})));
 """
     import base64
     inputs = ("const source=" + json.dumps(script) + ";const redirect=" + json.dumps(redirect)
               + ";const readiness=" + json.dumps(readiness) + ";const text=" + json.dumps(text)
+              + ";const ownership=" + json.dumps(ownership) + ";const spaceId=" + json.dumps(config.task_space)
               + ";const pixels=" + json.dumps(base64.b64encode(png()).decode()) + ";")
     result = subprocess.run([node, "-e", inputs + harness], capture_output=True,
-                            text=True, timeout=10, check=True)
+                            text=True, timeout=10, check=ownership == "agent")
     observed = next(line.split(":", 1)[1] for line in result.stdout.splitlines()
                     if line.startswith("SCRIPT_OBSERVATION:"))
     decoded = (reader._image_result(result.stdout, result.stderr, url, 0, str(path)) if image
                else reader._result(result.stdout, result.stderr, url))
     return decoded, json.loads(observed)
+
+
+@pytest.mark.parametrize("image", [False, True])
+@pytest.mark.parametrize("ownership", ["agentDelegatedToUser", "user", "inactive", "unassigned", "unknown"])
+def test_live_user_control_stops_before_page_access_and_can_resume_without_chat(
+    configured, tmp_path, monkeypatch, image, ownership,
+):
+    config = reader.ReaderConfig.from_environment()
+    result, observation = run_generated_script(config, URL, image, tmp_path / "image.png", ownership=ownership)
+    assert result == {"ok": False, "error": "source_reader_not_agent_owned"}
+    assert observation == {"domReads": 0, "captures": 0}
+    # The next tool call sees control returned through Ego itself, with no
+    # textual confirmation, takeover or replacement of the original space.
+    resumed, observed = run_generated_script(config, URL, image, tmp_path / "image.png")
+    assert resumed["ok"] and observed["domReads"] > 0
+    script = reader._image_script(config, URL, 0, str(tmp_path / "image.png")) if image else reader._script(config, URL)
+    assert "takeOverTaskSpace" not in script and "claimTaskSpace" not in script
+    monkeypatch.setattr(reader, "_run", lambda *_a, **_k: subprocess.CompletedProcess(
+        [], 1, reader.MARKER + json.dumps({"error": "source_reader_not_agent_owned"}), "private diagnostic"))
+    assert reader._read(URL, 0 if image else None, str(tmp_path / "image.png")) == result
 
 
 @pytest.mark.parametrize("image", [False, True])

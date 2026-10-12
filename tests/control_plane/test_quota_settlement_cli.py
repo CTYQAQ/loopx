@@ -1847,6 +1847,15 @@ def test_typed_blocked_retry_with_peer_hard_lease(
     assert next_turn["effective_action"] != "unsettled_host_turn_recovery"
     assert next_turn["status_projection_cache"]["miss_reason"] == "run_index_changed"
     assert (next_turn.get("selected_todo") or {}).get("todo_id") != TODO_ID
+    # Canonical Todo still has no wait; the committed Run alone supplies the
+    # bounded retry through real File/SQLite CLI collection and compaction.
+    pending = next_turn["scheduler_hint"]["pending_retry"]
+    assert pending["source"] == "turn_settlement"
+    assert pending["due_at"] == refresh["blocked_retry"]["due_at"]
+    assert pending["turn_instance_id"] == turn_id
+    assert pending["todo_id"] == TODO_ID
+    assert pending["execution_authority_granted"] is False
+    assert next_turn["scheduler_hint"]["app_automation"]["recommended_interval_minutes"] <= 5
 
 
 def test_in_flight_progress_preserves_todo_across_heartbeat_settlements(
@@ -1876,6 +1885,8 @@ def test_in_flight_progress_preserves_todo_across_heartbeat_settlements(
         0
     ]
     assert "--delivery-boundary in_flight_continuation" in first_writeback
+    writeback_step = guard["interaction_contract"]["cli_channel"]["settlement_plan"]["ordered_steps"][1]
+    assert "vision_authoring" not in writeback_step
 
     refresh_rc, refresh = _run_cli(
         registry_path,
@@ -6658,10 +6669,10 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     def frozen_completion_clock(argv, *args, **kwargs):
         if isinstance(argv, list) and argv[1:3] == ["-m", "loopx.cli"]:
             program = (
-                "import loopx.todos; "
+                "import loopx.control_plane.todos.legacy_mutation as legacy; "
                 "import loopx.control_plane.todos.provider_terminal_lifecycle as native; "
                 "clock=lambda:'2026-09-02T12:00:00+00:00'; "
-                "loopx.todos.now_local=clock; native.now_local=clock; "
+                "legacy.now_local=clock; native.now_local=clock; "
                 "from loopx.cli import main; raise SystemExit(main())"
             )
             argv = [argv[0], "-c", program, *argv[3:]]

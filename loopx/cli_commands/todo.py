@@ -46,15 +46,15 @@ from ..control_plane.goals.first_party_host_admission import (
     capture_first_party_host_goal_ref,
 )
 from ..control_plane.goals.source_session_registry_state import exact_goal_ref
-from ..todos import (
+from ..control_plane.todos.mutation_api import (
     add_goal_todo,
     archive_completed_todos,
     complete_goal_todo,
-    list_goal_todos,
-    resolve_todo_state,
     supersede_goal_todo,
     update_goal_todo,
 )
+from ..control_plane.todos.list_readback import list_goal_todos
+from ..control_plane.todos.path_resolution import resolve_todo_state
 from .todo_argument_validation import (
     validate_capability_gap_options,
     validate_shared_todo_options,
@@ -831,9 +831,23 @@ def handle_todo_command(
                 payload["post_writeback_hooks"] = post_writeback_source_failure(
                     post_writeback_hooks
                 )
+    output_format = format_name or str(getattr(args, "format", None) or "markdown")
+    if (args.todo_command == "list" and payload.get("ok")
+            and not args.todo_id and not args.todo_thin and output_format == "json"):
+        try:
+            payload = effect_runtime_result(
+                "todo.context.page", {"list_payload": payload},
+                large_local_snapshot=True,
+            )
+        except Exception as exc:
+            from ..usage_ping import capture_failure
+            capture_failure(exc)
+            payload = todo_error_payload(
+                args, exc, registry_path=registry_path, runtime_root_arg=runtime_root_arg,
+            )
     print_payload(
         payload,
-        format_name or str(getattr(args, "format", None) or "markdown"),
+        output_format,
         renderer,
     )
     return 0 if payload.get("ok") else 1

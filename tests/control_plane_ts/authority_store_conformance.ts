@@ -13,6 +13,7 @@ import {registerUserCompletionFollowthroughConformance} from "./user_completion_
 import {registerSuccessionReadConformance} from "./succession_read_conformance.ts";
 import {registerUserCompletionUpdateConformance} from "./user_completion_update_conformance.ts";
 import {registerTerminalSourceConformance} from "./terminal_source_conformance.ts";
+import {registerTerminalReentryConformance} from "./terminal_reentry_conformance.ts";
 import {registerLeaseAcquisitionConformance} from "./lease_acquisition_conformance.ts";
 import {registerClaimTransferConformance} from "./claim_transfer_conformance.ts";
 import {registerLeasedMonitorConformance} from "./monitor_poll_lease_conformance.ts";
@@ -54,6 +55,8 @@ import {
 } from "../../loopx/control_plane/coordination/coordination_projection.ts";
 import { executeCoordinationTodoClaim } from "../../loopx/control_plane/coordination/todo_claim.ts";
 import { executeCoordinationTodoCreate } from "../../loopx/control_plane/coordination/todo_create.ts";
+import {executeCanonicalTaskLeaseAcquire} from "../../loopx/control_plane/coordination/task_lease_acquire.ts";
+import {executeCanonicalTaskLeaseLifecycle} from "../../loopx/control_plane/coordination/task_lease_lifecycle.ts";
 import {executeCoordinationMonitorPoll} from "../../loopx/control_plane/coordination/todo_monitor_poll.ts";
 import { executeCoordinationTodoUpdate } from "../../loopx/control_plane/coordination/todo_update.ts";
 import {LOCAL_COORDINATION_TODO_LIST_REQUEST_SCHEMA} from "../../loopx/control_plane/coordination/local_authority_runtime.ts";
@@ -311,6 +314,57 @@ export function registerAuthorityStoreConformance(
     assert.equal((await invoke(store)).reason_code, "todo_dependency_pending");
     assert.deepEqual(await store.loadAuthority(), before);
   });
+  test(`${providerName} future date completion and owner pause/reopen use current authority`, async t => {
+    const {store} = await factory(t);
+    const {invoke, completion_todo_id} = await coordinationCommandFixture(store, "complete");
+    assert.equal((await invoke(store, {pendingValidation: true})).status, "execute_validation");
+    const head = await store.loadAuthority();
+    assert.equal(head.status, "loaded");
+    if (head.status !== "loaded") throw Error("missing test authority");
+    const lease = (head.head.leases as JsonObject[]).find(row => row.todo_id === completion_todo_id)!;
+    const authored = await executeCoordinationTodoUpdate(store, {
+      goal_id: "goal-a", todo_id: completion_todo_id, expected_role: "agent",
+      actor_agent_id: "agent-a", registered_agents: productionScaleCoordinationFixture("goal-a").registered_agents,
+      operation_id: "validator-race-author-date", patch: {}, clear_fields: [],
+      planning_intent: {resume_when: "resume_at:2026-09-07T07:00:00.001Z"},
+      lease_idempotency_key: String(lease.idempotency_key), lease_expected_version: Number(lease.version),
+      dry_run: false, now: new Date("2026-09-07T07:00:00Z"),
+    });
+    assert.equal(authored.status, "applied", JSON.stringify(authored));
+    const before = await store.loadAuthority();
+    assert.equal((await invoke(store, {pendingValidation: true})).reason_code, "todo_dependency_pending");
+    assert.equal((await invoke(store)).reason_code, "todo_dependency_pending");
+    assert.deepEqual(await store.loadAuthority(), before);
+    const registered_agents = productionScaleCoordinationFixture("goal-a").registered_agents;
+    const now = new Date("2026-09-07T07:00:00Z");
+    assert.equal((await executeCanonicalTaskLeaseLifecycle(store, {operation: "release", goal_id: "goal-a",
+      todo_id: completion_todo_id, owner: "agent-a", idempotency_key: String(lease.idempotency_key),
+      expected_version: Number(lease.version), ttl_seconds: null, registered_agents, now})).status, "applied");
+    const pausedHead = await store.loadAuthority();
+    assert.equal(pausedHead.status, "loaded");
+    if (pausedHead.status !== "loaded") throw Error("missing released authority");
+    const edit = {goal_id: "goal-a", todo_id: completion_todo_id, expected_role: "agent" as const,
+      actor_agent_id: "agent-a", registered_agents, patch: {}, clear_fields: [], dry_run: false, now};
+    const pause = await executeCoordinationTodoUpdate(store, {...edit, operation_id: "pause-future-date",
+      expected_provider_revision: pausedHead.provider_revision,
+      planning_intent: {status: "blocked", clear_resume_when: true, reason: "Owner paused the dated wait"}});
+    assert.equal(pause.status, "applied", JSON.stringify(pause));
+    const blocked = await store.loadAuthority();
+    assert.equal(blocked.status, "loaded");
+    if (blocked.status !== "loaded") throw Error("missing blocked authority");
+    assert.equal((blocked.head.todos as JsonObject[]).find(row => row.todo_id === completion_todo_id)?.resume_when, undefined);
+    assert.equal((blocked.head.leases as JsonObject[]).find(row => row.todo_id === completion_todo_id)?.status, "released");
+    const acquisition = {goal_id: "goal-a", todo_id: completion_todo_id, owner: "agent-a",
+      idempotency_key: "after-dated-pause", expected_version: Number(lease.version), ttl_seconds: 600,
+      write_scopes: [], registered_agents, now};
+    assert.equal((await executeCanonicalTaskLeaseAcquire(store, acquisition)).reason_code, "todo_not_open");
+    const reopen = await executeCoordinationTodoUpdate(store, {...edit, operation_id: "reopen-future-date",
+      expected_provider_revision: blocked.provider_revision,
+      planning_intent: {status: "open", clear_resume_when: true, reason: "Owner resumed the work"}});
+    assert.equal(reopen.status, "applied", JSON.stringify(reopen));
+    const acquired = await executeCanonicalTaskLeaseAcquire(store, acquisition);
+    assert.equal(acquired.status, "applied", JSON.stringify(acquired));
+  });
   test(`${providerName} supersede can retire waiting work without satisfying its prerequisite`, async t => {
     const {store} = await factory(t);
     const {invoke, completion_todo_id} = await coordinationCommandFixture(store, "supersede");
@@ -348,6 +402,7 @@ export function registerAuthorityStoreConformance(
   registerCompletionValidationBindingConformance(providerName, factory);
   registerUserCompletionUpdateConformance(providerName, factory);
   registerTerminalSourceConformance(providerName, factory);
+  registerTerminalReentryConformance(providerName, factory);
   registerUserCompletionFollowthroughConformance(providerName, factory);
   registerMonitorConfigurationConformance(providerName, factory);
   registerMonitorGateScopeConformance(providerName, factory);

@@ -75,7 +75,7 @@ def initialize_goal_storage_target(runtime_root: Path, goal: Mapping[str, Any], 
         # owner can request a complete source capture for unfinished creation.
         if result.get("source_capture_required") is not True:
             return result
-        from ...control_plane.coordination.runtime_shadow import build_runtime_shadow_source_snapshot
+        from ...control_plane.coordination.authority_source_capture import build_runtime_shadow_source_snapshot
         projection, snapshot = build_runtime_shadow_source_snapshot(goal=goal, runtime_root=runtime_root,
             state_path=state_path, registry_path=registry_path)
         request.update(creation_operation_id=goal.get("creation_operation_id"), projection=projection, source_snapshot=snapshot)

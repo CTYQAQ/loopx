@@ -9,7 +9,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from .agent_registry import agent_profile_for_goal, registered_agent_ids_for_goal
-from .bootstrap import GoalCreationConflictError, bootstrap_project
+from .control_plane.projects.identity import GoalCreationConflictError
 from .capabilities.machine_configuration.goal_storage import initialize_goal_storage_target
 from .chat import apply_todo_review_preview, build_todo_review_preview
 from .chat_action_normalization import ChatActionNormalizationMixin
@@ -31,9 +31,10 @@ from .history import load_registry
 from .host_loop_activation import build_host_loop_activation_packet
 from .kiro_cli_goal_mode import KIRO_CLI_CHAT_AGENT_ID
 from .paths import resolve_runtime_root
+from .public_safe_text import OPAQUE_ID_PATTERN as _OPAQUE_ID
 from .quota import build_quota_should_run
 from .registry import registry_goals
-from .todos import add_goal_todo, update_goal_todo
+from .control_plane.todos.mutation_api import add_goal_todo, update_goal_todo
 
 
 CHAT_ACTION_RESPONSE_SCHEMA_VERSION = "loopx_chat_action_response_v1"
@@ -52,7 +53,6 @@ SUPPORTED_ACTION_KINDS = {
     "operation.execute",
     "team.plan",
 }
-_OPAQUE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
 # Runtime Endpoint ids and durable Goal agent ids are chosen independently, so
 # a family token collapses both onto the host that produced them: Endpoint
 # `codex` has to resolve to a registered `codex-main-control`. Every host that
@@ -460,58 +460,25 @@ class ChatActionService(
                     raise ValueError("The original creation workspace is unavailable or changed; restore it before retrying")
                 source = next((goal for goal in goals if goal.get("id") == existing.get("parent_goal_id")), existing)
                 return project, source
+        # Explicit destinations outrank conversation context and legacy fallback.
+        # A missing/stale choice must ask again, never silently select another root.
         context_goal_id = str(context.get("goal_id") or "").strip()
+        source_id = context_goal_id if workspace_ref == "current" else workspace_ref
         source_goal = next(
-            (goal for goal in goals if str(goal.get("id") or "") == context_goal_id),
+            (goal for goal in goals if str(goal.get("id") or "") == source_id),
             None,
         )
-        if source_goal is None and workspace_ref != "current":
-            source_goal = next(
-                (goal for goal in goals if str(goal.get("id") or "") == workspace_ref),
-                None,
-            )
-        if source_goal is None and len(goals) == 1:
+        if source_goal is None and workspace_ref == "current" and len(goals) == 1:
             source_goal = goals[0]
-        if source_goal is None and workspace_ref == "current":
-            workspace_candidates = [
-                root
-                for root in self.workspace_roots
-                if root.is_dir()
-            ]
-            if len(workspace_candidates) == 1:
-                return workspace_candidates[0], {
-                    "id": "",
-                    "domain": "project-goal-control-plane",
-                    "repo": str(workspace_candidates[0]),
-                    "adapter": {"kind": "generic_project_goal_v0"},
-                }
+        if source_goal is None:
+            workspace_candidates = [root for root in self.workspace_roots if root.is_dir()]
             token_map = {
                 f"workspace-{hashlib.sha256(str(root).encode('utf-8')).hexdigest()[:12]}": root
                 for root in workspace_candidates
             }
-            if workspace_ref in token_map:
-                selected = token_map[workspace_ref]
-                return selected, {
-                    "id": "",
-                    "domain": "project-goal-control-plane",
-                    "repo": str(selected),
-                    "adapter": {"kind": "generic_project_goal_v0"},
-                }
-        elif source_goal is None and workspace_ref.startswith("workspace-"):
-            workspace_candidates = [
-                root
-                for root in self.workspace_roots
-                if root.is_dir()
-            ]
-            selected = next(
-                (
-                    root
-                    for root in workspace_candidates
-                    if workspace_ref
-                    == f"workspace-{hashlib.sha256(str(root).encode('utf-8')).hexdigest()[:12]}"
-                ),
-                None,
-            )
+            selected = (workspace_candidates[0]
+                        if workspace_ref == "current" and len(workspace_candidates) == 1
+                        else token_map.get(workspace_ref))
             if selected is not None:
                 return selected, {
                     "id": "",
@@ -539,7 +506,7 @@ class ChatActionService(
                 gate={
                     "kind": "workspace_selection_required",
                     "summary": "Select one server-configured workspace before creating this Goal.",
-                    "next_action": "Start LoopX Chat with exactly one --scan-path workspace or regenerate from an existing Goal channel.",
+                    "next_action": "Choose an available workspace or a registered Goal workspace, then review again. Unlisted directories require server workspace setup.",
                     "candidates": candidates,
                 },
             )
@@ -561,6 +528,13 @@ class ChatActionService(
         self, proposal_id: str, proposal: dict[str, Any], parameters: dict[str, Any]
     ) -> dict[str, Any]:
         from .control_plane.effect_runtime import effect_runtime_result
+
+        def require_first_turn_readback(turn: dict[str, Any]) -> None:
+            plan = effect_runtime_result("presentation.action_review_plan.compile", {
+                "proposal": {**proposal, "first_turn_readback": turn},
+            })
+            if plan.get("reason") == "readback_unverified":
+                raise ValueError("The original first Turn ended before Host dispatch; inspect its original Session instead of starting another")
 
         current_fingerprint = self._registry_fingerprint()
         heartbeat = (
@@ -630,6 +604,8 @@ class ChatActionService(
             result = {"ok": True}
         else:
             try:
+                from .bootstrap import bootstrap_project
+
                 result = bootstrap_project(
                     project=project,
                     creation_operation_id=proposal_id,
@@ -731,6 +707,7 @@ class ChatActionService(
             turn = turn_store.load_turn(session_id, turn_id) if session is not None else None
             if session is None or session.get("goal_id") != goal_id or session.get("agent_id") != agent_id or turn is None:
                 raise ValueError("The recorded first Turn is unavailable; restore its original Session instead of starting another")
+            require_first_turn_readback(turn)
             turn_result = {"turn_id": turn_id, "status": str(turn["status"]), "created": False}
         first_turn_gate: dict[str, Any] | None = None
         try:
@@ -809,6 +786,7 @@ class ChatActionService(
                 work_dir=project,
                 objective=objective,
             )
+            require_first_turn_readback(first_turn)
             turn_result = {
                 "turn_id": _opaque(first_turn.get("turn_id"), field="turn_id"),
                 "status": str(first_turn.get("status") or "queued"),

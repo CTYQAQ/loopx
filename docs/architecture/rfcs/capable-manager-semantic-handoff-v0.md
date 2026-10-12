@@ -688,6 +688,12 @@ recovery, and does not change context storage, Session identity or authority.
 
 The shared [conversation work surface](intelligent-review-presentation-surfaces-v0.md#88-reusable-conversation-work-surface) owns adaptive reports, truthful event presentation, Turn-scoped stop/steer, reconnect and cross-channel density for all LoopX conversations. This RFC applies those same rules to the steward's owner conversation; it owns recipient selection, receiver assessment and the original-route return. A manager-specific answer format or transport must not become a second presentation authority.
 
+The shared handoff acknowledgement presents a bounded task preview and readable
+result/boundary bullets, with the current delivery or execution observation.
+Selection evidence and historical context remain available in the complete
+receiver brief/readback. This presentation slice does not shorten the receiver
+contract, establish adoption, or qualify the full A21–A24 journey.
+
 Routing uses §5.5 rather than a static Agent name list. For a product-design request addressed to the steward, first inspect authorized current Goal, registration, claimed work and fresh session reachability; then rank eligible receivers by responsibility and context, with model/profile fit and actual capacity as separate constraints. Explain the selected recipient or the exact gap. The receiver must acknowledge and assess the full corrected intent, then either work or defer with an owner and condition. The original conversation receives the assessment and final evidenced result through §5.6; the catalog, a stored inbox request and a spinner are three distinct incomplete states. This must pass with a real active worker plus stopped, registered-only, stale and model-mismatched decoys before advertising automatic delegation.
 
 Delivery now prioritizes one complete supported intent→receiver→work→result journey, with the shared report, activity and stop/steer behavior needed by that journey. Do not make routing wait for presentation polish across every channel. Frontend and Lark still need separate real acceptance before an equivalence claim. Characterize and retire duplicated answer-shape prose and message/Turn correlation rules where parity is proven.
@@ -855,7 +861,15 @@ provider failure where available; unexpected local preparation errors use
 `runtime_unavailable`, with private diagnostics retained locally. Cancellation
 and an already terminal result win over a late preparation error. Restoring the
 runtime must not replay a failed request; the same ingress identity returns the
-same failure, while a fresh explicit request can run after repair.
+same failure, while a fresh explicit request can run after repair. Before
+terminal settlement, the built-in Codex provider may retry startup once for a
+typed `response_timeout` when restoring a known upstream thread. Its failed
+process must be closed first; the same thread, workspace and configured grant
+remain binding, with native configuration/authentication checks reapplied.
+This preparation retry does not dispatch a Turn. Fresh thread creation, host
+approval/authentication failures and already dispatched Turns are not retried;
+an exhausted startup still follows the existing terminal failure contract, and
+a persisted stop must prevent dispatch even if startup later succeeds.
 
 **Model capacity failures (S5/S10):** the Codex adapter preserves the typed
 `serverOverloaded` terminal error as `server_overloaded`; arbitrary upstream

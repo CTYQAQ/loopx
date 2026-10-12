@@ -48,11 +48,13 @@ def steward(tmp_path):
         if native_goal["status"] == "active":
             turn = "native-first"
             active_turn = turn
+            turn_status[turn] = "inProgress"
             print(json.dumps({"method": "turn/started", "params": {"threadId": "durable-thread", "turn": {"id": turn}}}), flush=True)
             if "wait for interrupt" in str(native_goal.get("objective")):
                 continue
             print(json.dumps({"method": "item/agentMessage/delta", "params": {"threadId": "durable-thread", "turnId": turn, "delta": "Verified synthetic result: the workspace has one README and no inherited portfolio."}}), flush=True)
             native_goal["status"] = "complete"
+            turn_status[turn] = "completed"
             print(json.dumps({"method": "turn/completed", "params": {"threadId": "durable-thread", "turn": {"id": turn, "status": "completed"}}}), flush=True)
         continue
     elif method == "turn/start":''')

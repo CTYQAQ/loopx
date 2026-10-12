@@ -96,7 +96,7 @@ from ..todos.quota_summary import (
     select_quota_todo_summary,
     select_task_orchestration_authority_items,
 )
-from ..todos.summary_item import compact_todo_summary_item
+from ..todos.summary_item import compact_todo_summary_item, compact_todo_summary_items
 from ..todos.user_gate import (
     open_todo_count as _open_todo_count,
 )
@@ -277,7 +277,7 @@ def _blocked_priority_fallback(
         text = str(item.get("text") or "").strip()
         if not text:
             continue
-        blocked_items.append(compact_todo_summary_item(item, text=text))
+        blocked_items.append(item)
         # A scheduled future monitor window is a deferral, not a blocker, so it
         # never earns an owner notice. An advancement item that is blocked, or
         # that waits on an unsatisfied resume condition, does: the owner is
@@ -296,6 +296,7 @@ def _blocked_priority_fallback(
 
     if not blocked_items:
         return None
+    blocked_items = compact_todo_summary_items(blocked_items, strip_text=True)
     selected_text = str(selected.get("text") or "").strip()
     selected_item = compact_todo_summary_item(selected, text=selected_text) if selected_text else dict(selected)
     return {
@@ -518,6 +519,7 @@ def _prepare_quota_should_run_item(
     receipt_bound_replay_phase: ReceiptBoundReplayPhase | None,
     receipt_bound_replan_obligation_id: str | None,
     receipt_bound_replan_guard_scoped: bool = False,
+    receipt_bound_guard_recorded_at: str | None = None,
 ) -> _QuotaDecisionPreparation:
     quota = item.get("quota") if isinstance(item.get("quota"), dict) else {}
     state = str(quota.get("state") or "unknown")
@@ -836,6 +838,7 @@ def _prepare_quota_should_run_item(
         goal_status=str(registry_goal.get("status") or ""),
         agent_profile=_quota_agent_profile(agent_identity),
         receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
+        receipt_bound_guard_recorded_at=receipt_bound_guard_recorded_at,
     )
     replan_obligation = (
         None

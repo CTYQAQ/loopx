@@ -41,6 +41,14 @@ Frozen failures/missing evidence remain visible. T4 deletes proven redundant
 owners alongside implementation, without waiting for R6 or all Python to vanish.
 This replaces stale current-count estimates, not historical execution evidence.
 
+The [reversible trial operation sheet](../../reference/sqlite-authority-store.md#reversible-developer-trial--可逆开发者试用)
+joins ordinary native Todo/guard/writeback/once-only spend with restart and a
+current-head exit to File. Its CLI regression preserves full Todo metadata and
+the original settled Turn through that exit. It is a bounded qualification path,
+not sustained use, full Goal recovery, a live Host trial or released-default
+approval. Package/source parity must also exclude retired modules after repeated
+builds; a clean build alone cannot close that packaging rule.
+
 **Fresh creation opt-in (2026-10-04, proposed).** The existing
 [device setting and CLI/App creation owner](../../reference/local-authority-provider-selection.md#new-goal-authority-machine-setting)
 can freeze a File/SQLite target and `soft_claim`/`hard_lease` policy, initialize
@@ -3349,6 +3357,16 @@ Qualify single/multiple-Goal and non-Git workspaces, response loss/restart,
 conflicting identities and provider refusal through installed CLI/HTTP and the
 packaged App. This bounded recovery closes no real-model first-Turn, L8/D3 or
 formal D2 acceptance and retires no historical recovery reader.
+
+**L9 original-proposal readback.** A global creation proposed inside an existing
+Goal retains its manager context. The opened drawer reads the exact original
+proposal independently of that Goal's discovery list; unrelated manager cards
+stay outside the Goal. Identity mismatch, missing records and transport failure
+remain explicit errors, and mutation responses cancel superseded reads before
+publishing receipts. Packaged interaction and installed File/SQLite recovery
+qualify this projection repair separately from real-model first-Turn, L8/D3,
+sustained D2 and release-default activation. No provider, policy or old-Goal
+migration default changes here.
 
 **Earlier 2026-09-24 implementation context.** Display refresh advances
 projection recovery/client closure without claiming every consumer qualified. SQLite #4910 added the larger measurement axes; #4224 records

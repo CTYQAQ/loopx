@@ -243,6 +243,24 @@ identity, step conditions, authority and one-spend semantics are unchanged.
 补结算命令保持一致。填充占位项后直接执行，检查退出码和 JSON `ok`；不再需要
 手工在子命令后追加格式参数。直接 CLI 的默认格式、历史回执与结算权限均不变。
 
+When an admitted Turn's verified durable writeback is followed by a Todo
+dependency wait, its replay now projects only the original `quota_spend` step.
+The later wait cannot replace the committed outcome with a blocked writeback.
+This default guard recovery grants no independent work and preserves the Todo
+wait and successor. The envelope retains the same complete executable command,
+including identity arguments after long registry/runtime paths. The spend owner
+still validates the original receipts, workspace and checkpoint; a missing spend
+receipt is repaired on that identity without another debit. Before verified
+writeback, registered causal waits retain the blocked no-spend closeout.
+This is shared CLI/heartbeat decision transport; it adds no frontend/Lark
+operation, changes no host cadence and does not update installed runtimes.
+
+中文：原 Turn 已有验证通过的持久写回，之后 Todo 才进入依赖等待时，同一 Turn
+重入只补原 `quota_spend` 步骤，不再要求用 blocked 覆盖已有结果。等待和后继任务
+保持原样，不准入独立工作；短包保留完整命令和原身份。额度 owner 仍校验原回执、
+工作区和 checkpoint，补回执不重复扣额。尚无验证写回的因果等待仍走不扣额收口。
+此项修复不改变宿主调度、已安装版本或前端/Lark 操作。
+
 The shared CLI plan also explains delivery classification before writeback.
 Validated evidence that excludes a route and informs the next decision can be
 `outcome_progress` even when the attempted candidate does not improve the target
@@ -303,6 +321,23 @@ same-Turn reentry cannot replace it with the current recommendation. An
 ineligible/rejected choice still replays the receipt without mutation; a
 first-call rejection reports
 `heartbeat_receipt.status=not_committed` and writes no receipt event.
+
+A receipt-bound `refresh-state --next-action` must refine that original Turn's
+Goal, Agent and Todo. If waiting or completion makes the current selector choose
+another Todo, the existing typed recommendation owner rejects the step before
+appending a run; even the other Todo's fresh read basis cannot retarget the
+original writeback. Finish the original writeback without `--next-action`, then
+select subsequent work through a fresh guard. A matching bound step records
+`settlement_alignment=exact`; ordinary unbound steps retain `not_applicable`.
+This changes the previous acceptance of a mismatched task-step write, without
+clearing dependencies, altering Todo authority or granting another Turn.
+
+中文：绑定回执的 `refresh-state --next-action` 必须属于原 Turn 的 Goal、Agent
+和 Todo。原任务等待或完成后，即使当前选择器已选中另一个 Todo，且提供其最新
+read basis，同一 TS recommendation owner 仍在追加 run 前拒绝跨任务步骤。
+先去掉 `--next-action` 完成原写回，再通过 fresh guard 选择后续工作。匹配步骤保留
+`settlement_alignment=exact`，无 Turn 绑定的普通步骤仍为 `not_applicable`。
+本项修复此前错误接受的跨任务写入，不清依赖、不改变 Todo 权威或授予新 Turn。
 
 For an eligible explicit choice deferred solely by runnable autonomous replan,
 the typed qualifier adds `inline_reentry_allowed=true`. After durably retaining

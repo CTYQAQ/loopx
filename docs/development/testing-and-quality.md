@@ -120,7 +120,7 @@ shell；不能因为过滤了 `CI` 就恢复采集。不能按系统、安装渠
 
 ### Required Merge Check / 必需合并检查
 
-`python-tests.yml` publishes `merge-gate` for every pull request. Code,
+`python-tests.yml` publishes `merge-gate` for every open pull request. Code,
 workflow, policy and unknown paths require the existing `pytest` aggregate
 (including TypeScript checks and all four Python shards), Stage 2C correctness
 aggregate, and Windows tests to succeed. Failed, cancelled, missing or
@@ -149,7 +149,7 @@ merge method `merge`. The trigger is inert until the live ruleset enables a
 merge queue. Enabling the queue, and then relaxing the up-to-date-branch
 requirement, is a ruleset decision for the lead maintainer.
 
-每个 PR 都会收到 `merge-gate` 结果。代码、工作流、治理规则和未知路径必须通过
+每个开放 PR 都会收到 `merge-gate` 结果。代码、工作流、治理规则和未知路径必须通过
 原有核心测试；失败、取消、缺失或意外跳过均不能通过。仅白名单根目录 Markdown
 或 `docs/**/*.md` 的修改可显式跳过昂贵测试；运行时 prompt、可执行文档、代码删除
 及代码移入文档均不享受豁免。实际启用状态以在线规则为准，使用 owner bypass
@@ -169,6 +169,29 @@ python scripts/ci/review_gate.py classify --base origin/main --head HEAD
 Changes to the classifier or workflow need both code-path and documentation-only
 qualification. Keep required check names stable and never require a
 workflow-level path-filtered check that cannot report on every PR.
+
+Closing or merging a PR retires its outstanding Python qualification. A PR
+number keeps the same concurrency lane when the merged close event changes
+`github.ref` to the base branch. Closed events skip classification and the final
+gate; open PRs retain the same required jobs and cancellation failures.
+
+A trusted `pull_request_target: closed` job additionally cancels remaining runs
+of this workflow, using job-local `actions: write` without checking out PR code.
+It verifies the current closed PR, source repository/branch and close time;
+it preserves reopened PRs, another open PR on that branch, newer runs and
+foreign repositories. A missing run-to-PR association requires the exact closed
+head. After ordinary cancellation, it uses GitHub's force-cancel endpoint for
+nonterminal `always()` aggregates. The cleanup needs one short runner job;
+it releases obsolete capacity rather than reserving release capacity or
+providing a GitHub shared-pool priority guarantee.
+
+PR 关闭或合并后，以 PR 编号维持原并发 lane，关闭事件跳过分类与最终门；开放
+PR 的必需检查及取消失败规则不变。来自目标分支的可信 `pull_request_target:
+closed` 清理任务仅自身持有 `actions: write`，不检出 PR 代码。它核验当前关闭
+状态、源仓库/分支与关闭时间，保留重开的 PR、同源分支上的其他开放 PR、更新
+运行及其他仓库；缺少 PR 关联时只处理确切关闭 head。普通取消后仍未结束的
+`always()` 汇总使用强制取消 API。清理需要一个短 runner 任务；这会释放过期
+容量，不等于为发布预留容量或设置 GitHub 共享池优先级。
 
 The [job exemption policy](ci-impact-selection.md) additionally permits pure
 Dashboard-client changes to skip backend Python/Windows and Stage2c, while
@@ -526,6 +549,28 @@ Canary 使用启动 LoopX 的 `sys.executable` 执行 Python 检查，显示的 
 目标 worktree。已有兼容虚拟环境也可用 `python -m pip install -e ".[test]"` 安装源码，
 随后直接使用该环境的命令。
 
+Canary is a repository development tool even when its CLI comes from a wheel.
+Run `premerge`, `run` and `smoke-suite` inside the intended source checkout
+(a subdirectory is also supported):
+the catalog, discovered examples, subprocess cwd and tracked-write guard share
+that checkout root. `canary premerge --catalog PATH` overrides the catalog only;
+it does not change the execution root or authorize commands outside its examples.
+Standalone read-only catalog commands retain their default catalog resolution;
+use their existing `--catalog PATH` when invoking an installed CLI.
+The wheel does not bundle the repository's docs/examples. Missing development
+inputs fail with a checkout/catalog recovery instruction, rather than an empty
+successful validation. `--no-execute` still previews; required CQR verification
+and merge authority remain separate gates.
+
+即使用 wheel 的 CLI，Canary 仍是仓库开发工具。`premerge`、`run`、`smoke-suite`
+在目标完整源码 checkout
+（也支持子目录）后运行；catalog、example 发现、子进程 cwd 与 tracked 写入保护
+共用该仓库根。`canary premerge --catalog PATH` 仅指定 catalog，不切执行根，也不
+授权执行 examples 之外的命令。独立的只读 catalog 命令保留既有默认解析，安装态
+可用其现有 `--catalog PATH` 指定输入。wheel 不携带仓库 docs/examples；缺少输入时明确
+提示补齐 checkout/catalog，不会以空检查冒充成功。`--no-execute` 仍是预览，
+required CQR 校验与合并权限继续分别判断。
+
 The repository does not currently track `.python-version` or `uv.lock`. `uv`
 creates a local lockfile during resolution; keep that generated file out of
 unrelated PRs. Introducing a shared lock or interpreter pin is a separate
@@ -555,6 +600,9 @@ Lint, type checks, and the CLI budget run separately. The required `pytest`
 check rejects failed/skipped shards and missing coverage artifacts, then uses
 `coverage combine` to enforce the existing 19.6% floor on the union, not on
 individual shards. Relative coverage paths make reports portable across runners.
+Each shard has a 60-minute job ceiling for setup, the full partition and report
+upload; individual test deadlines stay unchanged. Verbose progress names failed
+cases before the suite finishes, so an interrupted run retains their identities.
 The reusable Sonar workflow consumes that same run's XML and never reruns
 pytest or reads cross-run artifacts. Missing Sonar tokens still skip analysis
 successfully; test jobs receive no Sonar secret. The trigger is the union of
@@ -565,11 +613,13 @@ Linux 全套测试分到四台 hosted runner，每台保留两个 xdist worker�
 按完整 collection 分片；没有历史耗时时，等权测试交替分配。lint、类型检查和 CLI
 预算独立执行。必需的 `pytest` 汇总检查会拒绝失败／跳过的分片和缺失的 coverage，
 合并后再执行原有 19.6% 门槛；不要求单个分片达到全套覆盖率。coverage 使用相对路径，
+每个分片的作业上限为 60 分钟，覆盖环境准备、完整分片和报告上传；单项测试超时
+保持不变。详细进度在套件结束前就记录失败用例名称，运行中断后仍可定位这些用例。
 Sonar 只复用同一次 run 的 XML，不重复测试、不跨 run 取产物。缺少 token 仍成功跳过
 Sonar，测试 job 不接收 Sonar secret。触发范围取原有两套 workflow 的并集；纯前端
 PR 使用前述豁免，Sonar 配置变更仍全量运行，包括没有 token 的 fork。
 
-Reproduce one shard locally with `uv run --extra test python -m pytest -q -n 2 --splits 4 --group 1
+Reproduce one shard locally with `uv run --extra test python -m pytest -v -n 2 --splits 4 --group 1
 --splitting-algorithm least_duration --cov=loopx`. Omit the split arguments to
 run the complete suite locally. 全量本地测试仍省略分片参数即可。
 

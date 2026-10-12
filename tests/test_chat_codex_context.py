@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from loopx.capabilities.native_chat.codex_context import codex_home, disable_mcp_servers, process_environment
+from loopx.capabilities.native_chat.codex_context import codex_home, disable_mcp_servers, process_environment, public_source_reader, public_source_read_context, shared_chatgpt_transport
 
 
 def test_default_host_preserves_environment_and_native_store(tmp_path, monkeypatch):
@@ -40,12 +40,62 @@ def test_mcp_disable_overrides_all_config_layers_without_forwarding_secrets():
     private = {"mcp_servers": {"fixture": {"command": "private", "env": {"TOKEN": "secret"}}}}
     requested = {"mcp_servers": {"caller": {"enabled": True}}, "model": "fixture"}
     result = disable_mcp_servers(private, requested)
-    assert result == {"model": "fixture", "mcp_servers": {
+    assert result == {"model": "fixture", "features": {"apps": False}, "mcp_servers": {
         "fixture": {"enabled": False}, "caller": {"enabled": False}}}
     assert private["mcp_servers"]["fixture"]["env"]["TOKEN"] == "secret"
     for config, override in [({"mcp_servers": "bad"}, {}), ({}, {"mcp_servers": ["bad"]})]:
         with pytest.raises(ValueError, match="MCP"):
             disable_mcp_servers(config, override)
+
+
+def test_private_native_tools_disable_apps_with_public_reader_off(monkeypatch):
+    monkeypatch.setenv("LOOPX_CHAT_PUBLIC_SOURCE_READ", "off")
+    private = {"features": {"apps": True}, "mcp_servers": {"private": {"enabled": True}}}
+    requested = {"features": {"apps": True, "shell_tool": True}}
+    result = public_source_reader(private, disable_mcp_servers(private, requested))
+    assert result["features"] == {"apps": False, "shell_tool": True}
+    assert result["mcp_servers"] == {"private": {"enabled": False}}
+    assert private["features"]["apps"] is True
+    assert requested["features"]["apps"] is True
+    with pytest.raises(ValueError, match="feature"):
+        disable_mcp_servers({}, {"features": ["apps"]})
+
+
+def test_public_reader_off_does_not_change_ordinary_host_config(monkeypatch):
+    monkeypatch.setenv("LOOPX_CHAT_PUBLIC_SOURCE_READ", "off")
+    config = {"features": {"apps": True}, "mcp_servers": {"private": {"enabled": True}}}
+    assert public_source_reader(config, config) == config
+
+
+def test_public_source_context_requires_actual_admission_not_environment(monkeypatch):
+    monkeypatch.setenv("LOOPX_CHAT_PUBLIC_SOURCE_READ", "on")
+    assert public_source_read_context({}) == ""
+    assert public_source_read_context({"mcp_servers": {
+        "loopx_public_source_read": {"enabled": False}}}) == ""
+    assert public_source_read_context({"mcp_servers": {
+        "loopx_public_source_read": {"enabled": True, "enabled_tools": ["other_tool"]}}}) == ""
+    admitted = public_source_reader({}, {})
+    monkeypatch.setenv("LOOPX_CHAT_PUBLIC_SOURCE_READ", "off")
+    assert "read_public_url" in public_source_read_context(admitted)
+    disabled = public_source_reader(admitted, disable_mcp_servers(admitted, {}))
+    assert public_source_read_context(disabled) == ""
+
+
+def test_shared_chatgpt_transport_preserves_explicit_provider_and_core_policy():
+    explicit = {"model_provider": "operator-provider", "model_providers": {
+        "operator-provider": {"name": "operator-owned"}}}
+    assert shared_chatgpt_transport(explicit, {}) == explicit
+    policy = {"default_permissions": "fixture", "permissions": {"fixture": {
+        "network": {"enabled": False}, "filesystem": {"/fixture": "write"}}}}
+    result = shared_chatgpt_transport(policy, {})
+    assert result["permissions"] == policy["permissions"]
+    assert result["default_permissions"] == "fixture"
+    assert "model_provider" not in policy
+    assert set(result["model_providers"][result["model_provider"]]) == {
+        "name", "wire_api", "requires_openai_auth", "supports_websockets"}
+    with pytest.raises(ValueError, match="conflicts with project configuration"):
+        shared_chatgpt_transport(policy, {"model_providers": {
+            result["model_provider"]: {"base_url": "https://example.invalid", "env_key": "PRIVATE_KEY"}}})
 
 
 def test_compatibility_catalog_probe_keeps_private_process_environment(tmp_path, monkeypatch):
