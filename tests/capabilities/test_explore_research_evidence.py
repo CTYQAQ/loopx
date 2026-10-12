@@ -179,7 +179,11 @@ def test_real_cli_uses_synthetic_source_runtime_and_readback(tmp_path: Path) -> 
     assert view["research_frontier"]["mode"] == "read_only_shadow"
 
 
-def execution_fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
+def execution_fixture(
+    tmp_path: Path,
+    *,
+    provider: str = "file",
+) -> tuple[Path, Path, Path, dict]:
     from loopx.control_plane.coordination.runtime_shadow import (
         build_todo_runtime_shadow_projection,
     )
@@ -204,7 +208,7 @@ def execution_fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
             goal_id=GOAL, todos=[], handoff_mode="soft_claim"
         ),
         state_path=state,
-        provider="file",
+        provider=provider,
     )
     path = explore_result_log_path(runtime, GOAL)
     for name in ["a", "b"]:

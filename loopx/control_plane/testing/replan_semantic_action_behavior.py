@@ -278,10 +278,10 @@ def _build_fixture(
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         registry_path.write_text(registry_text + "\n", encoding="utf-8")
 
-    from ...todos import add_goal_todo
     from ..coordination.goal_storage_initialization import (
         initialize_goal_storage_target,
     )
+    from ..todos.mutation_api import add_goal_todo
 
     initialized = initialize_goal_storage_target(
         runtime_root,

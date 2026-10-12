@@ -280,11 +280,19 @@ def test_new_goal_and_original_creation_recovery_without_source_todo_writers(tmp
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_leased_delivery_settlement_and_recovery_without_source_todo_writers(tmp_path, provider, without_source_todo_writers):
-    project, runtime, registry, display, _ = _source(
+    project, runtime, registry, display, prefix = _source(
         tmp_path, provider=provider, handoff_mode="hard_lease",
-        extra=f"claimed_by={settlement.AGENT_ID}",
+        extra=(
+            f"claimed_by={settlement.AGENT_ID} "
+            "required_write_scopes=tests/**"
+        ),
     )
-    display.unlink()
+    config = json.loads(registry.read_text())
+    config["goals"][0]["coordination"]["write_scope"] = ["tests/**"]
+    registry.write_text(json.dumps(config))
+    # Goal intent remains readable while the Markdown Todo display contributes
+    # no candidate or lease facts after canonical promotion.
+    display.write_text(prefix)
 
     def run(*args, succeeds=True):
         result = subprocess.run(
@@ -301,10 +309,6 @@ def test_leased_delivery_settlement_and_recovery_without_source_todo_writers(tmp
     def guard(turn):
         return run("quota", "should-run", *identity, "--codex-app", "--turn-instance-id", turn)
 
-    selected = guard(settlement.TURN_ID)
-    assert selected["decision"] == "run"
-    original = selected["heartbeat_receipt"]["settlement_identity"]
-    assert original["todo_id"] == settlement.TODO_ID
     update = ["todo", "update", *identity, "--note", "Canonical delivery retained"]
     rejected = run(*update, succeeds=False)
     assert rejected["error_code"] == "handoff_mode_requires_lease"
@@ -315,6 +319,10 @@ def test_leased_delivery_settlement_and_recovery_without_source_todo_writers(tmp
     assert acquired["acquired"] is True
     proof = ["--task-lease-idempotency-key", "delivery",
              "--task-lease-expected-version", str(acquired["lease"]["version"])]
+    selected = guard(settlement.TURN_ID)
+    assert selected["decision"] == "run"
+    original = selected["heartbeat_receipt"]["settlement_identity"]
+    assert original["todo_id"] == settlement.TODO_ID
     assert run(*update, *proof)["ok"] is True
     before = run("todo", "list", *identity)["todo"]
     assert before["note"] == "Canonical delivery retained"
