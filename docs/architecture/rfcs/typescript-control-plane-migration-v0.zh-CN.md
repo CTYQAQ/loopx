@@ -55,6 +55,22 @@ canonical Todo 入口隔离（T4）：五种 mutation facade 统一进入既有
 revision 保持。这为最后调用方删除建立边界，不宣称代码已退役：bootstrap、
 handoff、team-plan 和 Monitor 仍有受支持的旧源调用；capture/outbox 及历史恢复
 各等自己的出口。见[调用方及回滚清单](../../reference/canonical-todo-completion-update.md#canonical-mutation-entrypoint-isolation)。
+生产 Todo 消费者直接使用具体 owner：CLI 注册／操作、quota 与规划、
+能力写回、旧源租约读取及 Lark 源投影直接导入相同的 mutation、完整读取、路径或
+Markdown 显示 owner，不新增 wrapper、决策或 RPC。历史公开导入及其受支持的旧源
+IO 继续保留。隔离源码／正常 wheel 同时移除 facade、整个旧 Todo writer 和四个
+shadow producer，验证真实 File/SQLite CLI 生命周期、恰好一次结算、Monitor 重放
+及 App 冷导入／操作／重启；缺 provider／租约及源／备份变化须拒绝。Lark dry-run
+与 Explore 重放只验证本地消费者，不计 live 外部采用。
+此前调用方盘点后，[#5280](https://github.com/loopx-project/loopx/pull/5280) 新增的
+fresh research execution 又在函数内导入历史 facade；现直接导入既有
+`todos/list_readback.py`，保持相同 typed 当前 Todo 校验以及先于读取的历史重放。
+同一 facade 存在／缺席、源码／正常 wheel、File／SQLite 矩阵补 fresh 执行、
+actor／可运行状态／输入拒绝、精确 lineage 读回，以及当前输入／Todo 改变后的
+原观察重放。完整生产包 import 守卫解析相对导入与 alias，动态加载仍依赖真实
+隔离路径验证。新能力进入时持续守卫，不把历史库存当永久出口。最后受支持的
+旧源 writer、历史恢复、安装 cohort 与发布验收各自保持开放。
+
 保留的 import-compatible field writer 在既有 typed field plan 中统一等待条件
 归一化及矛盾 clear 拒绝；保持 Python 空白输入省略和锁内 IO，只退役重复的
 normalization crossing，不删除仍受支持的 writer 或迁移 reader。
@@ -960,6 +976,14 @@ user role。历史节点不会进入活动工作或 lease lane。无法识别的
 不得恢复 promotion 后的 Markdown fallback。本批闭合已复现的依赖遗漏，不代表所有
 历史导入、provider 资格化、soak 或 D3 cutover 条件均完成。
 
+可选 Vision fallback 提示在 `goal_frontier/fallback_disposition.ts` 内组合已有
+resume evaluator 与合法 pending target 正向证明。Python 仅保留持久输入 codec、
+来源 I/O 和展示，删除独立 Monitor 等待分支与声明聚合规则。Live quota 一次读取
+完整 canonical/legacy 快照，再选择最多 16 个目标／直接依赖记录（含归档），不再
+逐 Todo 重复查询。有意修正：候选对称地消除所属声明，uncertainty 仅属于尚未解决
+的声明，非法／含混等待证据不能隐藏提示。这只闭合一个 T3 consumer，不代表整个
+quota 的快照一致性或 T1/T2 完成；声明仍是可选 advisory，不是执行 authority。
+
 - 分别审计 Turn/quota、Dashboard、standing decision、shared-goal alignment、
   amendment revision 输入。复用 #4117 canonical source adapter，一次决策传递一份
   snapshot，不新增 Todo inventory。
@@ -1048,6 +1072,13 @@ acceptance 和 vision。展示限制不能变成结算限制。在 legacy、File
   File/SQLite CLI 验证覆盖预览、写入、后续模式变化后的原操作回放及 provider
   故障时禁止 Markdown 回退。本批闭合 canonical setter 的 import 依赖；未晋升
   writer、lease capture 恢复及旧源迁移窗口仍保留独立退役验收。
+- 旧源 task-lease facts 直接复用 `todos/list_readback.py`，移除对历史 mutation
+  facade 的依赖。领取及生命周期决策仍由 TypeScript 拥有；Markdown IO、source
+  capture 与公开兼容 export 仍有实际 caller。CLI 分发反例移除 facade 并禁用
+  editable install finder，防止从 checkout 偷读已删除模块。源码与安装 wheel
+  覆盖 capture 关闭／开启、三种 handoff 模式、回放、owner/version 拒绝、转交、
+  释放及保留历史。本批闭合 reader 到 writer facade 的依赖；完整 writer 删除
+  仍须验收剩余 caller 与迁移窗口。
 
 **每张执行卡的验证与停止规则**
 

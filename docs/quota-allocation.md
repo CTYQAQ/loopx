@@ -122,10 +122,14 @@ loopx configure-goal --goal-id example
 loopx configure-goal --goal-id example --clear-execution-replan-after-turns --execute
 ```
 
-The Dashboard exposes **Goal review cadence** in the Capability Center for
+The Dashboard exposes **Goal review and stride** in the Capability Center for
 both the device and selected Goal. The existing machine namespace
-`todo_replan_cadence_machine_defaults_v1` stores `count_unit` (`effective_turns`
-or `completed_todos`) and `count`. It is built into the control plane and needs
+`todo_replan_cadence_machine_defaults_v2` stores `count_unit` (`effective_turns`
+or `completed_todos`), `count` and optional strategy selection. Existing v0/v1
+configurations remain readable without migrating them on inspection. The
+strategy defaults off; `evidence_conditioned_v1` adds evidence-conditioned scope
+and route advice, with unchanged admission and semantic exits. See the
+[versioned strategy configuration and rollback](reference/protocols/goal-vision-replan-contract-v0.md#configure-and-roll-back-the-stride-strategy). It is built into the control plane and needs
 no provider installation. The CLI, settings readback, quota decision and
 writeback validation use the same effective configuration.
 
@@ -412,6 +416,23 @@ from `classification`. New writes should use one of:
 execution-profile hints only as a compatibility fallback for historical runs;
 new control-plane decisions should be driven by the enum above.
 
+Classify the selected work item's result, not every unresolved candidate field.
+For example, an evaluation Todo can make `outcome_progress` with an `advanced`
+observation when new validated evidence rejects one candidate and informs the
+remaining evaluation. The candidate's rejection does not mean that the Todo's
+next executable step is blocked, nor that its whole stage is complete. Merely
+reusing known evidence, formatting a report, or repeating a negative probe does
+not create accountable progress. When a finite question is answered, stop that
+question and author the genuine next frontier or terminal result through the
+existing Todo/vision. Use `outcome_gap` with `blocked` when the selected Todo's
+actual next step cannot execute; do not choose it merely to settle an otherwise
+unchanged Turn. Outcome declarations still require their normal validation.
+
+按选定工作项的实际结果分类：有新增、可核验的证据否定候选，可以推进评估任务，
+但不等于整个阶段完成；候选缺证也不自动构成整个任务的执行阻塞。纯复用和重复
+探测不算新增进展，已回答的有限问题应停止并沿原 Todo/vision 重规划。只有实际
+下一步无法执行时才写 `blocked`，不得为结算而伪造进展或阻塞。
+
 An `outcome_gap` does not become delivery progress. A blocked writeback is
 eligible for exact Todo-bound Turn settlement only when it includes a
 `typed_progress_observation_v0` with `result_class=blocked`, the matching
@@ -433,6 +454,33 @@ Automatic no-spend stall writeback uses the same receipt-owned retry projection
 as live selection, including its post-writeback readback. A future unchanged
 monitor therefore stays quiet during that wait without failing the heartbeat
 receipt or changing the monitor's due time, hash, or material generation.
+The typed deadline owner reconciles a newer, earlier receipt-owned retry with
+an existing full-source deadline cache; hidden earlier monitor deadlines and
+unchanged caches remain intact. The same typed batch derives `blocked_retry_wait`
+from qualified full-source receipts independently of `frontier_deadline`, which
+still names the earliest wakeup. A non-blocking `user_action` notice therefore
+does not turn the retry into a human gate even when an earlier or equal monitor
+owns that wakeup. The retry identity and original due time remain visible; the
+monitor clock, genuine gate and independent runnable work keep their own rules.
+This corrects the automatic notice explanation without adding configuration or
+persisted state. The pending retry is a recheck deadline, not execution authority:
+current gates and the configured cadence floor still apply at and after due time.
+Receipt waits added after stored resume lanes were built are read from the same
+claim-scoped full selection source. An existing wait lane or its display limit
+cannot hide a new retry; foreign, excluded, mismatched and replaced waits do not
+qualify through this path.
+
+类型化 deadline owner 会把新叠加的、更早到期的 Turn 重试纳入已有的完整来源
+缓存，同时保留显示列表之外的更早监控时钟和未变化的缓存。同一个 typed batch
+从完整且合格的 receipt 来源独立投影 `blocked_retry_wait`；`frontier_deadline`
+仍表示最早唤醒时间。即使更早或同刻的独立 monitor 拥有下一唤醒，普通
+`user_action` 提醒也不会把重试解释为人工门禁；原 retry 身份/到期时间、monitor
+时钟、真实 gate 和独立可执行工作各自保持。这是自动通知解释的修正，不新增
+配置或持久化状态。重试到期仅要求重新检查，不授予执行权限；当前 gate 和
+已配置的调度周期下限仍然有效。
+stored resume lane 建立后新增的 receipt wait，沿同一个 claim-scoped 完整
+selection 来源读回。已有等待列表及其显示上限不能隐藏新重试；其它 Agent、
+被排除的执行者、身份不匹配或已被替换的等待不能由这条路径取得资格。
 
 `quota should-run` also separates long-running observation from work that should
 advance the selected goal. When the selected goal's current projection is a
@@ -1239,6 +1287,15 @@ as distinct durable follow-up guidance; they do not implicitly invoke this
 task-step editor or replace shared prose, including after completion or repair.
 Refreshes without `--next-action` keep their existing recommendation
 and report behavior. Historical prose-update receipts remain readable.
+
+A Todo-less autonomous replan carries a v1 replan settlement identity, not a
+Todo step target. `--next-action` therefore returns
+`next_action_task_unavailable` with recovery guidance instead of trying to
+decode a missing `todo_id`. Omit that flag to derive the recommendation, or use
+`--recommended-action` for explicit replan guidance, retaining the original
+Turn and `--replan-obligation-id`. Neither route selects another Todo or grants
+its execution authority. Recommendation consumers reuse the settlement owner's
+v0/v1 identity validation, including effect and exclusive-binding checks.
 
 CLI status omits the reducer's internal source context and duplicate basis;
 the selected route and explicit peer detail retain the editable read fence.

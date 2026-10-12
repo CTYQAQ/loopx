@@ -10,7 +10,6 @@ from ..agent_registry import registered_agent_ids_for_goal
 
 from ..control_plane.coordination.authority_source_capture import build_runtime_shadow_source_snapshot
 from ..control_plane.coordination.configuration import resolve_coordination_runtime_shadow_config
-from ..control_plane.coordination import local_authority_shadow_readback as observation
 from ..control_plane.coordination.promotion_review import execute_reviewed_coordination_promotion
 from ..control_plane.coordination.shadow_goal_scope import shadow_goal_scope
 from ..control_plane.projects.registry_codec import load_project_registry
@@ -265,7 +264,11 @@ def handle_coordination_shadow_command(
                     include_all_archived_todos=True)
                 request.update(action="prepare", projection=projection, source_snapshot=snapshot,
                     target_handoff_mode=args.target_handoff_mode, target_provider=args.provider,
-                    source_backup=read_cold_source_backup(args.backup_manifest))
+                    source_backup=read_cold_source_backup(args.backup_manifest, source_paths=[
+                        Path(snapshot["state_path"]), Path(snapshot["registry_source"]["path"]),
+                        *(Path(item["path"]) for item in snapshot["evidence_files"]),
+                        runtime_root / "goals" / args.goal_id / "task-leases",
+                    ]))
             else:
                 request.update(action="apply" if args.coordination_shadow_command == "apply-import" else "recover",
                     expected_plan_sha256=args.plan_sha256)
@@ -356,13 +359,19 @@ def handle_coordination_shadow_command(
         projection_version = _projection_version(projection)
         projected_todos = projection.get("todos")
         projected_leases = projection.get("leases")
-        inspection = {"status": "not_evaluated"} if args.coordination_shadow_command == "rollback" else observation.inspect_coordination_runtime_shadow(
-            goal=goal,
-            runtime_root=runtime_root,
-            goal_id=args.goal_id,
-            projection=projection,
-            source_snapshot=source_snapshot,
-        )
+        inspection = {"status": "not_evaluated"}
+        if args.coordination_shadow_command != "rollback":
+            # Registration, disabled shadow and cold import do not consume this
+            # reader. Load it only inside the selected action's error boundary.
+            from ..control_plane.coordination import local_authority_shadow_readback as observation
+
+            inspection = observation.inspect_coordination_runtime_shadow(
+                goal=goal,
+                runtime_root=runtime_root,
+                goal_id=args.goal_id,
+                projection=projection,
+                source_snapshot=source_snapshot,
+            )
         payload: dict[str, object] = {
             "ok": inspection.get("status") != "failed",
             "schema_version": "loopx_coordination_shadow_admin_v0",

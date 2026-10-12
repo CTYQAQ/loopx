@@ -279,7 +279,7 @@ records how each former writer family reached this cutoff.
 | `todos.py`, `bootstrap.py`, canonical Todo and lease adapters | Public mutation entrypoints admit only File, SQLite or PostgreSQL authority. Markdown remains a display and import source, not a write authority. | Run creation, update and recovery with the removed writer modules absent. Keep Markdown projection and supported import/export. |
 | `local_authority_shadow_outbox.py` and its typed reader | New outbox production is removed. Historical prepared and committed entries remain available for bounded disposition and exact receipt replay. | Seed historical bytes directly, classify each entry against its source and receipt, and prove restart recovery without a business write. |
 | `local_authority_shadow_projection.py` | Python transports full source artifacts, rejects floats and unsafe integers before Python/JS digest comparison, and checks identity, size, digest and regular-file readback. `coordination.source.project` remains the typed projection owner. | Preserve exact-byte and malformed-input behavior in the replacement, including symlink rejection, bounded transfer and ambiguous-operation errors. A language-only rewrite is insufficient. |
-| `runtime_shadow.py`, `local_authority_shadow_adapter.py` | Explicit bootstrap, inspect, candidate read, drain and recovery still consume full source snapshots, cursor history and digest comparison. | Qualify the replacement management/recovery entrypoints and supported historical evidence; a canonical write passing does not establish these readers are unused. |
+| `runtime_shadow.py`, `local_authority_shadow_adapter.py`; retained `configuration.py`, `authority_source_capture.py`, `local_authority_shadow_history.py`, `local_authority_shadow_readback.py` | Configuration, cold-source capture and read-only diagnostics now have concrete owners independent of producers. Explicit shadow bootstrap/drain/promotion and recovery still have live callers. | Retire obsolete producer aliases only after their supported callers exit. Preserve the retained import/history/readback owners and outbox recovery; inspect or cold import succeeding without producers does not make a live drain unused. |
 | `authority_core.py` | Live Todo adapters delegate to typed mutation/ownership rules; scope overlap delegates to the typed lease owner. The lease-mode input compatibility contract is explicitly retained. | Trace direct, internal, dynamic and exported callers separately. Review registered historical input support before retiring its vocabulary; do not infer a fresh grant from old `legacy` inputs. |
 
 Paths in the table are under `loopx/` or its `control_plane/coordination/` and
@@ -391,6 +391,12 @@ original evidence and settled lease history. The trusted Python tar adapter
 reads actual archive members, including older backups without a member list;
 the TypeScript owner verifies coverage of the coordination source bytes and
 pins both saved artifacts. A missing source path in the backup refuses import.
+CLI and App retain the full backup and validate every archive member, but
+transport only member digests covering the registered Goal's source files,
+registry, evidence and lease directory. Unrelated backup inventory does not
+inflate the bounded import request; unsafe members and changed complete
+artifacts still reject. This does not reduce imported Todo records or qualify
+whole-Goal reactivation.
 Prepare may select an empty target and persist its identity and immutable plan,
 but does not fence the writer, import state or grant execution authority.
 

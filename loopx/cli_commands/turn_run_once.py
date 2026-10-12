@@ -48,7 +48,7 @@ from ..control_plane.turn_driver import (
 )
 from ..quota import spend_quota_slot
 from ..state_refresh import refresh_state_run
-from ..todos import resolve_todo_state_path
+from ..control_plane.todos.path_resolution import resolve_todo_state_path
 from .turn_cadence import managed_cadence_start
 from .turn_decision import collect_turn_status_payload
 from .turn_dsh_host import build_dsh_host_runner
@@ -846,11 +846,18 @@ def execute_turn_run_once(
             )
 
         def on_managed_start_admitted() -> None:
+            replan_packet = stable_envelope.get("replan_action_packet")
+            capability_guard = (
+                replan_packet.get("capability_guard")
+                if isinstance(replan_packet, Mapping)
+                else None
+            )
             ensure_turn_heartbeat_settlement_receipt(
                 runtime_root,
                 settlement_identity,
                 semantic_replan_guard_scoped=replan_guard_scoped,
                 semantic_replan_obligation_id=replan_obligation_id,
+                semantic_replan_capability_guard=capability_guard,
                 goal_ref=goal_ref,
             )
 

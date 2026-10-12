@@ -45,7 +45,7 @@ def register_backup_state_command(
     )
     parser.add_argument(
         "--backup-id",
-        help="Stable id for the archive name. Defaults to a UTC timestamp.",
+        help="Id for a new backup. Defaults to a UTC timestamp; existing output names are never replaced.",
     )
     parser.add_argument(
         "--no-automations",
@@ -61,6 +61,12 @@ def register_backup_state_command(
         "--current-project-only",
         action="store_true",
         help="Do not discover additional project state from the global registry.",
+    )
+    parser.add_argument(
+        "--configuration-goal-id",
+        action="append",
+        help=("Select source-owned Goal configurations for the embedded checkpoint; "
+              "repeat for a reviewed cohort. Raw state discovery is unchanged."),
     )
     parser.add_argument(
         "--execute",
@@ -91,6 +97,7 @@ def handle_backup_state_command(
             include_skills=not bool(args.no_skills),
             include_registry_projects=not bool(args.current_project_only),
             registry_path=(Path(args.project).expanduser() / ".loopx/registry.json") if args.current_project_only else None,
+            configuration_goal_ids=getattr(args, "configuration_goal_id", None),
         )
         if args.execute:
             payload = execute_state_backup_plan(payload)
@@ -102,7 +109,7 @@ def handle_backup_state_command(
             "dry_run": not bool(getattr(args, "execute", False)),
             "execute_requested": bool(getattr(args, "execute", False)),
             "error": str(exc),
-            "recommended_action": "fix backup planning before retrying",
+            "recommended_action": "fix the reported backup error before retrying; preserve existing archive and manifest files",
         }
     print_payload(payload, output_format(args), render_state_backup_markdown)
     return 0 if payload.get("ok") else 1

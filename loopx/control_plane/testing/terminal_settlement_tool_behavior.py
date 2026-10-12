@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from ..coordination.goal_storage_initialization import initialize_goal_storage_target
 from ...heartbeat_prompt import build_heartbeat_prompt
-from ...todos import add_goal_todo, complete_goal_todo
+from ...control_plane.todos.mutation_api import add_goal_todo, complete_goal_todo
 from ..quota.turn_envelope import quota_action_signature_document
 from .doubao_model_behavior_actor import (
     ARK_API_KEY_ENV,
