@@ -404,13 +404,26 @@ def _intent() -> dict[str, object]:
     }
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path]:
+def _fixture(
+    tmp_path: Path,
+    *,
+    finished_updated_at: str = "2026-08-30T09:00:00Z",
+    provider: str = "file",
+) -> tuple[Path, Path]:
+    from loopx.control_plane.coordination.runtime_shadow import (
+        build_todo_runtime_shadow_projection,
+    )
+    from loopx.todos import list_goal_todos
+    from tests.control_plane.canonical_authority_fixture import (
+        initialize_canonical_authority,
+    )
+
     project = tmp_path / "project"
     runtime = tmp_path / "runtime"
     state = project / "ACTIVE_GOAL_STATE.md"
     state.parent.mkdir(parents=True)
     state.write_text(
-        """---
+        f"""---
 status: active
 ---
 
@@ -421,7 +434,7 @@ status: active
 ## Agent Todo
 
 - [x] Finish the bounded analysis.
-  <!-- loopx:todo todo_id=todo_finished status=done task_class=advancement_task claimed_by=report-agent evidence=validated-analysis-outcome updated_at=2026-08-30T09:00:00Z -->
+  <!-- loopx:todo todo_id=todo_finished status=done task_class=advancement_task claimed_by=report-agent evidence=validated-analysis-outcome updated_at={finished_updated_at} -->
 """,
         encoding="utf-8",
     )
@@ -452,6 +465,16 @@ status: active
             }
         ),
         encoding="utf-8",
+    )
+    todos = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)["todos"]
+    initialize_canonical_authority(
+        runtime,
+        GOAL_ID,
+        build_todo_runtime_shadow_projection(
+            goal_id=GOAL_ID, todos=todos, handoff_mode="soft_claim"
+        ),
+        state_path=state,
+        provider=provider,
     )
     sidecar_dir = runtime / "goals" / GOAL_ID / "post_writeback_hooks"
     sidecar_dir.mkdir(parents=True)
@@ -1821,14 +1844,8 @@ def test_consumption_reuses_the_exact_frozen_fact_request(tmp_path: Path) -> Non
 def test_consumption_derives_the_period_from_actual_report_facts(
     tmp_path: Path,
 ) -> None:
-    registry, runtime = _fixture(tmp_path)
-    state_path = registry.parent / "ACTIVE_GOAL_STATE.md"
-    state_path.write_text(
-        state_path.read_text(encoding="utf-8").replace(
-            "updated_at=2026-08-30T09:00:00Z",
-            "updated_at=2026-08-29T22:42:26+08:00",
-        ),
-        encoding="utf-8",
+    registry, runtime = _fixture(
+        tmp_path, finished_updated_at="2026-08-29T22:42:26+08:00"
     )
 
     required = consume_pending_periodic_report_intent(
@@ -1921,26 +1938,13 @@ def test_real_cli_editorial_fallback_reads_canonical_work_without_display(
     import subprocess
     import sys
     from tests.control_plane.canonical_authority_fixture import (
-        initialize_canonical_authority,
         isolate_sqlite_runtime,
-    )
-    from loopx.control_plane.coordination.runtime_shadow import (
-        build_todo_runtime_shadow_projection,
     )
 
     if provider == "sqlite":
         isolate_sqlite_runtime(tmp_path, monkeypatch)
-    registry, runtime = _fixture(tmp_path)
+    registry, runtime = _fixture(tmp_path, provider=provider)
     state = registry.parent / "ACTIVE_GOAL_STATE.md"
-    records = parse_active_state_todos(state.read_text(), item_limit=None)[
-        "agent_todos"
-    ]["items"]
-    projection = build_todo_runtime_shadow_projection(
-        goal_id=GOAL_ID, todos=records, handoff_mode="soft_claim"
-    )
-    initialize_canonical_authority(
-        runtime, GOAL_ID, projection, state_path=state, provider=provider
-    )
     # A runtime override must route both intent IO and the Todo snapshot.
     config = json.loads(registry.read_text())
     config["common_runtime_root"] = str(tmp_path / "unused-runtime")

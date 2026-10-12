@@ -7,10 +7,12 @@ from typing import Any
 
 from .contract import MachineConfigurationNamespace
 from ...control_plane.effect_runtime import effect_runtime_result
+from ...control_plane.coordination.goal_storage_initialization import (
+    NEW_GOAL_STORAGE_METHOD,
+)
 
 GOAL_STORAGE_DEFAULTS_SCHEMA = "loopx_goal_storage_defaults_v0"
 CANONICAL_GOAL_STORAGE_DEFAULTS_SCHEMA = "loopx_goal_storage_defaults_v1"
-NEW_GOAL_STORAGE_METHOD = "coordination.local_authority.new_goal_storage"
 
 
 def normalize_goal_storage_defaults(raw: Mapping[str, Any]) -> dict[str, Any]:
