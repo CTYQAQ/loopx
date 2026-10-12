@@ -1055,6 +1055,7 @@ def refresh_state_run(
             else {}
         )
         replan_qualification = qualify_refresh_replan_writeback(
+            replan_source_route={"registry": str(registry_path), "runtime_root": str(runtime_root)},
             todo_fields=todo_fields,
             autonomous_replan_recorded=autonomous_replan_recorded,
             requested_delta_kinds=normalized_repair_delta_kinds,

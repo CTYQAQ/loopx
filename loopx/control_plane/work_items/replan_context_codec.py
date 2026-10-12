@@ -151,6 +151,24 @@ def project_replan_context(
 
     strategy = normalize_stride_strategy(stride_strategy)
 
+    # Read the existing Explore participant only at an enabled fresh review.
+    # The TS owner projects references and decides the coupling; Python does
+    # not rank findings, infer their applicability or create a second planner.
+    explore_context = None
+    if strategy != "off" and evidence_ref is None and source_status:
+        # Explore owns its activation. The status boundary can omit its policy;
+        # absence there is not evidence that Graph/Harness is disabled.
+        if agent_id and source_status.get("registry") and source_status.get("runtime_root"):
+            from ...capabilities.explore.turn_context import explore_turn_context
+
+            try:
+                explore_context = explore_turn_context(
+                    registry_path=Path(source_status["registry"]), runtime_root=Path(source_status["runtime_root"]),
+                    goal_id=goal_id, agent_id=agent_id, include_finding_digests=True)
+            except (OSError, ValueError, RuntimeError):
+                # An unavailable read does not mean an empty or refuted graph.
+                explore_context = {"ok": False, "goal_id": goal_id, "agent_id": agent_id}
+
     prefix = ["loopx"]
     if source_status is not None:
         runs = replan_history_from_status(source_status, goal_id)
@@ -167,6 +185,7 @@ def project_replan_context(
                 include_decisions=strategy != "off" or bool(evidence_ref and evidence_ref.startswith("replan-decision-")),
                 history_newest_first=history_newest_first),
             "stride_strategy": strategy,
+            **({"explore_context": explore_context} if explore_context is not None else {}),
             "evidence_ref": evidence_ref,
             "read_prefix": shlex.join(prefix),
             "goal_facts": _goal_facts(source_status, goal_id, goal_acceptance_contract) if evidence_ref is None else {},

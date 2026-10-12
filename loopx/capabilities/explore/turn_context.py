@@ -43,7 +43,10 @@ def explore_turn_context(
     *, registry_path: Path, runtime_root: Path, goal_id: str, agent_id: str,
     result_limit: int = 3, result_offset: int = 0,
     result_node: str | None = None, result_revision: str | None = None,
+    include_finding_digests: bool = False,
 ):
+    if type(include_finding_digests) is not bool:
+        raise ValueError("include_finding_digests must be an explicit boolean")
     goal, graph, gate = _policy(registry_path, goal_id)
     require_registered_agent_id(
         registry_path=registry_path, goal_id=goal_id, agent_id=agent_id
@@ -99,6 +102,7 @@ def explore_turn_context(
             "result_offset": result_offset,
             "result_node": result_node,
             "result_revision": result_revision,
+            **({"include_finding_digests": True} if include_finding_digests else {}),
         },
     )
 

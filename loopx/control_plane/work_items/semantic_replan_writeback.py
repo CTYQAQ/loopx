@@ -202,6 +202,7 @@ def qualify_replan_writeback(
     guard_scoped: bool = False,
     guard_semantic_replan_obligation_id: str | None = None,
     receipt_bound_guard_recorded_at: str | None = None,
+    replan_source_route: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Return the shared open obligation and the writeback's typed delta.
 
@@ -261,6 +262,9 @@ def qualify_replan_writeback(
         effective_turn_cadence=effective_turn_cadence,
     )
     status_payload = {
+        **(dict(replan_source_route or {})
+           if ((registry_goal or {}).get("execution_profile") or {}).get("stride_strategy", "off") != "off"
+           else {}),
         "run_history": {
             "goals": [
                 {
@@ -385,6 +389,7 @@ def enforce_open_replan_writeback(
     todo_fields: dict[str, Any] | None = None,
     external_progress_review: Mapping[str, Any] | None = None,
     effective_turn_cadence: dict[str, Any] | None = None,
+    replan_source_route: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Fail closed unless concrete typed evidence satisfies the selected replan.
 
@@ -411,6 +416,7 @@ def enforce_open_replan_writeback(
         guard_scoped=guard_scoped,
         guard_semantic_replan_obligation_id=guard_semantic_replan_obligation_id,
         receipt_bound_guard_recorded_at=receipt_bound_guard_recorded_at,
+        replan_source_route=replan_source_route,
     )
     if not obligation:
         if isinstance(semantic_delta, dict) and semantic_delta.get("accepted") is True:
@@ -469,6 +475,7 @@ def qualify_refresh_replan_writeback(
     classification: str,
     delivery_outcome: str | None,
     todo_fields: dict[str, Any] | None = None,
+    replan_source_route: Mapping[str, Any] | None = None,
 ) -> RefreshReplanQualification:
     """Qualify one refresh's replan delta and accountable settlement outcome."""
 
@@ -537,6 +544,7 @@ def qualify_refresh_replan_writeback(
             settlement_guard_semantic_replan_obligation_id
         ),
         receipt_bound_guard_recorded_at=receipt_bound_guard_recorded_at,
+        replan_source_route=replan_source_route,
     )
     if semantic_delta:
         effective_recorded = True
