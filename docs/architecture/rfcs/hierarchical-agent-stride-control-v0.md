@@ -574,8 +574,8 @@ slice size is relative to the next useful postcondition and decision risk.
 | Basis | Work slice | Mechanism distance | Evidence breadth |
 |---|---|---|---|
 | A supported method yields repeatable useful progress | Increase coherent work when decision risk permits | Retain unless a remaining gap justifies alternatives | Keep required checks; avoid redundant sweeps |
-| Current method leaves a substantive gap under applicable evidence | Start with a small discriminating pilot | Compare a larger departure with continuation | Narrow to the observation that distinguishes the routes |
-| Results conflict or expected gains are below uncertainty | Reduce work until the decision is clearer | Retain or compare alternatives without declaring refutation | Increase only a justified replication/uncertainty probe |
+| Current method leaves a substantive gap under applicable evidence | Choose a complete experiment that can distinguish routes | Compare a larger departure with continuation | Cover the evidence needed to distinguish and adopt routes |
+| Results conflict or expected gains are below uncertainty | Retain or enlarge coherent work needed to resolve uncertainty | Retain or compare alternatives without declaring refutation | Increase only a justified replication/uncertainty probe |
 | A larger departure produces attributable useful results | Expand the adopted method's next slice | Retain the useful departure, not novelty for its own sake | Expand validation needed for adoption |
 | Decision-relevant failure or an authority boundary appears | End/split the current slice through its owner | Reassess within the existing goal | Validate the specific failure; never widen authority |
 
@@ -599,31 +599,32 @@ numeric policy. The engineering design has four replaceable boundaries:
    cost to the next review. Proposal, adoption and utility remain separately
    replayable; missing feedback never becomes success.
 
-The present source slice implements the fourth boundary's recorded-decision
-input and the optional TypeScript strategy component `evidence_conditioned_v1`.
-The first version accepts a model-assessed evidence basis and deterministically
-derives three relative `grow | hold | shrink` coordinates. A versioned
-`agent_vision.stride_decision` carries that vector, the admitted obligation and
-observed context ids, and the next probe/adoption/cost commitments. Vision
-authoring validates the declared shape and vector before mutation. Enabled fresh
-Vision path reviews require the structured proposal; other source-specific exits
-remain unchanged. Existing
-Todo/Next Action admits work, and the next review returns the decision with
-actual observations. This is structured proposal control, not an automatic
-executor or a machine classifier of research merit. Its shared configuration
-vocabulary is `off | evidence_conditioned_v1`; unknown
-versions fail before mutation. The existing Goal review capability editor and
-CLI expose the version for a whole Goal override or inherited device default.
-`off` preserves ordinary evidence identity/selection and the five existing review
-instructions. Enablement adds the source-bound followthrough input and separate
-work-slice/mechanism-distance/validation-breadth advice. It has no automatic
-vector actuator. Use the existing bounded `path_delta` and task Next Action to
-record the first proposals; do not create another policy/state database. The explicit versioned attachment prevents parsing prose as a control vector.
-Future strategy versions preserve default-off parity, bounded fields and
-separate proposal/adoption authority; do not silently reinterpret old decisions. Promote each strategy after same-state ablations establish
-adoption and full-cost benefit; change one coordinate before studying their
-interaction. Six effective work Turns remains the existing review default,
-not the size of a Todo, experiment or mechanism change.
+The initial TypeScript component remains one selectable strategy,
+`evidence_conditioned_v1`, plus `off`. Its current implementation replaces fixed
+basis-to-vector mappings with three independently declared adjustments and
+bounded reasons. Basis records the Agent's interpretation; it cannot force a
+smaller slice. The next probe declares minimum evidence for a complete,
+interpretable experiment, its prediction, adoption criterion and full cost.
+
+The existing replan context returns the prior accepted decision and later work.
+A fresh proposal explicitly reviews actual adoption, new information and goal
+gain against that decision and delivered evidence, retaining unknowns. Co-enabled
+Explore contributes references into its existing scoped findings/planner and
+omitted-result reads; the proposal binds the revision and considered findings
+with an applicability/disposition reason. Typed validation rejects missing
+reviews, wrong decision/finding references and stale or unavailable bases.
+These are provenance and proposal-shape obligations, not automatic proof that
+research was executed or useful. Ordinary Todo/Next Action carries admitted work.
+
+The activation vocabulary and existing Goal/device editor stay unchanged; no
+second selectable strategy or policy database is added. Off retains ordinary
+projection/review semantics. Historical fixed-vector decisions remain read-only
+compatibility and frozen workers retain their exact source. Pin implementation
+revisions for comparisons; do not reinterpret old decisions. The policy seam
+can evolve when evidence warrants it, without maintaining speculative variants.
+Six effective work Turns remains the review cadence, not the size of a Todo,
+experiment or route change. Matched continuation must qualify actual adoption,
+target benefit and full cost before promotion or synergy claims.
 
 Exploratory iteration may run only strategy-enabled test arms and reuse historical
 baselines as descriptive references. A fresh concurrent baseline is not required

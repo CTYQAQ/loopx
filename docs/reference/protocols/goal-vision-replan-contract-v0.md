@@ -415,66 +415,79 @@ and captured input scope for comparisons.
 
 ### Structured stride control
 
-The opt-in component exposes `replan_action_packet.stride_control` through full,
-compact CLI and host envelopes. `evidence_conditioned_v1` consumes an explicitly
-**Agent-assessed** evidence basis and derives three coordinates in TypeScript:
+One opt-in strategy is selectable: `off | evidence_conditioned_v1`. The existing
+activation token remains stable; the initial implementation now replaces its
+fixed evidence-label mapping with **three independently justified coordinates**.
+Pin the exact source revision when comparing runs. Frozen workers retain their
+installed source; historical fixed-vector declarations remain readable without
+being reinterpreted as new decisions.
 
-| Evidence basis | Work slice | Route distance | Validation scope |
-|---|---|---|---|
-| `supported_progress` | grow | hold | hold |
-| `unexplained_gap` | shrink | grow | shrink |
-| `uncertain_evidence` | shrink | hold | grow |
-| `useful_new_route` | grow | hold | grow |
-| `decision_failure` | shrink | hold | shrink |
+The full, compact CLI and Host packets expose `replan_action_packet.stride_control`.
+Declare `agent_vision.stride_decision` with its schema, strategy, actual context
+and admitted obligation references, Agent-assessed `basis`, all three `axes`
+(`grow | hold | shrink`) and one `axis_reasons` entry per axis. Basis is an
+interpretation, not a classifier that selects a whole vector. An unexplained
+goal gap may justify a larger complete alternative implementation; uncertain
+results may justify a coherent experiment with wider validation. Neither forces
+smaller work. Required acceptance and authority never shrink with a coordinate.
 
-These are relative adjustments to the declared current method and next useful
-postcondition, not a universal novelty score, runtime budget or certified
-research verdict. Reducing validation scope cannot remove required acceptance
-checks. The model assesses the basis from applicable evidence; the strategy
-owns the vector. For example, an unexplained method gap calls for a small probe
-of a larger route departure, while conflicting evidence calls for more targeted
-validation without automatically changing route.
+`next_probe` records `scope`, `prediction`, `minimum_evidence`,
+`adoption_criterion` and `cost_bound`. Choose the smallest **complete experiment
+that can reach an interpretable conclusion**, including implementation and
+validation, rather than the smallest Todo. Preserve unfinished useful work and
+the best qualified artifact. Do not repeat a smaller probe merely because the
+previous decision was not adopted or a repeated observation added no information;
+resolve the execution gap or name the changed inputs/new uncertainty first.
 
-Declare a top-level `agent_vision.stride_decision` attachment with
-`schema_version=stride_decision_v1`, the selected `strategy_version`,
-`reference_context_id`, `reference_obligation_id`, `basis` and `next_probe`
-(`scope`, `prediction`, `adoption_criterion`, `cost_bound`). Copy the actual
-reference ids from the live control packet. `axes` may be omitted; the strategy
-fills them. A supplied vector must match the version/basis. Unknown fields,
-versions, mismatched vectors, missing probe commitments, private text and
-oversized text are rejected during Vision authoring, before writeback. Attachment
-text counts toward the existing 1,800-character Vision budget.
+When a prior accepted decision is delivered, `previous_review` references its
+exact `replan-decision-*` id and separately records:
 
-Declared proposals are structurally validated. Under enabled review the fresh Vision path exit requires this structured
-proposal; other source-specific successor, progress and terminal exits remain
-available. Missing proposals or a proposal referencing a different obligation
-cannot satisfy the fresh Vision path exit. The binding uses the admitted obligation, not the latest
-context hash: legitimate shared-pool changes must not invalidate the original
-Turn's settlement. The context id records the observed basis; it does not prove
-that the Agent's assessment or predicted gain is correct.
+- `adoption`: executed, partially executed, not executed or unknown;
+- `information_gain`: new evidence, repeated evidence or unknown;
+- `goal_gain`: improved, flat, regressed or unknown;
+- delivered evidence references and the bounded lesson for the next experiment.
 
-A valid schema/vector alone cannot discharge a review, execute a Todo, spend
-quota or certify usefulness. The evidence-linked Path Delta and ordinary Todo/
-Next Action carry the proposal into authorized work. History and compact Vision
-readback retain the normalized decision; the next review returns it with later
-observations. Actual adoption, execution, gains and costs still need their
-own evidence. Off/legacy inputs with no declared attachment preserve ordinary
-projection and settlement. Explicit attachments are validated data even when
-ordinary review is selected; they do not enable automatic strategy projection.
+A claim needs evidence references; unavailable evidence remains unknown. These
+are explicit Agent assessments, not host certification of scientific truth.
+The next review retains the assessment with the original decision and subsequent
+observations, so planning, execution, information and target benefit remain
+separately inspectable.
 
-可选策略通过完整/精简 CLI 和 Host packet 提供结构化控制契约。Agent 根据证据
-判断 basis，TypeScript 策略计算工作大小、路线距离、验证范围的 grow/hold/shrink。
-例如目标缺口仍无法解释时，采用“小实验＋较大路线变化”；证据冲突时，“小实验＋
-路线保持＋扩大针对性验证”。它不依据运行时长或分数文案自动分类。
+Co-enabled Explore Graph/Harness supplies a scoped `explore_basis`: references
+into its existing findings, selected work branches and omitted-result read path.
+It does not create another graph or rerank branches. `explore_review` binds the
+basis revision and records considered finding ids, disposition (`used`,
+`deferred`, `no_applicable_evidence`, `unavailable`) and reason. A scoped
+counterexample is not a universal route ban, planner selection is not execution,
+and co-enablement is not evidence of synergy. Foreign/undelivered references,
+stale revisions and declaring unavailable evidence as empty are rejected. A
+changed evidence basis requires reassessment under the original Turn identity,
+not another quota debit. Disabled Explore adds no Explore assessment duty.
 
-结构化提案绑定当轮义务及观察到的 context，说明下一探针的范围、预测、采用条件
-与成本边界。启用后的新 Vision 路线复盘必须带结构化提案；其他 typed progress、successor
-和 terminal 出口保留。机器校验版本、向量、字段界限和来源绑定，沿用既有 Vision
-文本预算；
-只提交一个向量不能完成重规划。正常 Todo/Next Action 负责接续，下轮回读决定与
-真实观测。缩小验证范围不撤销硬验收；格式有效不证明实际采用或收益。关闭模式
-不自动投影策略；显式声明的附件仍须通过数据校验。策略建议与机器校验分别命名，
-执行权限及结算归属不扩大。
+The typed owner validates shape, references and declared provenance before the
+fresh Vision path exit; other source-specific progress, successor and terminal
+exits remain unchanged. All attachment text counts toward the existing
+1,800-character Vision budget. The live packet exposes field limits. Legacy
+recorded declarations and old explicit off-mode attachments retain transport compatibility;
+a newly enabled fresh-path proposal must provide
+independent axes/reasons and minimum evidence.
+
+The proposal does not execute or split a Todo, launch a child, submit a candidate,
+spend quota or certify gain. Ordinary Todo/Next Action and existing admission
+owners govern work. `off` preserves ordinary projection and review semantics.
+Evaluate actual artifact adoption, task outcomes and complete marginal cost
+before calling this strategy beneficial.
+
+**中文：** 初版只保留一套可选策略和总开关，沿用现有配置值，比较时固定确切源码。
+证据标签不再固定生成整组向量；工作大小、路线距离、验证范围分别声明调整和理由。
+工作单位是能产生可解释结论的完整实验：新路线可能需要更大实现，不稳定证据可能
+需要更多验证，两者都不自动要求缩小工作。下一实验须说明最低证据、预测、采用
+条件与完整成本。上轮复盘分别判断实际采用、新信息与目标收益，缺证据保持未知；
+不反复缩小未被采用或没有新信息的探针。Explore 开启时，绑定既有图谱/规划的证据
+revision 与具体 finding，说明采用、暂缓、无适用证据或读取不可用及理由，保留范围、
+反例和省略项的读取路径；不开新图或第二个 planner。错源、错引用、过期依据拒绝，
+按原 Turn 身份重新审视；不开额外执行权或配额。机器校验提案结构与引用，不能证明
+模型判断正确或已提升收益。历史固定向量只保留读取兼容，不增加可选策略版本。
 
 ### Path Delta
 
