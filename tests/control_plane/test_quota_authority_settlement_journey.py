@@ -265,7 +265,8 @@ def test_migrated_hard_lease_can_write_settle_retry_and_continue(tmp_path, provi
     assert code == 0 and migrated["status"] == "applied", migrated
     assert Path(migrated["backup_path"]).is_file()
     assert migrated["execution_authority_granted"] is False
-    path.unlink()  # The migrated journey cannot use the old Markdown writer.
+    goal_context = path.read_text().split("## Agent Todo")[0]
+    path.write_text(goal_context + "## Agent Todo\n\n")
 
     code, guard = _guard(project, runtime, registry)
     assert code == 0 and guard["decision"] == "run", guard
