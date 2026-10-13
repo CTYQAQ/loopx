@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import loopx.cli_commands.quota as quota_command  # noqa: E402
 from loopx.quota import record_quota_monitor_poll  # noqa: E402
+from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted  # noqa: E402
 from loopx.rollout_event_log import load_rollout_events, rollout_event_log_path  # noqa: E402
 from loopx.control_plane.quota.monitor_poll import (  # noqa: E402
     build_quota_monitor_poll_event,
@@ -106,6 +107,7 @@ def write_fixture(
     other_no_change_count: int = 1,
     monitor_required_capabilities: tuple[str, ...] = (),
     monitor_task_repository: str | None = None,
+    provider: str = "file",
 ) -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
@@ -238,6 +240,11 @@ def write_fixture(
         registered_agents=[AGENT_ID],
         quota_allowed_slots=None,
     )
+    # Consumer coverage uses a disposable real canonical authority. Legacy
+    # Markdown is only synthetic input, never the normal write owner.
+    from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture
+
+    initialize_canonical_registry_fixture(registry_path, provider=provider)
     return registry_path, state_file
 
 
@@ -303,6 +310,16 @@ def find_todo(state_file: Path, todo_id: str) -> dict:
     raise AssertionError(f"missing todo {todo_id}")
 
 
+def assert_provider_monitor_state(registry_path: Path, writeback: dict) -> None:
+    source = read_canonical_todos_if_promoted(
+        runtime_root=runtime_root_from_registry(registry_path), goal_id=GOAL_ID)
+    assert source is not None
+    assert source["legacy_fallback_used"] is False, source
+    monitor = next(row for row in source["todos"] if row["todo_id"] == writeback["todo_id"])
+    assert monitor["result_hash"] == writeback["result_hash"], monitor
+    assert int(monitor["consecutive_no_change"]) == writeback["consecutive_no_change"], monitor
+
+
 def run_index_records(registry_path: Path) -> list[dict]:
     runtime = runtime_root_from_registry(registry_path)
     assert runtime is not None, registry_path
@@ -361,6 +378,7 @@ def assert_unchanged_writeback() -> None:
         assert "turn_instance_id" not in payload, payload
         assert "replayed" not in payload, payload
         writeback = payload["todo_writeback"]
+        assert_provider_monitor_state(registry_path, writeback)
         assert writeback["todo_id"] == TODO_ID, payload
         assert writeback["consecutive_no_change"] == 5, payload
         item = find_todo(state_file, TODO_ID)
@@ -563,6 +581,7 @@ def assert_material_transition_followup() -> None:
         assert payload["ok"] is True, payload
         assert payload["material_change"] is True, payload
         writeback = payload["todo_writeback"]
+        assert_provider_monitor_state(registry_path, writeback)
         assert writeback["consecutive_no_change"] == 0, payload
         assert writeback["next_todos"], payload
         monitor = find_todo(state_file, TODO_ID)
@@ -1172,6 +1191,7 @@ def assert_writeback_helper_preview_contract() -> None:
             runtime_root=runtime_root_from_registry(registry_path),
             goal_id=GOAL_ID,
             generated_at=generated_at,
+            agent_id=AGENT_ID,
             execute=False,
             todo_id=TODO_ID,
             result_hash="old",

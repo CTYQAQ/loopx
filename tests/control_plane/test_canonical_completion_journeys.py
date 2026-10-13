@@ -144,3 +144,25 @@ def test_imported_archive_complete_journey(tmp_path, monkeypatch, provider):
     root = Path(__file__).resolve().parents[2]
     archive = runpy.run_path(str(root / "examples/control_plane/todo-archive-completed-smoke.py"))
     assert archive["main"](provider=provider) == 0
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_canonical_monitor_writeback_journey(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    monitor = runpy.run_path(str(root / "examples/control_plane/monitor-poll-writeback-smoke.py"))
+    original = monitor["write_fixture"]
+
+    def write_fixture(path, **options):
+        return original(path, provider=provider, **options)
+
+    monkeypatch.setitem(monitor["main"].__globals__, "write_fixture", write_fixture)
+    assert monitor["main"]() == 0
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_imported_durability_journey(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    durability = runpy.run_path(str(root / "examples/control_plane/todo-durability-fixture-smoke.py"))
+    assert durability["main"](provider=provider) == 0

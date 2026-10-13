@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted  # noqa: E402
 from loopx.status import parse_active_state_todos  # noqa: E402
 from loopx.rollout_event_log import (  # noqa: E402
     append_rollout_event,
@@ -49,16 +50,18 @@ def run_cli(*args: str, registry_path: Path, runtime: Path) -> dict:
             *args,
         ],
         cwd=REPO_ROOT,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
 
 
 def state_text() -> str:
     archived_lines = "".join(
         f"- [x] [P1] Archived completed work item {index}.\n"
+        f"  <!-- loopx:todo todo_id=todo_archive_{index} role=agent status=done task_class=advancement_task -->\n"
         for index in range(1, ARCHIVED_DONE_TODOS + 1)
     )
     return (
@@ -83,7 +86,8 @@ def state_text() -> str:
     )
 
 
-def write_fixture(root: Path) -> tuple[Path, Path]:
+def write_fixture(root: Path, *, provider: str = "file") -> tuple[Path, Path]:
+    root = root.resolve()
     project = root / "project"
     runtime = root / "runtime"
     state_file = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
@@ -114,6 +118,10 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
                             "kind": "harness_self_improvement",
                             "status": "connected-read-only",
                         },
+                        "coordination": {"agent_model": "peer_v1", "registered_agents": [
+                            "codex-product-capability", "codex-side-bypass",
+                            "codex-reviewer", "codex-builder",
+                        ]},
                         "authority_sources": [],
                         "quota": {
                             "compute": 1.0,
@@ -129,6 +137,20 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
         + "\n",
         encoding="utf-8",
     )
+    # Import the full cold source, including all historical archive rows.
+    saved = run_cli("backup-state", "--project", str(project),
+        "--output-dir", str(root / "backups"), "--backup-id", "durability-source",
+        "--current-project-only", "--no-skills", "--no-automations", "--execute",
+        registry_path=registry_path, runtime=runtime)
+    prepared = run_cli("coordination-shadow", "prepare-import", "--goal-id", GOAL_ID,
+        "--operation-id", "durability-import", "--backup-manifest", saved["manifest_path"],
+        "--provider", provider, "--target-handoff-mode", "soft_claim",
+        registry_path=registry_path, runtime=runtime)["cold_import"]
+    assert prepared["status"] == "prepared", prepared
+    applied = run_cli("coordination-shadow", "apply-import", "--goal-id", GOAL_ID,
+        "--operation-id", "durability-import", "--plan-sha256", prepared["plan_sha256"],
+        "--writers-stopped", "--execute", registry_path=registry_path, runtime=runtime)["cold_import"]
+    assert applied["status"] == "applied", applied
     return registry_path, runtime
 
 
@@ -273,13 +295,17 @@ def assert_pr_resume_repository_binding() -> None:
     ], ambiguous
 
 
-def main() -> int:
+def main(*, provider: str = "file") -> int:
     assert_pr_resume_repository_binding()
     parsed = parse_active_state_todos(state_text(), rollout_events=[pr_merged_event()])
     assert_parseable_agent_todos(parsed["agent_todos"])
 
     with tempfile.TemporaryDirectory(prefix="loopx-todo-durability-") as tmp:
-        registry_path, runtime = write_fixture(Path(tmp))
+        registry_path, runtime = write_fixture(Path(tmp), provider=provider)
+        source = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL_ID)
+        assert source is not None
+        archived = {row["todo_id"]: row for row in source["todos"] if row.get("archive_state") == "archive"}
+        assert set(archived) == {f"todo_archive_{index}" for index in range(1, ARCHIVED_DONE_TODOS + 1)}
         status_payload = run_cli("status", registry_path=registry_path, runtime=runtime)
         item = attention_item(status_payload)
 
@@ -324,11 +350,17 @@ def main() -> int:
         assert indexed_handoff["handoff_note"]["to_agent"] == "codex-reviewer", indexed_handoff
 
         guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
-        assert guard["should_run"] is True, guard
+        # A registered multi-Agent Goal cannot execute an anonymous guard.
+        assert guard["decision"] == "automation_prompt_upgrade", guard
+        assert guard["should_run"] is False, guard
         assert_parseable_agent_todos(guard["agent_todo_summary"], hot_path=True)
         assert "completed_todo_archive_warning" not in guard, guard
 
-        first_todo_id = guard["agent_todo_summary"]["first_executable_items"][0]["todo_id"]
+        scoped_guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID,
+            "--agent-id", "codex-product-capability", "--codex-app",
+            registry_path=registry_path, runtime=runtime)
+        assert scoped_guard["should_run"] is True, scoped_guard
+        first_todo_id = scoped_guard["agent_todo_summary"]["first_executable_items"][0]["todo_id"]
         lifecycle_result = run_cli(
             "todo",
             "complete",
@@ -338,6 +370,8 @@ def main() -> int:
             "agent",
             "--todo-id",
             first_todo_id,
+            "--agent-id",
+            "codex-product-capability",
             "--evidence",
             "fixture completed",
             "--next-agent-todo",
@@ -361,6 +395,10 @@ def main() -> int:
         assert post_agent_todos["first_open_items"][0]["priority"] == "P1", post_agent_todos
         assert post_agent_todos["first_open_items"][0]["todo_id"] == next_todo["todo_id"], post_agent_todos
         assert post_agent_todos["first_open_items"][0]["action_kind"] == "fixture_follow_up", post_agent_todos
+
+        after = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL_ID)
+        assert after is not None
+        assert {row["todo_id"]: row for row in after["todos"] if row.get("archive_state") == "archive"} == archived
 
     print("todo-durability-fixture-smoke ok")
     return 0
