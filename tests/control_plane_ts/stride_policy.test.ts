@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {normalizeStrideDecision, strideControlContract} from "../../loopx/control_plane/work_items/stride_policy.ts";
+import {normalizeStrideDecision, strideControlContract, stridePlanningGuidance} from "../../loopx/control_plane/work_items/stride_policy.ts";
 import {buildVisionCheckpoint, VISION_REFRESH_REQUEST_SCHEMA} from "../../loopx/control_plane/goals/vision_checkpoint.ts";
 import {projectReplanSemantics} from "../../loopx/control_plane/work_items/replan_semantics.ts";
 
@@ -188,4 +188,45 @@ test("independent v1 records preserve their values but cannot satisfy a current 
   const prepared = buildVisionCheckpoint({...request, agent_vision_packet: {...packet, stride_decision: withReviews}});
   const budget = (prepared.agent_vision as Record<string, unknown>).vision_budget as Record<string, unknown>;
   assert.ok(Number(budget.total_usage) < 1800);
+});
+
+// The shipped syntax example must be authorable; off does not gain this prompt.
+test("ordinary-work guidance and its example retain off isolation and bounded authoring", () => {
+  assert.deepEqual(stridePlanningGuidance("off"), []);
+  const guidance = stridePlanningGuidance("evidence_conditioned_v1").join(" ");
+  assert.match(guidance, /coherent accepted deliverable/);
+  assert.match(guidance, /Do not bundle independent commitments/);
+  const contract = strideControlContract({stride_strategy: "evidence_conditioned_v1", context_id: contextId}, proposal.reference_obligation_id)!;
+  const example = contract.minimal_example as Record<string, unknown>;
+  assert.equal(normalizeStrideDecision(example)[0]!.action, "verify");
+  const prepared = buildVisionCheckpoint({...request, agent_vision_packet: {...packet, stride_decision: example}});
+  assert.ok(Number(((prepared.agent_vision as Record<string, unknown>).vision_budget as Record<string, unknown>).total_usage) < 1800);
+});
+
+test("all decision codecs reject non-string reference identities without coercion", () => {
+  const {minimum_evidence: _, ...probe} = proposal.next_probe;
+  const fixed = {...proposal, schema_version: "stride_decision_v1", next_probe: probe};
+  delete (fixed as Record<string, unknown>).action;
+  delete (fixed as Record<string, unknown>).axes;
+  const independent = {...proposal, schema_version: "stride_decision_v1",
+    axes: {work_slice: "grow", route_distance: "hold", validation_scope: "grow"},
+    axis_reasons: {work_slice: "Complete work.", route_distance: "Keep method.", validation_scope: "Check outcomes."}};
+  delete (independent as Record<string, unknown>).action;
+  for (const base of [proposal, fixed, independent]) {
+    for (const field of ["reference_context_id", "reference_obligation_id"] as const) {
+      for (const malformed of [[base[field]], {value: base[field]}]) {
+        assert.throws(() => normalizeStrideDecision({...base, [field]: malformed}), /string/);
+      }
+    }
+  }
+  for (const axes of [null, false, {work_slice: "shrink", route_distance: "grow", validation_scope: "shrink", extra: "hold"}]) {
+    assert.throws(() => normalizeStrideDecision({...fixed, axes}));
+  }
+  const previous = {reference_decision_ref: "replan-decision-" + "c".repeat(24), adoption: "unknown",
+    information_gain: "unknown", goal_gain: "unknown", evidence_refs: [], lesson: "Unknown."};
+  const explore = {revision: "d".repeat(64), disposition: "deferred", considered_refs: [], reason: "Scoped later."};
+  for (const wrap of [(v: string) => [v], (v: string) => ({value: v})]) {
+    assert.throws(() => normalizeStrideDecision({...proposal, previous_review: {...previous, reference_decision_ref: wrap(previous.reference_decision_ref)}}), /string/);
+    assert.throws(() => normalizeStrideDecision({...proposal, explore_review: {...explore, revision: wrap(explore.revision)}}), /string/);
+  }
 });

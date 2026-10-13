@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -68,7 +70,10 @@ def test_managed_turn_counts_advancement_without_monitor_backlog(
 
 
 @pytest.mark.parametrize("explore_enabled", [False, True])
-def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path, explore_enabled: bool) -> None:
+@pytest.mark.parametrize("action", ["switch", "grow"])
+def test_projected_vision_replan_settles_without_a_meta_successor(
+    tmp_path: Path, explore_enabled: bool, action: str,
+) -> None:
     project, runtime, registry = _write_fixture(tmp_path)
     _configure_selected_todo_replan_fixture(project, registry)
     # This independently declared journey needs review → work → review: three
@@ -201,6 +206,28 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     refresh = refresh.replace("<path-to-evidence-linked-goal-vision-replan-contract-v0.json>", str(decision))
     # Opt-in control is a real validation rule, not only extra prompt text.
     valid_packet = json.loads(decision.read_text())
+    if action == "grow":
+        # Ordinary maintenance: one accepted slice includes implementation,
+        # compatibility, independent validation and readback, on the same Todo.
+        valid_packet["stride_decision"].update(
+            basis="supported_progress", action="grow",
+            axes={
+                "work_slice": {"plan": "Deliver name normalization with compatibility and failure checks.",
+                               "reason": "One coherent repair avoids separate implementation and validation reviews."},
+                "route_distance": {"plan": "Keep the existing normalizer and accepted input contract.",
+                                   "reason": "No evidence calls for a new architecture."},
+                "validation_scope": {"plan": "Check normalized output, legacy import and invalid input.",
+                                     "reason": "Scope grows without removing compatibility or failure coverage."},
+            },
+            next_probe={
+                "scope": "Complete the normalizer repair and its caller checks.",
+                "minimum_evidence": "Passing behavior, compatibility and rejection checks with artifact readback.",
+                "prediction": "One admitted work slice delivers the repair and its validation.",
+                "adoption_criterion": "Valid names normalize; invalid names reject; legacy caller remains usable.",
+                "cost_bound": "One related module and compatibility caller; no independent commitments.",
+            },
+        )
+        valid_packet["path_delta"]["changed"] = ["Deliver the repair and validation together"]
     if explore_enabled:
         basis = control["explore_basis"]
         assert basis["harness_enabled"] and basis["graph_enabled"]
@@ -242,8 +269,8 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     assert identity["turn_instance_id"] == TURN_ID
     persisted = json.loads(Path(refreshed["json_path"]).read_text())
     assert persisted["autonomous_replan_ack"] == ack
-    assert persisted["agent_vision"]["stride_decision"]["action"] == "switch"
-    assert persisted["agent_vision"]["stride_decision"]["axes"]["route_distance"]["plan"] == "Replace greedy selection with joint search."
+    assert persisted["agent_vision"]["stride_decision"]["action"] == action
+    assert persisted["agent_vision"]["stride_decision"] == valid_packet["stride_decision"]
     from loopx.control_plane.goals.goal_vision import compact_goal_vision_packet
     assert compact_goal_vision_packet(persisted["agent_vision"])["stride_decision"] == persisted["agent_vision"]["stride_decision"]
     assert _spend_run_count(runtime) == 0
@@ -262,16 +289,39 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     # probe. The next review may observe that work, but cannot infer utility.
     _bind_selected_replan_guard(registry, runtime, project, "turn-after-chain-review")
     probe = project / "bounded-probe.txt"
-    probe.write_text("Alternative mechanism: isolated synthetic execution.\n")
-    assert probe.read_text().startswith("Alternative mechanism:")
+    if action == "grow":
+        # Execute actual synthetic caller behavior, rather than treating a
+        # proposal or a written receipt as evidence of delivered work.
+        (project / "names.py").write_text(
+            "def normalize(value):\n"
+            "    if not isinstance(value, str) or not value.strip():\n"
+            "        raise ValueError('nonempty name required')\n"
+            "    return value.strip().casefold()\n"
+        )
+        (project / "legacy_names.py").write_text("from names import normalize\n")
+        checked = subprocess.run([sys.executable, "-c",
+            "from names import normalize; from legacy_names import normalize as legacy\n"
+            "assert normalize('  ALPHA  ') == 'alpha'\n"
+            "assert legacy('Beta') == 'beta'\n"
+            "for value in (None, '', '   ', 12):\n"
+            "    try: normalize(value)\n"
+            "    except ValueError: pass\n"
+            "    else: raise AssertionError('invalid input accepted')\n"
+            "print('behavior, compatibility and rejection checks passed')"],
+            cwd=project, capture_output=True, text=True, check=True)
+        probe.write_text(checked.stdout)
+        assert probe.read_text() == "behavior, compatibility and rejection checks passed\n"
+    else:
+        probe.write_text("Alternative mechanism: isolated synthetic execution.\n")
+        assert probe.read_text().startswith("Alternative mechanism:")
     call("refresh-state", "--goal-id", GOAL_ID, "--agent-id", AGENT_ID,
          "--todo-id", SELECTED_REPLAN_TODO_ID, "--turn-instance-id", "turn-after-chain-review",
          "--classification", "bounded_probe", "--delivery-batch-scale", "single_surface",
          "--delivery-outcome", "outcome_progress", "--delivery-boundary", "in_flight_continuation",
-         "--next-action", "Compare the executed alternative against the accepted requirement.",
-         "--progress-result-class", "advanced", "--progress-surface-id", "surface-alternative",
-         "--progress-probe-kind", "controlled-mechanism-comparison",
-         "--progress-evidence-id", "evidence:executed-alternative-probe")
+         "--next-action", "Review the delivered artifact and checks against the accepted requirement.",
+         "--progress-result-class", "advanced", "--progress-surface-id", "surface-delivered-work",
+         "--progress-probe-kind", "accepted-work-validation",
+         "--progress-evidence-id", "evidence:executed-work")
     call("quota", "spend-slot", "--goal-id", GOAL_ID, "--agent-id", AGENT_ID,
          "--todo-id", SELECTED_REPLAN_TODO_ID, "--turn-instance-id", "turn-after-chain-review",
          "--slots", "1", "--source", "heartbeat", "--execute")
@@ -284,7 +334,7 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     assert rearmed["rearmed_after_obligation_id"] == ack["semantic_delta"]["obligation_id"]
     follow = rearmed["replan_context"]["decision_followthrough"]
     assert follow["previous_decision"]["turn_instance_id"] == TURN_ID
-    assert follow["previous_decision"]["path_delta"]["changed"] == ["Proceed with the first validation slice"]
+    assert follow["previous_decision"]["path_delta"]["changed"] == valid_packet["path_delta"]["changed"]
     assert follow["previous_decision"]["stride_decision"] == persisted["agent_vision"]["stride_decision"]
     assert follow["recorded_progress_count"] == 1
     assert follow["execution_and_goal_gain"] == "unknown"
@@ -306,8 +356,8 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
         reference_context_id=next_control["reference_context_id"],
         reference_obligation_id=next_control["reference_obligation_id"],
     )
-    second["path_delta"]["observed_reality"] = "The admitted alternative produced an artifact and new scoped evidence; goal gain is unknown."
-    second["path_delta"]["evidence_refs"] = ["evidence:executed-alternative-probe"]
+    second["path_delta"]["observed_reality"] = "Admitted work produced an artifact and scoped checks; model utility and net efficiency remain unknown."
+    second["path_delta"]["evidence_refs"] = ["evidence:executed-work"]
     if explore_enabled:
         second["stride_decision"]["explore_review"]["revision"] = next_control["explore_basis"]["revision"]
     second_path = tmp_path / "second-decision.json"
@@ -321,8 +371,8 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     second["stride_decision"]["previous_review"] = {
         "reference_decision_ref": next_control["previous_decision_ref"],
         "adoption": "executed", "information_gain": "new_evidence", "goal_gain": "unknown",
-        "evidence_refs": ["evidence:executed-alternative-probe"],
-        "lesson": "The prior experiment ran; distinguish its target value before another route change.",
+        "evidence_refs": ["evidence:executed-work"],
+        "lesson": "The prior work ran; assess target value and full cost before changing scope.",
     }
     second_path.write_text(json.dumps(second))
     reviewed = call(*_projected_cli_args(next_refresh, turn_instance_id=next_turn))
