@@ -199,50 +199,6 @@ def test_capture_root_allocates_private_distinct_children(tmp_path):
         prepare_decision_capture(request(None, decision_output_root=tmp_path, turn_instance_id=None))
 
 
-def test_capture_root_accepts_guided_turn_before_identity_is_minted(tmp_path):
-    target = prepare_decision_capture(request(
-        None,
-        decision_output_root=tmp_path,
-        turn_instance_id=None,
-        begin_turn=True,
-    ))
-
-    assert target is not None
-    assert target.parent == tmp_path
-
-
-def test_guided_turn_captures_the_minted_identity(tmp_path):
-    project, runtime, registry = _write_fixture(tmp_path)
-    capture_root = tmp_path / "captures"
-    capture_root.mkdir()
-
-    code, payload = _run_cli(
-        registry,
-        runtime,
-        "quota",
-        "should-run",
-        "--goal-id",
-        GOAL_ID,
-        "--agent-id",
-        AGENT_ID,
-        "--runtime-profile",
-        "codex_app_ssh_goal",
-        "--begin-turn",
-        "--decision-output-root",
-        str(capture_root),
-        "--scan-path",
-        str(project),
-    )
-
-    assert code == 0, payload
-    saved = list(capture_root.glob("decision-*/decision.json"))
-    assert len(saved) == 1
-    full = json.loads(saved[0].read_text(encoding="utf-8"))
-    minted = full["heartbeat_receipt"]["turn_instance_id"]
-    assert minted.startswith("guided-start:")
-    assert payload["heartbeat_receipt"]["turn_instance_id"] == minted
-
-
 @pytest.mark.skipif(os.name != 'posix', reason='Unix local Host transport')
 @pytest.mark.parametrize('release', ['exact', 'wrong_digest', 'disconnect', 'changed_capture'])
 def test_real_cli_handoff_preserves_original_receipt(tmp_path, release):
@@ -343,3 +299,47 @@ def test_handoff_rejects_shared_or_symlink_endpoint_and_preserves_selection(tmp_
             words = shlex.split(payload['interaction_contract']['cli_channel']['selection_command']['command_args_template'])
             assert words[-4:] == ['--decision-output-root', str(tmp_path), '--decision-handoff-socket', str(endpoint)]
             assert '--turn-envelope' not in words  # Independent from display mode.
+
+
+def test_capture_root_accepts_guided_turn_before_identity_is_minted(tmp_path):
+    target = prepare_decision_capture(request(
+        None,
+        decision_output_root=tmp_path,
+        turn_instance_id=None,
+        begin_turn=True,
+    ))
+
+    assert target is not None
+    assert target.parent == tmp_path
+
+
+def test_guided_turn_captures_the_minted_identity(tmp_path):
+    project, runtime, registry = _write_fixture(tmp_path)
+    capture_root = tmp_path / "captures"
+    capture_root.mkdir()
+
+    code, payload = _run_cli(
+        registry,
+        runtime,
+        "quota",
+        "should-run",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        AGENT_ID,
+        "--runtime-profile",
+        "codex_app_ssh_goal",
+        "--begin-turn",
+        "--decision-output-root",
+        str(capture_root),
+        "--scan-path",
+        str(project),
+    )
+
+    assert code == 0, payload
+    saved = list(capture_root.glob("decision-*/decision.json"))
+    assert len(saved) == 1
+    full = json.loads(saved[0].read_text(encoding="utf-8"))
+    minted = full["heartbeat_receipt"]["turn_instance_id"]
+    assert minted.startswith("guided-start:")
+    assert payload["heartbeat_receipt"]["turn_instance_id"] == minted
