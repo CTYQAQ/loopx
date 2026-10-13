@@ -420,6 +420,10 @@ Declare authorized workspace code/research files, effective configuration and
 installed source/profile pins as non-overlapping components. The native and
 opportunity participants do not imply that omitted state was saved. Every source
 remains private; inspect the verified inventory before qualifying a complete point.
+Automatic native-store participants allocate unused artifact IDs without changing
+caller IDs. The sealed `native_session.store_members` mapping binds those IDs to
+the existing allowlisted native filenames. Reconstruction accepts earlier fixed-ID
+artifacts, rejects duplicate/undeclared mappings and keeps source-history checks.
 
 The current Host hook cannot capture a new replan created **inside an already
 running model wake** before that decision. Those boundaries still need a qualified
@@ -532,6 +536,9 @@ runtime receipt 绑定摘要；programmatic adapter 也可指定已放入 guest 
 失败后，修复声明不得把后来的状态补记成同一原点。评测参与者使用上文明确的
 公开 SForge fork/pin 和 Python 3.13；普通 upstream 安装缺少该 seam 时明确
 拒绝。Codex 原生会话的真实分页/compaction 与隔离 fork 须单独验证。
+自动原生存储参与者分配未占用的 artifact ID，保留调用者原 ID；封存的
+`native_session.store_members` 绑定这些 ID 与既有允许的原生文件名。恢复仍
+支持旧固定 ID，拒绝重复或未声明的映射，并保留源历史一致性校验。
 
 显式 `"loopx_state": true` 复用现有 state-backup inventory，捕获单 Goal 试验的
 注册状态、项目研究状态、runtime journal 和 registry；File/SQLite authority

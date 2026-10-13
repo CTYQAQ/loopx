@@ -171,14 +171,22 @@ def _fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: st
                                       timeout=max(.1, deadline - time.monotonic())).strip()
     if version != native["host_version"]:
         raise ValueError("native checkpoint Host version differs")
-    names = set()
+    names, component_ids = set(), set()
+    declared_ids = {entry["id"] for entry in manifest["components"]}
     for member in native["store_members"]:
-        name = member["name"]
-        if (name in names or member["id"] != "native_" + name.replace(".", "_") or
+        if not isinstance(member, dict) or set(member) != {"id", "name"}:
+            raise ValueError("native checkpoint member inventory is invalid")
+        name, component_id = member["name"], member["id"]
+        # The sealed manifest binds allocated IDs to bytes; provider names
+        # still select only the existing allowlisted native-store destinations.
+        # Historical fixed IDs remain valid without reserving caller names.
+        if (not isinstance(name, str) or not isinstance(component_id, str) or
+                name in names or component_id in component_ids or component_id not in declared_ids or
                 not (name in {"sessions", "archived_sessions", "session_index.jsonl"} or
                      re.fullmatch(r"(?:state|thread_history)_[0-9]+\.sqlite", name))):
             raise ValueError("native checkpoint member inventory is invalid")
         names.add(name)
+        component_ids.add(component_id)
     basis = {"checkpoint_sha256": expected_sha256, "source_session_id": native["session_id"],
         "completed_turn_id": native["completed_turn_id"], "config_sha256": native["config_sha256"],
         "destination_goal_id": env.get("LOOPX_GOAL_ID"), "destination_agent_id": env.get("LOOPX_AGENT_ID"),

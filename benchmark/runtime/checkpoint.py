@@ -399,8 +399,17 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
             metadata["session"] = {**session, "session_profile_digest": source_wake.digest}
             native = native_session_checkpoint(env, session.get("session_id", ""),
                                                timeout=max(.1, deadline - time.time()))
-            components = [*components, *native["components"]]
-            metadata["native_session"] = native["metadata"]
+            # Native names identify provider files, not reserved artifact IDs.
+            # Allocate in the same namespace as caller and other participants;
+            # retain the provider observation unchanged for the stability reread.
+            native_ids = {}
+            for entry in native["components"]:
+                component_id = _participant_id(components, entry["id"])
+                native_ids[entry["id"]] = component_id
+                components = [*components, {**entry, "id": component_id}]
+            metadata["native_session"] = {**native["metadata"], "store_members": [
+                {**member, "id": native_ids[member["id"]]}
+                for member in native["metadata"]["store_members"]]}
         probe = effect_runtime_result("runtime.checkpoint_artifacts", {
             "action": "probe", "components": components,
             "deadline_epoch_ms": deadline * 1000,

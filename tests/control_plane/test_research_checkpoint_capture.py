@@ -291,6 +291,64 @@ def test_real_native_cursor_must_match_sealed_store_basis(tmp_path, monkeypatch,
             assert (destination / "components" / caller_id).read_bytes() == candidate.read_bytes()
             assert receipt["checkpoint"]["research_point_qualified"] is False
 
+    if not source_moves and caller_id.startswith("native_"):
+        # The source app-server is now closed. Reconstruct through the actual
+        # provider fork entry, retaining the original home for byte comparison.
+        # Fixed paths are swapped in this fixture; this is not guest isolation.
+        import shutil
+        from benchmark.runtime.native_checkpoint import fork_native_checkpoint
+
+        native = manifest["point_metadata"]["native_session"]
+        assert all(member["id"] != caller_id for member in native["store_members"])
+        config = tmp_path / "native-config.toml"
+        home = Path(env["CODEX_HOME"])
+        config.write_bytes((home / "config.toml").read_bytes())
+        retained_home = tmp_path / "retained-native-home"
+        shutil.move(home, retained_home)
+        def source_bytes():
+            return {p.relative_to(retained_home).as_posix(): p.read_bytes()
+                    for p in retained_home.rglob("*") if p.is_file()}
+        before = source_bytes()
+        if caller_id == "native_sessions":
+            import copy
+            # Even a correctly sealed artifact cannot select undeclared bytes,
+            # alias a participant, duplicate a destination or import credentials.
+            for fault in ("undeclared", "duplicate_id", "duplicate_name", "credential"):
+                bad_metadata = copy.deepcopy(manifest["point_metadata"])
+                members = bad_metadata["native_session"]["store_members"]
+                if fault == "undeclared":
+                    members[0]["id"] = "not_declared"
+                elif fault == "duplicate_id":
+                    members[1]["id"] = members[0]["id"]
+                elif fault == "duplicate_name":
+                    members[1]["name"] = members[0]["name"]
+                else:
+                    members[0]["name"] = "auth.json"
+                bad_unit = tmp_path / fault
+                entries = [{"id": item["id"], "source_path": str(destination / "components" / item["id"])}
+                           for item in manifest["components"]]
+                witness = effect_runtime_result("runtime.checkpoint_artifacts", {"action": "probe", "components": entries})
+                bad = effect_runtime_result("runtime.checkpoint_artifacts", {
+                    "action": "capture", "destination": str(bad_unit), "components": entries,
+                    "point_metadata": bad_metadata, "expected_source_sha256": witness["source_sha256"]}, retry_safe=False)
+                with pytest.raises(ValueError, match="member inventory is invalid"):
+                    fork_native_checkpoint(env, bad_unit, bad["sha256"], config, timeout=30)
+                assert not home.exists() and len(calls) == 1
+        fork = fork_native_checkpoint(env, destination, receipt["checkpoint"]["sha256"], config, timeout=30)
+        assert fork["history_verified"] and fork["session_id"] != source
+        assert fork["visible_history_sha256"] == native["visible_history_sha256"]
+        assert source_bytes() == before and len(calls) == 1
+        assert (destination / "components" / caller_id).read_bytes() == candidate.read_bytes()
+
+
+@pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN"), reason="Requires a real native Host")
+@pytest.mark.parametrize("caller_id", ["native_state_5_sqlite", "native_sessions"])
+@pytest.mark.parametrize("source_moves", [False, True])
+def test_native_store_participants_preserve_caller_ids_and_source_witness(
+        tmp_path, monkeypatch, caller_id, source_moves):
+    test_real_native_cursor_must_match_sealed_store_basis(
+        tmp_path, monkeypatch, source_moves, "probe", caller_id=caller_id)
+
 
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN"), reason="Requires a real native Host")
 def test_native_binding_participant_preserves_legal_caller_id(tmp_path, monkeypatch):
