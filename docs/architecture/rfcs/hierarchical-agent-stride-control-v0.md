@@ -902,17 +902,18 @@ Model inference is excluded. Full Host provenance/clock alignment and joint
 session/research/effect recovery still need their profile's qualification;
 this participant transport cannot certify them.
 
-The composed local continuation qualification now carries the evaluator capsule
-inside the verified conversation/code/context artifact. The actual resumed Codex
-tool reads retained research and public feedback, computes a synthetic candidate
-from captured code, submits it through the native HTTP owner, and observes the
-inherited round limit. The original cooldown rejects an immediate submission;
-SForge's phase entry uses the remaining duration instead of a new trial budget.
-Source future evidence is excluded and its later state is unchanged. Participants
-are explicitly quiesced by the fixture; inference and grading are synthetic.
-This narrows the integration gap but does not prove an automatic joint barrier,
-canonical graph/vision/effect activation, original activation recovery, isolated
-Linux solver restoration, or useful research.
+The automatic source-capture boundary now composes the real worker's held
+fresh-replan decision with its native cursor, canonical research inventory and
+controller-owned Docker pause/archive barrier. The controller verifies the exact
+pending request and prepared source witness before sealing native incumbent,
+opportunity and remaining phase budget. A changed or expired boundary is missed,
+not recaptured after the source resumes. Synthetic native CLI/Docker/HTTP evidence
+covers this capture and original source continuation; it does not qualify a joint
+destination activation. The next acceptance remains one isolated destination:
+consume the captured context/code, obtain fresh Goal/session/evaluator authority,
+perform useful work, settle its original effect and grade without refilling budget.
+Preserve the existing lost-reply and wrong-source negatives in that composed path.
+No new research cells are admitted by the capture milestone alone.
 
 Committed native session admission now retains the captured artifact digest in
 the original atomic session binding. Exact controller retries after a lost binding

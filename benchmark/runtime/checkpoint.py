@@ -38,7 +38,7 @@ def parse_checkpoint_request(raw: bytes) -> dict[str, Any]:
     """Validate the same explicit declaration before staging and before capture."""
     request = json.loads(raw)
     if (not isinstance(request, dict) or
-            set(request) - {"destination", "components", "point_metadata", "native_session", "evaluation_opportunity", "loopx_state", "trigger"} or
+            set(request) - {"destination", "components", "point_metadata", "native_session", "evaluation_opportunity", "loopx_state", "trigger", "controller_handoff"} or
             not {"destination", "components", "point_metadata"}.issubset(request)):
         raise ValueError("checkpoint request requires destination, components and point_metadata")
     if "native_session" in request and type(request["native_session"]) is not bool:
@@ -47,6 +47,12 @@ def parse_checkpoint_request(raw: bytes) -> dict[str, Any]:
         raise ValueError("checkpoint evaluation_opportunity must be an explicit boolean")
     if "loopx_state" in request and type(request["loopx_state"]) is not bool:
         raise ValueError("checkpoint loopx_state must be an explicit boolean")
+    if "controller_handoff" in request and type(request["controller_handoff"]) is not bool:
+        raise ValueError("checkpoint controller_handoff must be an explicit boolean")
+    if request.get("controller_handoff") and (
+            request.get("trigger") != "fresh_replan" or not request.get("native_session") or
+            not request.get("loopx_state") or not request.get("evaluation_opportunity")):
+        raise ValueError("controller handoff requires fresh_replan and all three state participants")
     if "trigger" in request and request["trigger"] != "fresh_replan":
         raise ValueError("checkpoint trigger must be fresh_replan or omitted")
     if not isinstance(request["components"], list) or not request["components"]:
@@ -128,6 +134,68 @@ def _loopx_state_components(env, components, output_dir):
         "registry_member_path": (registry.relative_to(Path(registry_component["source_path"])).as_posix()
                                  if registry != Path(registry_component["source_path"]) else ""),
         "execution_authority_granted": False}
+
+
+def native_binding_participant(env, components, metadata):
+    from .codex import Execution
+    from .sessions import BenchmarkSessionWake
+    source_wake = BenchmarkSessionWake(env, Execution(context="resume",
+        sandbox=env.get("LOOPX_CODEX_SANDBOX", "danger-full-access")), {})
+    if source_wake.session_id != metadata["session"].get("session_id"):
+        raise ValueError("native checkpoint differs from the current source session binding")
+    # This sideband record belongs to the existing session owner. It
+    # must participate even when loopx_state was not requested: native
+    # store bytes alone cannot witness a binding/profile replacement.
+    from loopx.control_plane.turn_driver.codex_sessions import _session_path
+    binding_path = _session_path(source_wake.root, source_wake.lineage, "agent")
+    if not any(binding_path.is_relative_to(Path(entry["source_path"])) for entry in components):
+        components = [*components, {"id": _participant_id(components, "source_session_binding"),
+                                   "source_path": str(binding_path)}]
+    metadata["session"] = {**metadata["session"], "session_profile_digest": source_wake.digest}
+    return components, source_wake
+
+
+def research_participants(env, components, metadata, destination, evidence_path, deadline):
+    """Use the same inventory and historical context at either owned boundary."""
+    research = None
+    components, metadata["loopx_state"] = _loopx_state_components(env, components, destination)
+    from loopx.control_plane.coordination.local_authority import local_authority_is_promoted
+    if local_authority_is_promoted(runtime_root=Path(env["LOOPX_RUNTIME_ROOT"]), goal_id=env["LOOPX_GOAL_ID"]):
+        from .research_checkpoint import research_context, _encoded
+        research = research_context(env, deadline=deadline)
+        evidence = evidence_path
+        research_raw = _encoded(research)
+        with os.fdopen(os.open(evidence, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as file:
+            file.write(research_raw)
+        parent = next((entry for entry in components if evidence.is_relative_to(Path(entry["source_path"]))), None)
+        if parent is None:
+            parent = {"id": _participant_id(components, "research_context"), "source_path": str(evidence)}
+            components = [*components, parent]
+        metadata["research_context"] = {"component_id": parent["id"],
+            "member_path": evidence.relative_to(Path(parent["source_path"])).as_posix() if evidence != Path(parent["source_path"]) else "",
+            "sha256": hashlib.sha256(research_raw).hexdigest(),
+            "provider_revision": research["snapshot"]["provider_revision"], "store_identity": research["snapshot"]["store_identity"]}
+    else:
+        metadata["canonical_context_unavailable"] = "Source coordination is unpromoted; its retained inventory remains inert."
+    return components, research
+
+
+def verify_research_participants(env, components, metadata, research, witness, deadline):
+    from .research_checkpoint import research_context, verify_context_sources
+    if research is not None:
+        if research_context(env, deadline=deadline) != research:
+            raise ValueError("canonical research context moved before sealing")
+        verify_context_sources(research, components, witness)
+        retained = metadata["research_context"]
+        member = next((entry for entry in witness[retained["component_id"]]
+            if entry["path"] == retained["member_path"]), None)
+        if member is None or member.get("sha256") != retained["sha256"]:
+            raise ValueError("canonical research context bytes moved before sealing")
+    declared = metadata["loopx_state"]
+    witness = witness[declared["registry_component_id"]]
+    member = next((entry for entry in witness if entry["path"] == declared["registry_member_path"]), None)
+    if member is None or member.get("sha256") != declared["registry_sha256"]:
+        raise ValueError("LoopX registry differs from the scoped participant inventory")
 
 
 def _mark_replan_attempt(root: Path, obligation_id: str, turn_id: str, request_sha256: str | None) -> bool:
@@ -347,28 +415,10 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
         }
         components = request["components"]
         if request.get("loopx_state"):
-            components, metadata["loopx_state"] = _loopx_state_components(env, components, destination)
-            from loopx.control_plane.coordination.local_authority import local_authority_is_promoted
-            research = None
-            if local_authority_is_promoted(runtime_root=Path(env["LOOPX_RUNTIME_ROOT"]), goal_id=env["LOOPX_GOAL_ID"]):
-                from .research_checkpoint import research_context, verify_context_sources, _encoded
-                research = research_context(env, deadline=deadline)
-                evidence = Path(env["LOOPX_WAKE_LOG_DIR"]) / receipt["turn_id"] / "checkpoint-research-context.json"
-                research_raw = _encoded(research)
-                with os.fdopen(os.open(evidence, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as file:
-                    file.write(research_raw)
-                parent = next((entry for entry in components if evidence.is_relative_to(Path(entry["source_path"]))), None)
-                if parent is None:
-                    parent = {"id": _participant_id(components, "research_context"), "source_path": str(evidence)}
-                    components = [*components, parent]
-                metadata["research_context"] = {"component_id": parent["id"],
-                    "member_path": evidence.relative_to(Path(parent["source_path"])).as_posix() if evidence != Path(parent["source_path"]) else "",
-                    "sha256": hashlib.sha256(research_raw).hexdigest(),
-                    "provider_revision": research["snapshot"]["provider_revision"], "store_identity": research["snapshot"]["store_identity"]}
-            else:
-                metadata["canonical_context_unavailable"] = "Source coordination is unpromoted; its retained inventory remains inert."
+            evidence = Path(env["LOOPX_WAKE_LOG_DIR"]) / receipt["turn_id"] / "checkpoint-research-context.json"
+            components, research = research_participants(env, components, metadata, destination, evidence, deadline)
         opportunity = None
-        if request.get("evaluation_opportunity"):
+        if request.get("evaluation_opportunity") and not request.get("controller_handoff"):
             from .sforge_checkpoint import capture_opportunity
 
             evidence = Path(env["LOOPX_WAKE_LOG_DIR"]) / receipt["turn_id"] / "checkpoint-opportunity.json"
@@ -392,19 +442,7 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
             from .sessions import BenchmarkSessionWake
 
             session = receipt.get("session") or {}
-            source_wake = BenchmarkSessionWake(env, Execution(context="resume",
-                sandbox=env.get("LOOPX_CODEX_SANDBOX", "danger-full-access")), {})
-            if source_wake.session_id != session.get("session_id"):
-                raise ValueError("native checkpoint differs from the current source session binding")
-            # This sideband record belongs to the existing session owner. It
-            # must participate even when loopx_state was not requested: native
-            # store bytes alone cannot witness a binding/profile replacement.
-            from loopx.control_plane.turn_driver.codex_sessions import _session_path
-            binding_path = _session_path(source_wake.root, source_wake.lineage, "agent")
-            if not any(binding_path.is_relative_to(Path(entry["source_path"])) for entry in components):
-                components = [*components, {"id": _participant_id(components, "source_session_binding"),
-                                           "source_path": str(binding_path)}]
-            metadata["session"] = {**session, "session_profile_digest": source_wake.digest}
+            components, source_wake = native_binding_participant(env, components, metadata)
             native = native_session_checkpoint(env, session.get("session_id", ""),
                                                timeout=max(.1, deadline - time.time()))
             # Native names identify provider files, not reserved artifact IDs.
@@ -437,20 +475,7 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
                     (source_wake.session_id, source_wake.goal_ref, source_wake.digest)):
                 raise ValueError("native checkpoint source session binding moved before sealing")
         if request.get("loopx_state"):
-            if research is not None:
-                if research_context(env, deadline=deadline) != research:
-                    raise ValueError("canonical research context moved before sealing")
-                verify_context_sources(research, components, probe["source_witness"])
-                retained = metadata["research_context"]
-                member = next((entry for entry in probe["source_witness"][retained["component_id"]]
-                    if entry["path"] == retained["member_path"]), None)
-                if member is None or member.get("sha256") != retained["sha256"]:
-                    raise ValueError("canonical research context bytes moved before sealing")
-            declared = metadata["loopx_state"]
-            witness = probe["source_witness"][declared["registry_component_id"]]
-            member = next((entry for entry in witness if entry["path"] == declared["registry_member_path"]), None)
-            if member is None or member.get("sha256") != declared["registry_sha256"]:
-                raise ValueError("LoopX registry differs from the scoped participant inventory")
+            verify_research_participants(env, components, metadata, research, probe["source_witness"], deadline)
         if opportunity is not None and opportunity["native_incumbent"] is not None:
             selected = opportunity["native_incumbent"]
             witness = probe["source_witness"].get(metadata["evaluation_opportunity"]["incumbent_component_id"], [])
@@ -459,6 +484,13 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
                     witness[0].get("size") != selected["archive_bytes"]):
                 raise ValueError("native incumbent participant differs from its captured result")
         destination.parent.mkdir(parents=True, exist_ok=True)
+        if request.get("controller_handoff"):
+            if research is None:
+                raise ValueError("controller checkpoint requires complete canonical research context")
+            from .checkpoint_handoff import await_controller_capture
+            captured = await_controller_capture(root, components, metadata, probe, deadline)
+            receipt["checkpoint"] = {"captured": True, **captured}
+            return
         captured = effect_runtime_result("runtime.checkpoint_artifacts", {
             "action": "capture", "destination": str(destination),
             "components": components, "point_metadata": metadata,

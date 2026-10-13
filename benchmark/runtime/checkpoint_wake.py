@@ -67,7 +67,8 @@ class CheckpointWake:
 
     def _capture(self, held, deadline):
         """Capture declared files/native history; never downgrade research/effects."""
-        if any(self.request.get(key) for key in ("loopx_state", "evaluation_opportunity")):
+        if (any(self.request.get(key) for key in ("loopx_state", "evaluation_opportunity"))
+                and not self.request.get("controller_handoff")):
             raise ValueError("Interrupted full-state capture requires the controller writer barrier")
         destination = self.root / held["intent"]["obligation_id"]
         metadata = {"operator_metadata": self.request["point_metadata"],
@@ -81,8 +82,17 @@ class CheckpointWake:
             raise TimeoutError("original wake budget expired before capture")
         components = list(self.request["components"])
         native = None
+        research = None
+        if self.request.get("loopx_state"):
+            from .checkpoint import research_participants
+            evidence = held["path"].with_name(held["path"].stem + "-research.json")
+            components, research = research_participants(self.env, components, metadata, destination, evidence, window)
+            if research is None:
+                raise ValueError("controller checkpoint requires complete canonical research context")
         if self.request.get("native_session"):
             from .native_checkpoint import native_session_checkpoint
+            from .checkpoint import native_binding_participant
+            components, source_wake = native_binding_participant(self.env, components, metadata)
             guard = {"cli": self.env["LOOPX_CLI"], "workspace": self.env["LOOPX_PROJECT"],
                      "registry": self.env["LOOPX_REGISTRY"], "runtime_root": self.env["LOOPX_RUNTIME_ROOT"],
                      "goal_id": self.env["LOOPX_GOAL_ID"], "agent_id": self.env["LOOPX_AGENT_ID"],
@@ -107,8 +117,21 @@ class CheckpointWake:
         if native is not None:
             confirmed = native_session_checkpoint(self.env, self.receipt["session"]["session_id"],
                 timeout=max(.1, window - time.time()), interrupted_guard=guard)
+            from .sessions import BenchmarkSessionWake
+            from .codex import Execution
+            confirmed_wake = BenchmarkSessionWake(self.env, Execution(context="resume",
+                sandbox=self.env.get("LOOPX_CODEX_SANDBOX", "danger-full-access")), {})
+            if ((confirmed_wake.session_id, confirmed_wake.goal_ref, confirmed_wake.digest) !=
+                    (source_wake.session_id, source_wake.goal_ref, source_wake.digest)):
+                raise ValueError("interrupted source session binding moved before sealing")
             if confirmed != native:
                 raise ValueError("interrupted native cursor moved before sealing")
+        if self.request.get("loopx_state"):
+            from .checkpoint import verify_research_participants
+            verify_research_participants(self.env, components, metadata, research, probe["source_witness"], window)
+        if self.request.get("controller_handoff"):
+            from .checkpoint_handoff import await_controller_capture
+            return await_controller_capture(self.root, components, metadata, probe, window)
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         return effect_runtime_result("runtime.checkpoint_artifacts", {
             "action": "capture", "components": components, "destination": str(destination),

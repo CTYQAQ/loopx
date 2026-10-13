@@ -13,6 +13,7 @@ import os
 import re
 import tarfile
 import tempfile
+import time
 from pathlib import Path, PurePosixPath
 
 from loopx.control_plane.effect_runtime import effect_runtime_result
@@ -25,7 +26,8 @@ from .checkpoint_controller import _controller, _physical, capture
 def _request(path: Path) -> dict:
     value = json.loads(_physical(path).read_bytes())
     if (not isinstance(value, dict) or
-            set(value) != {"container_id", "components", "phase_deadline_path"} or
+            set(value) not in ({"container_id", "components", "phase_deadline_path"},
+                              {"container_id", "components", "phase_deadline_path", "handoff"}) or
             not re.fullmatch(r"[0-9a-f]{64}", value.get("container_id", "")) or
             not isinstance(value["components"], list) or not value["components"]):
         raise ValueError("Worker request requires a full container ID, explicit components and phase_deadline_path")
@@ -39,6 +41,12 @@ def _request(path: Path) -> dict:
         ids.add(entry["id"])
         paths.append(_guest_path(entry["source_path"]))
     paths.append(_guest_path(value["phase_deadline_path"]))
+    if "handoff" in value:
+        handoff = value["handoff"]
+        if (not isinstance(handoff, dict) or set(handoff) != {"source_path", "sha256"} or
+                not re.fullmatch(r"[0-9a-f]{64}", handoff.get("sha256", ""))):
+            raise ValueError("Worker handoff requires the exact private request digest")
+        paths.append(_guest_path(handoff["source_path"]))
     if any(a == b or a in b.parents or b in a.parents
            for index, a in enumerate(paths) for b in paths[index + 1:]):
         raise ValueError("Worker components and phase clock must not overlap")
@@ -80,6 +88,13 @@ def _archive(container, remote: str, destination: Path) -> Path:
                     raise ValueError("Worker archive contains undeclared, linked or special members")
                 names.add(str(path))
             archive.extractall(destination, members=members, filter="data")
+            # The data filter intentionally drops directory modes. This is a
+            # private raw transport witness, so restore only ordinary permission
+            # bits after safe extraction; never restore owners or special bits.
+            # Otherwise a private 0700 authority directory becomes 0755 and a
+            # matching frozen source is falsely rejected as having changed.
+            for member in sorted(members, key=lambda entry: len(PurePosixPath(entry.name).parts), reverse=True):
+                (destination / member.name).chmod(member.mode & 0o777)
     return _physical(destination / root)
 
 
@@ -169,6 +184,7 @@ def capture_worker(controller_file: Path, *, token: str, capture_id: str,
                 stage = Path(directory)
                 (stage / "workers").mkdir(mode=0o700)
                 components = []
+                prepared = None
                 pause_may_have_committed = True
                 try:
                     try:
@@ -182,9 +198,35 @@ def capture_worker(controller_file: Path, *, token: str, capture_id: str,
                     container.reload()
                     if not container.attrs["State"]["Paused"]:
                         raise RuntimeError("Worker writer barrier was not established")
+                    if "handoff" in request:
+                        held = _archive(container, request["handoff"]["source_path"], stage / "held")
+                        raw = held.read_bytes()
+                        if hashlib.sha256(raw).hexdigest() != request["handoff"]["sha256"]:
+                            raise ValueError("Worker handoff changed before its writer barrier")
+                        prepared = json.loads(raw)
+                        if (set(prepared) != {"capture_id", "components", "point_metadata", "source_sha256", "source_witness", "deadline_epoch"} or
+                                prepared["capture_id"] != capture_id or prepared["components"] != request["components"] or
+                                not isinstance(prepared["point_metadata"], dict) or not isinstance(prepared["source_witness"], dict) or
+                                type(prepared["deadline_epoch"]) not in (int, float) or
+                                not math.isfinite(prepared["deadline_epoch"]) or time.time() >= prepared["deadline_epoch"]):
+                            raise ValueError("Worker handoff is expired or differs from the original capture")
                     for entry in request["components"]:
                         copied = _archive_component(container, entry["source_path"], stage / "workers" / entry["id"])
                         components.append({"id": entry["id"], "source_path": str(copied)})
+                    if prepared is not None:
+                        observed = effect_runtime_result("runtime.checkpoint_artifacts", {
+                            "action": "probe", "components": components,
+                        }, retry_safe=False)
+                        if observed["source_sha256"] != prepared["source_sha256"]:
+                            changed = []
+                            for key, rows in observed["source_witness"].items():
+                                before = {row["path"]: row for row in prepared["source_witness"].get(key, [])}
+                                after = {row["path"]: row for row in rows}
+                                changed.extend(key + ":" + path for path in sorted(before.keys() | after.keys())
+                                               if before.get(path) != after.get(path))
+                            raise ValueError("Worker source changed after native/research preparation: " + ", ".join(changed))
+                        if time.time() >= prepared["deadline_epoch"]:
+                            raise TimeoutError("Worker handoff expired before evaluator capture")
                     phase = _archive(container, request["phase_deadline_path"], stage / "phase")
                     native = capture(controller_file, token=token, capture_id=capture_id,
                         destination=stage / "native", timeout=timeout, phase_deadline_file=phase)
@@ -203,14 +245,18 @@ def capture_worker(controller_file: Path, *, token: str, capture_id: str,
                             raise RuntimeError("Worker was not restored to running; inspect the original container before retry")
                 native_component = _participant_id(components, "native_capsule")
                 components.append({"id": native_component, "source_path": str(stage / "native")})
-                metadata = {"worker_file_snapshot": {
+                metadata = {**(prepared["point_metadata"] if prepared is not None else {}), "worker_file_snapshot": {
                     "container_id": container.id, "image_id": container.attrs["Image"],
                     "components": request["components"], "phase_deadline_path": request["phase_deadline_path"],
                     "native_capsule_sha256": native["sha256"],
                     "native_capsule_component_id": native_component,
                     "writer_barrier": "docker_pause", "process_memory_captured": False,
                     "native_cursor_qualified": False,
+                    **({"handoff_sha256": request["handoff"]["sha256"],
+                        "prepared_source_verified": True} if prepared is not None else {}),
                 }}
+                if prepared is not None:
+                    metadata["writer_barrier"] = "docker_pause"
                 probe = effect_runtime_result("runtime.checkpoint_artifacts", {"action": "probe", "components": components})
                 return effect_runtime_result("runtime.checkpoint_artifacts", {
                     "action": "capture", "components": components, "destination": str(destination),

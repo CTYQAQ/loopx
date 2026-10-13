@@ -224,6 +224,7 @@ def test_artifact_collection_preserves_both_session_homes_without_auth(tmp_path,
     pytest.importorskip("harbor")
     from benchmark.runtime.sforge_backend import RecordingDockerBackend, DockerBackend
     backend = object.__new__(RecordingDockerBackend)
+    backend.checkpoint = None
     backend.log_dir = tmp_path / "artifacts"
     backend.feedback = None
     copied, cleaned = [], []
@@ -277,6 +278,7 @@ def test_blind_policy_removes_judge_route_and_credentials_native_is_unchanged(mo
     pytest.importorskip("harbor")
     from benchmark.runtime.sforge_backend import RecordingDockerBackend, DockerBackend, AllowedEndpoint
     backend = object.__new__(RecordingDockerBackend)
+    backend.checkpoint = None
     backend.auth_ips = []
     backend.blind_api_endpoint = None
     judge = AllowedEndpoint(ip="192.0.2.1", port=8080, hostname="judge")
@@ -492,6 +494,50 @@ def test_edgebench_rejects_invalid_profile_settings_before_creating_trial(tmp_pa
               '--effort', 'xhigh', '--judge-url', 'http://127.0.0.1:9999', *options])
     assert error.value.code == 2
     assert not (tmp_path / 'runs').exists()
+
+
+@pytest.mark.parametrize("missing", ["controller", "declaration", "native_feedback"])
+def test_controller_handoff_cannot_be_partially_enabled(tmp_path, missing):
+    pytest.importorskip("sforge")
+    pytest.importorskip("harbor")
+    from benchmark.edgebench.run import main
+    request = tmp_path / "checkpoint.json"
+    request.write_text(json.dumps({"destination": "/logs/agent/checkpoints", "point_metadata": {},
+        "components": [{"id": "code", "source_path": "/task/code"}], "trigger": "fresh_replan",
+        "native_session": True, "loopx_state": True, "evaluation_opportunity": True,
+        "controller_handoff": True}))
+    options = [] if missing == "controller" else ["--checkpoint-controller-file", str(tmp_path / "private.json")]
+    if missing != "declaration":
+        options.extend(["--checkpoint-request", str(request)])
+    if missing == "native_feedback":
+        options.extend(["--feedback", "best-only"])
+    with pytest.raises(SystemExit) as error:
+        main(["--task", "fixture", "--tasks-dir", str(tmp_path), "--log-dir", str(tmp_path),
+              "--run-id", "invalid", "--worker", "heartbeat-resume", "--model", "fixture",
+              "--effort", "xhigh", "--judge-url", "http://127.0.0.1:9999", *options])
+    assert error.value.code == 2 and not (tmp_path / "runs").exists()
+
+
+def test_checkpoint_supervisor_is_bound_to_container_and_only_solver_execution(tmp_path, monkeypatch):
+    pytest.importorskip("sforge")
+    pytest.importorskip("harbor")
+    from types import SimpleNamespace
+    from benchmark.runtime.sforge_backend import RecordingDockerBackend, DockerBackend
+    calls = []
+    controller = SimpleNamespace(bind=lambda env: calls.append(("bind", env["SFORGE_TOKEN"])),
+        start=lambda raw: calls.append(("start", raw)), close=lambda: calls.append(("close",)))
+    backend = RecordingDockerBackend(log_dir=tmp_path / "collected", logger=None,
+                                    oauth_proxy=True, checkpoint=controller)
+    handle = SimpleNamespace(raw="exact-container")
+    monkeypatch.setattr(DockerBackend, "create_container", lambda *a, **kw: handle)
+    backend.create_container("image", "name", environment={"SFORGE_TOKEN": "synthetic"})
+    backend.execution_command = "solver"
+    monkeypatch.setattr(DockerBackend, "exec_run_with_timeout", lambda *a, **kw:
+        SimpleNamespace(exit_code=0, timed_out=False, elapsed_seconds=1))
+    backend.exec_run_with_timeout(handle, ["setup"])
+    assert calls == [("bind", "synthetic")]
+    backend.exec_run_with_timeout(handle, ["/bin/bash", "-c", "solver"])
+    assert calls == [("bind", "synthetic"), ("start", "exact-container"), ("close",)]
 
 
 @pytest.mark.parametrize("protect_fails", [False, True])
@@ -729,6 +775,7 @@ def test_recorded_solver_exit_does_not_take_status_from_output(tmp_path, monkeyp
     from types import SimpleNamespace
     from benchmark.runtime.sforge_backend import RecordingDockerBackend, DockerBackend
     backend = object.__new__(RecordingDockerBackend)
+    backend.checkpoint = None
     backend.log_dir = tmp_path / "collected"
     backend.blind_api_endpoint = None
     backend.feedback = None

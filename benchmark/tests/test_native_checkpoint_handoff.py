@@ -345,7 +345,7 @@ def test_checkpoint_interrupt_timeout_reaps_without_qualifying_capture(tmp_path)
 
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN") or os.name != "posix",
                    reason="Requires the real native CLI and private Unix transport")
-@pytest.mark.parametrize("capture", ["files", "native", "full", "off"])
+@pytest.mark.parametrize("capture", ["files", "native", "full", "off", "controller"])
 def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay(tmp_path, capture):
     """Use run_once, its renderer/listener/session owner and the actual quota CLI."""
     import sys
@@ -357,14 +357,18 @@ def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay
         _heartbeat_receipt_count, _run_cli,
     )
 
+    if capture == "controller" and os.environ.get("LOOPX_CHECKPOINT_EXTERNAL_CONTROLLER") != "1":
+        pytest.skip("Requires an explicitly attached host checkpoint supervisor")
     project, runtime, registry = _write_fixture(tmp_path / "authority")
-    logs = tmp_path / "trial" / "wakes"
+    logs = Path("/logs/agent/wakes") if capture == "controller" else tmp_path / "trial" / "wakes"
     candidate = project / "candidate.txt"
     candidate.write_text("original candidate")
     request = tmp_path / "request.json"
     request.write_text(json.dumps({"destination": str(logs.parent / "checkpoints"),
         "components": [{"id": "code", "source_path": str(candidate)}],
-        "point_metadata": {}, "trigger": "fresh_replan", "native_session": capture in {"native", "full"}, "loopx_state": capture == "full"}))
+        "point_metadata": {}, "trigger": "fresh_replan", "native_session": capture in {"native", "full", "controller"},
+        "loopx_state": capture in {"full", "controller"},
+        "evaluation_opportunity": capture == "controller", "controller_handoff": capture == "controller"}))
     skills = tmp_path / "skills"
     skills.mkdir()
     cli = tmp_path / "loopx-cli"
@@ -414,6 +418,15 @@ def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay
                 Path(row["json_path"]).write_text(json.dumps(row))
                 later.append(json.dumps(row) + "\n")
             index_path.write_text(prior_runs + "".join(later))
+            if capture == "controller":
+                from tests.control_plane.canonical_authority_fixture import initialize_canonical_authority
+                from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+                rc, listed = _run_cli(registry, runtime, "todo", "list", "--goal-id", GOAL_ID)
+                assert rc == 0, listed
+                initialize_canonical_authority(runtime, GOAL_ID,
+                    build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=listed["todos"],
+                        handoff_mode="hard_lease", leases=[]),
+                    state_path=project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md", provider="sqlite")
             body = next(t for t in texts(payload) if "quota should-run" in t and "```sh" in t)
             guard = next(line for line in body.splitlines() if "quota should-run" in line)
             guard = guard.replace('${LOOPX_TURN:?}', TURN_ID)
@@ -452,12 +465,15 @@ def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay
             return
         assert len(result["checkpoint_handoffs"]) == 1
         event = result["checkpoint_handoffs"][0]
-        assert event["captured"] is (capture in {"files", "native"})
+        assert event["captured"] is (capture in {"files", "native", "controller"}), json.dumps(event)
         assert event["research_point_qualified"] is False
         assert len(calls) == 4 and (project / "continued.txt").read_text() == "continued"
         assert "heartbeat_receipt" in json.dumps(requests[2])
         assert any(item.get("type") == "function_call_output" and item.get("call_id") == "call_midwake"
                    and "aborted" in item.get("output", "") for item in requests[2]["input"])
+        if capture == "controller":
+            (tmp_path / "controller-result.json").write_text(json.dumps(event))
+            return  # The external controller verifies the combined artifact.
         if capture in {"files", "native"}:
             point = logs.parent / "checkpoints" / event["obligation_id"]
             assert (point / "components" / "code").read_text() == "original candidate"

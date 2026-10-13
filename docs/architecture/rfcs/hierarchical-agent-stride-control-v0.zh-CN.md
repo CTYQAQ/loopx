@@ -746,13 +746,15 @@ phase 文件参与者还将声明的 Host deadline 与 native 捕获时间绑定
 完整 Host 来源/时钟对齐及联合会话/研究/effect 恢复仍须按 profile 资格化，
 参与者传输本身不能证明这些结果。
 
-组合式本地接续验证现将 evaluator capsule 放入同一已验证的会话/代码/上下文产物。
-实际恢复的 Codex 工具读取保留研究与公开反馈，从捕获代码计算合成候选，经原生
-HTTP owner 提交并观察继承的轮次上限。恢复后的首次立即提交仍被原冷却拒绝；
-SForge phase 入口使用剩余时长，不重置整场预算。来源的后续证据被排除，其后续
-状态保持不变。参与者由 fixture 显式静置；模型响应与评分计算均为合成。
-这缩小了集成缺口，但不证明自动联合 barrier、canonical graph/vision/effect
-激活、原激活操作恢复、隔离 Linux solver 恢复或有效研究。
+自动源捕获已将真实 worker 的 fresh-replan 原始决策、原生 cursor、canonical
+研究 inventory 与 controller 的 Docker pause/archive 屏障组合起来。controller
+先验证仍有效的请求及准备时的 source witness，再封存 incumbent、评测机会和
+剩余 phase 预算。变化或过期的边界记为未捕获，不能在源恢复后补作原点。
+真实 native CLI/Docker/HTTP 的合成验证覆盖联合捕获及原源接续；仍不代表目标
+联合激活。下一验收是独立目标环境消费保留上下文和代码、取得新权限、开展有用
+工作、结算原 effect 并完成后续评测，同时不补预算并保留丢回复/错误源负例。
+仅捕获里程碑不准入新的研究组。
+
 
 inert verification unit 不授予执行权。目标侧使用新的实验/Host 身份，通过既有
 Goal/session/state admission 进入。历史租约、quota、timer、pending effect 和

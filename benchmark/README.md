@@ -244,11 +244,9 @@ that entire captured prefix, including the aborted tool, without using a complet
 Turn as a substitute; completed-cursor checks stay unchanged. Lost fork replies
 reuse the existing one-attempt recovery path.
 
-Canonical research/evaluation requests still reject at this mid-wake path. Native
-history plus declared files is not a controller-wide writer barrier or authority
-admission. Interrupted sessions cannot enter destination Goal admission until the
-joint controller continuation contract is qualified. The next acceptance composes
-that barrier, research/evaluator/budget adoption and isolated useful continuation.
+Full capture uses the external controller path below. Native-only history plus
+declared files remains an inert subset. Interrupted sessions still cannot enter
+destination Goal admission until joint controller continuation is qualified.
 Remove the checkpoint request to disable automatic handoff; a direct caller can
 omit the socket option to disable only the transport.
 
@@ -497,17 +495,11 @@ caller IDs. The sealed `native_session.store_members` mapping binds those IDs to
 the existing allowlisted native filenames. Reconstruction accepts earlier fixed-ID
 artifacts, rejects duplicate/undeclared mappings and keeps source-history checks.
 
-The current Host hook cannot capture a new replan created **inside an already
-running model wake** before that decision. Those boundaries still need a qualified
-Host handoff; a later snapshot must not be labeled as the missed point. A real
-native qualification now demonstrates interrupting at a synthetic tool boundary,
-forking the exact retained history and producing a new artifact while preserving
-the source history. The existing checkpoint correctly rejects that interrupted
-cursor: native resumability does not prove settled LoopX work, a pre-decision
-replan boundary or joint evaluator consistency. The probe does not yet wire the
-worker handoff or reconstruct a separate solver environment. Complete
-LoopX research-state adoption, joint evaluator/Host admission and useful continued work
-remain open. No automatic retention or extra evaluation opportunity is introduced.
+Fresh replan can arise at Host preflight or inside a running native wake. The
+explicit handoff retains the original guard and rejects replacement by a later
+point. Full-state capture additionally requires the controller writer barrier
+below. Capturing that point does not admit a destination session or prove useful
+continued research.
 
 ### Controller-only native capsule transport
 
@@ -579,15 +571,43 @@ later files with an older native point. Missing paths, archive links, traversal 
 Declare only the intended private code/state stores: a whole home can contain
 credentials, and neither archive filtering nor a freeze is privacy certification.
 
-This is an **inert joint file snapshot**, still `research_point_qualified=false`.
-It does not snapshot process memory, qualify a pending/interrupted Codex cursor,
-verify externally hosted writers or activate canonical research state. Ordinary
-native restore rejects this outer unit. Worker/evaluator pairing is explicitly
-caller-declared here, not a verified automatic SForge run binding. A real Docker writer plus native HTTP
-test verifies unchanged file bytes throughout evaluator capture, retained used
-rounds/cooldown/phase, source resumption and failure cleanup. Automatic quota
-handoff before the replan decision and isolated useful continuation remain the
-next integration boundary; this command alone does not qualify experiment restart.
+This explicit command produces an **inert joint file snapshot**, still
+`research_point_qualified=false`. It does not snapshot process memory, freeze
+external writers or activate canonical research state. Ordinary native restore
+rejects the outer unit; callers must use the declared native capsule and existing
+fresh-authority admission paths.
+
+For automatic capture, the heartbeat declaration must include `"trigger":
+"fresh_replan"`, `"native_session": true`, `"loopx_state": true`,
+`"evaluation_opportunity": true`, and `"controller_handoff": true`, in addition
+to its authorized code components, destination and metadata. Pass both
+`--checkpoint-request REQUEST.json` and `--checkpoint-controller-file CONTROLLER.json`
+to `benchmark.edgebench.run`, with native feedback. The controller file remains
+host-private; only the declaration enters the worker. Missing or mismatched opt-ins
+reject before trial creation. The backend binds the supervisor to its actual
+container and native registration, rather than accepting a solver-supplied token.
+
+The worker prepares native history, the original decision, canonical research
+context and its file witness while holding the model boundary. The controller
+pauses that worker, rereads the exact live handoff and copies declared sources
+through Docker archive. A differing source witness or expired/removed request
+rejects **before** native evaluator capture. Ordinary permission bits survive safe
+archive extraction so private authority directories do not falsely appear changed.
+The controller seals the frozen files with incumbent, used opportunities, cooldown
+and remaining Host phase. It releases the barrier before publishing a private reply;
+the source continues from the original packet and deadline. Optional capture
+failure records a missed point, never a later replacement or a new model/eval budget.
+A barrier that cannot be released remains an explicit controller recovery problem.
+
+A real native CLI/worker plus isolated Docker/native-HTTP qualification covers the
+mid-wake path, complete canonical context, conserved evaluator opportunity and
+original source continuation. It uses a deterministic local model and synthetic
+grading. The artifact remains unqualified for scientific restart: isolated joint
+destination admission, useful work, original-effect recovery and subsequent grading
+must still be verified together. No old lease, quota, timer or token is activated.
+Omit the controller file and `controller_handoff` on a new run to disable automatic
+controller capture; removing the checkpoint request disables capture entirely.
+Existing artifacts remain inert, and the source trial is not restarted by disabling it.
 
 An explicit **SForge phase-clock participant** preserves a declared Host file's
 remaining duration alongside native opportunities. Add
@@ -673,8 +693,16 @@ runtime receipt 绑定摘要；programmatic adapter 也可指定已放入 guest 
 物化后仍是惰性历史。缺少来源、共享注册表、路径别名或重叠声明会拒绝，捕获
 不授予新的租约、配额、效果或执行权，不能替代完整接续验收。
 
-运行中才出现的 fresh replan 仍缺 Host 交接。真实 native 探针已证明：在合成工具
-边界 interrupt 后，可 fork 完整原生历史、继续读原候选并产出新文件，原历史不变。
-现有 checkpoint 仍正确拒绝该 interrupted cursor；可继续原生会话不等于已结算
-LoopX 工作、replan 决策前边界或 evaluator 联合一致性。该探针没有接入 worker
-自动捕获，也没有证明独立 solver 环境恢复，不能据此宣称每个 replan 已覆盖。
+运行中出现的 fresh replan 可通过显式交接捕获。完整捕获需同时声明
+`controller_handoff`、`native_session`、`loopx_state`、`evaluation_opportunity`
+为 true，使用 `fresh_replan`，并在 host CLI 提供 `--checkpoint-controller-file`。
+controller 配置及 admin 权限不进入 solver；backend 绑定真实 container 与原生注册。
+worker 保留原 guard，controller 暂停全部容器写入者，核对仍有效的请求和准备时
+文件 witness，再封存原生评测机会、incumbent 及剩余预算。源变化、过期或失去
+交接会拒绝；可恢复的捕获失败不取消原研究，也不得改用稍后的状态。解除暂停后，
+源会话继续使用原 packet 和 deadline。
+真实 native worker、Docker 与 native HTTP 的合成验证覆盖了联合捕获和源接续；
+产物仍是 `research_point_qualified=false`。独立目标环境的新权限准入、有效工作、
+联合丢回复恢复及后续评测尚待一体验证，不能据此重启研究实验。新运行省略
+controller 文件及 handoff 开关即可关闭；移除 checkpoint 请求关闭全部捕获，
+已有产物保持惰性。

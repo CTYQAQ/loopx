@@ -76,6 +76,69 @@ def counter(container):
         return int(archive.extractfile("counter").read())
 
 
+def test_archive_keeps_private_directory_modes_without_special_bits(writer, tmp_path):
+    from benchmark.edgebench.checkpoint_worker import _archive
+    container, _ = writer
+    assert container.exec_run(["python", "-c", "from pathlib import Path; "
+        "p=Path('/private-state'); p.mkdir(mode=0o700); "
+        "(p/'child').mkdir(mode=0o700); (p/'child').chmod(0o2700)"]).exit_code == 0
+    copied = _archive(container, "/private-state", tmp_path / "copy")
+    assert copied.stat().st_mode & 0o7777 == 0o700
+    assert (copied / "child").stat().st_mode & 0o7777 == 0o700
+
+
+@pytest.mark.parametrize("fault", [None, "source_moved", "expired"])
+def test_supervisor_captures_only_the_prepared_worker_boundary(controllers, writer, tmp_path, fault):
+    from loopx.control_plane.effect_runtime import effect_runtime_result
+    from benchmark.edgebench.checkpoint_worker import _archive
+    from benchmark.edgebench.checkpoint_supervisor import CheckpointSupervisor
+
+    source, _, first, _, files, grades = controllers
+    container, _ = writer
+    token = register(source, first, submission_cooldown=3600)
+    assert submit(first, token, 7).status_code == 200
+    assert container.exec_run(["python", "-c", "from pathlib import Path; "
+        "Path('/candidate').write_text('retained'); "
+        "Path('/logs/agent/checkpoint-controller').mkdir(parents=True); "
+        "Path('/opt/loopx-benchmark/control').mkdir(parents=True); "
+        "Path('/opt/loopx-benchmark/control/phase-deadline').write_bytes(Path('/phase').read_bytes())"]).exit_code == 0
+    prepared = _archive(container, "/candidate", tmp_path / "prepared")
+    probe = effect_runtime_result("runtime.checkpoint_artifacts", {"action": "probe",
+        "components": [{"id": "code", "source_path": str(prepared)}]})
+    nonce = "e" * 32
+    request = {"capture_id": nonce, "components": [{"id": "code", "source_path": "/candidate"}],
+        "point_metadata": {"synthetic_boundary": True}, "source_sha256": probe["source_sha256"],
+        "source_witness": probe["source_witness"],
+        "deadline_epoch": time.time() + (-1 if fault == "expired" else 30)}
+    if fault == "source_moved":
+        assert container.exec_run(["python", "-c", "from pathlib import Path; Path('/candidate').write_text('later')"]).exit_code == 0
+    assert container.exec_run(["python", "-c", "from pathlib import Path; "
+        "Path('/logs/agent/checkpoint-controller/ready.json').write_text(" + repr(json.dumps(request)) + ")"]).exit_code == 0
+    supervisor = CheckpointSupervisor(files[0], tmp_path / "points")
+    supervisor.bind({"SFORGE_TOKEN": token})
+    supervisor.start(container)
+    try:
+        wait(lambda: (tmp_path / "points" / (nonce + ".json")).exists())
+        wait(lambda: container.exec_run(["test", "-f", "/logs/agent/checkpoint-controller/" + nonce + ".json"]).exit_code == 0)
+    finally:
+        supervisor.close()
+    response = json.loads((tmp_path / "points" / (nonce + ".json")).read_bytes())
+    assert response["ok"] is (fault is None)
+    unit = tmp_path / "points" / nonce
+    if fault is None:
+        manifest = json.loads((unit / "checkpoint.json").read_bytes())
+        metadata = manifest["point_metadata"]
+        assert metadata["synthetic_boundary"] is True
+        assert metadata["worker_file_snapshot"]["prepared_source_verified"] is True
+        assert (unit / "components/code").read_text() == "retained"
+        assert response["capture"]["research_point_qualified"] is False
+    else:
+        assert not unit.exists()
+        assert not (Path(json.loads(files[0].read_bytes())["bank_root"]) / nonce).exists()
+    container.reload()
+    assert not container.attrs["State"]["Paused"] and len(grades) == 1
+
+
 @pytest.mark.parametrize("directory", [False, True])
 def test_paused_sqlite_capture_retains_committed_wal_not_pending_transaction(
         controllers, writer, tmp_path, directory):
