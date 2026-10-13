@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import select
 import subprocess
@@ -10,9 +11,10 @@ import sys
 import pytest
 
 from shadow_e2e_fixture import ShadowWorkspace, workspace as make_workspace
+from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
+from historical_shadow_fixture import HistoricalShadowWorkspace, original_1x_source  # noqa: F401
 from loopx.control_plane.coordination.coordination_state_contract_generated import TASK_LEASE_ACQUIRE_REQUEST_SCHEMA
 from loopx.control_plane.coordination.legacy_writer_fence import legacy_coordination_writer_fence_path
-from loopx.control_plane.work_items.task_lease_acquire_adapter import task_lease_acquire_authority_facts
 
 REPO = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.stage2c_e2e
@@ -35,8 +37,8 @@ def public(ws: ShadowWorkspace, *args: str, goal: str | None = None) -> dict:
     return json.loads(result.stdout)
 
 
-def start(args: list[str]) -> subprocess.Popen[str]:
-    return subprocess.Popen(args, cwd=REPO, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+def start(args: list[str], *, cwd: Path = REPO) -> subprocess.Popen[str]:
+    return subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
 def barrier(child: subprocess.Popen[str], phase: str) -> None:
@@ -65,14 +67,22 @@ import fs from 'node:fs';
 import {syncBuiltinESMExports} from 'node:module';
 import {once} from 'node:events';
 const input = JSON.parse(process.argv[1]);
-if (input.wait_lock) {
+if (input.wait_lock || input.pause_lock) {
   const actual = fs.promises.open;
   let notified = false;
   fs.promises.open = async (path, flags, ...args) => {
     if (String(path) === input.wait_lock + '.ts-effect.lock' && flags === 'wx' && !notified) {
       notified = true; process.stdout.write('BARRIER native-lock\n');
     }
-    return await actual(path, flags, ...args);
+    const handle = await actual(path, flags, ...args);
+    if (String(path) === input.pause_lock + '.ts-effect.lock' && flags === 'wx') {
+      const write = handle.writeFile.bind(handle);
+      handle.writeFile = async (...args) => {
+        await write(...args);
+        process.stdout.write('BARRIER native-held\n'); await once(process.stdin, 'data');
+      };
+    }
+    return handle;
   };
   syncBuiltinESMExports();
 }
@@ -84,9 +94,9 @@ process.stdout.write(JSON.stringify(await owner[input.function](input.request, d
 """
 
 
-def native(module: str, function: str, request: dict, **options: object) -> list[str]:
+def native(module: str, function: str, request: dict, *, source: Path = REPO, **options: object) -> list[str]:
     return ["node", "--no-warnings", "--experimental-strip-types", "--input-type=module", "-e", NATIVE,
-            json.dumps({"module": (REPO / module).as_uri(), "function": function, "request": request, **options})]
+            json.dumps({"module": (source / module).as_uri(), "function": function, "request": request, **options})]
 
 
 def fence_request(ws: ShadowWorkspace) -> dict:
@@ -112,11 +122,14 @@ def test_other_goal_cannot_write_a_protected_goal_source_via_state_override(tmp_
     registry["goals"].append({"id": "goal-other", "repo": str(tmp_path), "state_file": other_state.name,
                               "coordination": {"registered_agents": ["agent-a"]}})
     ws.registry.write_text(json.dumps(registry))
-    # Preserve the existing opt-out contract before any source authority exists.
+    # An unbound source no longer grants normal writes, even before capture or a fence.
+    before = ws.state.read_bytes(), other_state.read_bytes()
     legacy = public(ws, "todo", "add", "--state-file", str(ws.state), "--role", "agent",
-                    "--text", "An unbound shared-state write remains supported.",
-                    "--evidence", "Legacy compatibility control.", goal="goal-other")
-    assert legacy["ok"] is True and legacy["added"] is True, legacy
+                    "--text", "An unbound shared-state write requires import.",
+                    "--evidence", "Canonical import requirement.", goal="goal-other")
+    assert legacy["ok"] is False and legacy["added"] is False, legacy
+    assert legacy["error_code"] == "canonical_authority_required", legacy
+    assert (ws.state.read_bytes(), other_state.read_bytes()) == before
     if authority == "active_capture":
         # A registered source stays protected even without a frontmatter owner.
         ws.state.write_text(ws.state.read_text().replace(f"goal_id: {ws.goal}\n", ""))
@@ -129,8 +142,8 @@ def test_other_goal_cannot_write_a_protected_goal_source_via_state_override(tmp_
                     "--text", "Must not bypass another goal's source authority.",
                     "--evidence", "Cross-goal source boundary.", goal="goal-other")
     assert not result.get("ok"), json.dumps(result, indent=2)
-    expected = "shadow_source_goal_mismatch" if authority == "active_capture" else "legacy_coordination_writer_fenced"
-    assert result["error_code"] == expected, result
+    # Current admission rejects before any legacy source writer is selected.
+    assert result["error_code"] == "canonical_authority_required", result
     assert (ws.state.read_bytes(), other_state.read_bytes()) == before
     assert not (ws.runtime / "authority-shadow" / "outbox" / "goal-other").exists()
     if authority == "active_capture":
@@ -187,23 +200,34 @@ raise SystemExit(main(sys.argv[2:]))
 
 
 def paused_public(ws: ShadowWorkspace, stage: str, *args: str) -> subprocess.Popen[str]:
-    return start([sys.executable, "-c", PUBLIC_WORKER, stage, *command(ws, *args)[3:]])
+    return start([sys.executable, "-c", PUBLIC_WORKER, stage, *command(ws, *args)[3:]], cwd=ws.cwd)
 
 
 @pytest.mark.parametrize("first", ["lease", "handoff"])
-def test_handoff_and_native_acquire_serialize_quiescence_and_source_evidence(tmp_path: Path, first: str) -> None:
-    ws = workspace(tmp_path)
+def test_current_drain_recovers_original_handoff_acquire_races(
+    tmp_path: Path, first: str, original_source: Path,
+) -> None:
+    current = workspace(tmp_path)
+    ws = HistoricalShadowWorkspace(**vars(current), original_source=original_source).original()
+    # The original writers establish authentic 1.x receipts. All recovery below
+    # uses HEAD; no current normal writer is redirected to a compatibility path.
     added = ws.add("Unclaimed work eligible for a lease.")
     todo_id = added["todo_id"]
-    assert public(ws, "coordination-shadow", "bootstrap", "--execute")["bootstrap"]["status"] == "applied"
+    assert ws.cli("coordination-shadow", "bootstrap", "--execute")["bootstrap"]["status"] == "applied"
+    facts = subprocess.run([sys.executable, "-c",
+        "import json,sys; from pathlib import Path; "
+        "from loopx.control_plane.work_items.task_lease_acquire_adapter import task_lease_acquire_authority_facts; "
+        "print(json.dumps(task_lease_acquire_authority_facts(registry_path=Path(sys.argv[1]), "
+        "goal_id=sys.argv[2], todo_id=sys.argv[3])))", str(ws.registry), ws.goal, todo_id],
+        cwd=original_source, capture_output=True, text=True, check=True, timeout=30)
     request = {"schema_version": TASK_LEASE_ACQUIRE_REQUEST_SCHEMA, "runtime_root": str(ws.runtime), "goal_id": ws.goal,
         "todo_id": todo_id, "owner": "agent-a", "idempotency_key": "native-variant-acquire", "ttl_seconds": 120,
         "write_scopes": [], "expected_version": None,
-        "authority": task_lease_acquire_authority_facts(registry_path=ws.registry, goal_id=ws.goal, todo_id=todo_id)}
+        "authority": json.loads(facts.stdout)}
     lease_dir = ws.runtime / "goals" / ws.goal / "task-leases"
     def lease_command(**options: object) -> list[str]:
         return native("loopx/control_plane/work_items/task_lease_acquire.ts",
-                      "executeTaskLeaseAcquire", request, **options)
+                      "executeTaskLeaseAcquire", request, source=original_source, **options)
     handoff_args = ("handoff-mode", "set", "--mode", "soft_claim")
     lease = handoff = None
     original = ws.state.read_bytes()
@@ -232,13 +256,91 @@ def test_handoff_and_native_acquire_serialize_quiescence_and_source_evidence(tmp
             assert refused["error_code"] == "authority_source_changed", refused
             assert "handoff_mode: soft_claim" in ws.state.read_text()
             assert not (lease_dir / f"{todo_id}.json").exists()
-        public(ws, "authority-shadow", "drain")
-        inspected = public(ws, "coordination-shadow", "inspect")
+        before = ws.state.read_bytes()
+        refused = public(current, "todo", "add", "--role", "agent", "--text", "Fresh legacy intent")
+        assert refused["error_code"] == "canonical_authority_required", refused
+        assert ws.state.read_bytes() == before
+        drained = public(current, "authority-shadow", "drain")
+        assert drained["ok"] is True, drained
+        inspected = public(current, "coordination-shadow", "inspect")
         assert inspected["inspection"]["status"] == "matched", inspected
         assert inspected["inspection"]["cursor"] == "2", inspected
     finally:
         stop(lease)
         stop(handoff)
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("first", ["lease", "handoff"])
+def test_canonical_handoff_acquire_race_uses_one_provider_head(tmp_path, monkeypatch, provider, first):
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    from loopx.control_plane.coordination.coordination_state_contract import (
+        TODO_DOMAIN_READ_RECORD_SCHEMA_VERSION, TODO_DOMAIN_RECORD_FIELDS,
+    )
+    from loopx.control_plane.coordination.coordination_state_contract_generated import TASK_LEASE_CANONICAL_ACQUIRE_REQUEST_SCHEMA
+    from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
+    from loopx.control_plane.work_items.task_lease_acquire_adapter import _canonical_lease_authority_facts
+
+    if provider == "sqlite":
+        isolate_sqlite_runtime(tmp_path, monkeypatch)
+    ws = workspace(tmp_path)
+    projection = build_todo_runtime_shadow_projection(goal_id=ws.goal, todos=[], handoff_mode="hard_lease")
+    projection["todo_read_model"].update(schema_version=TODO_DOMAIN_READ_RECORD_SCHEMA_VERSION,
+                                         contract_fields=list(TODO_DOMAIN_RECORD_FIELDS))
+    initialize_canonical_authority(ws.runtime, ws.goal, projection, state_path=ws.state, provider=provider)
+    todo = ws.add("Race mode change against execution admission.")["todo_id"]
+    original = ws.state.read_bytes()
+    def read():
+        return read_canonical_todos_if_promoted(runtime_root=ws.runtime, goal_id=ws.goal, include_leases=True)
+    initial = read()
+    acquire = {"schema_version": TASK_LEASE_CANONICAL_ACQUIRE_REQUEST_SCHEMA,
+        "runtime_root": str(ws.runtime), "goal_id": ws.goal, "todo_id": todo, "owner": "agent-a",
+        "idempotency_key": "canonical-race", "expected_version": 0, "ttl_seconds": 120, "write_scopes": [],
+        "authority": _canonical_lease_authority_facts(ws.registry, ws.goal)}
+    handoff = {"schema_version": "loopx_coordination_handoff_mode_set_request_v0",
+        "runtime_root": str(ws.runtime), "goal_id": ws.goal, "operation_id": "canonical-race-mode",
+        "requested_mode": "soft_claim", "dry_run": False}
+    # A real clock makes the just-acquired lease time-active for the mode decision.
+    from datetime import datetime, timezone
+    handoff["observed_at"] = datetime.now(timezone.utc).isoformat()
+    digest = hashlib.sha256(ws.goal.encode()).hexdigest()[:16]
+    lock = str(ws.runtime / "authority-transition/file-v0" / ("shadow-management-" + digest) / "maintenance")
+    lease = mode = None
+    try:
+        if first == "lease":
+            lease = start(native("loopx/control_plane/work_items/task_lease_acquire.ts",
+                                 "executeTaskLeaseAcquire", acquire, pause_write=True))
+            barrier(lease, "native-write")
+            mode = start(native("loopx/control_plane/coordination/handoff_mode_runtime.ts",
+                                "setLocalHandoffMode", handoff, wait_lock=lock))
+            barrier(mode, "native-lock")
+            assert mode.poll() is None
+            assert finish(lease, resume=True)["acquired"] is True
+            refused = finish(mode)
+            assert refused["reason_code"] == "handoff_mode_not_quiescent", refused
+            final = read()
+            assert final["handoff_mode"] == "hard_lease"
+            assert len(final["leases"]) == 1 and final["leases"][0]["owner"] == "agent-a"
+        else:
+            mode = start(native("loopx/control_plane/coordination/handoff_mode_runtime.ts",
+                                "setLocalHandoffMode", handoff, pause_lock=lock))
+            barrier(mode, "native-held")
+            lease = start(native("loopx/control_plane/work_items/task_lease_acquire.ts",
+                                 "executeTaskLeaseAcquire", acquire, wait_lock=lock))
+            barrier(lease, "native-lock")
+            assert lease.poll() is None
+            assert finish(mode, resume=True)["changed"] is True
+            refused = finish(lease)
+            assert refused["error_code"] == "handoff_mode_forbids_lease", refused
+            final = read()
+            assert final["handoff_mode"] == "soft_claim" and final["leases"] == []
+        assert final["todos"] == initial["todos"]
+        assert int(final["cursor"]) == int(initial["cursor"]) + 1
+        assert ws.state.read_bytes() == original
+        assert not list((ws.runtime / "goals" / ws.goal / "task-leases").glob("*.json"))
+    finally:
+        stop(lease)
+        stop(mode)
 
 
 def prepare_rewards(ws: ShadowWorkspace) -> Path:

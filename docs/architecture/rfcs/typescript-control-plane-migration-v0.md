@@ -131,8 +131,15 @@ checks include the canonical head and journal; accepted no-op mode intents retai
 a receipt, while their exact retry leaves that journal unchanged. Bootstrap
 replacement and terminal writes on an unmigrated source refuse before mutation;
 current release still settles a genuine pre-upgrade lease.
-This repairs the executable recovery boundary; it does not qualify every old
-shadow-writer ladder or replace the independent installed/natural-trial gates.
+The shared-authority recovery ladder now identifies its immutable 1.x producer
+revision separately from the current receiver. Current drain survives process
+death at commit, cursor and cleanup boundaries on those original entries; source
+replacement, rollback, archive/audit and bounded history checks retain their
+assertions. Original handoff/acquire races retain recoverable receipts, while
+current File/SQLite races independently prove quiescence and policy admission
+against one canonical head. Legacy-source overrides refuse before writing.
+These are executable recovery and current-consumer checks, not sustained
+operation or substitutes for the independent installed/natural-trial gates.
 The backend configuration catalog now describes the same 2.0 creation boundary.
 Exact-head review, core-developer trial and release authorization remain open. Retained outbox recovery and source
 lease release are concrete remaining callers, not grounds for keeping normal

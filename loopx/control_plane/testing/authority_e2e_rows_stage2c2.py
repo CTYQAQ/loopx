@@ -1,12 +1,15 @@
 """Stage 2C parity-half rows (``s2c2.*``) of the shared-goal-authority ladder.
 
-Every row drives the product through the real ``python -m loopx.cli`` against
+Rows retain immutable 1.x producers and drive current recovery through the
+real ``python -m loopx.cli`` against
 one goal whose ``coordination.runtime_shadow`` capture is explicitly enabled
 and bootstrapped, and asserts only through shipped operator interfaces:
 ``authority-shadow status|drain``, ``coordination-shadow bootstrap|inspect|
 qualify|read-candidate|rollback`` and ``migrate-state``. Candidate history is
 read back through the retained TypeScript store (the adapter's read RPC). The
 rows add no product path and never read the candidate for a decision.
+Producer evidence is explicitly historical: it cannot qualify current normal
+Markdown writes, canonical adoption, or sustained operation.
 
 Two scheduling-only seams exist, both outside every product decision:
 
@@ -31,6 +34,8 @@ from ...file_lock import exclusive_cross_runtime_file_lock
 from ..coordination import local_authority_shadow_outbox as shadow_outbox
 from .authority_e2e_fixtures import (
     REPO_ROOT,
+    ORIGINAL_1X_REVISION,
+    original_1x_source,
     GoalWorkspace,
     JsonObject,
     build_goal_workspace,
@@ -45,11 +50,9 @@ from .authority_e2e_row_support import (
     AGENT_B,
     RowContext,
     RowOutcome,
-    acquire_lease,
-    add_todo,
     expect,
     lease_version,
-    passed,
+    passed as row_passed,
 )
 
 RUNTIME_SHADOW_CONFIG_SCHEMA = "loopx_coordination_runtime_shadow_config_v0"
@@ -196,6 +199,26 @@ def goal_cli(workspace: GoalWorkspace, *args: str, check: bool = True) -> JsonOb
     return run_cli(workspace, *args, "--goal-id", workspace.goal_id, check=check)
 
 
+def original_goal_cli(workspace: GoalWorkspace, *args: str, check: bool = True) -> JsonObject:
+    return run_cli(workspace, *args, "--goal-id", workspace.goal_id, check=check,
+                   source=original_1x_source(workspace.root / "original-1x"))
+
+
+def original_add_todo(workspace: GoalWorkspace, text: str) -> JsonObject:
+    return original_goal_cli(workspace, "todo", "add", "--role", "agent", "--text", text,
+                             "--task-class", "advancement_task")
+
+
+def original_acquire_lease(workspace: GoalWorkspace, *, todo_id: str, owner: str, idempotency_key: str) -> JsonObject:
+    return original_goal_cli(workspace, "task-lease", "acquire", "--todo-id", todo_id,
+                             "--owner", owner, "--idempotency-key", idempotency_key, "--ttl-seconds", "120")
+
+
+def passed(**evidence: object) -> RowOutcome:
+    return row_passed(**evidence, historical_producer_revision=ORIGINAL_1X_REVISION,
+                      receiver_source="current_checkout", normal_legacy_writes_supported=False)
+
+
 def bootstrap_capture(workspace: GoalWorkspace) -> JsonObject:
     """Bootstrap the capture lineage; returns the whole CLI payload."""
 
@@ -224,6 +247,10 @@ def capture_workspace(
     set_runtime_shadow(workspace, enabled=True)
     if bootstrap:
         bootstrap_capture(workspace)
+    before = workspace.state_path.read_bytes()
+    rejected = goal_cli(workspace, "todo", "add", "--role", "agent", "--text", "Fresh legacy intent", check=False)
+    expect(rejected.get("error_code") == "canonical_authority_required", "current writers must require canonical import")
+    expect(workspace.state_path.read_bytes() == before, "cutoff must preserve the historical source")
     return workspace
 
 
@@ -423,11 +450,29 @@ def hold_drain_lock(workspace: GoalWorkspace) -> Iterator[None]:
 def crash_cli(workspace: GoalWorkspace, window: str, *args: str) -> None:
     """Run one real CLI command and SIGKILL it at ``window``."""
 
-    command = [sys.executable, "-c", CRASH_WORKER, window, str(workspace.state_path), *workspace.cli_prefix(), *args, "--goal-id", workspace.goal_id]
+    if window in DRAIN_CRASH_WINDOWS:
+        with hold_drain_lock(workspace):
+            deferred(original_goal_cli(workspace, *args), label="original before drain crash")
+        args = ("authority-shadow", "drain")
+        source = REPO_ROOT
+    else:
+        source = original_1x_source(workspace.root / "original-1x")
+    driver = workspace.home / "drain-fault.mts"
+    module = REPO_ROOT / "loopx/control_plane/coordination/shadow_drain.ts"
+    driver.write_text(
+        "import {drainShadowOutbox} from " + json.dumps(module.as_uri()) + ";"
+        "let input='';for await(const bytes of process.stdin)input+=bytes;"
+        "const phase=process.argv[2]==='between_unlinks'?'after_unlink':process.argv[2];"
+        "const request=JSON.parse(input);"
+        "await drainShadowOutbox(request,{afterEffect:async observed=>{if(observed===phase){"
+        "process.stdout.write('BARRIER '+JSON.stringify({native_pid:process.pid})+'\\n');"
+        "await new Promise(()=>{setInterval(()=>{},1000);});}}});")
+    worker = CRASH_WORKER.replace("'loopx/control_plane/testing/shadow_drain_fault_process.ts'", repr(str(driver)))
+    command = [sys.executable, "-c", worker, window, str(workspace.state_path), *workspace.cli_prefix(), *args, "--goal-id", workspace.goal_id]
     process = subprocess.Popen(
         command,
-        cwd=REPO_ROOT,
-        env=cli_env(workspace),
+        cwd=source,
+        env=cli_env(workspace, source=source),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -464,10 +509,10 @@ def row_outbox_prepared_then_committed_entries(context: RowContext) -> RowOutcom
 
     workspace = capture_workspace(context, "ladder-outbox")
     with hold_drain_lock(workspace):
-        added = add_todo(workspace, "Prepared and committed while the drain lock is held.")
+        added = original_add_todo(workspace, "Prepared and committed while the drain lock is held.")
         expect(added.get("added") is True, "the todo must commit while its drain is deferred")
         todo_id = str(added["todo_id"])
-        acquired = acquire_lease(workspace, todo_id=todo_id, owner=AGENT_A, idempotency_key="ladder-outbox-lease")
+        acquired = original_acquire_lease(workspace, todo_id=todo_id, owner=AGENT_A, idempotency_key="ladder-outbox-lease")
         expect(acquired.get("acquired") is True, "the lease must commit while its drain is deferred")
         entries = [
             _object(deferred(added, label="todo add").get("entry"), "todo entry"),
@@ -510,7 +555,7 @@ def row_outbox_prepared_then_committed_entries(context: RowContext) -> RowOutcom
     classes = sorted({str(receipt.get("write_class")) for receipt in receipts})
     expect(runtimes == ["python", "typescript"], "the deliveries must come from both writer runtimes")
     expect(classes == ["task_lease_acquire", "todo_add"], "the deliveries must carry their write classes")
-    inline = delivered(add_todo(workspace, "Delivered inline once the lock is free."), label="todo add (inline)")
+    inline = delivered(original_add_todo(workspace, "Delivered inline once the lock is free."), label="todo add (inline)")
     expect(_object(inline.get("drain"), "inline drain").get("last_cursor") == "4", "an inline delivery must continue the same lineage")
     return passed(
         deferred_entries=2,
@@ -528,7 +573,7 @@ def row_drain_idempotent(context: RowContext) -> RowOutcome:
     workspace = capture_workspace(context, "ladder-drain")
     with hold_drain_lock(workspace):
         for index in range(3):
-            deferred(add_todo(workspace, f"Deferred todo {index}."), label=f"todo add {index}")
+            deferred(original_add_todo(workspace, f"Deferred todo {index}."), label=f"todo add {index}")
     pending = backlog(shadow_status(workspace), "todos")
     expect(pending.get("committed_pending") == 3 and pending.get("next_seq") == 3, "three committed entries must be pending")
     first = drain(workspace, "--max-entries", "1")
@@ -560,10 +605,10 @@ def row_drain_idempotent(context: RowContext) -> RowOutcome:
     listed = _list(goal_cli(workspace, "todo", "list").get("todos"), "todo list")
     todo_id = str(_object(listed[0], "listed todo")["todo_id"])
     acquired = delivered(
-        acquire_lease(workspace, todo_id=todo_id, owner=AGENT_A, idempotency_key="ladder-drain-lease"),
+        original_acquire_lease(workspace, todo_id=todo_id, owner=AGENT_A, idempotency_key="ladder-drain-lease"),
         label="task-lease acquire",
     )
-    replayed = acquire_lease(workspace, todo_id=todo_id, owner=AGENT_A, idempotency_key="ladder-drain-lease")
+    replayed = original_acquire_lease(workspace, todo_id=todo_id, owner=AGENT_A, idempotency_key="ladder-drain-lease")
     expect(replayed.get("idempotent") is True, "a same-key re-acquire must be idempotent")
     expect("coordination_runtime_shadow" not in replayed, "an idempotent replay must not capture")
     expect(len(history(workspace)) == 5, "a writer replay must not add a candidate transaction")
@@ -614,7 +659,7 @@ def row_sigkill_between_primary_write_and_drain(context: RowContext) -> RowOutco
 
 
 def row_sigkill_mid_drain(context: RowContext) -> RowOutcome:
-    """A writer killed inside its inline drain is recovered by the next drain from exact receipts, never delivered twice."""
+    """Current drain interrupted on original entries recovers from exact receipts without duplicate delivery."""
 
     outcomes: dict[str, JsonObject] = {}
     for window in DRAIN_CRASH_WINDOWS:
@@ -652,9 +697,9 @@ def row_rollback_with_pending_entries(context: RowContext) -> RowOutcome:
 
     workspace = capture_workspace(context, "ladder-rollback", bootstrap=False)
     first = _object(bootstrap_capture(workspace).get("bootstrap"), "first bootstrap")
-    delivered(add_todo(workspace, "Delivered before rollback."), label="todo add")
+    delivered(original_add_todo(workspace, "Delivered before rollback."), label="todo add")
     with hold_drain_lock(workspace):
-        deferred(add_todo(workspace, "Committed but not yet drained."), label="todo add (deferred)")
+        deferred(original_add_todo(workspace, "Committed but not yet drained."), label="todo add (deferred)")
     crash_cli(workspace, "before_replace", "todo", "add", "--role", "agent", "--text", "Prepared only.", "--task-class", "advancement_task")
     status = shadow_status(workspace)
     pending = backlog(status, "todos")
@@ -690,8 +735,8 @@ def row_rollback_with_pending_entries(context: RowContext) -> RowOutcome:
     status = shadow_status(workspace)
     expect(management_status(status) == "inactive" and candidate(status).get("status") == "missing", "management must be inactive with no candidate")
     expect(backlog(status, "todos").get("committed_pending") == 0 and backlog(status, "todos").get("prepared_only") == 0, "no backlog may remain")
-    after = add_todo(workspace, "Primary write after rollback.")
-    expect(after.get("added") is True, "primary writes must resume after rollback")
+    after = original_add_todo(workspace, "Primary write after rollback.")
+    expect(after.get("added") is True, "the immutable original writer must resume after rollback")
     held = capture_evidence(after, label="todo add (after rollback)")
     expect(held.get("outcome") == "no_transaction" and held.get("reason_code") == "bootstrap_required", "capture must report bootstrap_required, not a transaction")
     rebootstrap = bootstrap_capture(workspace)
@@ -704,7 +749,7 @@ def row_rollback_with_pending_entries(context: RowContext) -> RowOutcome:
         replay.get("status") == "replayed" and replay.get("current_capture_lineage_id") == second.get("capture_lineage_id"),
         "a replayed rollback must return its historical result against the new lineage",
     )
-    resumed = delivered(add_todo(workspace, "Captured in the new lineage."), label="todo add (new lineage)")
+    resumed = delivered(original_add_todo(workspace, "Captured in the new lineage."), label="todo add (new lineage)")
     expect(_object(resumed.get("drain"), "drain").get("last_cursor") == "2", "the new lineage must capture from cursor 2")
     transactions = history(workspace)
     expect(len(transactions) == 2 and transactions[0].get("receipts") == [] and projected_todo_count(transactions[0]) == 3, "the new history must start from the imported baseline")
@@ -728,7 +773,7 @@ class _MixedWriterLedger:
     no_change_writes: int = 0
 
     def cli(self, *args: str) -> JsonObject:
-        return goal_cli(self.workspace, *args)
+        return original_goal_cli(self.workspace, *args)
 
     def mutate(self, label: str, payload: JsonObject, *, flag: str) -> JsonObject:
         expect(payload.get(flag) is True, f"{label} must report {flag}=true")
@@ -753,9 +798,9 @@ def _mixed_writer_cycle(ledger: _MixedWriterLedger, cycle: int) -> None:
 
     workspace = ledger.workspace
     key_a, key_b, key_c = (f"ladder-parity-{cycle}-{suffix}" for suffix in ("a", "b", "c"))
-    first = ledger.mutate("todo add", add_todo(workspace, f"Cycle {cycle}: deliver one bounded change."), flag="added")
+    first = ledger.mutate("todo add", original_add_todo(workspace, f"Cycle {cycle}: deliver one bounded change."), flag="added")
     todo_id = str(first["todo_id"])
-    acquired = ledger.mutate("task-lease acquire", acquire_lease(workspace, todo_id=todo_id, owner=AGENT_A, idempotency_key=key_a), flag="acquired")
+    acquired = ledger.mutate("task-lease acquire", original_acquire_lease(workspace, todo_id=todo_id, owner=AGENT_A, idempotency_key=key_a), flag="acquired")
     note = ["todo", "update", "--todo-id", todo_id, "--note", f"Cycle {cycle} note.", "--agent-id", AGENT_A]
     ledger.mutate("todo update (note)", ledger.cli(*note), flag="changed")
     ledger.unchanged("todo update (same note)", ledger.cli(*note))
@@ -785,7 +830,7 @@ def _mixed_writer_cycle(ledger: _MixedWriterLedger, cycle: int) -> None:
         ),
         flag="completed",
     )
-    second = ledger.mutate("todo add (second)", add_todo(workspace, f"Cycle {cycle}: replace this work with a successor."), flag="added")
+    second = ledger.mutate("todo add (second)", original_add_todo(workspace, f"Cycle {cycle}: replace this work with a successor."), flag="added")
     second_id = str(second["todo_id"])
     ledger.mutate(
         "todo update (explicit exclusion)",
@@ -795,7 +840,7 @@ def _mixed_writer_cycle(ledger: _MixedWriterLedger, cycle: int) -> None:
     clear = ["todo", "update", "--todo-id", second_id, "--clear-excluded-agents", "--agent-id", AGENT_A]
     ledger.mutate("todo update (explicit clear)", ledger.cli(*clear), flag="changed")
     ledger.unchanged("todo update (clear again)", ledger.cli(*clear))
-    held = ledger.mutate("task-lease acquire (second)", acquire_lease(workspace, todo_id=second_id, owner=AGENT_A, idempotency_key=key_c), flag="acquired")
+    held = ledger.mutate("task-lease acquire (second)", original_acquire_lease(workspace, todo_id=second_id, owner=AGENT_A, idempotency_key=key_c), flag="acquired")
     ledger.mutate(
         "todo supersede",
         ledger.cli(
@@ -807,7 +852,7 @@ def _mixed_writer_cycle(ledger: _MixedWriterLedger, cycle: int) -> None:
     )
     ledger.mutate(
         "todo add (verification)",
-        add_todo(workspace, f"Cycle {cycle}: verify the captured projection."),
+        original_add_todo(workspace, f"Cycle {cycle}: verify the captured projection."),
         flag="added",
     )
 
@@ -837,11 +882,11 @@ def _assert_bounded_parity(ledger: _MixedWriterLedger, cycle: int, anchor_todo_i
 
 
 def row_parity_equal(context: RowContext) -> RowOutcome:
-    """Sustained interleaving of Python and TypeScript writers keeps every bounded qualification matched."""
+    """Interleaved original writers retain receipts accepted by current bounded qualification."""
 
     workspace = capture_workspace(context, "ladder-parity")
     ledger = _MixedWriterLedger(workspace)
-    anchor = ledger.mutate("todo add (anchor)", add_todo(workspace, "Anchor todo that stays open for qualified reads."), flag="added")
+    anchor = ledger.mutate("todo add (anchor)", original_add_todo(workspace, "Anchor todo that stays open for qualified reads."), flag="added")
     anchor_todo_id = str(anchor["todo_id"])
     qualification: JsonObject = {}
     for cycle in range(1, PARITY_CYCLES + 1):
@@ -876,7 +921,7 @@ def _recover_by_rollback_and_rebootstrap(workspace: GoalWorkspace, *, label: str
     expect(rollback.get("status") == "applied" and rollback.get("archive_retained") is True, f"{label}: rollback must retire the held lineage into an archive")
     rebootstrap = bootstrap_capture(workspace)
     for index in range(3):
-        delivered(add_todo(workspace, f"{label} recovery write {index}."), label=f"{label} recovery write {index}")
+        delivered(original_add_todo(workspace, f"{label} recovery write {index}."), label=f"{label} recovery write {index}")
     qualified(qualify(workspace), label=f"{label} after recovery")
     return _object(rebootstrap.get("projection_summary"), f"{label} rebootstrap summary")
 
@@ -887,7 +932,7 @@ def row_parity_divergent_detects_foreign_edit(context: RowContext) -> RowOutcome
     workspace = capture_workspace(context, "ladder-drift")
     todo_ids: list[str] = []
     for index in range(3):
-        added = add_todo(workspace, f"Drift baseline {index}.")
+        added = original_add_todo(workspace, f"Drift baseline {index}.")
         delivered(added, label=f"todo add {index}")
         todo_ids.append(str(added["todo_id"]))
     qualified(qualify(workspace), label="baseline")
@@ -904,7 +949,7 @@ def row_parity_divergent_detects_foreign_edit(context: RowContext) -> RowOutcome
     rejected(qualify(workspace), "qualification", label="qualify after drift")
     read = read_candidate(workspace, todo_ids[0])
     expect(read.get("ok") is False and rejected(read, "read_candidate", label="read after drift").get("read_candidate_qualified") is False, "no candidate read may qualify after drift")
-    after = add_todo(workspace, "Public write after the foreign edit.")
+    after = original_add_todo(workspace, "Public write after the foreign edit.")
     expect(after.get("added") is True, "the primary write must still commit")
     held = capture_evidence(after, label="todo add (after drift)")
     expect(held.get("outcome") == "pending" and held.get("reason_code") == CONTINUITY_HOLD, "the capture must hold on unproven continuity")
@@ -936,7 +981,7 @@ def row_event_only_todo_source_holds(context: RowContext) -> RowOutcome:
     workspace = capture_workspace(context, "ladder-event")
     todo_ids: list[str] = []
     for index in range(3):
-        added = add_todo(workspace, f"Markdown baseline {index}.")
+        added = original_add_todo(workspace, f"Markdown baseline {index}.")
         delivered(added, label=f"todo add {index}")
         todo_ids.append(str(added["todo_id"]))
     qualified(qualify(workspace), label="baseline")
@@ -1020,7 +1065,7 @@ def row_migration_seeds_and_drains(context: RowContext) -> RowOutcome:
 
     legacy = capture_workspace(context, "ladder-legacy", bootstrap=False)
     first = _object(bootstrap_capture(legacy).get("bootstrap"), "legacy bootstrap")
-    delivered(add_todo(legacy, "Captured before migration."), label="legacy todo add")
+    delivered(original_add_todo(legacy, "Captured before migration."), label="legacy todo add")
     documents = store_documents(legacy)
     expect(len(documents) == 1, "the legacy runtime must hold one candidate document")
     legacy_bytes = documents[0].read_bytes()
@@ -1057,7 +1102,7 @@ def row_migration_seeds_and_drains(context: RowContext) -> RowOutcome:
     expect(bootstrap.get("status") == "applied" and bootstrap.get("capture_lineage_id") != first.get("capture_lineage_id"), "the target must seed a fresh lineage")
     summary = _object(bootstrap_payload.get("projection_summary"), "target projection summary")
     expect(summary.get("todo_count") == 1 and summary.get("lease_count") == 0, "the fresh lineage must import the migrated baseline")
-    added = run_cli(target, "todo", "add", "--goal-id", target.goal_id, "--role", "agent", "--text", "Captured in the migrated runtime root.", "--task-class", "advancement_task")
+    added = run_cli(target, "todo", "add", "--goal-id", target.goal_id, "--role", "agent", "--text", "Captured in the migrated runtime root.", "--task-class", "advancement_task", source=original_1x_source(context.root / "original-1x"))
     drained = _object(delivered(added, label="target todo add").get("drain"), "target drain")
     expect(drained.get("last_cursor") == "2", "the first migrated write must drain to cursor 2")
     qualification = _object(run_cli(target, "coordination-shadow", "qualify", "--goal-id", target.goal_id, "--minimum-operations", "1", check=False).get("qualification"), "target qualification")
@@ -1085,7 +1130,7 @@ def row_growth_measurement_gate(context: RowContext) -> RowOutcome:
     sizes = [int(str(status.get("store_bytes")))]
     cursors = [str(candidate(status).get("cursor"))]
     for index in range(GROWTH_TRANSACTIONS):
-        delivered(add_todo(workspace, GROWTH_TEXT_TEMPLATE % index), label=f"growth write {index}")
+        delivered(original_add_todo(workspace, GROWTH_TEXT_TEMPLATE % index), label=f"growth write {index}")
         status = shadow_status(workspace)
         expect(status.get("retention_pressure") is False, "the bounded workload must not trip retention pressure")
         sizes.append(int(str(status.get("store_bytes"))))
@@ -1125,23 +1170,23 @@ def row_archive_after_leased_completion_parity(context: RowContext) -> RowOutcom
     """Archiving a Todo whose released lease stays on disk keeps the candidate head matched and qualifiable."""
 
     workspace = capture_workspace(context, "ladder-archive-leased")
-    leased = add_todo(workspace, "Leased todo archived after its completion is captured.")
+    leased = original_add_todo(workspace, "Leased todo archived after its completion is captured.")
     leased_todo_id = str(leased["todo_id"])
     delivered(leased, label="todo add (leased)")
-    acquired = acquire_lease(workspace, todo_id=leased_todo_id, owner=AGENT_A, idempotency_key="ladder-archive-leased-a")
+    acquired = original_acquire_lease(workspace, todo_id=leased_todo_id, owner=AGENT_A, idempotency_key="ladder-archive-leased-a")
     delivered(acquired, label="task-lease acquire")
-    completed = goal_cli(
+    completed = original_goal_cli(
         workspace, "todo", "complete", "--todo-id", leased_todo_id, "--agent-id", AGENT_A,
         "--task-lease-idempotency-key", "ladder-archive-leased-a",
         "--task-lease-expected-version", lease_version(acquired, label="acquire"),
         "--evidence", "validation://ladder-archive-leased", "--no-follow-up",
     )
     delivered(completed, label="todo complete")
-    anchor = add_todo(workspace, "Anchor todo that stays open across the archive write.")
+    anchor = original_add_todo(workspace, "Anchor todo that stays open across the archive write.")
     anchor_todo_id = str(anchor["todo_id"])
     delivered(anchor, label="todo add (anchor)")
     qualified(qualify(workspace), label="baseline")
-    archived = goal_cli(workspace, "todo", "archive-completed", "--role", "agent", "--max-active-done", "0", "--execute")
+    archived = original_goal_cli(workspace, "todo", "archive-completed", "--role", "agent", "--max-active-done", "0", "--execute")
     expect(archived.get("changed") is True and archived.get("moved_count") == 1, "archive-completed must move exactly the completed todo")
     inspection = _object(inspect(workspace).get("inspection"), "post-archive inspection")
     expect(
@@ -1165,10 +1210,10 @@ def row_archive_after_leased_completion_parity(context: RowContext) -> RowOutcom
 
     # The second boundary the same rule covers: a later lease write must not
     # re-read the retained lease of the archived Todo into its own partition.
-    successor = add_todo(workspace, "Successor todo that takes a fresh lease after the archive.")
+    successor = original_add_todo(workspace, "Successor todo that takes a fresh lease after the archive.")
     successor_todo_id = str(successor["todo_id"])
     delivered(successor, label="todo add (successor)")
-    successor_lease = acquire_lease(
+    successor_lease = original_acquire_lease(
         workspace, todo_id=successor_todo_id, owner=AGENT_A, idempotency_key="ladder-archive-leased-b",
     )
     delivered(successor_lease, label="task-lease acquire (successor)")
@@ -1179,7 +1224,7 @@ def row_archive_after_leased_completion_parity(context: RowContext) -> RowOutcom
     )
     # Completion closes the lease fence in a separate native request. It must
     # retain the same current-graph rule as acquire, not reintroduce audit leases.
-    successor_completed = goal_cli(
+    successor_completed = original_goal_cli(
         workspace, "todo", "complete", "--todo-id", successor_todo_id, "--agent-id", AGENT_A,
         "--task-lease-idempotency-key", "ladder-archive-leased-b",
         "--task-lease-expected-version", lease_version(successor_lease, label="successor acquire"),

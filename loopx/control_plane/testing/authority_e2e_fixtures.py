@@ -8,15 +8,18 @@ ladder can never become a second authority over the local goal state.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -339,11 +342,46 @@ def build_legacy_migration_source(
     )
 
 
-def cli_env(workspace: CliWorkspace) -> dict[str, str]:
-    """Child environment: this checkout on ``PYTHONPATH`` and an isolated home."""
+# Public pre-cutoff compatibility input; never an alternate current writer.
+ORIGINAL_1X_REVISION = "60d833b13c85135587b725013b247e827663ffb9"
+
+
+@cache
+def original_1x_source(root: Path) -> Path:
+    """Extract one immutable producer into a disposable test directory."""
+    result = subprocess.run(["git", "archive", ORIGINAL_1X_REVISION, "loopx"],
+        cwd=REPO_ROOT, capture_output=True, check=False)
+    if result.returncode:
+        raise ProbeError(f"Historical recovery requires Git object {ORIGINAL_1X_REVISION}; fetch repository history")
+    root.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(result.stdout)) as archive:
+        for member in archive:
+            path = root / member.name
+            if not path.resolve().is_relative_to(root.resolve()):
+                raise ProbeError("historical source archive escapes its scratch root")
+            if member.isdir():
+                path.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                content = archive.extractfile(member)
+                if content is None:
+                    raise ProbeError("historical source archive member has no content")
+                with content:
+                    path.write_bytes(content.read())
+            else:
+                raise ProbeError("historical source archive contains a non-file member")
+    imported = subprocess.run([sys.executable, "-c", "import loopx; print(loopx.__file__)"],
+        cwd=root, env={**os.environ, "PYTHONPATH": str(root)}, capture_output=True, text=True, check=True)
+    if Path(imported.stdout.strip()).resolve() != (root / "loopx/__init__.py").resolve():
+        raise ProbeError("historical producer imported the wrong source")
+    return root
+
+
+def cli_env(workspace: CliWorkspace, *, source: Path = REPO_ROOT) -> dict[str, str]:
+    """Child environment: explicit source (current by default) and an isolated home."""
 
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT)
+    env["PYTHONPATH"] = str(source)
     env["HOME"] = str(workspace.home)
     if os.name == "nt":
         env["USERPROFILE"] = str(workspace.home)
@@ -359,14 +397,15 @@ def run_cli(
     *args: str,
     timeout: float = 60,
     check: bool = True,
+    source: Path = REPO_ROOT,
 ) -> JsonObject:
     """Run one product CLI command and return its JSON object response."""
 
     command = cli_command(workspace, *args)
     completed = subprocess.run(
         command,
-        cwd=REPO_ROOT,
-        env=cli_env(workspace),
+        cwd=source,
+        env=cli_env(workspace, source=source),
         capture_output=True,
         text=True, encoding="utf-8", errors="replace",
         timeout=timeout,

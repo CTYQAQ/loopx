@@ -110,6 +110,12 @@ def test_ladder_row_passes_or_is_declared_unverified(
     )
     reported = report["rows"][0]
     assert reported["status"] == "pass", (reported["reason_code"], reported["evidence"])
+    if row.stage == "2c2" or row.id == "s1.cli_document_decodes_through_ts_store":
+        # Historical input and current receiver evidence never certify live writers.
+        assert reported["evidence"]["historical_producer_revision"] == ladder.ORIGINAL_1X_REVISION
+        assert reported["evidence"]["receiver_source"] == "current_checkout"
+        assert reported["evidence"]["normal_legacy_writes_supported"] is False
+
     assert report["summary"] == {"pass": 1, "fail": 0, "unverified": 0, "pending": 0, "executed": 1, "privacy_violations": 0}
     assert report["exit_policy"]["exit_code"] == 0
 

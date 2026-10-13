@@ -32,8 +32,6 @@ from .authority_e2e_row_support import (
     RowAssertionError,
     RowContext,
     RowOutcome,
-    acquire_lease,
-    add_todo,
     expect,
     passed,
     sha256_hex,
@@ -43,6 +41,9 @@ from .authority_e2e_rows_stage2c import row_retired_observation_upgrade
 from .authority_e2e_rows_stage2c2 import (
     capture_workspace,
     delivered,
+    original_add_todo,
+    original_acquire_lease,
+    original_goal_cli,
     row_archive_after_leased_completion_parity,
     row_drain_idempotent,
     row_event_only_todo_source_holds,
@@ -56,13 +57,13 @@ from .authority_e2e_rows_stage2c2 import (
     row_sigkill_mid_drain,
 )
 from .authority_e2e_fixtures import (
+    ORIGINAL_1X_REVISION,
     REPO_ROOT,
     CliOutputError,
     TS_READBACK_PROBE,
     JsonObject,
     node_executable,
     parse_json_object,
-    run_cli,
     tap_summary,
     ts_readback,
     unique_goal_id,
@@ -250,20 +251,18 @@ def _row_cli_document_decodes_through_ts_store(context: RowContext) -> RowOutcom
     if node_executable() is None:
         return unverified("node_missing")
     workspace = capture_workspace(context, "ladder-s1")
-    added = add_todo(workspace, "Decode this source transaction through the TypeScript store.")
+    added = original_add_todo(workspace, "Decode this source transaction through the TypeScript store.")
     todo_id = str(added["todo_id"])
-    acquired = acquire_lease(
+    acquired = original_acquire_lease(
         workspace,
         todo_id=todo_id,
         owner=AGENT_A,
         idempotency_key="ladder-s1-lease",
     )
-    updated = run_cli(
+    updated = original_goal_cli(
         workspace,
         "todo",
         "update",
-        "--goal-id",
-        workspace.goal_id,
         "--todo-id",
         todo_id,
         "--note",
@@ -292,7 +291,9 @@ def _row_cli_document_decodes_through_ts_store(context: RowContext) -> RowOutcom
     assert isinstance(receipt_probe, dict)
     receipt = receipt_probe.get("receipt")
     expect(isinstance(receipt, dict) and receipt.get("status") == "found", "readReceipt must find the first source write")
-    return passed(cursor="4", scan_pages=scan.get("pages"), transaction_count=4)
+    return passed(cursor="4", scan_pages=scan.get("pages"), transaction_count=4,
+                  historical_producer_revision=ORIGINAL_1X_REVISION, receiver_source="current_checkout",
+                  normal_legacy_writes_supported=False)
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +501,7 @@ LADDER_ROWS: tuple[LadderRow, ...] = (
     LadderRow(
         id="s1.cli_document_decodes_through_ts_store",
         stage="1",
-        title="CLI-written candidate documents decode through the TypeScript FileAuthorityStore",
+        title="Original 1.x CLI documents decode through the current TypeScript FileAuthorityStore",
         product_path="real_cli",
         gate="deterministic",
         posix_only=False,
@@ -536,7 +537,7 @@ LADDER_ROWS: tuple[LadderRow, ...] = (
     LadderRow(
         id="s2c2.outbox_prepared_then_committed_entries",
         stage="2c2",
-        title="Python and TypeScript writers leave prepared records with committed markers that one drain delivers once",
+        title="Original 1.x writers leave committed outbox records that the current drain delivers once",
         product_path="real_cli",
         gate="deterministic",
         posix_only=False,
@@ -563,7 +564,7 @@ LADDER_ROWS: tuple[LadderRow, ...] = (
     LadderRow(
         id="s2c2.sigkill_mid_drain",
         stage="2c2",
-        title="A SIGKILL inside the inline drain is recovered from exact receipts without a second delivery",
+        title="A SIGKILL inside current drain recovers original entries without a second delivery",
         product_path="real_cli",
         gate="deterministic",
         posix_only=True,
@@ -581,7 +582,7 @@ LADDER_ROWS: tuple[LadderRow, ...] = (
     LadderRow(
         id="s2c2.parity_equal",
         stage="2c2",
-        title="Sustained interleaving of Python and TypeScript writers keeps every bounded qualification matched",
+        title="Interleaved original 1.x writer receipts pass current bounded parity qualification",
         product_path="real_cli",
         gate="deterministic",
         posix_only=False,
