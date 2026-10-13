@@ -43,6 +43,7 @@ from .completion_validation_projection import (
 )
 from .path_resolution import resolve_todo_state_path
 from .monitor_metadata import MonitorPollObservation
+from .external_wait_contract import TodoExternalWaitAuthoringError
 
 
 def _dispatch_canonical_todo_update(
@@ -279,6 +280,25 @@ def update_canonical_todo_if_promoted(
             raise ValueError("Todo is missing from canonical authority")
         if result.get("reason_code") == "todo_role_mismatch":
             raise ValueError("Todo does not have the requested role")
+        # The TypeScript planner owns the rule and its typed diagnostic. Keep
+        # the public CLI repair projection without revalidating the transition.
+        code = result.get("reason_code")
+        if isinstance(code, str) and code.startswith("external_wait_"):
+            context = result.get("external_wait_authoring_context")
+            if not isinstance(context, dict):
+                context = planning_intent or {}
+            resume_when = context.get("resume_when")
+            monitor_id = (
+                resume_when.split(":", 1)[1]
+                if isinstance(resume_when, str) and resume_when.startswith("monitor_changed:")
+                else None
+            )
+            raise TodoExternalWaitAuthoringError(
+                str(result.get("reason") or "invalid external-wait transition"),
+                code=code,
+                monitor_todo_id=monitor_id,
+                successor_todo_ids=context.get("successor_todo_ids"),
+            )
     if isinstance(result, dict) and (
         result.get("status") == "missing"
         and result.get("source_authority") in LOCAL_AUTHORITY_SOURCES

@@ -44,6 +44,7 @@ export type {CoordinationTodoUpdateInput} from "./todo_update_intent.ts";
 import {normalizeTodoUpdateInput, prepareUpdatedTodo, type CoordinationTodoUpdateInput} from "./todo_update_intent.ts";
 import {executeCoordinationTodoTerminalLifecycle} from "./todo_terminal_lifecycle.ts";
 import {planCompletionValidationRevision} from "../todos/completion_validation_revision.ts";
+import {EffectRuntimeRequestError} from "../effect_runtime_errors.ts";
 
 export type CoordinationTodoUpdateResult = JsonObject & {
   readonly schema_version: typeof COORDINATION_TODO_UPDATE_RESULT_SCHEMA;
@@ -193,8 +194,17 @@ export async function executeCoordinationTodoUpdate(
     ...(rejected.recovery === undefined ? {} : {recovery: rejected.recovery})};
   let prepared: ReturnType<typeof prepareUpdatedTodo>;
   try { prepared = prepareUpdatedTodo(target.todo, input, head.head); }
-  catch (error) { return failure("invalid_coordination_todo_update",
-    error instanceof Error ? error.message : "invalid updated Todo"); }
+  catch (error) {
+    const code = error instanceof EffectRuntimeRequestError ? error.code : "invalid_coordination_todo_update";
+    const rejected = failure(code, error instanceof Error ? error.message : "invalid updated Todo");
+    if (!code.startsWith("external_wait_")) return rejected;
+    // The public repair hint needs the effective wait after a partial edit.
+    // These are source facts, not a second validation or a new grant.
+    return {...rejected, external_wait_authoring_context: {
+      resume_when: input.planning_intent?.resume_when ?? target.todo.resume_when ?? null,
+      successor_todo_ids: input.planning_intent?.successor_todo_ids ?? target.todo.successor_todo_ids ?? [],
+    }};
+  }
   let {next, changed, clearFields} = prepared;
   let completionValidationRevisionReceipt: JsonObject | null = null;
   if (input.completion_validation_revision !== undefined) {
