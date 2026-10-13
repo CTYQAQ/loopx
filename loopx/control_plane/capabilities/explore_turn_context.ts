@@ -14,6 +14,10 @@ function compact(row: JsonObject, fields: string[]): JsonObject {
   return Object.fromEntries(fields.filter(key => row[key] !== undefined)
     .map(key => [key, typeof row[key] === "string" ? (row[key] as string).slice(0, 240) : row[key]]));
 }
+function findingDigest(row: JsonObject, findingSources?: Map<string, JsonObject>): JsonObject {
+  const source = findingSources?.get(String(row.finding_id));
+  return source ? {source_sha256: createHash("sha256").update(JSON.stringify(source)).digest("hex")} : {};
+}
 function evidenceCount(audit: JsonObject, kind: string, detailCount: number): number {
   if (audit.status_counts == null) return detailCount;
   const counts = requireJsonObject(audit.status_counts, "Explore evidence status counts");
@@ -27,7 +31,7 @@ function evidenceCount(audit: JsonObject, kind: string, detailCount: number): nu
   }
   return Math.max(detailCount, total);
 }
-function branchContext(row: JsonObject, findingDigests?: Map<string, string>): JsonObject {
+function branchContext(row: JsonObject, findingSources?: Map<string, JsonObject>): JsonObject {
   const result = compact(row, ["todo_id", "text", "branch_role", "score", "confidence",
     "selection_status", "status", "actionable_open", "resume_when", "resume_ready"]);
   if (row.typed_evidence_audit == null) return result;
@@ -45,7 +49,7 @@ function branchContext(row: JsonObject, findingDigests?: Map<string, string>): J
     omitted_unknown_node_refs: Math.max(0, unknown.length - 8),
     nodes: nodes.slice(0, 3).map(node => compact(node, ["node_id", "title", "status"])),
     findings: findings.slice(0, 3).map(finding => ({...compact(finding, ["finding_id", "node_id", "finding", "status"]),
-      ...(findingDigests?.has(String(finding.finding_id)) ? {source_sha256: findingDigests.get(String(finding.finding_id))} : {})})),
+      ...findingDigest(finding, findingSources)})),
     relevant_edges: edges.slice(0, 3).map(edge => compact(edge, ["from_node", "to_node", "edge_type"])),
     omitted_audit_nodes: Math.max(0, nodes.length - 3),
     omitted_audit_findings: Math.max(0, evidenceCount(audit, "findings", findings.length) - 3),
@@ -69,8 +73,9 @@ export function projectExploreTurnContext(params: JsonObject): JsonObject {
   if (params.include_finding_digests != null && typeof params.include_finding_digests !== "boolean") {
     throw new EffectRuntimeRequestError("include_finding_digests must be a boolean");
   }
-  const findingDigests = params.include_finding_digests === true ? new Map(findings.map(row =>
-    [String(row.finding_id), createHash("sha256").update(JSON.stringify(row)).digest("hex")])) : undefined;
+  // Retain full sources, but hash only findings emitted by the bounded view.
+  const findingSources = params.include_finding_digests === true ? new Map(findings.map(row =>
+    [String(row.finding_id), row])) : undefined;
   const branches = rows(plan.selected_branches);
   const rejected = rows(plan.rejected_candidates);
   const frontier = rows(projection.frontier);
@@ -140,14 +145,14 @@ export function projectExploreTurnContext(params: JsonObject): JsonObject {
       recent_nodes: nodes.slice(0, 3).map(row => compact(row, ["node_id", "title", "status", "blocked_reason"])),
       // The canonical evidence projection calls the finding's title `finding`.
       recent_findings: findings.slice(0, 3).map(row => ({...compact({...row, title: row.finding}, ["finding_id", "node_id", "title", "status"]),
-        ...(findingDigests?.has(String(row.finding_id)) ? {source_sha256: findingDigests.get(String(row.finding_id))} : {})})),
+        ...findingDigest(row, findingSources)})),
       // Full scoped summaries; progressive reads can raise the page size.
       // These retain the observation AND applicability; clipping away conditions
       // could turn a bounded refutation into a blanket route ban.
       writeback_results: visibleResults
         .map(row => ({...compact(row, ["finding_id", "node_id", "finding", "status", "evidence_refs"]),
           summary: String(row.summary ?? "").slice(0, EXPLORE_WRITEBACK_SUMMARY_LIMIT),
-          ...(findingDigests?.has(String(row.finding_id)) ? {source_sha256: findingDigests.get(String(row.finding_id))} : {})})),
+          ...findingDigest(row, findingSources)})),
       result_page: {
         total: resultRows.length, offset: resultOffset, limit: resultLimit,
         remaining: remainingResults, revision: resultRevision,
@@ -176,7 +181,7 @@ export function projectExploreTurnContext(params: JsonObject): JsonObject {
     harness: harness ? {
       orchestration_gate: gate,
       candidate_count: plan.candidate_count ?? 0,
-      selected_branches: branches.slice(0, 3).map(branch => branchContext(branch, findingDigests)),
+      selected_branches: branches.slice(0, 3).map(branch => branchContext(branch, findingSources)),
       omitted_selected_branches: Math.max(0, branches.length - 3),
       rejected_candidates: rejected.slice(0, 3).map(branch => branchContext(branch)),
       omitted_rejected_candidates: Math.max(0,
