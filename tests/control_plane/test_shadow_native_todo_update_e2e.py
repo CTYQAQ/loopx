@@ -253,10 +253,12 @@ def pending(workspace: Workspace, kind: str) -> subprocess.Popen[str]:
 def test_native_update_preserves_complete_records_and_exact_receipts(workspace: Workspace, transport: str) -> None:
     before = inspect(workspace)
     preview = invoke(workspace, transport, dry_run=True)
-    assert preview["status"] == "planned", preview
+    assert preview["provider_status" if transport == "cli" else "status"] == "planned", preview
     assert inspect(workspace)["head"] == before["head"]
     result = invoke(workspace, transport)
-    assert result["status"] == "applied", result
+    assert result["provider_status" if transport == "cli" else "status"] == "applied", result
+    if transport == "cli":
+        assert result["status"] == preview["status"] == "open"
     receipt = result["original_receipt"]
     after = inspect(workspace, receipt["operation_id"])
     assert after["receipt"]["status"] == "found"
@@ -297,7 +299,8 @@ def test_canonical_update_rpc_budget_covers_the_writer_lock_and_receipt(
         text="Updated with the bounded canonical writer budget", note=None,
         dry_run=False, operation_id="budgeted-update",
     )
-    assert result is not None and result["status"] == "applied", result
+    assert result is not None and result["provider_status"] == "applied", result
+    assert result["status"] == "open"
     assert observed and all(timeout > 35 for timeout in observed)
     receipt = inspect(workspace, "budgeted-update")["receipt"]
     assert receipt["status"] == "found"
@@ -315,7 +318,8 @@ def test_cli_update_waits_past_default_rpc_budget_for_real_writer_lock(workspace
         assert result.returncode == 0, result.stdout + result.stderr
         payload = json.loads(result.stdout)
         assert elapsed > 10, elapsed
-        assert payload["status"] == "applied", payload
+        assert payload["provider_status"] == "applied", payload
+        assert payload["status"] == "open"
         receipt = payload["original_receipt"]
         assert inspect(workspace, receipt["operation_id"])["receipt"]["status"] == "found"
     finally:

@@ -41,7 +41,7 @@ export const COORDINATION_TODO_OBSERVATION_UPDATE_REQUEST_SCHEMA =
 export const COORDINATION_TODO_VALIDATION_REVISION_REQUEST_SCHEMA =
   "loopx_local_coordination_todo_update_request_v5";
 export type {CoordinationTodoUpdateInput} from "./todo_update_intent.ts";
-import {normalizeTodoUpdateInput, prepareUpdatedTodo, type CoordinationTodoUpdateInput} from "./todo_update_intent.ts";
+import {todoUpdateResultFacts, normalizeTodoUpdateInput, prepareUpdatedTodo, type CoordinationTodoUpdateInput} from "./todo_update_intent.ts";
 import {executeCoordinationTodoTerminalLifecycle} from "./todo_terminal_lifecycle.ts";
 import {planCompletionValidationRevision} from "../todos/completion_validation_revision.ts";
 import {EffectRuntimeRequestError} from "../effect_runtime_errors.ts";
@@ -68,6 +68,8 @@ function updateReceipt(input: CoordinationTodoUpdateInput, requestSha: string) {
     decode(original) {
       if (typeof original.changed !== "boolean") throw new AuthorityStoreProtocolError("update receipt changed must be boolean");
       return {fields: {todo_id: input.todo_id, original_receipt: original,
+        ...(original.todo_update === undefined ? {} : {todo_update:
+          canonicalAuthorityObject(original.todo_update, "Todo update receipt facts")}),
         ...(input.monitor_observation === undefined ? {} : {
           monitor_poll_transition: canonicalAuthorityObject(original.monitor_poll_transition, "Monitor update receipt transition")}),
         ...(original.monitor_lifecycle_transition === undefined ? {} : {monitor_lifecycle_transition:
@@ -278,7 +280,8 @@ export async function executeCoordinationTodoUpdate(
   // The provider CAS covers Todo/lease state. Registry configuration is a
   // separate source witness, not part of a distributed transaction.
   if (!await authoritySourcesCurrent()) return sourceChanged();
-  if (input.dry_run) return {schema_version: COORDINATION_TODO_UPDATE_RESULT_SCHEMA,
+  const todoUpdate = todoUpdateResultFacts(target.todo, next);
+  if (input.dry_run) return {todo_update: todoUpdate, schema_version: COORDINATION_TODO_UPDATE_RESULT_SCHEMA,
     status: changed ? "planned" : "no_change", changed, todo_id: input.todo_id,
     provider_revision: head.provider_revision, cursor: head.cursor, dry_run: true,
     ...(prepared.monitorTransition ? {monitor_poll_transition: prepared.monitorTransition} : {}),
@@ -289,7 +292,7 @@ export async function executeCoordinationTodoUpdate(
     ...(blockedCycle?.transition == null ? {} : {blocked_lifecycle_transition: blockedCycle.transition})};
   commit.receipts = [{schema_version: COORDINATION_TODO_UPDATE_RECEIPT_SCHEMA,
     operation_id: input.operation_id, goal_id: input.goal_id,
-    todo_id: input.todo_id, request_sha256: requestSha, changed,
+    todo_id: input.todo_id, request_sha256: requestSha, changed, todo_update: todoUpdate,
     ...(prepared.monitorTransition ? {monitor_poll_transition: prepared.monitorTransition} : {}),
     ...(completionValidationRevisionReceipt === null ? {} :
       {completion_validation_revision: completionValidationRevisionReceipt}),

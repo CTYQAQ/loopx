@@ -639,7 +639,7 @@ def main() -> int:
             "--next-excluded-agent",
             "codex-side-bypass",
         )
-        assert "cannot also appear in next_excluded_agents" in (
+        assert "cannot also appear in excluded_agents" in (
             side_review_claim_error["error"]
         ), side_review_claim_error
 

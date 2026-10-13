@@ -206,7 +206,8 @@ def test_empty_promoted_edits_reject_without_the_source_writer(update_workspace,
                         "--update-operation-id", "empty-update")
     assert replay.returncode == 0, replay.stdout + replay.stderr
     recovered = json.loads(replay.stdout)
-    assert recovered["status"] == "replayed"
+    assert recovered["provider_status"] == "replayed"
+    assert recovered["status"] == "open"
     assert recovered["original_receipt"] == first["original_receipt"]
     assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == newer
 

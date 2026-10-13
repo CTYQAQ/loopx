@@ -51,6 +51,12 @@ export function registerNativePlanningUpdateConformance(provider: string, factor
     assert.deepEqual(await head(store), before);
     const applied = await executeCoordinationTodoUpdate(store, request);
     assert.equal(applied.status, "applied", JSON.stringify(applied));
+    const facts = applied.todo_update as JsonObject;
+    assert.ok(facts, "update must return its original transaction facts");
+    assert.equal((facts.todo as JsonObject).note, "Owner reviewed correction");
+    assert.equal(facts.status_changed, false);
+    assert.equal(facts.text_changed, false);
+    assert.equal(facts.metadata_updated, true);
     const original = await store.readReceipt(request.operation_id);
     const after = await head(store);
     assert.deepEqual(after.head.leases, before.head.leases);
@@ -64,6 +70,7 @@ export function registerNativePlanningUpdateConformance(provider: string, factor
     const replay = await executeCoordinationTodoUpdate(store, {...request, lifecycle_grants: []},
       async () => { throw new Error("historical receipt must precede current source admission"); });
     assert.equal(replay.status, "replayed");
+    assert.deepEqual(replay.todo_update, facts);
     assert.deepEqual(await head(store), latest);
     assert.deepEqual(await store.readReceipt(request.operation_id), original);
     assert.equal((await executeCoordinationTodoUpdate(store, {...request, authority_reason: "Changed justification"})).reason_code,

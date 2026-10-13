@@ -92,6 +92,10 @@ export function registerUserCompletionUpdateConformance(provider: string, factor
       const completed = (after.head.todos as JsonObject[]).find(todo => todo.todo_id === target.todo_id)!;
       assert.equal(completed.status, "done");
       assert.equal(completed.text, request.patch.text);
+      const facts = applied.todo_update as JsonObject;
+      assert.deepEqual(facts.todo, completed);
+      assert.equal(facts.text_changed, true);
+      assert.equal(facts.status_changed, true);
       const retired = (after.head.leases as JsonObject[]).find(row => row.todo_id === target.todo_id)!;
       assert.deepEqual(retired, {...lease, status: "released", updated_at: "2026-09-18T06:00:00Z"});
       assert.equal(retired.status, "released");

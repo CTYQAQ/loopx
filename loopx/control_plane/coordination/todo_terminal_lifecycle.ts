@@ -6,7 +6,7 @@ import {AUTHORITY_SOURCE_CHANGED, uncheckedAuthoritySource, type AuthoritySource
 export type TodoTerminalEvidenceGuard = (context: {
   goal_id: string; todo: JsonObject; todos: JsonObject[]; actor_agent_id: string | null; command: string;
 }) => Promise<JsonObject>;
-import {normalizeTodoUpdateInput, prepareUpdatedTodo, type CoordinationTodoUpdateInput, type TodoCompletionEdit} from "./todo_update_intent.ts";
+import {todoUpdateResultFacts, normalizeTodoUpdateInput, prepareUpdatedTodo, type CoordinationTodoUpdateInput, type TodoCompletionEdit} from "./todo_update_intent.ts";
 import {todoUpdateAdmissionRejection} from "./todo_update_admission.ts";
 import { createHash } from "node:crypto";
 import {acceptanceWorkGuard, acceptanceCompletionRequirements, validateAcceptanceCompletion,
@@ -1660,6 +1660,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
     ? projection.todos.get(String(todo.unblocks_todo_id)) : undefined;
   const changed = authority.outcome === "apply" || edit?.changed === true || terminalUpgradeReceipt !== null;
   const result: JsonObject = {
+    ...(input.user_update == null ? {} : {todo_update: todoUpdateResultFacts(authorityTodo, target.todo)}),
     todo_id: input.todo_id,
     command: input.command,
     changed,

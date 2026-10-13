@@ -211,8 +211,20 @@ export function prepareUpdatedTodo(
   const changed = !canonicalAuthorityBytes(changedBeforeAudit).equals(
     canonicalAuthorityBytes(originalBeforeAudit));
   if (!changed) {
-    next.last_actor_agent_id = todo.last_actor_agent_id;
-    next.updated_at = todo.updated_at;
+    for (const field of ["last_actor_agent_id", "updated_at"]) {
+      if (Object.hasOwn(todo, field)) next[field] = todo[field];
+      else delete next[field];
+    }
   }
   return {next, changed, clearFields: [...clearFields], ...(monitorTransition ? {monitorTransition} : {})};
+}
+
+/** Capture decided edit facts inside the transaction, including on previews.
+ * Receipt replay must never reconstruct these from a later provider head. */
+export function todoUpdateResultFacts(before: JsonObject, after: JsonObject): JsonObject {
+  const metadata = (todo: JsonObject) => Object.fromEntries(Object.entries(todo).filter(
+    ([key]) => !["text", "status", "done", "updated_at", "last_actor_agent_id"].includes(key)));
+  return {todo: after, status_changed: before.status !== after.status,
+    text_changed: before.text !== after.text,
+    metadata_updated: !canonicalAuthorityBytes(metadata(before)).equals(canonicalAuthorityBytes(metadata(after)))};
 }
