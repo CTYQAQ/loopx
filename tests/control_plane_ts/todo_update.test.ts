@@ -751,6 +751,24 @@ test("provider-first update rejects authority and lifecycle escalation", async (
   }
 });
 
+test("canonical update preserves the planner's typed external-wait repair code", async () => {
+  const {store, request} = await seeded({todo_id: "todo_waiting001", task_class: "advancement_task"});
+  const before = await store.loadAuthority();
+  const result = await executeCoordinationTodoUpdate(store, {...request, todo_id: "todo_waiting001",
+    patch: {}, clear_fields: [], planning_intent: {
+      status: "blocked",
+      resume_when: "monitor_changed:todo_monitor001",
+      successor_todo_ids: ["todo_next001"],
+    }});
+  assert.equal(result.status, "failed");
+  assert.equal(result.reason_code, "external_wait_todo_status_must_remain_open", JSON.stringify(result));
+  assert.deepEqual(result.external_wait_authoring_context, {
+    resume_when: "monitor_changed:todo_monitor001", successor_todo_ids: ["todo_next001"],
+  });
+  assert.deepEqual(await store.loadAuthority(), before);
+  assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+});
+
 for (const claimed_by of ["agent-a", null]) {
 test(`provider-first update fails closed without a hard-lease execution proof (${claimed_by ?? "unclaimed"})`, async () => {
   const {store, request} = await seeded({claimed_by});

@@ -6,6 +6,8 @@ from threading import Event
 
 import pytest
 
+from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
+from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 from loopx.control_plane.scheduler.monitor_poll_writeback import (
     write_monitor_poll_todo_state,
 )
@@ -17,7 +19,8 @@ from loopx.control_plane.todos.active_state_todo_parser import parse_active_stat
 from loopx.control_plane.todos.external_wait_contract import (
     TodoExternalWaitAuthoringError,
 )
-from loopx.todos import complete_goal_todo, update_goal_todo
+from loopx.control_plane.coordination.local_authority import LocalCoordinationAuthorityUnavailable
+from loopx.todos import complete_goal_todo, list_goal_todos, update_goal_todo
 
 
 GOAL_ID = "external-wait-fixture"
@@ -28,7 +31,7 @@ DEPENDENCY_ID = "todo_dependency001"
 FALLBACK_ID = "todo_fallback001"
 
 
-def _write_fixture(root: Path, *, dependency: bool = False) -> tuple[Path, Path]:
+def _write_fixture(root: Path, *, dependency: bool = False, provider: str = "file") -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -72,6 +75,12 @@ def _write_fixture(root: Path, *, dependency: bool = False) -> tuple[Path, Path]
         registered_agents=[AGENT_ID],
         quota_allowed_slots=None,
     )
+    # Treat the frozen Markdown source as imported history. Active writes now
+    # execute through the canonical provider, not the retired source writer.
+    imported = list_goal_todos(registry_path=registry, goal_id=GOAL_ID, role="agent")["todos"]
+    initialize_canonical_authority(runtime, GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=imported,
+            handoff_mode="soft_claim"), state_path=state_file, provider=provider)
     return registry, state_file
 
 
@@ -82,10 +91,18 @@ def _todos(state_file: Path) -> dict[str, dict]:
     return {item["todo_id"]: item for item in summary["items"]}
 
 
+def _canonical_todo(registry: Path, todo_id: str) -> dict:
+    return list_goal_todos(registry_path=registry, goal_id=GOAL_ID,
+                           todo_id=todo_id)["todo"]
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_monitor_change_wait_binds_generation_and_resumes_only_after_increment(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
 ) -> None:
-    registry, state_file = _write_fixture(tmp_path)
+    if provider == "sqlite":
+        isolate_sqlite_runtime(tmp_path, monkeypatch)
+    registry, state_file = _write_fixture(tmp_path, provider=provider)
 
     transition = update_goal_todo(
         registry_path=registry,
@@ -96,10 +113,12 @@ def test_monitor_change_wait_binds_generation_and_resumes_only_after_increment(
         agent_id=AGENT_ID,
     )
 
-    receipt = transition["external_wait_transition"]
-    assert receipt["baseline_generation"] == 2
-    assert receipt["successor_todo_ids"] == [FALLBACK_ID]
-    assert receipt["authoring_contract"]["waiting_todo"]["status"] == "open"
+    assert transition["status"] == "applied"
+    canonical_waiting = _canonical_todo(registry, WAITING_ID)
+    assert canonical_waiting["resume_monitor_generation"] == 2
+    assert canonical_waiting["successor_todo_ids"] == [FALLBACK_ID]
+    assert canonical_waiting["status"] == "open"
+    assert canonical_waiting["resume_when"] == f"monitor_changed:{MONITOR_ID}"
     waiting = _todos(state_file)[WAITING_ID]
     assert waiting["resume_monitor_generation"] == 2
     assert waiting["resume_ready"] is False
@@ -270,13 +289,15 @@ def test_monitor_provider_effect_replay_does_not_advance_counters(
     assert monitor["monitor_effect_id"] == "quota-monitor-poll:provider-reentry"
     assert int(monitor["consecutive_no_change"]) == first["consecutive_no_change"]
 
-    with pytest.raises(ValueError, match="monitor effect identity is already bound"):
+    with pytest.raises(LocalCoordinationAuthorityUnavailable,
+                       match="operation id already names a different coordination request") as conflict:
         write_monitor_poll_todo_state(
             **{
                 **kwargs,
                 "result_hash": "review-v3-conflict",
             }
         )
+    assert conflict.value.code == "coordination_operation_identity_mismatch"
 
     newer = write_monitor_poll_todo_state(
         **{
@@ -291,8 +312,12 @@ def test_monitor_provider_effect_replay_does_not_advance_counters(
     before_replay = state_file.read_bytes()
     historical = write_monitor_poll_todo_state(**kwargs)
     expected = {**first, "provider_replayed": True}
-    # Post-commit shadow diagnostics are outside the immutable business receipt.
-    expected.pop("coordination_runtime_shadow", None)
+    # Projection delivery describes the latest provider revision. A replay of
+    # an earlier business receipt must retain its facts even after a newer
+    # operation has advanced that separate delivery state.
+    for key in ("coordination_runtime_shadow", "projection_delivery", "projection_outbox"):
+        expected.pop(key, None)
+        historical.pop(key, None)
     expected["todo_update"] = {key: value for key, value in first["todo_update"].items()
                                if key != "coordination_runtime_shadow"}
     assert historical == expected
@@ -343,22 +368,21 @@ def test_overlapping_material_batches_recompute_generation_after_wait_baseline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import loopx.control_plane.scheduler.legacy_monitor_poll as batch_module
+    import loopx.control_plane.scheduler.provider_monitor_poll as batch_module
 
     registry, state_file = _write_fixture(tmp_path)
-    original_apply = batch_module.apply_legacy_monitor_poll
+    original_apply = batch_module.effect_runtime_result
     second_poll_ready = Event()
     release_second_poll = Event()
 
-    def delay_second_poll(**kwargs):
-        result_hash = kwargs["request"]["observation"]["result_hash"]
-        if result_hash == "review-v4-second":
+    def delay_second_poll(method, request, **kwargs):
+        if method == "coordination.local_authority.monitor_poll" and request["observation"]["result_hash"] == "review-v4-second":
             second_poll_ready.set()
             if not release_second_poll.wait(timeout=30):
                 raise RuntimeError("timed out waiting to release overlapping poll")
-        return original_apply(**kwargs)
+        return original_apply(method, request, **kwargs)
 
-    monkeypatch.setattr(batch_module, "apply_legacy_monitor_poll", delay_second_poll)
+    monkeypatch.setattr(batch_module, "effect_runtime_result", delay_second_poll)
     with ThreadPoolExecutor(max_workers=2) as executor:
         second_poll = executor.submit(
             write_monitor_poll_todo_state,
@@ -395,7 +419,8 @@ def test_overlapping_material_batches_recompute_generation_after_wait_baseline(
             successor_todo_ids=[FALLBACK_ID],
             agent_id=AGENT_ID,
         )
-        assert wait_transition["external_wait_transition"]["baseline_generation"] == 3
+        assert wait_transition["status"] == "applied"
+        assert _canonical_todo(registry, WAITING_ID)["resume_monitor_generation"] == 3
 
         release_second_poll.set()
         second_result = second_poll.result(timeout=5)
@@ -418,7 +443,8 @@ def test_dependency_completion_automatically_resumes_waiting_todo(tmp_path: Path
         successor_todo_ids=[FALLBACK_ID],
         agent_id=AGENT_ID,
     )
-    assert transition["external_wait_transition"]["resume_kind"] == "todo_done"
+    assert transition["status"] == "applied"
+    assert _canonical_todo(registry, WAITING_ID)["resume_when"] == f"todo_done:{DEPENDENCY_ID}"
     assert _todos(state_file)[WAITING_ID]["resume_ready"] is False
 
     complete_goal_todo(
