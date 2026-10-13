@@ -113,7 +113,7 @@ process.stdout.write(JSON.stringify({head: await store.loadAuthority(),
 
 
 @pytest.fixture(params=[(mode, provider) for mode in ('absent', 'disabled', 'enabled')
-                        for provider in ('file', 'sqlite')])
+                        for provider in ('file', 'sqlite')], ids=lambda value: '-'.join(value))
 def canonical_caller(tmp_path: Path, request: pytest.FixtureRequest) -> CanonicalCaller:
     # Keep the raw caller fixture unchanged: native/fence tests import it to
     # exercise retained 1.x originals and the explicit 2.0 cutoff.

@@ -95,7 +95,7 @@ CASES = [
     Case('rollout_cwd_root', (('loopx/cli_rollout.py', replacement(
         'resolve_runtime_root(registry, runtime_root_arg, registry_path=registry_path)',
         'resolve_runtime_root(registry, runtime_root_arg)')),),
-         'tests/control_plane/test_shadow_observable_e2e.py::test_registry_relative_root_does_not_depend_on_callers_cwd[disabled]'),
+         'tests/control_plane/test_shadow_observable_e2e.py::test_registry_relative_root_does_not_depend_on_callers_cwd[disabled-file]'),
     Case('native_note_dropped', ((COORDINATION + 'todo_update_intent.ts', replacement(
         '  const next: JsonObject = {...todo, ...input.patch};',
         '  const next: JsonObject = {...todo, ...input.patch};\n  if ("note" in input.patch) next.note = todo.note;')),),
@@ -363,14 +363,37 @@ CASES.append(Case("lifecycle_fence_guard_skipped", (
 ), "tests/control_plane_ts/legacy_writer_fence_caller_parity.test.ts", pattern="^fence parity: ts-release-engaged$"))
 
 
-def run(case: Case, directory: Path, log: Path) -> subprocess.CompletedProcess[str]:
+def isolated_environment(directory: Path) -> dict[str, str]:
     environment = {key: value for key, value in os.environ.items()
-                   if not key.startswith(("PYTHON", "LOOPX", "NODE", "COVERAGE"))}
+                   if not key.startswith(("PYTHON", "LOOPX", "NODE", "COVERAGE", "GIT_"))}
     environment.update(PYTHONPATH=str(directory), PYTHONNOUSERSITE="1")
+    return environment
+
+
+def run(case: Case, directory: Path, log: Path) -> subprocess.CompletedProcess[str]:
+    environment = isolated_environment(directory)
     result = subprocess.run(case.command(), cwd=directory, env=environment,
                             capture_output=True, text=True, timeout=120, check=False)
     log.write_text(result.stdout + result.stderr, encoding="utf-8")
     return result
+
+
+def freeze_historical_git_source(source: Path, frozen: Path) -> str:
+    """Retain the fixture's pinned producer without borrowing a live Git directory."""
+    environment = isolated_environment(frozen)
+    # Read the pin from the frozen fixture owner, including for --source. Do not
+    # duplicate it in this runner or redirect every test's Git commands upstream.
+    revision = subprocess.check_output([
+        sys.executable, "-c",
+        "from loopx.control_plane.testing.authority_e2e_fixtures import ORIGINAL_1X_REVISION; "
+        "print(ORIGINAL_1X_REVISION)",
+    ], cwd=frozen, env=environment, text=True, timeout=30).strip()
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise ValueError("historical fixture must pin a complete Git object id")
+    subprocess.run(["git", "init", "--quiet", str(frozen)], env=environment, check=True, timeout=30)
+    subprocess.run(["git", "-C", str(frozen), "fetch", "--quiet", "--no-tags", "--depth=1",
+                    str(source), revision], env=environment, check=True, timeout=60)
+    return revision
 
 
 def main() -> int:
@@ -399,6 +422,10 @@ def main() -> int:
             shutil.copy2(source / name, frozen / name)
         if (source / "node_modules").is_dir():
             (frozen / "node_modules").symlink_to(source / "node_modules", target_is_directory=True)
+        historical_revision = freeze_historical_git_source(source, frozen)
+        (output / "historical-source.json").write_text(json.dumps({
+            "original_1x_revision": historical_revision,
+        }, indent=2) + "\n")
         manifest = {str(path.relative_to(frozen)): hashlib.sha256(path.read_bytes()).hexdigest()
                     for folder in ("loopx", "tests") for path in (frozen / folder).rglob("*") if path.is_file()}
         manifest.update({name: hashlib.sha256((frozen / name).read_bytes()).hexdigest()
