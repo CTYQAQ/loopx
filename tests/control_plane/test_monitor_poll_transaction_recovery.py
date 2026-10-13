@@ -106,7 +106,10 @@ def _ok(registry: Path, runtime: Path, *args: str, source: Path = REPO) -> dict:
     return result
 
 
-def _fixture(tmp_path: Path, source: Path | None = None) -> tuple[Path, Path, Path, str, tuple[str, ...]]:
+def _fixture(
+    tmp_path: Path, source: Path | None = None, *, provider: str = "file",
+) -> tuple[Path, Path, Path, str, tuple[str, ...]]:
+    """Create current authority once, or use an explicit original receipt producer."""
     project, runtime = tmp_path / "project", tmp_path / "runtime"
     state = project / ".codex" / "goals" / GOAL / "ACTIVE_GOAL_STATE.md"
     registry = project / ".loopx" / "registry.json"
@@ -121,7 +124,8 @@ def _fixture(tmp_path: Path, source: Path | None = None) -> tuple[Path, Path, Pa
     )
     if source is None:
         initialize_canonical_authority(runtime, GOAL, build_todo_runtime_shadow_projection(
-            goal_id=GOAL, handoff_mode="soft_claim", todos=[]), state_path=state)
+            goal_id=GOAL, handoff_mode="soft_claim", todos=[]),
+            state_path=state, provider=provider)
     monitor = _ok(registry, runtime, "todo", "add", "--goal-id", GOAL,
         "--role", "agent", "--text", "Observe public synthetic target",
         "--task-class", "continuous_monitor", "--claimed-by", AGENT,

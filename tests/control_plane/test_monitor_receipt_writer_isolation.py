@@ -7,6 +7,8 @@ import sys
 
 import pytest
 
+from tests.control_plane.historical_shadow_fixture import original_1x_source  # noqa: F401
+
 from canonical_authority_fixture import initialize_canonical_authority
 from test_canonical_todo_writer_isolation import (
     isolated_todo_distribution, retirement_wheel,  # noqa: F401 -- shared distribution fixtures
@@ -26,11 +28,13 @@ from loopx.todos import list_goal_todos
 @pytest.mark.parametrize("outbox_present", [False, True])
 @pytest.mark.parametrize("writer_present", [False, True], ids=["absent", "present"])
 def test_imported_monitor_receipt_settles_without_legacy_writer(
-    tmp_path, provider, outbox_present, writer_present, isolated_todo_distribution,  # noqa: F811
+    original_source, tmp_path, provider, outbox_present, writer_present, isolated_todo_distribution,  # noqa: F811
 ):
     package, command = isolated_todo_distribution
-    registry, runtime, state, _monitor, poll = _fixture(tmp_path)
-    code, response = _cli(registry, runtime, *poll, fault="after")
+    # Only the immutable producer creates the historical business receipt.
+    # All later writes and recovery below use the current isolated distribution.
+    registry, runtime, state, _monitor, poll = _fixture(tmp_path, original_source)
+    code, response = _cli(registry, runtime, *poll, fault="after", source=original_source)
     assert (code, response) == (83, None)
     original = _business_receipt(state)["writeback"]
     successor_ids = {item["todo_id"] for item in original["next_todos"]}
@@ -107,7 +111,7 @@ assert 'loopx.control_plane.scheduler.legacy_monitor_poll' not in sys.modules
 assert 'loopx.control_plane.coordination.local_authority_shadow_adapter' not in sys.modules
 print(json.dumps(result))
 """
-    result = subprocess.run([sys.executable, "-c", child, str(request)], cwd=tmp_path,
+    result = subprocess.run([sys.executable, "-S", "-c", child, str(request)], cwd=tmp_path,
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     replay = json.loads(result.stdout)
