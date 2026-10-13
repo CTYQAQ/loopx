@@ -832,8 +832,13 @@ The explicit Docker controller now offers a bounded writer barrier: pause the
 owned running worker, archive declared files and its phase clock through the
 daemon, capture the native evaluator capsule, then unpause before publishing an
 inert joint unit. A live-writer/native-HTTP qualification proves file stability
-and original opportunity retention; cancellation, lost pause responses and failed
-capture exercise cleanup. An existing pause is not owned or released, and failed
+and original opportunity retention. Standalone SQLite participants also transport
+their WAL and rollback journal under that same pause, then use the existing
+SQLite snapshot owner: a valid main database alone can omit committed research.
+Committed WAL rows survive, uncommitted rows stay excluded, and unavailable or
+linked companions reject capture before native publication. Cancellation, lost
+pause responses and failed capture exercise cleanup. An existing pause is not
+owned or released, and failed
 resume prevents publication. This closes the manual provider's file-writer
 barrier gap only. No process memory, native cursor eligibility, external writers,
 automatic pre-decision handoff or isolated continuation are qualified by it.

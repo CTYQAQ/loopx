@@ -83,6 +83,38 @@ def _archive(container, remote: str, destination: Path) -> Path:
     return _physical(destination / root)
 
 
+def _archive_component(container, remote: str, destination: Path) -> Path:
+    """Transport a standalone SQLite participant's committed storage too.
+
+    A paused process can still have committed data only in its WAL. Reading
+    the main file alone silently exports an older, internally valid database.
+    The typed artifact owner's SQLite backup still decides the committed
+    snapshot; this Docker adapter only transports its physical input while
+    the same writer barrier is held. A directory archive already includes it.
+    """
+    from docker.errors import NotFound
+
+    copied = _archive(container, remote, destination)
+    if not copied.is_file():
+        return copied
+    with copied.open("rb") as source:
+        if source.read(16) != b"SQLite format 3\0":
+            return copied
+    # SHM is a reader index, rebuilt locally. WAL and rollback journals can
+    # affect committed state and must not be dropped or treated as optional
+    # when transport, permissions or link validation fails.
+    for suffix in ("-wal", "-journal"):
+        with tempfile.TemporaryDirectory(prefix=".sqlite-transport-", dir=destination) as stage:
+            try:
+                companion = _archive(container, remote + suffix, Path(stage) / "member")
+            except NotFound:
+                continue
+            if not companion.is_file():
+                raise ValueError("SQLite companion must be a physical regular file")
+            companion.rename(copied.with_name(copied.name + suffix))
+    return copied
+
+
 def _worker_lock(client, container_id: str) -> Path:
     # Controller banks and endpoint aliases may differ for the same daemon.
     # Coordinate captures by this user on this host, not by artifact location.
@@ -151,7 +183,7 @@ def capture_worker(controller_file: Path, *, token: str, capture_id: str,
                     if not container.attrs["State"]["Paused"]:
                         raise RuntimeError("Worker writer barrier was not established")
                     for entry in request["components"]:
-                        copied = _archive(container, entry["source_path"], stage / "workers" / entry["id"])
+                        copied = _archive_component(container, entry["source_path"], stage / "workers" / entry["id"])
                         components.append({"id": entry["id"], "source_path": str(copied)})
                     phase = _archive(container, request["phase_deadline_path"], stage / "phase")
                     native = capture(controller_file, token=token, capture_id=capture_id,

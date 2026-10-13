@@ -4,10 +4,12 @@ from __future__ import annotations
 import io
 import json
 import os
+import sqlite3
 import tarfile
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -32,10 +34,19 @@ def writer(tmp_path):
     image = os.environ.get("LOOPX_CHECKPOINT_WRITER_IMAGE", "python:3.12-slim")
     client.images.get(image)  # Never pull implicitly for this test.
     script = """from pathlib import Path
-import time
+import time, sqlite3
 Path('/data').mkdir()
 Path('/phase').write_text(str(int(time.time())+7200))
 Path('/link').symlink_to('/data', target_is_directory=True)
+db=sqlite3.connect('/data/research.sqlite')
+db.execute('PRAGMA journal_mode=WAL')
+db.execute('PRAGMA wal_autocheckpoint=0')
+db.execute('CREATE TABLE evidence (value INTEGER)')
+db.commit()
+db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+db.execute('INSERT INTO evidence VALUES (42)')
+db.commit()
+db.execute('INSERT INTO evidence VALUES (99)')
 count=0
 while True:
     count+=1
@@ -63,6 +74,79 @@ def counter(container):
     stream, _ = container.get_archive("/data/counter")
     with tarfile.open(fileobj=io.BytesIO(b"".join(stream))) as archive:
         return int(archive.extractfile("counter").read())
+
+
+@pytest.mark.parametrize("directory", [False, True])
+def test_paused_sqlite_capture_retains_committed_wal_not_pending_transaction(
+        controllers, writer, tmp_path, directory):
+    """A valid main DB can omit all recent research while integrity_check passes."""
+    source, _, first, _, files, _ = controllers
+    container, request = writer
+    token = register(source, first)
+    payload = json.loads(request.read_text())
+    payload["components"] = [{"id": "research", "source_path":
+        "/data" if directory else "/data/research.sqlite"}]
+    request.write_text(json.dumps(payload))
+    unit = tmp_path / "wal-point"
+    capture_worker(files[0], token=token, capture_id="b" * 32,
+                   destination=unit, request_file=request)
+    captured = unit / "components/research"
+    database = captured / "research.sqlite" if directory else captured
+    with sqlite3.connect(database) as readback:
+        assert readback.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert readback.execute("SELECT value FROM evidence").fetchall() == [(42,)]
+    assert not database.with_name(database.name + "-wal").exists()
+    container.reload()
+    assert container.attrs["State"]["Running"] and not container.attrs["State"]["Paused"]
+
+
+@pytest.mark.parametrize("fault", ["symlink", "directory", "transport"])
+def test_sqlite_companion_failure_cannot_publish_an_older_valid_database(
+        controllers, writer, tmp_path, monkeypatch, fault):
+    from docker.errors import APIError
+    from benchmark.edgebench import checkpoint_worker
+
+    source, _, first, _, files, grades = controllers
+    container, request = writer
+    token = register(source, first)
+    payload = json.loads(request.read_text())
+    payload["components"] = [{"id": "research", "source_path": "/data/research.sqlite"}]
+    request.write_text(json.dumps(payload))
+    if fault == "transport":
+        original = checkpoint_worker._archive
+        def unavailable(worker, remote, destination):
+            if remote.endswith("-wal"):
+                raise APIError("Synthetic Docker archive transport failure")
+            return original(worker, remote, destination)
+        monkeypatch.setattr(checkpoint_worker, "_archive", unavailable)
+    else:
+        replacement = "p.symlink_to('/phase')" if fault == "symlink" else "p.mkdir()"
+        assert container.exec_run(["python", "-c", "from pathlib import Path; "
+            "p=Path('/data/research.sqlite-wal'); p.unlink(); " + replacement]).exit_code == 0
+    unit = tmp_path / "invalid-point"
+    with pytest.raises((ValueError, APIError)):
+        capture_worker(files[0], token=token, capture_id="c" * 32,
+                       destination=unit, request_file=request)
+    assert not unit.exists() and not grades
+    assert not (Path(json.loads(files[0].read_text())["bank_root"]) / ("c" * 32)).exists()
+    container.reload()
+    assert container.attrs["State"]["Running"] and not container.attrs["State"]["Paused"]
+
+
+def test_non_sqlite_file_does_not_capture_similarly_named_neighbors(controllers, writer, tmp_path):
+    source, _, first, _, files, _ = controllers
+    container, request = writer
+    token = register(source, first)
+    assert container.exec_run(["python", "-c",
+        "from pathlib import Path; Path('/data/counter-wal').write_text('PRIVATE_NEIGHBOR')"]).exit_code == 0
+    payload = json.loads(request.read_text())
+    payload["components"] = [{"id": "counter", "source_path": "/data/counter"}]
+    request.write_text(json.dumps(payload))
+    unit = tmp_path / "ordinary-point"
+    capture_worker(files[0], token=token, capture_id="d" * 32,
+                   destination=unit, request_file=request)
+    assert all(b"PRIVATE_NEIGHBOR" not in member.read_bytes()
+               for member in unit.rglob("*") if member.is_file())
 
 
 def test_controller_cli_captures_frozen_worker_with_original_native_point(
