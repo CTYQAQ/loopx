@@ -1478,6 +1478,13 @@ export async function executeCoordinationTodoTerminalLifecycle(
         cursor: head.cursor,
       };
     }
+    if (completion.decision === "policy_reject") {
+      const failure = completion.completion_policy_failure;
+      return terminalFailure(
+        failure.kind, failure.summary,
+        {completion_policy_failure: failure}, "decision_rejection",
+      );
+    }
     if (completion.decision === "reject") {
       return terminalFailure(
         completion.failure.kind,

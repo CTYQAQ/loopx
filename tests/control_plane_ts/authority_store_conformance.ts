@@ -761,6 +761,29 @@ export function registerAuthorityStoreConformance(
         local_path_captured: false as const,
       },
     };
+    // A policy rejection must not commit the Todo, create successors, release
+    // its lease or consume the operation identity. Exercise the production
+    // boundary on every real provider, then reuse the identity below.
+    const beforePolicyRejection = await store.loadAuthority();
+    for (const successorIntents of [[], commitRequest.successor_intents]) {
+      for (const evidence of ["", "\u0085", " \t\n"]) {
+        const rejected = await executeCoordinationTodoTerminalLifecycle(store, {
+          ...commitRequest,
+          successor_intents: successorIntents,
+          requested_no_followup: successorIntents.length === 0,
+          completion_policy_request: {
+            ...commitRequest.completion_policy_request, self_merged: true, evidence,
+            next_agent_todo: successorIntents.length === 0 ? null : successorIntent.text,
+          },
+        });
+        assert.equal(rejected.status, "failed", JSON.stringify(rejected));
+        assert.equal(rejected.changed, false);
+        assert.equal(rejected.failure_kind, "decision_rejection");
+        assert.equal(rejected.reason_code, "completion_policy_rejected");
+        assert.match(String(rejected.reason), /--self-merged requires --evidence/);
+        assert.deepEqual(await store.loadAuthority(), beforePolicyRejection);
+      }
+    }
     const dangling = await executeCoordinationTodoTerminalLifecycle(store, {
       ...commitRequest,
       operation_identity: {kind: "explicit" as const, operation_id: "complete-dangling-successor"},
