@@ -94,6 +94,13 @@ def test_one_packet_repairs_all_grammar_errors_and_preserves_route(claim_cli):
     if lease:
         for flag, value in zip(lease[::2], lease[1::2]):
             assert repaired[repaired.index(flag) + 1] == value
+    if provider == "legacy":
+        # Fixing syntax cannot authorize a fresh write to an unmigrated source.
+        for arguments in (repaired, [arg for arg in repaired if arg != "--dry-run"]):
+            refused = run([*arguments, "--claimed-by", "peer-a"], expected_exit=1)
+            assert refused["error_code"] == "canonical_authority_required"
+            assert snapshot() == before
+        return
     preview = run([*repaired, "--claimed-by", "peer-a"])
     assert preview["ok"] is True
     assert snapshot() == before

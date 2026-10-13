@@ -1,4 +1,4 @@
-"""Default-off counterfactual: run unchanged against the pre-claim base too."""
+"""The 2.0 cutoff refuses new execution before an explicit canonical import."""
 
 from __future__ import annotations
 
@@ -7,15 +7,17 @@ from pathlib import Path
 
 import pytest
 
-from loopx.todos import add_goal_todo, list_goal_todos, update_goal_todo
+from loopx.todos import list_goal_todos, update_goal_todo
+from loopx.control_plane.coordination.legacy_writer_fence import LegacyCoordinationWriterFenced
 
 
 @pytest.mark.parametrize("with_note", [False, True])
-def test_unpromoted_claim_retains_markdown_semantics(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_note: bool
+def test_unpromoted_claim_requires_import_without_source_writes(
+    tmp_path: Path, with_note: bool
 ) -> None:
     state = tmp_path / "ACTIVE_GOAL_STATE.md"
-    state.write_text("# Goal\n\n## Agent Todo\n\n", encoding="utf-8")
+    state.write_text("# Goal\n\n## Agent Todo\n\n- [ ] Historical unclaimed task.\n"
+                     "  <!-- loopx:todo todo_id=todo_import_claim status=open -->\n", encoding="utf-8")
     runtime = tmp_path / "runtime"
     registry = tmp_path / "registry.json"
     registry.write_text(json.dumps({
@@ -25,35 +27,19 @@ def test_unpromoted_claim_retains_markdown_semantics(
                        "registered_agents": ["agent-a", "agent-b"],
                    }}],
     }), encoding="utf-8")
-    created = add_goal_todo(registry_path=registry, goal_id="goal-a", role="agent",
-                            text="Claim through the unchanged Markdown path")
-    monkeypatch.setattr(
-        "loopx.control_plane.coordination.local_authority.effect_runtime_result",
-        lambda *_args, **_kwargs: pytest.fail("unpromoted call must not enter provider runtime"),
-    )
-    request = dict(registry_path=registry, goal_id="goal-a", todo_id=created["todo_id"],
+    request = dict(registry_path=registry, goal_id="goal-a", todo_id="todo_import_claim",
                    claimed_by="agent-a", agent_id="agent-a", claim_only=True)
     if with_note:
-        request["note"] = "legacy combined claim remains supported"
+        request["note"] = "A note cannot authorize a new source claim"
     before = state.read_bytes()
     with pytest.raises(ValueError, match="requires promoted canonical authority"):
         update_goal_todo(**request, claim_operation_id="explicit-retry")
     assert state.read_bytes() == before
-    preview = update_goal_todo(**request, dry_run=True)
-    assert preview["ok"] is True
-    assert preview["changed"] is True
-    assert state.read_bytes() == before
-    claimed = update_goal_todo(**request)
-    assert claimed["ok"] is True
-    assert claimed["changed"] is True
-    assert claimed["mutation_authority"]["command"] == "claim"
-    assert "source_authority" not in claimed
-    todos = list_goal_todos(registry_path=registry, goal_id="goal-a")["todos"]
-    todo = next(item for item in todos if item["todo_id"] == created["todo_id"])
-    assert todo["claimed_by"] == "agent-a"
-    if with_note:
-        assert todo["note"] == request["note"]
-    after = state.read_bytes()
-    assert update_goal_todo(**request)["changed"] is False
-    assert state.read_bytes() == after
+    before_todos = list_goal_todos(registry_path=registry, goal_id="goal-a")["todos"]
+    for dry_run in (True, False):
+        with pytest.raises(LegacyCoordinationWriterFenced) as rejected:
+            update_goal_todo(**request, dry_run=dry_run)
+        assert rejected.value.code == "canonical_authority_required"
+        assert state.read_bytes() == before
+        assert list_goal_todos(registry_path=registry, goal_id="goal-a")["todos"] == before_todos
     assert not (runtime / "authority" / "file-v0").exists()

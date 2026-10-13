@@ -12,14 +12,13 @@ from loopx.control_plane.coordination.local_authority import (
 from loopx.control_plane.scheduler.monitor_poll_writeback import (
     write_monitor_poll_todo_state,
 )
-import loopx.control_plane.work_items.task_lease as task_lease_module
+import loopx.control_plane.todos.provider_terminal_lifecycle as terminal_provider
 from loopx.control_plane.work_items.task_lease import (
     TaskLeaseError,
     acquire_task_lease,
     inspect_task_lease,
     release_task_lease,
 )
-from loopx.status import parse_active_state_todos
 from loopx.todos import (
     list_goal_todos,
     archive_completed_todos,
@@ -138,13 +137,6 @@ def _lease_path(tmp_path: Path, todo_id: str) -> Path:
     return tmp_path / "runtime" / "goals" / GOAL_ID / "task-leases" / f"{todo_id}.json"
 
 
-def _agent_todo(state: Path, todo_id: str) -> dict:
-    todos = parse_active_state_todos(state.read_text(encoding="utf-8"))
-    return next(
-        item for item in todos["agent_todos"]["items"] if item["todo_id"] == todo_id
-    )
-
-
 def _add_agent_todo(
     registry: Path,
     *,
@@ -163,8 +155,8 @@ def _add_agent_todo(
     )
 
 
-def test_continuous_monitor_requires_explicit_boundedness(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path, multi_agent=False)
+def test_continuous_monitor_requires_explicit_boundedness(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False)
     common = {
         "registry_path": registry,
         "goal_id": GOAL_ID,
@@ -192,18 +184,18 @@ def test_continuous_monitor_requires_explicit_boundedness(tmp_path: Path) -> Non
             },
         }
     )
-    item = _agent_todo(state, str(result["todo_id"]))
+    item = _canonical_todo(registry, str(result["todo_id"]))
     assert item["watch_only"] == "true"
 
 
 def test_update_to_continuous_monitor_requires_explicit_boundedness(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    registry, state = canonical_workspace(tmp_path, multi_agent=False)
     todo = _add_agent_todo(registry)
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="requires one of: --expires-at"):
+    with pytest.raises(LocalCoordinationAuthorityUnavailable, match="requires one of: --expires-at"):
         update_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -217,11 +209,11 @@ def test_update_to_continuous_monitor_requires_explicit_boundedness(
             },
         )
 
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
 
-def test_continuous_monitor_accepts_resume_condition_bound(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path, multi_agent=False)
+def test_continuous_monitor_accepts_resume_condition_bound(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False)
     result = add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -237,7 +229,7 @@ def test_continuous_monitor_accepts_resume_condition_bound(tmp_path: Path) -> No
             "next_due_at": "2026-08-12T00:00:00Z",
         },
     )
-    item = _agent_todo(state, str(result["todo_id"]))
+    item = _canonical_todo(registry, str(result["todo_id"]))
     assert item["resume_when"] == "pr_merged:#3083"
 
 
@@ -295,9 +287,9 @@ def test_excluded_actor_cannot_mutate_unclaimed_todo(tmp_path: Path, canonical_w
 
 
 def test_idempotent_add_preserves_existing_executor_exclusions(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path)
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(
         registry,
         text="Independently review one exact PR head.",
@@ -317,19 +309,13 @@ def test_idempotent_add_preserves_existing_executor_exclusions(
     assert replay["already_exists"] is True
     assert replay["metadata_updated"] is False
     assert replay["excluded_agents"] == [AUTHOR_AGENT]
-    assert _agent_todo(state, todo["todo_id"])["excluded_agents"] == [AUTHOR_AGENT]
+    assert _canonical_todo(registry, todo["todo_id"])["excluded_agents"] == [AUTHOR_AGENT]
 
 
-def test_unresolved_decision_scope_is_not_a_local_claim_gate(tmp_path: Path) -> None:
-    """Characterize the local writer before shared revision publishers exist.
+def test_unresolved_decision_scope_is_not_a_local_claim_gate(tmp_path: Path, canonical_workspace) -> None:
+    """A recorded decision scope alone does not create an active User gate."""
 
-    The shared-authority RFC names dependency and decision-gate revisions as
-    command preconditions.  The current Markdown writer stores the scopes but
-    has no authoritative publisher for their resolution, so Stage 1 must not
-    silently invent a gate and change local claim behavior.
-    """
-
-    registry, state = _write_fixture(tmp_path)
+    registry, state = canonical_workspace(tmp_path)
     todo = add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -349,7 +335,7 @@ def test_unresolved_decision_scope_is_not_a_local_claim_gate(tmp_path: Path) -> 
     )
 
     assert result["claimed_by"] == AUTHOR_AGENT
-    item = _agent_todo(state, str(todo["todo_id"]))
+    item = _canonical_todo(registry, str(todo["todo_id"]))
     assert item["required_decision_scopes"] == [
         {
             "schema_version": "decision_scope_v0",
@@ -401,9 +387,9 @@ def test_non_owner_cannot_mutate_claimed_todo(
 
 
 def test_completion_policy_unicode_parity_through_public_facade(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path)
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(registry, text="Continue with Python whitespace parity.")
 
     result = complete_goal_todo(
@@ -417,14 +403,14 @@ def test_completion_policy_unicode_parity_through_public_facade(
         next_continuation_policy="\u0085same_agent_non_delivery\u0085",
     )
 
-    successor = _agent_todo(state, result["next_todos"][0]["todo_id"])
+    successor = _canonical_todo(registry, result["next_todos"][0]["todo_id"])
     assert successor["claimed_by"] == AUTHOR_AGENT
 
     blank_evidence = _add_agent_todo(
         registry,
         text="Reject Python-blank self-merge evidence.",
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
     with pytest.raises(ValueError, match="--self-merged requires --evidence"):
         complete_goal_todo(
             registry_path=registry,
@@ -435,7 +421,7 @@ def test_completion_policy_unicode_parity_through_public_facade(
             evidence="\u0085",
             no_followup=True,
         )
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
     bom_evidence = _add_agent_todo(
         registry,
@@ -454,17 +440,17 @@ def test_completion_policy_unicode_parity_through_public_facade(
 
 
 def test_completion_policy_errors_do_not_preempt_actor_or_lease_fences(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path)
+    registry, state = canonical_workspace(tmp_path, handoff_mode="hard_lease")
     claimed_by_other = _add_agent_todo(
         registry,
         text="Keep actor authority ahead of policy diagnostics.",
         claimed_by=REVIEW_AGENT,
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="claimed_by='codex-review'"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as owner_error:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -474,7 +460,8 @@ def test_completion_policy_errors_do_not_preempt_actor_or_lease_fences(
             evidence="\u0085",
             no_followup=True,
         )
-    assert state.read_text(encoding="utf-8") == before
+    assert owner_error.value.code == "claim_owner_mismatch"
+    assert _canonical_snapshot(registry, state) == before
 
     leased = _add_agent_todo(
         registry,
@@ -490,8 +477,8 @@ def test_completion_policy_errors_do_not_preempt_actor_or_lease_fences(
         idempotency_key=lease_key,
         ttl_seconds=600,
     )
-    before = state.read_text(encoding="utf-8")
-    with pytest.raises(TaskLeaseError) as stale_lease:
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as stale_lease:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -504,7 +491,7 @@ def test_completion_policy_errors_do_not_preempt_actor_or_lease_fences(
             no_followup=True,
         )
     assert stale_lease.value.code == "version_mismatch"
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
 
 def test_owner_actor_update_returns_typed_receipt(tmp_path: Path, canonical_workspace) -> None:
@@ -637,8 +624,8 @@ def test_canonical_claim_rejects_role_mismatch_atomically(tmp_path: Path, canoni
     assert _canonical_snapshot(registry, state) == before
 
 
-def test_advancement_todo_preserves_public_target_key(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_advancement_todo_preserves_public_target_key(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
 
     todo = add_goal_todo(
         registry_path=registry,
@@ -651,13 +638,13 @@ def test_advancement_todo_preserves_public_target_key(tmp_path: Path) -> None:
         monitor_metadata={"target_key": "issue-fix:owner/repo:issue_42"},
     )
 
-    projected = _agent_todo(state, todo["todo_id"])
+    projected = _canonical_todo(registry, todo["todo_id"])
     assert projected["action_kind"] == "issue_fix_branch_validation"
     assert projected["target_key"] == "issue-fix:owner/repo:issue_42"
 
 
-def test_capability_binding_follows_generated_agent_successor(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_capability_binding_follows_generated_agent_successor(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -681,7 +668,7 @@ def test_capability_binding_follows_generated_agent_successor(tmp_path: Path) ->
         next_continuation_policy="same_agent_non_delivery",
     )
 
-    successor = _agent_todo(state, result["next_todos"][0]["todo_id"])
+    successor = _canonical_todo(registry, result["next_todos"][0]["todo_id"])
     assert successor["capability_binding_ref"] == ("issue-fix:feasibility-a1b2c3d4")
 
 
@@ -986,62 +973,45 @@ def test_terminal_upgrade_requires_original_completion_turn_key(tmp_path: Path, 
     assert _canonical_snapshot(registry, state) == completed_state
 
 
-def test_terminal_upgrade_rejects_untyped_legacy_completion_until_repaired(
-    tmp_path: Path,
+def test_imported_untyped_completion_requires_explicit_repair(
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path, multi_agent=False)
-    todo = _add_agent_todo(registry)
-    todo_id = todo["todo_id"]
-
-    complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo_id,
-        claimed_by=AUTHOR_AGENT,
-        completion_turn_key="turn-a",
-        evidence="ordinary completion from the original turn",
-    )
-    state.write_text(
-        state.read_text(encoding="utf-8").replace(
-            " completion_continuation=active_goal",
-            "",
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="missing completion_continuation"):
+    # Synthetic historical metadata is seeded before provider creation; editing
+    # its Markdown display afterward must never change canonical authority.
+    todo_id = "todo_untypedcompletion"
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, source_rows=(
+        "- [x] Historical completion with missing continuation.\n"
+        f"  <!-- loopx:todo todo_id={todo_id} status=done task_class=advancement_task "
+        f"claimed_by={AUTHOR_AGENT} completion_turn_key=turn-a -->\n"
+    ))
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection, match="missing completion_continuation"):
         complete_goal_todo(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            todo_id=todo_id,
-            claimed_by=AUTHOR_AGENT,
-            completion_turn_key="turn-a",
-            evidence="legacy ambiguity must not be inferred",
-            no_followup=True,
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo_id,
+            agent_id=AUTHOR_AGENT, completion_turn_key="turn-a",
+        completion_identity_source="turn_settlement",
+            evidence="legacy ambiguity must not be inferred", no_followup=True,
         )
-
+    assert _canonical_snapshot(registry, state) == before
     repaired = complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo_id,
-        claimed_by=AUTHOR_AGENT,
-        completion_turn_key="turn-a",
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo_id,
+        agent_id=AUTHOR_AGENT, completion_turn_key="turn-a",
+        completion_identity_source="turn_settlement",
         evidence="repair explicit completion continuation",
         note="repair explicit completion continuation",
     )
-    assert repaired["completion_continuation"] == "active_goal"
-
+    assert repaired["ok"] is True
+    assert _canonical_todo(registry, todo_id)["completion_continuation"] == "active_goal"
     upgraded = complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo_id,
-        claimed_by=AUTHOR_AGENT,
-        completion_turn_key="turn-a",
-        evidence="same-turn terminal closeout after explicit repair",
-        no_followup=True,
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo_id,
+        agent_id=AUTHOR_AGENT, completion_turn_key="turn-a",
+        completion_identity_source="turn_settlement",
+        evidence="repair explicit completion continuation",
+        note="repair explicit completion continuation", no_followup=True,
     )
-    assert upgraded["completion_continuation"] == "no_followup"
-    assert upgraded["completion_recovery"] == "same_turn_terminal_closeout"
+    assert upgraded["ok"] is True
+    assert _canonical_todo(registry, todo_id)["completion_recovery"] == "same_turn_terminal_closeout"
+    assert _canonical_todo(registry, todo_id)["completion_continuation"] == "no_followup"
 
 
 def test_unfenced_completion_leaves_no_lease_artifacts(tmp_path: Path, canonical_workspace) -> None:
@@ -1064,49 +1034,37 @@ def test_unfenced_completion_leaves_no_lease_artifacts(tmp_path: Path, canonical
     assert list(lease_dir.glob("todo_*.json")) == []
 
 
-def test_divergent_claim_completion_leaves_foreign_lease_untouched(
-    tmp_path: Path,
+def test_foreign_claim_and_completion_preserve_current_execution_lease(
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, _state = _write_fixture(tmp_path)
+    # Canonical hard-lease claim cannot create the old split-brain state.
+    registry, state = canonical_workspace(tmp_path, handoff_mode="hard_lease")
     todo = _add_agent_todo(registry, claimed_by=None)
     acquire_task_lease(
-        registry_path=registry,
-        runtime_root=tmp_path / "runtime",
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        owner=AUTHOR_AGENT,
-        idempotency_key="author-instance",
-        ttl_seconds=600,
+        registry_path=registry, runtime_root=tmp_path / "runtime", goal_id=GOAL_ID,
+        todo_id=todo["todo_id"], owner=AUTHOR_AGENT,
+        idempotency_key="author-instance", ttl_seconds=600,
     )
-    update_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        claimed_by=REVIEW_AGENT,
-        agent_id=REVIEW_AGENT,
-        claim_only=True,
-    )
-    lease_path = _lease_path(tmp_path, todo["todo_id"])
-    lease_before = lease_path.read_text(encoding="utf-8")
-
-    completed = complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        claimed_by=REVIEW_AGENT,
-        agent_id=REVIEW_AGENT,
-        evidence="split-brain claimer completed without the lease key",
-        no_followup=True,
-    )
-
-    assert completed["ok"] is True
-    assert completed["task_lease_fence"] == {
-        "schema_version": "task_lease_v0",
-        "required": False,
-        "active": False,
-    }
-    assert lease_path.read_text(encoding="utf-8") == lease_before
-    assert json.loads(lease_before)["owner"] == AUTHOR_AGENT
+    before = _canonical_snapshot(registry, state)
+    lease_before = _canonical_lease(registry, tmp_path, todo["todo_id"])
+    for command in ("claim", "complete"):
+        with pytest.raises(LocalCoordinationAuthorityRejection):
+            if command == "claim":
+                update_goal_todo(
+                    registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+                    claimed_by=REVIEW_AGENT, agent_id=REVIEW_AGENT, claim_only=True,
+                    task_lease_idempotency_key="author-instance", task_lease_expected_version=1,
+                )
+            else:
+                complete_goal_todo(
+                    registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+                    agent_id=REVIEW_AGENT, task_lease_idempotency_key="author-instance",
+                    task_lease_expected_version=1, evidence="A foreign actor cannot borrow the holder's proof.",
+                )
+        assert _canonical_snapshot(registry, state) == before
+        assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == lease_before
+    assert lease_before["owner"] == AUTHOR_AGENT
+    assert lease_before["status"] == "active"
 
 
 def test_dry_run_completion_does_not_release_lease(tmp_path: Path, canonical_workspace) -> None:
@@ -1143,130 +1101,84 @@ def test_dry_run_completion_does_not_release_lease(tmp_path: Path, canonical_wor
     assert _canonical_snapshot(registry, state) == before
 
 
-def test_release_failure_after_commit_keeps_completion_ok(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_completion_and_lease_release_recover_after_response_loss(
+    tmp_path: Path, canonical_workspace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    registry, _state = _write_fixture(tmp_path, multi_agent=False)
+    # Canonical completion releases its lease in the same commit; there is no
+    # independent post-commit release call to fail. Lose the real response instead.
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
     todo = _add_agent_todo(registry)
-    lease_key = "release-failure-instance"
+    lease_key = "response-loss-instance"
     acquire_task_lease(
-        registry_path=registry,
-        runtime_root=tmp_path / "runtime",
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        owner=AUTHOR_AGENT,
-        idempotency_key=lease_key,
-        ttl_seconds=600,
+        registry_path=registry, runtime_root=tmp_path / "runtime", goal_id=GOAL_ID,
+        todo_id=todo["todo_id"], owner=AUTHOR_AGENT, idempotency_key=lease_key, ttl_seconds=600,
     )
-
-    native_lifecycle = task_lease_module._execute_native_task_lease_lifecycle
-
-    def _fail_release(**kwargs: object) -> dict:
-        if (
-            kwargs.get("operation") == "fence_close"
-            and kwargs.get("committed") is True
-            and kwargs.get("release_lease") is True
-        ):
-            native_lifecycle(
-                **{
-                    **kwargs,
-                    "committed": False,
-                    "release_lease": False,
-                }
-            )
-            raise OSError("simulated terminal write failure")
-        return native_lifecycle(**kwargs)
-
-    monkeypatch.setattr(
-        task_lease_module,
-        "_execute_native_task_lease_lifecycle",
-        _fail_release,
-    )
-    completed = complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
-        task_lease_idempotency_key=lease_key,
-        task_lease_expected_version=1,
-        evidence="completion must survive a failed lease release",
+    request = dict(
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], agent_id=AUTHOR_AGENT,
+        task_lease_idempotency_key=lease_key, task_lease_expected_version=1,
+        completion_turn_key="response-loss-turn", evidence="Original completion committed once.",
         no_followup=True,
     )
+    native_effect = terminal_provider.effect_runtime_result
+    committed = []
+    def lose_response(method, payload, **kwargs):
+        result = native_effect(method, payload, **kwargs)
+        if method == "coordination.local_authority.todo_terminal" and not committed:
+            assert result["status"] == "applied"
+            committed.append(result)
+            raise OSError("response lost after real canonical commit")
+        return result
+    with monkeypatch.context() as patch:
+        patch.setattr(terminal_provider, "effect_runtime_result", lose_response)
+        with pytest.raises(OSError, match="response lost"):
+            complete_goal_todo(**request)
+    assert len(committed) == 1
+    assert _canonical_todo(registry, todo["todo_id"])["status"] == "done"
+    lease_after_commit = _canonical_lease(registry, tmp_path, todo["todo_id"])
+    assert lease_after_commit["status"] == "released"
+    replay = complete_goal_todo(**request)
+    assert replay["ok"] is True and replay["idempotent_replay"] is True
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == lease_after_commit
+    after_recovery = _canonical_snapshot(registry, state)
+    assert complete_goal_todo(**request)["idempotent_replay"] is True
+    assert _canonical_snapshot(registry, state) == after_recovery
 
-    assert completed["ok"] is True
-    assert completed["completed"] is True
-    assert completed["task_lease_fence"]["execution_instance_verified"] is True
-    assert completed["task_lease_fence"]["released"] is False
-    lease_path = _lease_path(tmp_path, todo["todo_id"])
-    assert json.loads(lease_path.read_text(encoding="utf-8"))["status"] == "active"
 
-
-def test_reopened_todo_completes_unfenced_after_lease_release(
-    tmp_path: Path,
+def test_completed_todo_rejects_metadata_reopen_and_new_execution(
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    """Pin the accepted reopen-window divergence of release-on-completion.
-
-    The terminal tombstone retains the generation but is not time-active, so a
-    manually reopened todo completes unfenced. The tombstone exists only to
-    prevent a later acquire from reusing the old execution generation.
-    """
-
-    registry, _state = _write_fixture(tmp_path, multi_agent=False)
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
     todo = _add_agent_todo(registry)
-    lease_key = "reopen-window-instance"
     acquire_task_lease(
-        registry_path=registry,
-        runtime_root=tmp_path / "runtime",
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        owner=AUTHOR_AGENT,
-        idempotency_key=lease_key,
-        ttl_seconds=600,
+        registry_path=registry, runtime_root=tmp_path / "runtime", goal_id=GOAL_ID,
+        todo_id=todo["todo_id"], owner=AUTHOR_AGENT, idempotency_key="first-instance", ttl_seconds=600,
     )
-
-    completed = complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
-        task_lease_idempotency_key=lease_key,
-        task_lease_expected_version=1,
-        evidence="first completion releases the verified lease",
-        no_followup=True,
+    complete_goal_todo(
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], agent_id=AUTHOR_AGENT,
+        task_lease_idempotency_key="first-instance", task_lease_expected_version=1,
+        completion_turn_key="first-turn", evidence="First completion releases its lease.",
     )
-    assert completed["task_lease_fence"]["released"] is True
-    assert (
-        json.loads(_lease_path(tmp_path, todo["todo_id"]).read_text(encoding="utf-8"))[
-            "status"
-        ]
-        == "released"
-    )
-
-    reopened = update_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
-        status="open",
-        note="manual reopen inside the old lease TTL",
-    )
-    assert reopened["ok"] is True
-
-    recompleted = complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
-        evidence="reopened todo completes without a lease fence",
-        no_followup=True,
-    )
-    assert recompleted["ok"] is True
-    assert recompleted["task_lease_fence"] == {
-        "schema_version": "task_lease_v0",
-        "required": False,
-        "active": False,
-    }
+    released = _canonical_lease(registry, tmp_path, todo["todo_id"])
+    assert released["status"] == "released"
+    before = _canonical_snapshot(registry, state)
+    # A completed ordinary Todo has no metadata-reopen contract. Keep terminal
+    # history intact rather than silently resurrecting a retired execution.
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], agent_id=AUTHOR_AGENT,
+            status="open", note="Metadata cannot reopen a completed execution.",
+        )
+    assert rejected.value.code == "unsupported_todo_update_target"
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == released
+    with pytest.raises((ValueError, LocalCoordinationAuthorityRejection)):
+        complete_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], agent_id=AUTHOR_AGENT,
+            task_lease_idempotency_key="first-instance", task_lease_expected_version=1,
+            completion_turn_key="second-turn", evidence="Released proof cannot authorize new execution.",
+        )
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == released
 
 
 def test_cli_release_after_auto_release_replays_terminal_tombstone(
@@ -1370,8 +1282,8 @@ def test_invalid_completion_keeps_existing_lease_and_state(
     assert _canonical_snapshot(registry, state) == state_before
 
 
-def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -1380,9 +1292,9 @@ def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -
         task_class="advancement_task",
         capability_binding_ref="issue-fix:feasibility-a1b2c3d4",
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="immutable once set"):
+    with pytest.raises(LocalCoordinationAuthorityUnavailable, match="different capability_binding_ref"):
         add_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -1392,13 +1304,13 @@ def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -
             capability_binding_ref="issue-fix:feasibility-e5f6a7b8",
         )
 
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
 
 def test_duplicate_todo_add_rejects_invalid_task_domain_atomically(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path)
+    registry, state = canonical_workspace(tmp_path)
     todo = add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -1407,7 +1319,7 @@ def test_duplicate_todo_add_rejects_invalid_task_domain_atomically(
         task_class="advancement_task",
         task_domain="validation",
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
     with pytest.raises(ValueError, match="task_domain"):
         add_goal_todo(
@@ -1419,12 +1331,12 @@ def test_duplicate_todo_add_rejects_invalid_task_domain_atomically(
             task_domain="../private",
         )
 
-    assert state.read_text(encoding="utf-8") == before
-    assert _agent_todo(state, todo["todo_id"])["task_domain"] == "validation"
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_todo(registry, todo["todo_id"])["task_domain"] == "validation"
 
 
-def test_todo_update_rejects_invalid_task_domain_atomically(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_todo_update_rejects_invalid_task_domain_atomically(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -1434,9 +1346,9 @@ def test_todo_update_rejects_invalid_task_domain_atomically(tmp_path: Path) -> N
         task_domain="validation",
         claimed_by=AUTHOR_AGENT,
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="task_domain"):
+    with pytest.raises(LocalCoordinationAuthorityUnavailable, match="task_domain"):
         update_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -1445,8 +1357,8 @@ def test_todo_update_rejects_invalid_task_domain_atomically(tmp_path: Path) -> N
             agent_id=AUTHOR_AGENT,
         )
 
-    assert state.read_text(encoding="utf-8") == before
-    assert _agent_todo(state, todo["todo_id"])["task_domain"] == "validation"
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_todo(registry, todo["todo_id"])["task_domain"] == "validation"
 
 
 def test_monitor_schedule_fields_remain_monitor_only(tmp_path: Path) -> None:
@@ -1495,8 +1407,8 @@ def test_claim_actor_must_match_requested_owner(tmp_path: Path, canonical_worksp
     assert _canonical_todo(registry, todo["todo_id"])["claimed_by"] == AUTHOR_AGENT
 
 
-def test_monitor_writeback_propagates_multi_agent_actor(tmp_path: Path) -> None:
-    registry, _state = _write_fixture(tmp_path)
+def test_monitor_writeback_propagates_multi_agent_actor(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -1511,6 +1423,7 @@ def test_monitor_writeback_propagates_multi_agent_actor(tmp_path: Path) -> None:
         },
     )
 
+    before = _canonical_snapshot(registry, state)
     result = write_monitor_poll_todo_state(
         registry_path=registry,
         runtime_root=tmp_path / "runtime",
@@ -1523,15 +1436,23 @@ def test_monitor_writeback_propagates_multi_agent_actor(tmp_path: Path) -> None:
     )
 
     assert result is not None
-    authority = result["todo_update"]["mutation_authority"]
-    assert authority["mode"] == "registered_peer_actor"
-    assert authority["actor_agent_id"] == AUTHOR_AGENT
+    assert _canonical_snapshot(registry, state) == before
+    written = write_monitor_poll_todo_state(
+        registry_path=registry, runtime_root=tmp_path / "runtime", goal_id=GOAL_ID,
+        generated_at="2026-07-18T00:15:00+00:00", execute=True,
+        todo_id=todo["todo_id"], result_hash="unchanged", agent_id=AUTHOR_AGENT,
+    )
+    assert written is not None
+    current = _canonical_todo(registry, todo["todo_id"])
+    assert current["last_actor_agent_id"] == AUTHOR_AGENT
+    assert current["claimed_by"] == AUTHOR_AGENT
+    assert current["result_hash"] == "unchanged"
 
 
 def test_monitor_successor_replay_preserves_independent_reviewer_exclusion(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path)
+    registry, state = canonical_workspace(tmp_path)
     monitor = add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -1583,7 +1504,7 @@ def test_monitor_successor_replay_preserves_independent_reviewer_exclusion(
 
     assert result is not None
     assert result["successor_receipts"][0]["todo_id"] == review["todo_id"]
-    assert _agent_todo(state, review["todo_id"])["excluded_agents"] == [
+    assert _canonical_todo(registry, review["todo_id"])["excluded_agents"] == [
         AUTHOR_AGENT
     ]
 
