@@ -18,19 +18,13 @@ def test_canonical_completion_journeys(tmp_path, monkeypatch, provider):
     # any production decisions, transport responses or assertions.
     import todo_lifecycle_fixtures as fixtures
     original = fixtures.write_fixture
-    def write_fixture(path):
-        return original(path, provider=provider)
+    def write_fixture(path, **options):
+        return original(path, provider=provider, **options)
     monkeypatch.setattr(fixtures, "write_fixture", write_fixture)
     lifecycle["assert_peer_monitor_no_followup"].__globals__["write_fixture"] = write_fixture
-    for name in (
-        "assert_configured_peer_handoff",
-        "assert_no_followup_cli_metadata",
-        "assert_complete_links_existing_successor",
-        "assert_same_title_completion_creates_fresh_successor",
-        "assert_peer_monitor_no_followup",
-        "assert_open_parent_successor_advisory",
-    ):
-        lifecycle[name]()
+    assert lifecycle["main"]() == 0
+    deferred = runpy.run_path(str(root / "examples/control_plane/todo-deferred-capacity-cli-smoke.py"))
+    assert deferred["main"]() == 0
     continuation = runpy.run_path(str(root / "examples/control_plane/todo-continuation-policy-smoke.py"))
     assert continuation["main"](provider=provider) == 0
 
@@ -84,3 +78,61 @@ def test_user_completion_update_projects_combined_edit(tmp_path, monkeypatch, pr
     assert result["todo"] == "Confirmed bounded change"
     assert result["status_changed"] is True
     assert result["text_changed"] is True
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_create_response_preserves_original_todo_after_later_edit(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    runpy.run_path(str(root / "examples/control_plane/todo-lifecycle-cli-smoke.py"))
+    from todo_lifecycle_fixtures import GOAL_ID, run_cli, run_cli_error, write_fixture
+    registry, _ = write_fixture(tmp_path / "fixture", provider=provider)
+    intent = ("todo", "add", "--goal-id", GOAL_ID, "--role", "agent",
+        "--text", "Wait for worker capacity", "--claimed-by", "codex-main-control",
+        "--status", "deferred",
+        "--resume-when", "capacity_available:short_pool", "--operation-id", "original-create")
+    preview = run_cli(registry, *intent, "--dry-run")
+    assert preview["status"] == "deferred"
+    assert preview["provider_status"] == "planned"
+    assert preview["changed"] is False
+    original = run_cli(registry, *intent)
+    assert original["todo"] == "Wait for worker capacity"
+    assert original["status"] == "deferred"
+    assert original["provider_status"] == "applied"
+    assert original["claimed_by"] == "codex-main-control"
+    assert original["resume_when"] == "capacity_available:short_pool"
+    assert original["added"] is True and original["already_exists"] is False
+    run_cli(registry, "todo", "update", "--goal-id", GOAL_ID,
+        "--todo-id", original["todo_id"], "--agent-id", "codex-main-control",
+        "--text", "Worker capacity available", "--status", "open", "--clear-resume-when")
+    replay = run_cli(registry, *intent)
+    assert replay["provider_status"] == "replayed"
+    assert replay["changed"] is False and replay["updated_at"] is None
+    assert original["updated_at"] is not None
+    for field in ("todo", "todo_id", "status", "claimed_by", "resume_when"):
+        assert replay[field] == original[field]
+    rejected = run_cli_error(registry, *intent, "--text", "Different create intent")
+    assert rejected["error_code"] == "coordination_operation_identity_mismatch"
+    current = run_cli(registry, "todo", "list", "--goal-id", GOAL_ID, "--todo-id", original["todo_id"])
+    assert current["todo"]["text"] == "Worker capacity available"
+    assert current["todo"]["status"] == "open"
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_create_duplicate_projects_existing_open_todo(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    runpy.run_path(str(root / "examples/control_plane/todo-lifecycle-cli-smoke.py"))
+    from todo_lifecycle_fixtures import GOAL_ID, run_cli, write_fixture
+    registry, _ = write_fixture(tmp_path / "fixture", provider=provider)
+    intent = ("todo", "add", "--goal-id", GOAL_ID, "--role", "agent",
+        "--text", "An existing open task", "--claimed-by", "codex-main-control")
+    original = run_cli(registry, *intent)
+    duplicate = run_cli(registry, *intent)
+    assert duplicate["status"] == "open"
+    assert duplicate["todo"] == "An existing open task"
+    assert duplicate["todo_id"] == original["todo_id"]
+    assert duplicate["claimed_by"] == "codex-main-control"
+    assert duplicate["provider_status"] == "no_change"
+    assert duplicate["added"] is False and duplicate["already_exists"] is True
+    assert duplicate["changed"] is False

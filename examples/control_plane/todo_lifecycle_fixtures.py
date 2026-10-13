@@ -39,7 +39,7 @@ UNCLAIMED_SOURCE_TODO = "Prepare an unclaimed successor routing check."
 UNCLAIMED_SUCCESSOR_TODO = "Continue the unclaimed successor routing check."
 
 
-def write_fixture(root: Path, *, provider: str = "file") -> tuple[Path, Path]:
+def write_fixture(root: Path, *, provider: str = "file", placeholder: bool = True) -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -54,7 +54,7 @@ def write_fixture(root: Path, *, provider: str = "file") -> tuple[Path, Path]:
         "## Objective\n\n"
         "Exercise todo lifecycle transitions.\n\n"
         "## Agent Todo\n\n"
-        "- [ ] Legacy monitor-only placeholder.\n",
+        + ("- [ ] Legacy monitor-only placeholder.\n" if placeholder else ""),
         encoding="utf-8",
     )
     write_fixture_registry(

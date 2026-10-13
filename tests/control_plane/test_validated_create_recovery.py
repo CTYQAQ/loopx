@@ -137,7 +137,8 @@ def test_public_cli_replays_prior_normalized_create_without_replacing_new_data(p
     retried = subprocess.run(command, capture_output=True, text=True, timeout=60)
     assert retried.returncode == 0, retried.stdout + retried.stderr
     replay = json.loads(retried.stdout)
-    assert replay["status"] == "replayed", replay
+    assert replay["status"] == "open"
+    assert replay["provider_status"] == "replayed", replay
     assert replay["original_receipt"] == receipt
     assert read(runtime) == current
 
@@ -181,7 +182,8 @@ def test_lost_response_replays_exact_create_after_another_edit(promoted, monkeyp
                      role="agent", agent_id="agent-a", text="A subsequent work declaration")
     before_retry = read(runtime)
     replay = add_goal_todo(**intent(registry))
-    assert replay["status"] == "replayed"
+    assert replay["status"] == "open"
+    assert replay["provider_status"] == "replayed"
     assert replay["todo_id"] == todo["todo_id"]
     assert read(runtime) == before_retry  # No new commit or stale declaration overwrite.
     with pytest.raises(LocalCoordinationAuthorityUnavailable):
@@ -314,7 +316,8 @@ add_goal_todo(registry_path=Path(sys.argv[1]), goal_id="goal-a", role="agent",
     ], capture_output=True, text=True, timeout=60)
     assert retried.returncode == 0, retried.stdout + retried.stderr
     result = json.loads(retried.stdout)
-    assert result["status"] == "replayed"
+    assert result["status"] == "open"
+    assert result["provider_status"] == "replayed"
     assert result["todo_id"] == before["todos"][0]["todo_id"]
     assert read(runtime) == before
 
@@ -379,7 +382,8 @@ def test_create_transaction_rejects_an_inconsistent_complete_head(promoted, exis
     assert len(damaged["head"]["todos"]) == int(existing_receipt)
     if existing_receipt:
         replay = add_goal_todo(**original)
-        assert replay["status"] == "replayed"
+        assert replay["status"] == "open"
+        assert replay["provider_status"] == "replayed"
         assert replay["changed"] is False
         assert replay["projection_delivery"] == "pending"
         assert head("read") == damaged  # A historical receipt grants no new write.

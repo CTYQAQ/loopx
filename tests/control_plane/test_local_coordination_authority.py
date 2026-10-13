@@ -19,6 +19,7 @@ from loopx.control_plane.coordination.coordination_state_contract import (
     TODO_DOMAIN_RECORD_FIELDS,
 )
 from loopx.control_plane.coordination.legacy_writer_fence import (
+    LegacyCoordinationWriterFenced,
     legacy_coordination_writer_fence_path,
 )
 from loopx.control_plane.coordination.local_authority import (
@@ -37,8 +38,6 @@ from loopx.control_plane.todos import (
 )
 from loopx.control_plane.todos.active_state_editing import (
     TODO_SECTION_HEADINGS,
-    section_bounds,
-    todo_blocks,
 )
 from loopx.control_plane.todos.completion_validation_projection import (
     completion_validation_declaration_sha256,
@@ -562,7 +561,8 @@ def test_validated_create_recovers_sidecar_after_commit_before_publish_crash(
     ) is None
 
     recovered = add_goal_todo(**create_kwargs)
-    assert recovered["status"] == "no_change"
+    assert recovered["status"] == "open"
+    assert recovered["provider_status"] == "no_change"
     assert recovered["todo_id"] == todo_id
     assert recovered["added"] is False
     assert recovered["already_exists"] is True
@@ -618,7 +618,8 @@ def test_promoted_validator_revision_updates_canonical_digest_and_private_readba
         validation_command_json=json.dumps(replacement_argv),
         validation_label="focused validation",
     )
-    assert revised["status"] == "applied"
+    assert revised["status"] == "open"
+    assert revised["provider_status"] == "applied"
     canonical = read_canonical_todos_if_promoted(
         runtime_root=runtime_root, goal_id="goal-a"
     )
@@ -658,7 +659,8 @@ def test_promoted_validator_revision_updates_canonical_digest_and_private_readba
         validation_command_json=json.dumps(replacement_argv),
         validation_label="focused validation",
     )
-    assert replay["status"] == "replayed"
+    assert replay["status"] == "open"
+    assert replay["provider_status"] == "replayed"
     assert read_canonical_todos_if_promoted(
         runtime_root=runtime_root, goal_id="goal-a"
     ) == canonical
@@ -830,7 +832,8 @@ Continue.
         validation_label="recoverable provider validation",
     )
 
-    assert applied["status"] == "applied"
+    assert applied["status"] == "open"
+    assert applied["provider_status"] == "applied"
     assert applied["projection_delivery"] == "pending"
     canonical = read_canonical_todos_if_promoted(
         runtime_root=runtime_root,
@@ -856,7 +859,8 @@ Continue.
         validation_command_json=json.dumps(["python3", "-c", "raise SystemExit(0)"]),
         validation_label="recoverable provider validation",
     )
-    assert replay["status"] == "no_change"
+    assert replay["status"] == "open"
+    assert replay["provider_status"] == "no_change"
     assert replay["projection_delivery"] == "delivered"
     rendered = state_file.read_text(encoding="utf-8")
     assert "Recover the native compatibility projection" in rendered
@@ -1296,14 +1300,17 @@ def test_canonical_hard_lease_claim_cli_atomically_acquires_ownership(
         return subprocess.run(argv, capture_output=True, text=True, timeout=30)
     preview_edit = invoke_edit([*edit, "--dry-run"])
     assert preview_edit.returncode == 0, preview_edit.stdout + preview_edit.stderr
-    assert json.loads(preview_edit.stdout)["status"] == "planned"
+    assert json.loads(preview_edit.stdout)["status"] == "open"
+    assert json.loads(preview_edit.stdout)["provider_status"] == "planned"
     assert list_goal_todos(registry_path=registry_path, goal_id="goal-a") == after
     first_edit = invoke_edit(edit)
     assert first_edit.returncode == 0, first_edit.stdout + first_edit.stderr
-    assert json.loads(first_edit.stdout)["status"] == "applied"
+    assert json.loads(first_edit.stdout)["status"] == "open"
+    assert json.loads(first_edit.stdout)["provider_status"] == "applied"
     retry_edit = invoke_edit(edit)
     assert retry_edit.returncode == 0, retry_edit.stdout + retry_edit.stderr
-    assert json.loads(retry_edit.stdout)["status"] == "replayed"
+    assert json.loads(retry_edit.stdout)["status"] == "open"
+    assert json.loads(retry_edit.stdout)["provider_status"] == "replayed"
     changed_edit = invoke_edit([*edit, "--note", "Different intent"])
     assert changed_edit.returncode != 0
     final = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
@@ -1594,7 +1601,7 @@ Continue provider-first delivery.
     assert "Continue provider-first delivery." in rendered
 
 
-def test_public_terminal_optional_prose_matches_before_and_after_promotion(
+def test_terminal_prose_requires_import_then_preserves_normalization(
     tmp_path: Path,
 ) -> None:
     cases = [
@@ -1687,6 +1694,16 @@ def test_public_terminal_optional_prose_matches_before_and_after_promotion(
                 state_path=state_file,
             )
 
+        if not promoted:
+            before = state_file.read_bytes()
+            for command in (complete_goal_todo, supersede_goal_todo):
+                with pytest.raises(LegacyCoordinationWriterFenced) as denied:
+                    command(registry_path=registry_path, runtime_root_arg=str(runtime_root),
+                        goal_id="goal-a", todo_id="todo_prose_01", role="agent", agent_id="agent-a")
+                assert denied.value.code == "canonical_authority_required"
+                assert state_file.read_bytes() == before
+            return {}
+
         for index, (field, value, _expected) in enumerate(cases, start=1):
             common = {
                 "registry_path": registry_path,
@@ -1708,24 +1725,11 @@ def test_public_terminal_optional_prose_matches_before_and_after_promotion(
                 )
                 assert result["completed"] is True
 
-        if promoted:
-            projection = read_canonical_todos_if_promoted(
-                runtime_root=runtime_root,
-                goal_id="goal-a",
-            )
-            assert projection is not None
-            todos = projection["todos"]
-        else:
-            lines = state_file.read_text(encoding="utf-8").splitlines()
-            bounds = section_bounds(lines, "agent")
-            assert bounds is not None
-            todos = todo_blocks(
-                lines,
-                bounds[0],
-                bounds[1],
-                role="agent",
-                source_section=bounds[2],
-            )
+        projection = read_canonical_todos_if_promoted(
+            runtime_root=runtime_root, goal_id="goal-a",
+        )
+        assert projection is not None
+        todos = projection["todos"]
         by_id = {todo["todo_id"]: todo for todo in todos}
         return {
             f"{field}:{index}": by_id[f"todo_prose_{index:02d}"].get(field)
@@ -1738,14 +1742,14 @@ def test_public_terminal_optional_prose_matches_before_and_after_promotion(
         f"{field}:{index}": value
         for index, (field, _input, value) in enumerate(cases, start=1)
     }
-    assert legacy == expected
+    assert legacy == {}
     assert canonical == expected
 
 
-def test_illegal_terminal_actor_is_a_domain_valueerror_before_and_after_promotion(
+def test_terminal_admission_rejects_legacy_then_illegal_canonical_actor(
     tmp_path: Path,
 ) -> None:
-    def rejected(root: Path, *, promoted: bool) -> ValueError:
+    def rejected(root: Path, *, promoted: bool) -> Exception:
         runtime_root = root / "runtime"
         project = root / "project"
         state_file = project / "ACTIVE_GOAL_STATE.md"
@@ -1808,7 +1812,8 @@ def test_illegal_terminal_actor_is_a_domain_valueerror_before_and_after_promotio
                 ),
                 state_path=state_file,
             )
-        with pytest.raises(ValueError) as exc_info:
+        before = state_file.read_bytes()
+        with pytest.raises(ValueError if promoted else LegacyCoordinationWriterFenced) as exc_info:
             complete_goal_todo(
                 registry_path=registry_path,
                 runtime_root_arg=str(runtime_root),
@@ -1819,11 +1824,13 @@ def test_illegal_terminal_actor_is_a_domain_valueerror_before_and_after_promotio
                 agent_id="agent-b",
                 no_followup=True,
             )
+        assert state_file.read_bytes() == before
         return exc_info.value
 
     legacy = rejected(tmp_path / "legacy", promoted=False)
     canonical = rejected(tmp_path / "canonical", promoted=True)
-    assert not isinstance(legacy, LocalCoordinationAuthorityUnavailable)
+    assert isinstance(legacy, LegacyCoordinationWriterFenced)
+    assert legacy.code == "canonical_authority_required"
     assert isinstance(canonical, LocalCoordinationAuthorityRejection)
     assert canonical.code == "actor_not_registered"
 
@@ -2379,7 +2386,8 @@ def test_real_canonical_provider_preserves_complete_complex_todo_semantics(
         text=True,
         check=True,
     )
-    assert json.loads(create_preview.stdout)["status"] == "planned"
+    assert json.loads(create_preview.stdout)["status"] == "open"
+    assert json.loads(create_preview.stdout)["provider_status"] == "planned"
     assert not state_file.exists()
     created = json.loads(
         subprocess.run(
@@ -2430,14 +2438,16 @@ def test_real_canonical_provider_preserves_complete_complex_todo_semantics(
     preview = subprocess.run(
         [*command, "--dry-run"], capture_output=True, text=True, check=True
     )
-    assert json.loads(preview.stdout)["status"] == "planned"
+    assert json.loads(preview.stdout)["status"] == "open"
+    assert json.loads(preview.stdout)["provider_status"] == "planned"
     assert (
         list_goal_todos(registry_path=registry_path, goal_id="goal-a")["todos"]
         == after_create["todos"]
     )
     edited = subprocess.run(command, capture_output=True, text=True, check=True)
     edit_result = json.loads(edited.stdout)
-    assert edit_result["status"] == "applied"
+    assert edit_result["status"] == "open"
+    assert edit_result["provider_status"] == "applied"
     assert edit_result["projection_delivery"] == "pending"
     assert not state_file.exists()
     after_edit = list_goal_todos(registry_path=registry_path, goal_id="goal-a")

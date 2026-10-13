@@ -29,20 +29,9 @@ CAPACITY_RESUME = "capacity_available:short_pool"
 ACTOR_AGENT_ID = "codex-side-bypass"
 
 
-def remove_legacy_placeholder(state_file: Path) -> None:
-    state_file.write_text(
-        state_file.read_text(encoding="utf-8").replace(
-            "- [ ] Legacy monitor-only placeholder.\n",
-            "",
-        ),
-        encoding="utf-8",
-    )
-
-
 def assert_deferred_add_and_capacity_resume() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-deferred-capacity-add-") as tmp:
-        registry_path, state_file = write_fixture(Path(tmp))
-        remove_legacy_placeholder(state_file)
+        registry_path, state_file = write_fixture(Path(tmp), placeholder=False)
         before = state_file.read_text(encoding="utf-8")
 
         unsupported = run_cli_error(

@@ -706,7 +706,9 @@ def main() -> int:
         assert review_item.get("updated_at"), review_item
         assert side_completed["next_todos"][0].get("updated_at") == review_item["updated_at"], side_completed
 
-        repeated = run_cli(
+        # Omitting ownership changes the persisted terminal intent. Only the
+        # exact original request may replay its receipt.
+        changed_retry = run_cli_error(
             registry_path,
             "todo",
             "complete",
@@ -720,6 +722,29 @@ def main() -> int:
             "fresh-repeat-result-ready",
             "--next-agent-todo",
             REBUILD_TODO,
+            "--next-action-kind",
+            "rebuild_score",
+        )
+        assert changed_retry["error_code"] == "coordination_operation_identity_mismatch", changed_retry
+
+        repeated = run_cli(
+            registry_path,
+            "todo",
+            "complete",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            run_todo_id,
+            "--claimed-by",
+            "codex-main-control",
+            "--agent-id",
+            "codex-main-control",
+            "--evidence",
+            "fresh-repeat-result-ready",
+            "--next-agent-todo",
+            REBUILD_TODO,
+            "--next-claimed-by",
+            "codex-main-control",
             "--next-action-kind",
             "rebuild_score",
         )

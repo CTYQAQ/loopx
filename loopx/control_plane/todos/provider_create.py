@@ -37,6 +37,8 @@ from .completion_validation_store import (
     prepare_completion_validation_declaration,
     read_completion_validation_declaration,
 )
+from .mutation_response import serialize_added_todo_payload
+from .path_resolution import resolve_todo_state_path
 from .provider_projection import settle_canonical_todo_projection
 
 
@@ -58,6 +60,10 @@ def create_canonical_todo_if_promoted(
     # Identity is independent of current Todo count: exact retries still address
     # the original operation after other creates, edits, completion or archive.
     todo_id = "todo_" + hashlib.sha256(operation_id.encode("utf-8")).hexdigest()[:24]
+    project, state_file = resolve_todo_state_path(
+        registry_path=registry_path, goal_id=goal_id, project=project,
+        state_file=state_file, require_existing=False,
+    )
     normalized_metadata = normalize_todo_metadata_for_write(metadata)
     validation_source = {
         **normalized_metadata,
@@ -207,6 +213,26 @@ def create_canonical_todo_if_promoted(
                     "provider_status": result.get("status"),
                 },
             )
+    # Public fields describe the original accepted Todo, including receipt
+    # replay. The native commit phase stays available as provider_status.
+    # Historical receipts without row facts retain their existing response.
+    public = {}
+    if isinstance(canonical_todo, dict):
+        public = serialize_added_todo_payload(
+            add_result={**canonical_todo,
+                "section": canonical_todo.get("source_section") or (
+                    "Agent Todo" if canonical_todo["role"] == "agent"
+                    else "User Todo / Owner Review Reading Queue"),
+                "already_exists": result.get("changed") is not True},
+            goal_id=goal_id, role=canonical_todo["role"],
+            todo_text=canonical_todo["text"], agent_id=actor_agent_id,
+            state_file=state_file, project=project,
+            updated_at=canonical_todo.get("updated_at"), dry_run=dry_run,
+            added=result.get("changed") is True, metadata_updated=False,
+            changed=result.get("changed") is True and not dry_run, handoff_gate={},
+        )
+        public["provider_status"] = result["status"]
+        public["changed"] = result.get("changed") is True and not dry_run
     settled = settle_canonical_todo_projection({
         "ok": True,
         "operation_id": operation_id,
@@ -218,6 +244,7 @@ def create_canonical_todo_if_promoted(
         "added": result.get("changed") is True,
         "already_exists": result.get("changed") is not True,
         **result,
+        **public,
     }, registry_path=registry_path, runtime_root=runtime_root, goal_id=goal_id,
         project=project, state_file=state_file)
     return cast(dict[str, Any], settled)
