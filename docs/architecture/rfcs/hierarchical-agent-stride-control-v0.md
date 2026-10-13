@@ -643,10 +643,31 @@ consistency and comparison requirements, not a second restore authority.
 Before capture, declare the point by elapsed research budget or a semantic event;
 do not choose it retrospectively for a favorable score. A later point such as
 ten hours is an experiment setting, not a product default or automatic pivot.
+
+The proposed automatic capture policy is **off by default; when explicitly
+enabled, capture at each fresh replan node before its strategy decision**. Reuse
+the canonical replan obligation identity: repeated context reads or retries of
+that node do not create another point. Ordinary work Turns do not trigger a full
+capture. A successful point records the replan identity, the completed Host
+cursor, source revisions and current strategy version; these are evidence
+bindings, not authority. Branches can then compare different replan decisions
+from the same retained research state, including a decision to keep the route.
+
+The trigger still waits for the settled boundary below and must precede the
+replan decision and its new work. A replan can occur inside one Host wake, so an
+after-wake hook alone cannot implement this ordering. The replan and Host owners
+must provide that handoff without an extra model call or work settlement. If the
+boundary cannot be qualified, record the missed point and continue under the
+existing execution contract; do not substitute a later state for that node.
+Measure capture time and storage per node before choosing compression, shared
+immutable members or retention limits. Retention must preserve declared study
+points and their branches rather than silently selecting favorable outcomes.
+
 Record the actual boundary and any skew:
 
-- native conversation cursor and a Host-qualified export/fork path; copied log
-  text does not establish a resumable session;
+- native conversation cursor and a Host-qualified export/fork path, including
+  compaction records, paginated history and the session index needed for native
+  readback; copied log text does not establish a resumable session;
 - settled LoopX research evidence, original goal/priorities, prior decisions,
   scoped negative results and unresolved questions;
 - exact working code, necessary authorized untracked files, incumbent artifact
@@ -654,6 +675,156 @@ Record the actual boundary and any skew:
 - source/model/tool/evaluator pins and solver-visible feedback already consumed;
 - remaining total budget, accepted submission history and next feedback
   opportunity under the original protocol.
+
+Capture belongs at the existing **settled work-Turn boundary**, before the next
+work admission. A time-based request waits for that boundary and records its
+actual elapsed budget; it cannot interrupt an arbitrary tool operation and
+label the resulting files consistent. The runner/Host owns this barrier, while
+each existing participant owns its snapshot:
+
+1. Finish owed Turn settlement and reconcile outstanding tool, child-work and
+   evaluator effects by their original identities. Unresolved effects make the
+   point unqualified; copying their journals does not resolve them.
+2. Capture the native completed-turn cursor, canonical research-state revision,
+   working-artifact manifest and evaluator opportunity state at that barrier.
+   Use the existing SQLite snapshot owner where applicable, not a live database
+   file copy. Keep code and incumbent/result bindings independently verifiable.
+3. Recheck each participant's revision/cursor and artifact digests before
+   publishing one immutable verification unit. Any movement, missing member or
+   interrupted capture leaves an incomplete unit, never a usable point. This
+   establishes the declared barrier's consistency, not a cross-owner transaction.
+4. Restore into an isolated destination, verify its contents, then use the
+   existing owners to admit fresh sessions and research work. Restore alone
+   cannot start a model, claim work, register a timer or submit a candidate.
+
+The Host adapter must qualify native history reconstruction at its pinned
+version, including compaction and paginated storage. For example, Codex's
+[native fork protocol](https://learn.chatgpt.com/docs/app-server)
+can bound a branch by a completed turn. An exported file still needs the native
+store's import/readback path; an arbitrary file path or successful log parse is
+insufficient. Compare the reconstructed prefixes and excluded later history,
+not just returned session identifiers. Keep provider-specific migration and
+storage handling outside the generic consistency decision.
+
+The Host profile must also declare path portability. A native index can retain
+absolute guest paths: qualification must either preserve those paths inside a
+fresh isolated environment or use the Host's supported import/rebinding API.
+Editing native database rows by hand does not qualify import. Bind the effective
+Host configuration and installed tool/skill versions separately from credentials;
+reauthentication remains with the existing owner. Full research state means the
+declared participants needed to resume useful work, not a copy of every file or
+the model's unobservable internal state.
+
+Historical conversation truncation cannot reconstruct earlier code, research
+state or feedback consumption from their terminal versions. Without a qualified
+contemporaneous capture of those participants, such a probe establishes Host
+feasibility only and must not enter a same-state intervention comparison.
+
+The initial implementation slice is [inert artifact capture](../../../benchmark/README.md#inert-checkpoint-capture).
+The benchmark adapter requests it after the existing Turn settlement; the typed
+artifact owner seals explicit files/directories and committed SQLite snapshots,
+rechecks source witnesses and verifies an isolated materialization. Its manifest
+always declares the research point unqualified. The heartbeat adapter also accepts
+an explicit fresh-replan trigger: it preloads the original quota guard and captures
+an admitted replan projected at wake start before invoking the model, deduplicated
+by the existing obligation. It does not cover replans first created inside a running
+Host wake. The optional native participant reads complete history through Codex,
+checks the session's actual workspace and current source binding/profile, and rechecks them after the byte
+probe. A later source Turn in the read-to-probe gap is rejected; the artifact
+owner's witness checks cover subsequent writes. It seals rollout/index/paged
+stores and verifies native forks at fixed guest paths. These source-basis checks
+are qualified separately from research utility. An explicit source-checkout
+controller now prepares a verified fork through the existing registry/session
+owners, with distinct registered Goal/Agent identities and a matching captured
+session profile. The registry fence guards configuration through the binding write;
+existing lifetime semantics remain. The lifecycle-only source-session profile
+cannot run governed work and is rejected rather than used as a benchmark surrogate.
+Replacement, changed configuration/profile and native automatic Goal activation
+are refused. Real native CLI/resume qualification uses a local static provider
+to carry retained conversation into a new Turn, verify materialized code/negative
+evidence and settle the original LoopX guard/writeback/spend. The quiesced fixture
+swaps fixed guest paths; full environment isolation remains unqualified. This proves
+the conversation participant's adoption and synthetic continuation, not full research/effect adoption, remaining
+whole-trial budget, installed frontend recovery or scientific benefit.
+An explicit checkpoint-aware native judge also exports released public result
+details, accepted counters/clock, remaining cooldown and original trial deadline,
+plus the opaque native-selected incumbent archive bound to its released result.
+The incumbent can precede the working candidate; native ranking remains the owner.
+Missing bytes, changed capture bindings or mismatched file witnesses reject before
+publication, without grading or refilling admission; pending or unreconciled grades reject.
+The opt-in LoopX-state participant additionally seals a complete paged canonical
+Todo read at one promoted provider revision, with byte/revision rechecks. It
+retains complete Explore events and indexed vision/checkpoint history, including
+stride decisions, as historical context. The source owner validates Explore rows;
+framing, source-file digests and absence are checked against the sealed inventory.
+Malformed or moved history rejects the optional capture. These retained records
+do not activate a destination graph, old vision or historical effects.
+Unpromoted coordination retains its previous inert inventory only, explicitly
+without canonical context adoption. A controller can
+attach this retained context to an already owned destination Todo through the
+existing leased continuation prepare/adopt owner and canonical projection
+readback. The source population, notes and original negative evidence are
+available as private context; current requirements, status, claims and leases
+remain current authority. Native profile and complete-history readback precede
+both preparation and adoption. A real native fork/resume plus CLI and canonical
+owner fixture consumes the captured candidate, negative Todo/Explore evidence and vision, excludes
+later source evidence, and settles governed work. Its local deterministic provider
+qualifies transport/adoption and mechanical use, not research judgment or benefit;
+context-command retries now reuse the original prepare/adopt identities and
+revision after lost responses or projection failure, while changed authority,
+notes, artifacts and advanced native history still refuse recovery. Canonical
+graph/vision/effect activation, full native/Host/evaluator consistency, joint
+participant recovery, packaged delivery and useful continued research remain open. Participant/effect reconciliation and complete fresh research-state
+adoption cannot be certified by operator metadata or native history equality.
+
+A native fresh registration is not restored admission. In the controlled native
+Docker qualification, one of twelve source submissions was consumed and its
+cooldown remained active. A same-limit fresh registration admitted `agent-1`
+immediately with twelve unused rounds. Regrading the retained archive created a
+new result, without restoring the source history or opportunity state. This is
+valid new-trial behavior; it cannot substitute for a same-point continuation.
+The evaluator owner must separately qualify destination initialization from the
+bound history/counters and remaining cooldown duration, together with the Host's
+remaining total budget. Copying captured token rows is not admission proof.
+
+The [controller-only native capsule transport](../../../benchmark/README.md#controller-only-native-capsule-transport)
+now connects the proposed native initializer to the existing typed artifact owner:
+explicit controller authority captures/imports a sealed native bank and requests
+fresh native registration. Controller configuration stays out of solver payloads
+and exported participants; opaque data remains private and uncertified. This slice preserves native history, selected
+archive, counters and cooldown; it does not yet qualify the joint replan barrier,
+model/LoopX state adoption or useful research. Its explicit SForge phase-file
+participant also seals the declared Host deadline against the native capture
+timestamp. Restore recomputes the remaining duration and anchors a new Host phase
+file at activation, charging transport rather than offline time or a fresh trial.
+The existing work reserve and native opportunity owner remain unchanged. An
+uncertain response leaves an unusable phase reservation, not a fresh-budget
+fallback. Full Host provenance/clock alignment, joint research/effect adoption
+and original-operation recovery still need their profile's qualification; this
+participant transport cannot certify them.
+
+The composed local continuation qualification now carries the evaluator capsule
+inside the verified conversation/code/context artifact. The actual resumed Codex
+tool reads retained research and public feedback, computes a synthetic candidate
+from captured code, submits it through the native HTTP owner, and observes the
+inherited round limit. The original cooldown rejects an immediate submission;
+SForge's phase entry uses the remaining duration instead of a new trial budget.
+Source future evidence is excluded and its later state is unchanged. Participants
+are explicitly quiesced by the fixture; inference and grading are synthetic.
+This narrows the integration gap but does not prove an automatic joint barrier,
+canonical graph/vision/effect activation, original activation recovery, isolated
+Linux solver restoration, or useful research.
+
+Committed native session admission now retains the captured artifact digest in
+the original atomic session binding. Exact controller retries after a lost binding
+reply verify that receipt, current Goal/Agent/profile and unchanged complete
+native history, then return the same session without a fork or model call.
+Ordinary subsequent observations preserve provenance only for that conversation;
+replacement identity drops it. Unmarked/foreign bindings and advanced native
+history reject old-point admission. This closes post-binding reply loss, not an
+unknown fork before binding or joint evaluator/Host activation recovery. Tests
+inject reply loss after the actual binding, then recover through the CLI and
+continue real native governed work with a deterministic local provider.
 
 An inert verification unit grants no execution authority. The destination uses
 fresh experiment/Host identities and the existing Goal/session/state admission
@@ -673,6 +844,10 @@ continuation and evidence-conditioned scope review, with equal continuation
 budgets and resources. Change one control factor; preserve feedback opportunity
 counts and cooldown timing through the evaluator owner. Label session restart,
 summary replacement, source upgrades or policy bundles as additional factors.
+The evaluator carries the remaining cooldown and consumed opportunities into
+each newly authorized branch; a fresh identity must not create an extra immediate
+submission. Wall-clock waiting between capture and admission does not replenish
+the checkpoint's opportunity allowance or extend the continuation budget.
 Keep all branches and invalid/negative results; compare adopted native outcomes,
 information gained and full continuation cost. The result qualifies the scoped
 intervention, not all LoopX behavior or an optimal universal stride.

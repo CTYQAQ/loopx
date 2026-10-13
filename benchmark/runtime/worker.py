@@ -16,6 +16,8 @@ from pathlib import Path
 
 from benchmark.runtime.codex import Execution, prepare_codex_home, process_environment
 
+PHASE_WORK_RESERVE_SECONDS = 160
+
 
 def read_json(text: str) -> dict:
     payload = json.loads(text)
@@ -282,12 +284,12 @@ def run_once(env: dict[str, str]) -> dict:
             remaining = float(env["LOOPX_PHASE_DEADLINE_EPOCH"]) - time.time()
             # Reserve startup and settlement on every wake, then allow the
             # remaining time for work instead of reusing the initial timeout.
-            if remaining <= 160:
+            if remaining <= PHASE_WORK_RESERVE_SECONDS:
                 receipt.update(ok=True, budget_exhausted=True, host_invoked=False)
                 return receipt
             execution = replace(
-                execution, timeout_seconds=(remaining - 160 if execution.timeout_seconds is None
-                                             else min(execution.timeout_seconds, remaining - 160))
+                execution, timeout_seconds=(remaining - PHASE_WORK_RESERVE_SECONDS if execution.timeout_seconds is None
+                                             else min(execution.timeout_seconds, remaining - PHASE_WORK_RESERVE_SECONDS))
             )
         prepare_codex_home(
             home,
@@ -317,6 +319,10 @@ def run_once(env: dict[str, str]) -> dict:
             from benchmark.runtime.sessions import BenchmarkSessionWake
 
             session_wake = BenchmarkSessionWake(env, execution, receipt)
+        if stage == "execute" and execution.mode == "heartbeat" and env.get("LOOPX_CHECKPOINT_REQUEST"):
+            from benchmark.runtime.checkpoint import capture_before_replan
+
+            body = capture_before_replan(env, receipt, body)
         with (wake / "stderr.log").open("w") as stderr:
             if execution.native_goal and stage == "execute":
                 run_native_goal(env, execution, body, receipt, stderr)
@@ -397,6 +403,10 @@ def run_once(env: dict[str, str]) -> dict:
             receipt.update(ok=False, error_kind=type(exc).__name__)
             raise
         finally:
+            if env.get("LOOPX_CHECKPOINT_REQUEST"):
+                from benchmark.runtime.checkpoint import capture_after_wake
+
+                capture_after_wake(env, receipt)
             if (home / "sessions").is_dir():
                 # One authoritative copy; resumed prefixes are never double counted.
                 shutil.copytree(

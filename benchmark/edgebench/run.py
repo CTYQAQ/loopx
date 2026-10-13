@@ -119,6 +119,8 @@ def main(argv=None):
                          help="Explicit completed-Todo cadence ablation for heartbeat profiles")
     parser.add_argument("--stride-strategy", choices=stride_strategy_options(),
                         help="Explicit heartbeat Goal-review strategy; omitted keeps the ordinary off treatment")
+    parser.add_argument("--checkpoint-request", type=Path,
+                        help="Explicit host JSON declaration staged into a heartbeat worker; omitted disables capture")
     parser.add_argument("--eval-interval", type=int,
                         help="Native default: 0 (no periodic evaluation); other modes use task defaults; explicit 0 disables")
     parser.add_argument("--submission-cooldown", type=int,
@@ -142,6 +144,12 @@ def main(argv=None):
         parser.error("Replan cadence requires a heartbeat worker")
     if args.stride_strategy is not None and not args.worker.startswith("heartbeat-"):
         parser.error("--stride-strategy requires a heartbeat worker")
+    checkpoint_request = None
+    if args.checkpoint_request is not None:
+        if not args.worker.startswith("heartbeat-"):
+            parser.error("--checkpoint-request requires a heartbeat worker")
+        from benchmark.runtime.checkpoint import read_checkpoint_request
+        _, checkpoint_request = read_checkpoint_request(str(args.checkpoint_request))
     # One directory is one attempt: never reuse native registration or overwrite
     # source/profile evidence after an ambiguous launch.
     trial = args.log_dir / "runs" / args.run_id / args.task
@@ -196,7 +204,9 @@ def main(argv=None):
                          replan_after_turns=args.replan_after_turns,
                          replan_after_todos=args.replan_after_todos,
                          **({"stride_strategy": args.stride_strategy}
-                            if args.stride_strategy is not None else {}))
+                            if args.stride_strategy is not None else {}),
+                         **({"checkpoint_request": checkpoint_request}
+                            if checkpoint_request is not None else {}))
     if args.api_proxy_url:
         agent.default_api_base_url = args.api_proxy_url
     logger = logging.getLogger("edgebench-runtime")
@@ -242,6 +252,8 @@ def main(argv=None):
            if agent.replan_after_todos is not None else {}),
         **({"stride_strategy": args.stride_strategy}
            if args.stride_strategy is not None else {}),
+        **({"checkpoint_request_sha256": hashlib.sha256(checkpoint_request).hexdigest()}
+           if checkpoint_request is not None else {}),
     }
     receipt_path = trial / "runtime-receipt.json"
     receipt_path.write_text(json.dumps(receipt, indent=2))

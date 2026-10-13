@@ -548,15 +548,137 @@ Host 会话 owner 和 artifact provider；本 RFC 定义研究实验的一致性
 不新建 restore 权威。
 
 捕获前按已分配研究预算或语义事件声明位置，不事后挑分数有利的点。十小时等
-中后期位置属于实验设置，不是产品默认值或自动转向条件。记录实际边界与 skew：
+中后期位置属于实验设置，不是产品默认值或自动转向条件。
 
-- 原生会话 cursor 和已资格化的 Host export/fork 路径；复制日志不证明能恢复
-  session；
+自动捕获策略提案是**默认关闭；显式开启后，在每个新的 replan 节点、策略决策
+之前捕获**。复用 canonical replan obligation 身份：重复读取 context 或重试
+同一节点不会生成另一研究点。普通工作 Turn 不触发完整捕获。成功研究点绑定
+replan 身份、已完成 Host cursor、来源 revision 及当前策略版本；这些是证据
+绑定，不是权限。不同分支可从同一份积累比较不同 replan 决策，包括保留原路线。
+
+触发仍须等待下述已结算边界，并先于 replan 决策及其新工作。一次 Host wake
+内部也可能发生 replan，因此单独的 after-wake hook 不能实现这个顺序。Replan
+与 Host owner 须提供该衔接，不增加模型调用或工作结算。边界无法资格化时记录
+缺失研究点，按既有执行契约继续；不能用更晚状态代替该节点。先记录每个节点
+的捕获时间和存储量，再决定压缩、共享不可变成员或保留上限。保留策略须保护
+已声明研究点及其分支，不能静默挑选有利结果。
+
+记录实际边界与 skew：
+
+- 原生会话 cursor 和已资格化的 Host export/fork 路径，包括 compaction 记录、
+  分页历史及原生读回所需的 session 索引；复制日志不证明能恢复 session；
 - 已结算的 LoopX 研究证据、原目标/优先级、既有决定、有范围负结果及未解问题；
 - 精确工作源码、必要且获授权的未跟踪文件、incumbent 与其 qualifying result；
   尚未测量的候选与 incumbent 分开保留；
 - source/model/tool/evaluator pins 与已消费的 solver-visible feedback；
 - 剩余总预算、已受理提交历史及原协议下的下一次反馈机会。
+
+捕获接在既有**有效工作 Turn 已结算、下一次工作尚未准入**的边界。按时间请求
+捕获时，等待该边界并记录实际已用预算；不能任意打断工具操作，再把所得文件
+称为一致状态。Runner/Host 持有这道 barrier，各既有参与 owner 分别负责快照：
+
+1. 完成欠账的 Turn 结算，并按原身份 reconcile 未决工具、子任务和 evaluator
+   效果。未决效果使研究点尚未资格化；复制 journal 不等于解决效果。
+2. 在 barrier 记录原生已完成 turn cursor、canonical 研究状态 revision、工作
+   产物 manifest 和 evaluator 机会状态。适用时复用既有 SQLite snapshot owner，
+   不复制活数据库文件；代码与 incumbent/result 绑定分别可验证。
+3. 发布一份不可变 verification unit 前，复查各参与者 revision/cursor 和产物
+   digest。来源移动、缺失成员或中断捕获都留下 incomplete unit，不能成为可用
+   研究点；这只证明所声明 barrier 的一致性，不宣称跨 owner 事务。
+4. 恢复到隔离目标、验证内容，再由既有 owner 准入新 session 和研究工作。
+   Restore 本身不能启动模型、claim 工作、注册 timer 或提交候选。
+
+Host adapter 须在固定版本验证原生历史重建，包括 compaction 和分页存储。
+例如 Codex 的[原生 fork 协议](https://learn.chatgpt.com/docs/app-server)
+可按已完成 turn 限定分支；导出文件仍须通过原生 store 的 import/readback 路径，
+任意文件路径或日志解析成功并不充分。比较重建的历史前缀及被排除的后续历史，
+不只检查返回了 session id。Provider 特有迁移与存储处理不进入通用一致性决策。
+
+Host profile 还须声明路径可移植性。原生索引可能保留绝对 guest 路径：资格化
+须在新隔离环境保留这些路径，或使用 Host 支持的 import/rebinding API；手改
+原生数据库行不能资格化导入。有效 Host 配置及已安装工具/skill 版本须与凭证
+分开绑定，重新认证仍由既有 owner 负责。完整研究状态是继续有效工作所需的
+已声明参与者，不是复制所有文件或模型不可观测的内部状态。
+
+截短历史会话不能从终局版本重建当时的代码、研究状态或反馈消费。没有其他参与者
+同时捕获且已资格化的状态时，这类探针只证明 Host 可行性，不能进入同状态干预比较。
+
+第一项实现切片是 [inert 产物捕获](../../../benchmark/README.md#inert-checkpoint-capture)。
+Benchmark adapter 在既有 Turn 结算后请求捕获；typed 产物 owner 封存显式文件/
+目录及已提交 SQLite 快照，复查来源 witness 并验证隔离物化。Manifest 始终声明
+研究点尚未资格化。Heartbeat adapter 还支持显式 fresh-replan 触发：预加载原
+quota guard，在模型调用前捕获 wake 开始已投影的准入 replan，并按既有义务
+去重；尚不覆盖运行中 Host wake 首次产生的 replan。可选 native 参与者通过
+Codex 读取完整历史、核对会话真实工作区及当前 source binding/profile，并在字节 probe 后复查。读取
+到 probe 之间出现的后续 source Turn 会拒绝；之后的写入由产物 witness 校验
+拦截。它封存 rollout/索引/分页库并验证固定 guest 路径下的原生分叉；来源基准
+校验不等于研究收益。显式 source-checkout controller 现可通过既有 registry/
+session owner 准备已验证 fork，要求不同且已注册的 Goal/Agent 身份与匹配的
+捕获 session profile。Registry fence 保护配置复查到绑定写入，保持原有 profile
+的 lifetime 语义；lifecycle-only source-session profile 不能运行 governed 工作，
+会被拒绝而非当作 benchmark 替代路径。已有绑定、配置/profile 变化和原生自动
+Goal 激活均会拒绝。真实 native CLI/resume 资格化通过本地静态 provider，将保留
+会话传入新 Turn，实际验证物化代码与负证据，并按原身份结算 LoopX guard/
+writeback/spend。合成源静止后交换固定 guest 路径；完整环境隔离仍未资格化。
+这证明会话参与者采用与合成接续，不等于完整研究/
+effect 采用、剩余总预算、已安装前端恢复或科学收益。显式 checkpoint-aware native judge 还可导出已公开结果明细、受理计数/
+时钟、剩余冷却及原试验期限，并封存与已公开结果绑定的原生选优 incumbent
+原始 archive。它可能早于工作区候选；排序仍由原生规则决定。缺失源码、捕获
+绑定变化或文件 witness 不符均在发布前拒绝；不评测、不补发机会，未完成或
+未对账评测会拒绝。
+可选 LoopX-state 参与者还封存 promoted provider 同一 revision 的完整分页
+canonical Todo 读取，并复查字节和 revision。同时保留完整 Explore 事件、索引中的
+vision/checkpoint 历史及原 stride 决策，供后续读取原分支、负证据与路线判断。
+Explore 行仍由原 owner 校验；不完整追加、坏行、源文件 digest/缺失状态与封存
+inventory 不一致均拒绝可选捕获。历史记录不激活目标 graph、旧 vision 或 effect。
+未 promoted 的来源仍只保存原有
+惰性 inventory，明确不支持 canonical context 采用。控制器通过既有 leased
+continuation prepare/adopt owner，将保留上下文挂到已被目标 Agent 持有的 Todo，
+读回 canonical note 与 Markdown 投影。原始 Todo 集合、note 和负证据仅作为私有
+上下文；目标 requirements、status、claim 和 lease 仍由当前 authority 决定。
+prepare/adopt 前均复查 native profile 与完整历史。真实 native fork/resume、CLI
+和 canonical owner 的合成资格测试实际读取保留候选、Todo/Explore 负证据与 vision，排除来源后续证据，
+并完成当前 governed 工作结算。本地确定性 provider 只证明传输、采用及机械使用，
+不证明研究判断或收益。context 命令在响应丢失或投影失败后，复用原 prepare/adopt
+身份与 revision 恢复；authority、note、产物变化或 native 历史已推进仍拒绝。
+canonical graph/vision/effect 激活、完整 native/Host/evaluator 一致性、参与者联合
+恢复、packaged 交付和实际有效研究仍待验收。operator metadata 或历史一致不能
+认证参与者/effect 对账与完整新研究状态采用。
+
+已提交的 native session 准入现在将捕获产物 digest 与原 session binding 原子保存。
+binding 已提交但控制器响应丢失时，重复原命令会核对原凭据、当前 Goal/Agent/profile
+及未推进的完整 native 历史，返回同一 session，不另起 fork 或模型调用。同一会话的
+后续正常观察保留来源，替换 session、profile 或 Goal lifetime 不继承来源。无来源
+标记、外来 binding 或已推进历史均拒绝旧点准入。真实 binding 后注入响应丢失，
+再经 CLI 恢复并继续实际 native governed 工作的确定性测试覆盖这一边界；fork 在
+binding 前的未知结果与 evaluator/Host 联合激活恢复仍未资格化。
+
+原生新注册不等于恢复准入。真实原生 Docker 资格测试中，source 已消耗十二次
+中的一次，且冷却仍有效；同额度的新注册却立即受理 `agent-1`，保留十二次未用
+机会。重评已保存 archive 产生新的结果，没有恢复 source 的历史或机会状态。
+这是合法的新试验行为，不能代替同一研究点接续。Evaluator owner 须另行资格化
+从已绑定历史/计数及剩余冷却时长初始化目标状态，同时保留 Host 剩余总预算；
+复制旧 token 行不是准入证明。
+
+[Controller-only native capsule transport](../../../benchmark/README.md#controller-only-native-capsule-transport)
+已将提议中的 native initializer 接入既有 typed 产物 owner：显式 controller
+权限捕获/导入封存 native bank，再请求新的原生注册。controller 配置不进入 solver
+payload 或导出参与者；opaque 内容仍私有且未获隐私认证。此切片保留原生历史、选优 archive、计数及冷却，仍不
+资格化联合 replan barrier、模型/LoopX 状态采用或实际有效研究。其显式 SForge
+phase 文件参与者还将声明的 Host deadline 与 native 捕获时间绑定；恢复时重算
+剩余时长，在激活处锚定新的 Host phase 文件，计入传输时间，不计离线等待，
+也不重置为新试验的完整预算。既有工作预留和 native 评测机会 owner 不变。
+不确定响应留下不可执行的 phase 预留，不能回退到新预算。完整 Host 来源/
+时钟对齐、联合研究/effect 采用与原操作恢复仍须按 profile 资格化；参与者
+传输本身不能证明这些结果。
+
+组合式本地接续验证现将 evaluator capsule 放入同一已验证的会话/代码/上下文产物。
+实际恢复的 Codex 工具读取保留研究与公开反馈，从捕获代码计算合成候选，经原生
+HTTP owner 提交并观察继承的轮次上限。恢复后的首次立即提交仍被原冷却拒绝；
+SForge phase 入口使用剩余时长，不重置整场预算。来源的后续证据被排除，其后续
+状态保持不变。参与者由 fixture 显式静置；模型响应与评分计算均为合成。
+这缩小了集成缺口，但不证明自动联合 barrier、canonical graph/vision/effect
+激活、原激活操作恢复、隔离 Linux solver 恢复或有效研究。
 
 inert verification unit 不授予执行权。目标侧使用新的实验/Host 身份，通过既有
 Goal/session/state admission 进入。历史租约、quota、timer、pending effect 和
@@ -571,7 +693,9 @@ submission token 不能变成目标侧权限；未知效果先按原身份 recon
 研究消融从**同一份**已资格化研究点分成原策略接续与证据驱动范围复盘，使用
 等额接续预算与资源，只改变一个控制因素；通过 evaluator owner 保留反馈机会数
 与冷却时机。Session 重启、摘要替换、版本升级或策略组合属于额外变量。保留
-所有分支及无效/负结果，比较实际采用的原生成绩、新信息与完整接续成本。结果
+所有分支及无效/负结果。Evaluator 向每个新获授权分支传递剩余冷却和已消费机会，
+不能因新身份多得一次立即提交；捕获到准入之间的墙钟等待不会补充 checkpoint
+的机会额度，也不会延长接续预算。比较实际采用的原生成绩、新信息与完整接续成本。结果
 只资格化这项有范围干预，不证明整个 LoopX 或一个通用最优 stride。
 
 ## 8. 测量模型
