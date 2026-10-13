@@ -68,10 +68,17 @@ def test_sqlite_cli_reopens_updates_and_recovers_missing_markdown(tmp_path, monk
         "--status", "deferred", "--resume-when", "resume_at:2026-09-14T09:30:00+08:00",
         "--reason", "Await the exact scheduled instant",
         "--update-operation-id", "sqlite-planning")
-    assert cli(*planning, "--dry-run")["status"] == "planned"
+    planned = cli(*planning, "--dry-run")
+    assert planned["status"] == "deferred"
+    assert planned["provider_status"] == "planned"
+    assert cli("list")["todos"][0]["status"] == "open"
     assert not state.exists()
     assert cli(*planning)["source_authority"] == "sqlite_v0"
-    assert cli(*planning)["status"] == "replayed"
+    before_replay = cli("list")
+    replayed = cli(*planning)
+    assert replayed["status"] == "deferred"
+    assert replayed["provider_status"] == "replayed"
+    assert cli("list")["authority_read"]["provider_revision"] == before_replay["authority_read"]["provider_revision"]
     assert "resume_at:2026-09-14T01:30:00Z" in json.dumps(cli("list"))
     resumed = cli("update", "--role", "agent", "--todo-id", "todo_sqlite", "--agent-id", "agent-a",
         "--status", "open", "--clear-resume-when")
@@ -219,7 +226,9 @@ def test_new_default_goal_settles_once_and_returns_current_writes_to_file(tmp_pa
         spent = command(*spend_args)
         assert spent["settlement_progress"]["state"] == "settled"
         restart_effect_runtime()
-        assert command(*update)["status"] == "replayed"
+        replayed_update = command(*update)
+        assert replayed_update["status"] == "open"
+        assert replayed_update["provider_status"] == "replayed"
         replay = command(*spend_args)
         assert replay["idempotent_replay"] is True and replay["appended"] is False
         settled = command(*guard_args)
