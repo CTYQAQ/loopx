@@ -57,7 +57,8 @@ def test_clear_condition_and_successors_together_is_valid(tmp_path, monkeypatch,
     result = update_goal_todo(registry_path=registry, goal_id=GOAL_ID,
         todo_id=waiting["todo_id"], agent_id=AGENT_ID,
         clear_resume_when=True, successor_todo_ids=[])
-    assert result["status"] == "applied"
+    assert result["status"] == "open"
+    assert result["provider_status"] == "applied"
     updated = _canonical_todo(registry, waiting["todo_id"])
     assert updated.get("resume_when") is None
     assert updated.get("resume_monitor_generation") is None
@@ -70,7 +71,8 @@ def test_copy_edit_preserves_existing_wait_fence(tmp_path):
     registry, _, _, waiting, _ = waiting_goal(tmp_path)
     result = update_goal_todo(registry_path=registry, goal_id=GOAL_ID,
         todo_id=waiting["todo_id"], agent_id=AGENT_ID, note="Clarify context")
-    assert result["status"] == "applied"
+    assert result["status"] == "open"
+    assert result["provider_status"] == "applied"
     updated = _canonical_todo(registry, waiting["todo_id"])
     assert updated["resume_when"].startswith("monitor_changed:")
     assert updated["resume_monitor_generation"] == 3
@@ -105,6 +107,7 @@ def test_public_update_uses_one_scope_wait_field_crossing(tmp_path, monkeypatch)
     result = update_goal_todo(registry_path=registry, goal_id=GOAL_ID,
         todo_id=waiting["todo_id"], agent_id=AGENT_ID,
         successor_todo_ids=[successor["todo_id"]])
-    assert result["status"] in {"applied", "no_change"}
+    assert result["status"] == "open"
+    assert result["provider_status"] in {"applied", "no_change"}
     assert _canonical_todo(registry, waiting["todo_id"])["resume_monitor_generation"] == 3
     assert calls == ["coordination.local_authority.todo_update"]

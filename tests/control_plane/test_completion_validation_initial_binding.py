@@ -48,10 +48,14 @@ def test_public_cli_first_binding_replays_and_still_runs_real_validation(
         assert proc.returncode == 0, proc.stderr + proc.stdout
         return json.loads(proc.stdout)
 
-    assert run(["--dry-run"])["status"] == "planned"
+    preview = run(["--dry-run"])
+    assert preview["status"] == "open"
+    assert preview["provider_status"] == "planned"
     assert canonical(runtime) == before
     assert not marker.exists()
-    assert run()["status"] == "applied"
+    applied = run()
+    assert applied["status"] == "open"
+    assert applied["provider_status"] == "applied"
     bound = canonical(runtime)
     work = bound["todos"][0]
     assert work["status"] == "open"
@@ -66,7 +70,9 @@ def test_public_cli_first_binding_replays_and_still_runs_real_validation(
     assert "validation_command_argv" not in public_work
     assert "validation_command" not in public_work
     assert read_completion_validation_declaration(runtime_root=runtime, goal_id="goal-a", todo_id=todo_id)["validation_command_argv"] == argv
-    assert run()["status"] == "replayed"
+    replayed = run()
+    assert replayed["status"] == "open"
+    assert replayed["provider_status"] == "replayed"
     assert canonical(runtime) == bound
     assert not marker.exists()
 
@@ -81,7 +87,7 @@ def test_public_cli_first_binding_replays_and_still_runs_real_validation(
     assert update_goal_todo(registry_path=registry, runtime_root_arg=str(runtime), goal_id="goal-a",
                            todo_id=todo_id, role="agent", agent_id="agent-a", update_operation_id="replace",
                            update_expected_provider_revision=current["provider_revision"],
-                           validation_command_json=json.dumps(replacement), validation_label="Independent check")["status"] == "applied"
+                           validation_command_json=json.dumps(replacement), validation_label="Independent check")["provider_status"] == "applied"
     replaced = canonical(runtime)
     assert replaced["todos"][0]["completion_validation_revision"] == 2
     # The original first-binding replay is historical, not permission to restore old bytes.
@@ -123,7 +129,9 @@ def test_first_binding_recovers_lost_private_publication_with_same_operation(
     sidecar = completion_validation_declaration_path(runtime_root=runtime, goal_id="goal-a", todo_id=todo_id)
     assert not sidecar.exists()
     monkeypatch.setattr(provider_update, "persist_completion_validation_declaration", publish)
-    assert update_goal_todo(**args)["status"] == "replayed"
+    replayed = update_goal_todo(**args)
+    assert replayed["status"] == "open"
+    assert replayed["provider_status"] == "replayed"
     assert canonical(runtime) == committed
     assert sidecar.exists()
     assert read_completion_validation_declaration(runtime_root=runtime, goal_id="goal-a", todo_id=todo_id) is not None
