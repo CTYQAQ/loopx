@@ -12,7 +12,6 @@ from loopx.control_plane.coordination.local_authority import (
 from loopx.control_plane.scheduler.monitor_poll_writeback import (
     write_monitor_poll_todo_state,
 )
-import loopx.control_plane.todos.mutation_authority as mutation_authority_module
 import loopx.control_plane.work_items.task_lease as task_lease_module
 from loopx.control_plane.work_items.task_lease import (
     TaskLeaseError,
@@ -23,6 +22,7 @@ from loopx.control_plane.work_items.task_lease import (
 from loopx.status import parse_active_state_todos
 from loopx.todos import (
     list_goal_todos,
+    archive_completed_todos,
     add_goal_todo,
     complete_goal_todo,
     supersede_goal_todo,
@@ -102,8 +102,10 @@ def canonical_workspace(request, tmp_path, monkeypatch):
     )
     isolate_sqlite_runtime(tmp_path, monkeypatch)
 
-    def create(root, *, handoff_mode="soft_claim", **kwargs):
+    def create(root, *, handoff_mode="soft_claim", source_rows="", **kwargs):
         registry, state = _write_fixture(root, **kwargs)
+        if source_rows:
+            state.write_text(state.read_text(encoding="utf-8") + source_rows, encoding="utf-8")
         initialize_canonical_registry_fixture(registry, provider=request.param, handoff_mode=handoff_mode)
         readback = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)
         assert readback["authority_read"]["source_authority"] == request.param + "_v0"
@@ -526,194 +528,113 @@ def test_owner_actor_update_returns_typed_receipt(tmp_path: Path, canonical_work
 
 
 @pytest.mark.parametrize("status", ["deferred", "blocked", "done"])
-def test_claim_rejection_preserves_status_suffix(
-    tmp_path: Path,
-    status: str,
+def test_canonical_claim_rejects_nonopen_status_atomically(
+    tmp_path: Path, canonical_workspace, status: str,
 ) -> None:
-    """Claim rejections keep the legacy todo_id/status diagnostic suffix."""
-
-    registry, state = _write_fixture(tmp_path)
+    registry, state = canonical_workspace(tmp_path)
     if status == "deferred":
         todo = add_goal_todo(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            role="agent",
-            text="Wait for external capacity before claim.",
-            status="deferred",
+            registry_path=registry, goal_id=GOAL_ID, role="agent",
+            text="Wait for external capacity before claim.", status="deferred",
             resume_when="capacity_available:network",
         )
     else:
         todo = _add_agent_todo(registry)
         if status == "done":
             complete_goal_todo(
-                registry_path=registry,
-                goal_id=GOAL_ID,
-                todo_id=todo["todo_id"],
-                agent_id=AUTHOR_AGENT,
-                evidence="finished before the contested claim",
+                registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+                agent_id=AUTHOR_AGENT, evidence="finished before the contested claim",
             )
         else:
             update_goal_todo(
-                registry_path=registry,
-                goal_id=GOAL_ID,
-                todo_id=todo["todo_id"],
-                agent_id=AUTHOR_AGENT,
-                status=status,
+                registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+                agent_id=AUTHOR_AGENT, status=status,
             )
-    before = state.read_text(encoding="utf-8")
-
-    with pytest.raises(ValueError) as excinfo:
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as error:
         update_goal_todo(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            todo_id=todo["todo_id"],
-            claim_only=True,
-            claimed_by=AUTHOR_AGENT,
-            agent_id=AUTHOR_AGENT,
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+            claim_only=True, claimed_by=AUTHOR_AGENT, agent_id=AUTHOR_AGENT,
         )
-
-    assert str(excinfo.value) == (
-        f"todo claim requires status=open; todo_id '{todo['todo_id']}' "
-        f"is status='{status}'"
-    )
-    assert state.read_text(encoding="utf-8") == before
+    assert error.value.code == "todo_not_open"
+    assert error.value.payload["todo_status"] == status
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) is None
 
 
-def test_claim_user_todo_rejection_preserves_binding_hint(
-    tmp_path: Path,
-) -> None:
-    """Claiming a user Todo keeps the legacy --bound-agent remediation hint."""
-
-    registry, state = _write_fixture(tmp_path)
+def test_canonical_claim_rejects_user_todo_atomically(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = add_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        role="user",
-        text="Owner reviews the delivered change.",
-        task_class="user_action",
+        registry_path=registry, goal_id=GOAL_ID, role="user",
+        text="Owner reviews the delivered change.", task_class="user_action",
         bound_agent=AUTHOR_AGENT,
     )
-    before = state.read_text(encoding="utf-8")
-
-    with pytest.raises(ValueError) as excinfo:
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as error:
         update_goal_todo(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            todo_id=todo["todo_id"],
-            claim_only=True,
-            claimed_by=AUTHOR_AGENT,
-            agent_id=AUTHOR_AGENT,
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+            claim_only=True, claimed_by=AUTHOR_AGENT, agent_id=AUTHOR_AGENT,
         )
+    assert error.value.code == "todo_not_agent"
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_todo(registry, todo["todo_id"])["bound_agent"] == AUTHOR_AGENT
 
-    assert str(excinfo.value) == (
-        "claimed_by is execution ownership for agent todos, not a user-todo "
-        "binding; use --bound-agent or --goal-bound"
+
+def test_canonical_claim_requires_removed_policy_repair(tmp_path: Path, canonical_workspace) -> None:
+    # A synthetic historical record is captured once, before canonical creation.
+    # The claim then reads the real provider; no live authority is rewritten.
+    registry, state = canonical_workspace(tmp_path, source_rows=(
+        "- [ ] Repair this imported continuation before claiming.\n"
+        "  <!-- loopx:todo todo_id=todo_removedpolicy status=open task_class=advancement_task "
+        "removed_continuation_policy=primary_review -->\n"
+    ))
+    assert _canonical_todo(registry, "todo_removedpolicy")["removed_continuation_policy"] == "primary_review"
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as error:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id="todo_removedpolicy",
+            claim_only=True, claimed_by=AUTHOR_AGENT, agent_id=AUTHOR_AGENT,
+        )
+    assert error.value.code == "removed_continuation_policy"
+    assert "must be repaired before claiming" in str(error.value)
+    assert _canonical_snapshot(registry, state) == before
+
+
+def test_canonical_claim_cannot_reactivate_archived_work(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
+    todo = _add_agent_todo(registry)
+    complete_goal_todo(
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+        agent_id=AUTHOR_AGENT, evidence="finished before archival",
     )
-    assert state.read_text(encoding="utf-8") == before
+    archive_completed_todos(
+        registry_path=registry, goal_id=GOAL_ID, max_active_done=0, dry_run=False,
+    )
+    assert _canonical_todo(registry, todo["todo_id"])["archive_state"] == "archive"
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as error:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+            claim_only=True, claimed_by=AUTHOR_AGENT, agent_id=AUTHOR_AGENT,
+        )
+    # Status eligibility precedes archive eligibility in the shared claim owner.
+    assert error.value.code == "todo_not_open"
+    assert _canonical_snapshot(registry, state) == before
 
 
-def test_claim_rejection_preserves_removed_policy_repair_hint(
-    tmp_path: Path,
-) -> None:
-    """Claiming a removed-policy Todo keeps the legacy repair instructions."""
-
-    registry, state = _write_fixture(tmp_path)
+def test_canonical_claim_rejects_role_mismatch_atomically(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(registry, claimed_by=None)
-    text = state.read_text(encoding="utf-8")
-    marker = f"todo_id={todo['todo_id']} "
-    assert marker in text
-    state.write_text(
-        text.replace(
-            marker,
-            f"{marker}removed_continuation_policy=primary_review ",
-            1,
-        ),
-        encoding="utf-8",
-    )
-    before = state.read_text(encoding="utf-8")
-
-    with pytest.raises(ValueError) as excinfo:
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as error:
         update_goal_todo(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            todo_id=todo["todo_id"],
-            claim_only=True,
-            claimed_by=AUTHOR_AGENT,
-            agent_id=AUTHOR_AGENT,
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], role="user",
+            claim_only=True, claimed_by=AUTHOR_AGENT, agent_id=AUTHOR_AGENT,
         )
-
-    assert str(excinfo.value) == (
-        f"todo_id '{todo['todo_id']}' uses removed continuation_policy="
-        "primary_review; repair it before claiming"
-    )
-    assert state.read_text(encoding="utf-8") == before
-
-
-def test_claim_archived_todo_rejection_preserves_not_found_message(
-    tmp_path: Path,
-) -> None:
-    """Archived-Todo claim rejections keep the legacy not-found message."""
-
-    registry, _state = _write_fixture(tmp_path)
-
-    with pytest.raises(ValueError) as excinfo:
-        mutation_authority_module.authorize_todo_lifecycle_mutation(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            command="claim",
-            todo={
-                "todo_id": "todo_archivedprobe",
-                "role": "agent",
-                "status": "open",
-                "archive_state": "archive",
-            },
-            actor_agent_id=AUTHOR_AGENT,
-            requested_claimed_by=AUTHOR_AGENT,
-        )
-
-    assert str(excinfo.value) == (
-        "todo_id 'todo_archivedprobe' was not found in active user or agent todos"
-    )
-
-
-def test_claim_role_mismatch_rejection_preserves_not_found_message(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Role-mismatch claim rejections keep the legacy not-found message."""
-
-    registry, _state = _write_fixture(tmp_path)
-
-    def fake_typescript_decision(_command: str, _payload: dict) -> dict:
-        return {
-            "status": "rejected",
-            "reason_code": "todo_role_mismatch",
-            "reason": "Todo does not have the requested role",
-        }
-
-    monkeypatch.setattr(
-        mutation_authority_module,
-        "effect_runtime_result",
-        fake_typescript_decision,
-    )
-
-    with pytest.raises(ValueError) as excinfo:
-        mutation_authority_module.authorize_todo_lifecycle_mutation(
-            registry_path=registry,
-            goal_id=GOAL_ID,
-            command="claim",
-            todo={
-                "todo_id": "todo_rolemismatchprobe",
-                "role": "agent",
-                "status": "open",
-            },
-            actor_agent_id=AUTHOR_AGENT,
-            requested_claimed_by=AUTHOR_AGENT,
-        )
-
-    assert str(excinfo.value) == (
-        "todo_id 'todo_rolemismatchprobe' was not found in active user or agent todos"
-    )
+    assert error.value.code == "todo_role_mismatch"
+    assert error.value.payload["requested_role"] == "user"
+    assert error.value.payload["todo_role"] == "agent"
+    assert _canonical_snapshot(registry, state) == before
 
 
 def test_advancement_todo_preserves_public_target_key(tmp_path: Path) -> None:

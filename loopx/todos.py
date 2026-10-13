@@ -97,8 +97,6 @@ _EXPORTS = {
     "todo_summaries_from_fields": "loopx.control_plane.todos.goal_todo_projection",
     "parse_todo_source": "loopx.control_plane.todos.active_state_todo_parser",
     "todo_monitor_metadata": "loopx.control_plane.todos",
-    "authorize_todo_lifecycle_mutation": "loopx.control_plane.todos.mutation_authority",
-    "todo_update_authority_action": "loopx.control_plane.todos.mutation_authority",
     "build_open_parent_successor_advisory": "loopx.control_plane.todos.succession_warning",
     "build_successor_intents": "loopx.control_plane.todos.successor_derivation",
     "derive_successor_proposals": "loopx.control_plane.todos.successor_derivation",
