@@ -799,6 +799,16 @@ graph/vision/effect activation, full native/Host/evaluator consistency, joint
 participant recovery, packaged delivery and useful continued research remain open. Participant/effect reconciliation and complete fresh research-state
 adoption cannot be certified by operator metadata or native history equality.
 
+The explicit Docker controller now offers a bounded writer barrier: pause the
+owned running worker, archive declared files and its phase clock through the
+daemon, capture the native evaluator capsule, then unpause before publishing an
+inert joint unit. A live-writer/native-HTTP qualification proves file stability
+and original opportunity retention; cancellation, lost pause responses and failed
+capture exercise cleanup. An existing pause is not owned or released, and failed
+resume prevents publication. This closes the manual provider's file-writer
+barrier gap only. No process memory, native cursor eligibility, external writers,
+automatic pre-decision handoff or isolated continuation are qualified by it.
+
 A native fresh registration is not restored admission. In the controlled native
 Docker qualification, one of twelve source submissions was consumed and its
 cooldown remained active. A same-limit fresh registration admitted `agent-1`

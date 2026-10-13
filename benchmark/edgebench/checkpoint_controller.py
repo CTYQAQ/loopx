@@ -293,6 +293,12 @@ def main(argv=None) -> None:
     capture_parser.add_argument("--destination", required=True, type=Path)
     capture_parser.add_argument("--phase-deadline-file", type=Path,
                                 help="Explicit physical SForge Host phase file; omitted keeps native-only capture")
+    worker_parser = commands.add_parser("capture-worker",
+        help="Controller-owned Docker pause/archive plus native capsule; inert files, not process restoration")
+    worker_parser.add_argument("--token-file", required=True, type=Path)
+    worker_parser.add_argument("--capture-id", required=True)
+    worker_parser.add_argument("--destination", required=True, type=Path)
+    worker_parser.add_argument("--worker-request", required=True, type=Path)
     restore_parser = commands.add_parser("restore")
     restore_parser.add_argument("--root", required=True, type=Path)
     restore_parser.add_argument("--expected-sha256", required=True)
@@ -301,11 +307,18 @@ def main(argv=None) -> None:
     restore_parser.add_argument("--phase-deadline-file", type=Path,
                                 help="Fresh physical Host phase file, required for a capsule containing that participant")
     args = parser.parse_args(argv)
-    if args.command == "capture":
+    if args.command in {"capture", "capture-worker"}:
         source_token = _physical(args.token_file).read_text().strip()
-        result = capture(args.controller_file, token=source_token,
-                         capture_id=args.capture_id, destination=args.destination,
-                         phase_deadline_file=args.phase_deadline_file)
+        if args.command == "capture-worker":
+            from benchmark.edgebench.checkpoint_worker import capture_worker
+
+            result = capture_worker(args.controller_file, token=source_token,
+                capture_id=args.capture_id, destination=args.destination,
+                request_file=args.worker_request)
+        else:
+            result = capture(args.controller_file, token=source_token,
+                             capture_id=args.capture_id, destination=args.destination,
+                             phase_deadline_file=args.phase_deadline_file)
         print(json.dumps(result))
     else:
         # Reserve before admission. A lost output is explicit recovery, never a

@@ -480,6 +480,38 @@ fail without a fresh evaluation. Redirects cannot forward the admin secret.
 After an uncertain restore response, inspect native readback with the controller;
 do not switch run identities or perform ordinary fresh registration as a retry.
 
+For an explicitly owned Docker worker, `capture-worker` can additionally freeze
+its writers while copying declared files and capturing the native capsule. Supply
+`--worker-request` with a physical JSON file containing the full `container_id`,
+`components: [{"id": "code", "source_path": "/task/code"}]`, and the separate
+`phase_deadline_path` inside that container. Use the same controller, token-file,
+capture-id and destination arguments as `capture`; no phase file is read through
+an executing container process. The controller uses the Docker daemon's
+pause/archive/unpause path, then seals the copied files and nested native capsule
+with the existing typed artifact owner. Component IDs are preserved when they
+collide with the automatic native capsule name. Neither Docker access nor judge
+administration is passed into the solver. Omit this command to retain ordinary
+capture behavior; there is no automatic activation or retention policy.
+
+The container must initially be running and unpaused. Cancellation, failed file
+reads, rejected native capture and a lost pause response attempt to release only
+this operation's barrier. Failure to resume the worker is reported and publishes
+no outer artifact. An existing pause is never released. The first attempt owns
+the capture identity; a failure cannot silently pair later files with an older
+native point. Missing paths, archive links, traversal and special members reject.
+Declare only the intended private code/state stores: a whole home can contain
+credentials, and neither archive filtering nor a freeze is privacy certification.
+
+This is an **inert joint file snapshot**, still `research_point_qualified=false`.
+It does not snapshot process memory, qualify a pending/interrupted Codex cursor,
+verify externally hosted writers or activate canonical research state. Ordinary
+native restore rejects this outer unit. Worker/evaluator pairing is explicitly
+caller-declared here, not a verified automatic SForge run binding. A real Docker writer plus native HTTP
+test verifies unchanged file bytes throughout evaluator capture, retained used
+rounds/cooldown/phase, source resumption and failure cleanup. Automatic quota
+handoff before the replan decision and isolated useful continuation remain the
+next integration boundary; this command alone does not qualify experiment restart.
+
 An explicit **SForge phase-clock participant** preserves a declared Host file's
 remaining duration alongside native opportunities. Add
 `--phase-deadline-file /private/source-phase-deadline` to capture, and
