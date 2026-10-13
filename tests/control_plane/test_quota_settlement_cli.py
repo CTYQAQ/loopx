@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 import pytest
 
+from examples.control_plane.quota_plan_fixtures import write_codex_heartbeat_fixture
 from loopx.bootstrap_command_pack import build_start_goal_guided_packet
 from loopx.control_plane.work_items.delivery_outcome import (
     PROGRESS_DELIVERY_OUTCOMES,
@@ -45,6 +46,36 @@ REENTRY_TODO_ID = "todo_fixture_network_reentry"
 DUE_MONITOR_TODO_ID = "todo_fixture_due_monitor"
 TURN_ID = "turn-settlement-cli-1"
 SELECTED_REPLAN_TODO_ID = "todo_chain_000000000000"
+
+
+@pytest.fixture
+def scheduler_host_home(tmp_path: Path, monkeypatch) -> Path:
+    root = tmp_path / "codex-host"
+    monkeypatch.setenv("CODEX_HOME", str(root))
+    monkeypatch.setenv("CODEX_THREAD_ID", "scheduler-fixture")
+    return root
+
+
+def _prepare_scheduler_host_readback(
+    registry_path: Path, runtime: Path, host_root: Path, ack_args: list[str],
+) -> None:
+    """Exercise the real Host reader over a synthetic manifest, not a live App."""
+    requested = ack_args[ack_args.index("--applied-rrule") + 1]
+    wrong = "FREQ=MINUTELY;INTERVAL=60"
+    assert requested != wrong
+    for observed in (None, wrong):
+        if observed is not None:
+            write_codex_heartbeat_fixture(host_root, goal_id=GOAL_ID, agent_id=AGENT_ID, rrule=observed)
+        rc, refused = _run_cli(registry_path, runtime, *ack_args)
+        assert rc == 1, refused
+        assert refused["scheduler_commit"]["reason_code"] == "rrule_mismatch", refused
+        assert refused["scheduler_commit"]["written"] is False
+        assert refused["scheduler_commit"]["observed_host_rrule"] == (observed or "")
+        assert load_scheduler_state(runtime, goal_id=GOAL_ID, agent_id=AGENT_ID,
+            state_key=APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY) is None
+        assert _spend_run_count(runtime) == 1
+    # Only change the isolated Host observation, not the original receipt/hint.
+    write_codex_heartbeat_fixture(host_root, goal_id=GOAL_ID, agent_id=AGENT_ID, rrule=requested)
 
 
 def _assert_action_selection_recovery_projections(payload: dict[str, Any]) -> None:
@@ -2708,13 +2739,8 @@ def test_prior_host_closeout_reads_archived_exact_todo(
 
 
 def test_standard_codex_app_settlement_is_receipted_and_idempotent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, scheduler_host_home: Path,
 ) -> None:
-    from examples.control_plane.quota_plan_fixtures import write_codex_heartbeat_fixture
-
-    codex_home = tmp_path / "codex-home"
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setenv("CODEX_THREAD_ID", "scheduler-fixture")
     project, runtime, registry_path = _write_fixture(tmp_path)
     _configure_read_only_todo(project)
     binding = (
@@ -2902,10 +2928,9 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
         TURN_ID,
         "--execute",
     ]
-    # Matching Host facts cannot revive the superseded receipt; the fresh
-    # Turn below must still acknowledge this real isolated host observation.
+    # Matching Host facts cannot revive the superseded receipt.
     write_codex_heartbeat_fixture(
-        codex_home, goal_id=GOAL_ID, agent_id=AGENT_ID,
+        scheduler_host_home, goal_id=GOAL_ID, agent_id=AGENT_ID,
         rrule="FREQ=MINUTELY;INTERVAL=3",
     )
     ack_rc, ack = _run_cli(
@@ -2967,11 +2992,18 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     assert _spend_run_count(runtime) == 1
 
     fresh_ack_args = fresh_turn["scheduler_hint"]["app_automation"]["ack_hint"]["cli_args"]
+    # Remove only the isolated observation to exercise missing Host refusal.
+    (scheduler_host_home / "automations" / "scheduler-fixture" / "automation.toml").unlink()
+    _prepare_scheduler_host_readback(registry_path, runtime, scheduler_host_home, fresh_ack_args)
     fresh_ack_rc, fresh_ack = _run_cli(registry_path, runtime, *fresh_ack_args)
     assert fresh_ack_rc == 0, fresh_ack
     assert fresh_ack["schema_version"] == "loopx_scheduler_host_followup_result_v0"
     assert fresh_ack["mode"] == "scheduler-ack"
     assert fresh_ack["scheduler_commit"]["written"] is True
+    assert load_scheduler_state(runtime, goal_id=GOAL_ID, agent_id=AGENT_ID,
+        state_key=APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY)["last_applied_rrule"] == (
+            fresh_ack_args[fresh_ack_args.index("--applied-rrule") + 1]
+        )
     scheduler_bytes = Path(fresh_ack["scheduler_state_path"]).read_bytes()
     replay_ack_rc, replay_ack = _run_cli(registry_path, runtime, *fresh_ack_args)
     assert replay_ack_rc == 0, replay_ack
@@ -5694,13 +5726,8 @@ def test_pending_action_selection_does_not_commit_after_new_user_gate(
 
 @pytest.mark.parametrize("write_vision", [True, False], ids=["qualified-vision", "missing-vision"])
 def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
-    tmp_path: Path, write_vision: bool, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, write_vision: bool, scheduler_host_home: Path,
 ) -> None:
-    from examples.control_plane.quota_plan_fixtures import write_codex_heartbeat_fixture
-
-    codex_home = tmp_path / "codex-home"
-    monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setenv("CODEX_THREAD_ID", "scheduler-fixture")
     project, runtime, registry_path = _write_fixture(tmp_path)
     _configure_autonomous_replan_fixture(project, runtime, registry_path)
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
@@ -5871,28 +5898,7 @@ def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
     ] == "autonomous_replan"
     assert _spend_run_count(runtime) == 1
 
-    # A settled receipt retains the original recipe, not authority to invent
-    # current Host facts. Missing and different cadences cannot mutate state.
-    for observed in (None, "FREQ=MINUTELY;INTERVAL=6"):
-        if observed is not None:
-            write_codex_heartbeat_fixture(
-                codex_home, goal_id=GOAL_ID, agent_id=AGENT_ID, rrule=observed,
-            )
-        refused_rc, refused = _run_cli(
-            registry_path, runtime, *original_scheduler_ack_args,
-        )
-        assert refused_rc == 1, refused
-        assert refused["scheduler_commit"]["reason_code"] == "rrule_mismatch"
-        assert refused["scheduler_commit"]["written"] is False
-        assert not Path(refused["scheduler_commit"]["path"]).exists()
-        assert _spend_run_count(runtime) == 1
-
-    # Simulate the host update through the existing isolated manifest fixture;
-    # command-line hints alone do not prove the actual Codex Host readback.
-    write_codex_heartbeat_fixture(
-        codex_home, goal_id=GOAL_ID, agent_id=AGENT_ID,
-        rrule="FREQ=MINUTELY;INTERVAL=3",
-    )
+    _prepare_scheduler_host_readback(registry_path, runtime, scheduler_host_home, original_scheduler_ack_args)
     ack_rc, ack = _run_cli(
         registry_path,
         runtime,
@@ -5907,6 +5913,10 @@ def test_todoless_autonomous_replan_settles_quota_refresh_spend_chain(
     assert ack["scheduler_commit"]["written"] is True
     assert ack["scheduler_state_mutated"] is True
     assert ack["appended"] is False
+    assert load_scheduler_state(runtime, goal_id=GOAL_ID, agent_id=AGENT_ID,
+        state_key=APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY)["last_applied_rrule"] == (
+            original_scheduler_ack_args[original_scheduler_ack_args.index("--applied-rrule") + 1]
+        )
     scheduler_bytes = Path(ack["scheduler_state_path"]).read_bytes()
     ack_replay_rc, ack_replay = _run_cli(
         registry_path, runtime, *original_scheduler_ack_args
