@@ -204,6 +204,23 @@ changed capture or the 120-second transport deadline fails the call while
 retaining the original admission and captured decision. Recover that original
 identity; do not obtain a replacement guard to reconstruct a missed point.
 
+An explicit native CLI caller can pass its live `child_process` handle as
+`native_process` to `held_quota_decision`. The Host interrupts its owned process
+group, requires graceful leader exit, and reaps descendants before calling the
+selector or entering the capture body. Failed interruption stops that capture;
+it does not turn an unfinished native history into a completed cursor. After a
+successful context exit, `continuation_body` contains the original guard for an
+explicit resume of **that source session**. The killed tool remains aborted in
+native history; the packet is supplied on a new native turn and is never rerun.
+A dead source socket needs no acknowledgement in this path. Omit the process
+argument to retain the original output-only transport.
+
+A real native CLI regression holds this interrupted boundary beyond the tool's
+yield interval and verifies retained context, explicit original-packet delivery
+and one guard receipt. This qualifies interruption/recovery after the Host
+receives the packet, not absence of earlier inference, independent writer
+quiescence, or an automatically captured research checkpoint.
+
 This transport is a prerequisite, **not automatic mid-wake checkpoint capture**.
 The actual native Host/CLI test binds the pending command event, forks while the
 real guard output is withheld, and verifies no duplicate guard receipt. It does

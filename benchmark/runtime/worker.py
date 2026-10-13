@@ -100,22 +100,47 @@ def child_process(command: list[str], *, env: dict[str, str], stdout, stderr):
     try:
         yield process
     finally:
-        # Reap descendants even when their leader exited or Harbor cancelled us.
-        try:
-            # Python's standard SIGINT handler lets the Turn host's finally
-            # path reap its separately grouped Codex child before forced kill.
-            os.killpg(process.pid, signal.SIGINT)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.wait(timeout=10)
+        _reap_child_process(process)
+
+
+def _reap_child_process(process):
+    """Reap the process group created by child_process, including descendants."""
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait(timeout=10)
+
+
+def interrupt_checkpoint_process(process, *, timeout: float = 10) -> int:
+    """Close an owned native CLI before inspecting a mid-wake checkpoint.
+
+    A held tool response is not a native execution barrier: the native tool can
+    yield and schedule more inference. Require graceful leader exit so native
+    history can flush, then reap its group. An unacknowledged interruption is a
+    missed capture, not a completed cursor or permission to continue elsewhere.
+    This does not freeze independent workspace writers.
+    """
+    import math
+
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("checkpoint interruption requires a finite positive timeout")
+    if (not isinstance(process, subprocess.Popen) or process.poll() is not None or
+            os.getpgid(process.pid) != process.pid or os.getsid(process.pid) != process.pid):
+        raise ValueError("checkpoint interruption requires a live owned child process group")
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+        return process.wait(timeout=timeout)
+    finally:
+        _reap_child_process(process)
 
 
 def turn_command(

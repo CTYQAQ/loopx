@@ -476,7 +476,7 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
 
 @contextmanager
 def held_quota_decision(listener, capture_root: Path, *, goal_id: str, agent_id: str,
-                        turn_instance_id: str):
+                        turn_instance_id: str, native_process=None, interrupt_timeout: float = 10):
     """Host-side counterpart of the explicit quota pre-output transport.
 
     The existing typed owner decides whether this exact packet admits a fresh
@@ -484,6 +484,14 @@ def held_quota_decision(listener, capture_root: Path, *, goal_id: str, agent_id:
     releases the original tool response; it certifies no research checkpoint.
     Failure/disconnection never retries the guard or substitutes a new point.
     The listener must already be bound by the Host in a private directory.
+
+    Passing the live child_process-owned native CLI explicitly interrupts and
+    reaps it before selection/capture. Its pending tool is aborted; normal exit
+    returns a source-only continuation body containing the original packet,
+    rather than acknowledging a dead socket. This is not a complete workspace
+    barrier, destination admission, or a qualified interrupted native cursor.
+    Without native_process this is output ordering only; a slow capture can
+    outlive the native tool's yield interval and does not stop inference.
     """
     if not capture_root.is_absolute() or capture_root.resolve(strict=True) != capture_root:
         raise ValueError("decision capture root must be a physical absolute directory")
@@ -504,11 +512,33 @@ def held_quota_decision(listener, capture_root: Path, *, goal_id: str, agent_id:
         if hashlib.sha256(raw).hexdigest() != message["sha256"]:
             raise ValueError("decision handoff digest mismatch")
         quota = json.loads(raw)
+        interrupted = None
+        if native_process is not None:
+            from .worker import interrupt_checkpoint_process
+
+            # Interrupt before the typed selector: even this read can outlive a
+            # native tool yield. Keep original bytes for same-identity recovery.
+            interrupted = interrupt_checkpoint_process(native_process, timeout=interrupt_timeout)
         intent = effect_runtime_result("runtime.checkpoint_artifacts", {
             "action": "select_replan", "quota": quota, "goal_id": goal_id,
             "agent_id": agent_id, "turn_instance_id": turn_instance_id,
         })
-        yield {"path": path, "sha256": message["sha256"], "quota": quota, "intent": intent}
+        held = {"path": path, "sha256": message["sha256"], "quota": quota, "intent": intent}
+        if native_process is not None:
+            held["native_process_return_code"] = interrupted
+        yield held
         if path.read_bytes() != raw:
             raise ValueError("original decision changed while held")
-        channel.sendall(json.dumps({"released": True, "sha256": message["sha256"]}).encode() + b"\n")
+        if native_process is None:
+            channel.sendall(json.dumps({"released": True, "sha256": message["sha256"]}).encode() + b"\n")
+        else:
+            # Expose only after capture/readback succeeds. A failing consumer
+            # cannot mistake the interruption for ordinary continuation.
+            held["continuation_body"] = (
+                "The Host interrupted this source session while its quota tool response was held. "
+                "The pending tool was aborted; its guard already committed. Consume the original "
+                "packet below in this same source session and preserve its Turn identity, required "
+                "reads, selection and settlement instructions. Do not rerun that guard or infer "
+                "a successful checkpoint from this message. This grants no destination authority.\n\n"
+                + raw.decode("utf-8")
+            )
