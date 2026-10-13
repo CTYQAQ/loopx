@@ -4,7 +4,7 @@ import {taskLeaseStableValue as stableValue, taskLeaseDigest as digest,
   taskLeaseOperationIdentity as operationIdentity,
   taskLeaseOperationRequestDigest as operationRequestDigest} from "./task_lease_operation_identity.ts";
 import { ShadowManagementError, requireShadowPrimaryWriteAllowed } from "../coordination/shadow_management.ts";
-import { LegacyCoordinationWriteError, requireLegacyCoordinationPrimaryWriteAllowed } from "../coordination/legacy_writer_fence.ts";
+import { LegacyCoordinationWriteError, rejectLegacyCoordinationExecution, requireLegacyCoordinationPrimaryWriteAllowed } from "../coordination/legacy_writer_fence.ts";
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -1220,13 +1220,11 @@ async function ordinaryOperation(
     return replay;
   }
 
-  let todo: TodoFact | null = null;
-  if (request.operation !== "release") {
-    const authority = request.authority;
-    if (!authority) throw new TaskLeaseLifecycleError("authority is required", "authority_required");
-    await revalidateAuthoritySources(authority.source_receipts);
-    todo = authorityTodo(request);
-  }
+  // Prepared-with-matching-bytes and committed receipts above are recovery.
+  // A missing/ambiguous effect cannot be renewed or transferred after cutoff.
+  if (request.operation !== "release") rejectLegacyCoordinationExecution(request.goal_id);
+
+  const todo: TodoFact | null = null;
   const decision = ordinaryDecision(request, existing, todo, at);
   if (decision.outcome === "conflict" || decision.outcome === "rejected") {
     if (
@@ -1236,70 +1234,38 @@ async function ordinaryOperation(
       decision.code === "owner_excluded_from_todo" ||
       decision.code === "owner_conflicts_with_claim"
     ) {
-      const rejectedOwner = request.operation === "transfer" &&
-          decision.code === "owner_not_registered" &&
-          !request.authority?.registered_agents.includes(request.owner!)
-        ? request.owner
-        : request.operation === "transfer" ? request.new_owner : request.owner;
+      const rejectedOwner = request.owner;
       throw ownerError(request, decision.code, todo, rejectedOwner);
     }
     throw transitionError(request, decision.code, existing, leasePath);
   }
 
-  if (request.operation === "release") {
-    if (decision.code === "lease_missing") {
-      return {
-        ok: true,
-        schema_version: "task_lease_v0",
-        action: "release",
-        released: false,
-        missing: true,
-        lease_path: leasePath,
-        ...(request.authority?.handoff_mode
-          ? { handoff_mode: request.authority.handoff_mode }
-          : {}),
-        settlement: lifecycleSettlement(request, "committed"),
-      };
-    }
-    if (decision.code === "lease_release_replay" && existing !== null) {
-      return responseForOrdinary(request, leasePath, existing, true, { released: true });
-    }
-    if (existing === null || decision.next_lease === null) {
-      throw transitionError(request, "invalid_lease_snapshot", existing, leasePath);
-    }
-    const next = releasedLease(existing, at);
-    const response = responseForOrdinary(request, leasePath, next, false, { released: true });
-    await persistOperationReceipt(request, "prepared", next, response);
-    await dependencies.beforeWrite?.(next);
-    const shadowCapture = await captureLeaseWrite(
-      request, existing, next, "task_lease_release",
-    );
-    await atomicWriteJson(leasePath, next);
-    await shadowCapture?.commit();
-    await persistOperationReceipt(request, "committed", next, response);
-    return attachRuntimeShadowCapture(response, shadowCapture);
+  if (decision.code === "lease_missing") {
+    return {
+      ok: true,
+      schema_version: "task_lease_v0",
+      action: "release",
+      released: false,
+      missing: true,
+      lease_path: leasePath,
+      ...(request.authority?.handoff_mode
+        ? { handoff_mode: request.authority.handoff_mode }
+        : {}),
+      settlement: lifecycleSettlement(request, "committed"),
+    };
+  }
+  if (decision.code === "lease_release_replay" && existing !== null) {
+    return responseForOrdinary(request, leasePath, existing, true, { released: true });
   }
   if (existing === null || decision.next_lease === null) {
     throw transitionError(request, "invalid_lease_snapshot", existing, leasePath);
   }
-  const next = materializeTaskLeaseLifecycle(existing, {
-    operation: request.operation as "renew" | "transfer", owner: request.owner!,
-    idempotency_key: request.idempotency_key!, expected_version: request.expected_version,
-    ttl_seconds: request.ttl_seconds, new_owner: request.new_owner,
-    new_idempotency_key: request.new_idempotency_key,
-  }, decision, at);
-  const response = responseForOrdinary(
-    request,
-    leasePath,
-    next,
-    false,
-    request.operation === "renew" ? { renewed: true } : { transferred: true },
-  );
+  const next = releasedLease(existing, at);
+  const response = responseForOrdinary(request, leasePath, next, false, { released: true });
   await persistOperationReceipt(request, "prepared", next, response);
   await dependencies.beforeWrite?.(next);
-  if (request.authority) await revalidateAuthoritySources(request.authority.source_receipts);
   const shadowCapture = await captureLeaseWrite(
-    request, existing, next, `task_lease_${request.operation}`,
+    request, existing, next, "task_lease_release",
   );
   await atomicWriteJson(leasePath, next);
   await shadowCapture?.commit();
@@ -1533,6 +1499,7 @@ async function fenceVerify(
         );
       }
     }
+    if (receipt === null) rejectLegacyCoordinationExecution(request.goal_id);
     const adoptedLock = await adoptFenceReceiptLock(request, receipt);
     const acquiredFreshLock = adoptedLock === null;
     lock = adoptedLock ?? await acquireFileMutationLock(

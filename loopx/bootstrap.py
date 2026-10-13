@@ -393,6 +393,9 @@ def bootstrap_project(
     existing_authority = (read_canonical_todos_if_promoted(runtime_root=runtime_root, goal_id=goal_id)
         if previous_goal is not None and not canonical_creation else None)
     canonical_existing = existing_authority is not None
+    if not canonical_creation and not canonical_existing:
+        from .control_plane.coordination.legacy_writer_fence import reject_legacy_coordination_execution
+        reject_legacy_coordination_execution(goal_id)
     if canonical_creation and previous_goal is not None and force:
         raise ValueError("Canonical creation cannot rebuild existing state; restore or migrate through its owning operation")
     if canonical_existing and force:
@@ -415,24 +418,7 @@ def bootstrap_project(
     elif state_exists and force:
         state_action = "replaced"
 
-    repaired_state_text: str | None = None
-    repaired_todo_source_roles: list[str] = []
-    if not canonical_creation and not canonical_existing and state_exists and state_action in {
-        "kept-existing",
-        "kept-existing-preserve-todos",
-    }:
-        repaired_state_text, repaired_todo_source_roles = repair_missing_todo_source_sections(
-            state_file.read_text(encoding="utf-8")
-        )
-    todo_source_migration = (
-        {
-            "schema_version": "todo_source_section_migration_v0",
-            "added_roles": repaired_todo_source_roles,
-            "applied": False,
-        }
-        if repaired_todo_source_roles
-        else None
-    )
+    todo_source_migration = None
 
     dry_state_actions = {
         "created": "would-create",
@@ -530,8 +516,6 @@ def bootstrap_project(
                 "error": str(global_writability.get("error") or "global registry is not writable"),
             }
     storage_selection = None
-    shadow_capture = None
-    shadow_evidence: dict[str, Any] = {}
     if not dry_run:
         # Reconnect enters the same typed receipt owner before compatibility
         # reads or rebuild checks. It alone decides whether unfinished creation
@@ -540,7 +524,6 @@ def bootstrap_project(
             storage_selection = initialize_goal_storage_target(runtime_root,
                 {**previous_goal, "state_file": str(state_file)}, registry_path=registry_path)
         canonical_reconnect = canonical_existing or (storage_selection is not None and storage_selection.get("authority_initialized") is True)
-        canonical_bootstrap_transport = canonical_creation
         with project_registry_transaction(
             registry_path,
             operation="bootstrap_registry",
@@ -565,6 +548,9 @@ def bootstrap_project(
                     goal_entry["coordination"]["storage_target"] = frozen
             frozen_target = goal_entry.get("coordination", {}).get("storage_target") or {}
             canonical_creation = frozen_target.get("schema_version") == "loopx_new_goal_storage_target_v1"
+            if not canonical_creation and not canonical_existing:
+                from .control_plane.coordination.legacy_writer_fence import reject_legacy_coordination_execution
+                reject_legacy_coordination_execution(goal_id)
             if canonical_creation and force and (current_goal is not None or state_file.exists()):
                 raise ValueError("Canonical creation cannot rebuild existing state; restore or migrate through its owning operation")
 
@@ -601,28 +587,10 @@ def bootstrap_project(
                     execution_profile=execution_profile,
                     handoff_mode=declared_handoff_mode,
                 )
-            elif not canonical_creation and not canonical_reconnect:
-                planned, repaired_todo_source_roles = repair_missing_todo_source_sections(original)
             if planned != original:
-                if canonical_bootstrap_transport:
-                    require_registry_source_write_allowed(registry_path=registry_path, runtime_root=runtime_root,
-                        goal_id=goal_id, state_file=state_file)
-                if not canonical_creation:
-                    from .control_plane.coordination.runtime_shadow_writer_adapter import (
-                        begin_todo_runtime_shadow_capture,
-                        require_runtime_shadow_capture_prepared,
-                    )
-
-                    shadow_capture = begin_todo_runtime_shadow_capture(registry_path=registry_path,
-                        runtime_root=runtime_root, goal_id=goal_id, state_path=state_file,
-                        write_class="bootstrap_state", original_text=original)
-                    shadow_capture.prepare(planned)
-                    require_runtime_shadow_capture_prepared(shadow_capture, runtime_root=runtime_root, goal_id=goal_id)
+                require_registry_source_write_allowed(registry_path=registry_path, runtime_root=runtime_root,
+                    goal_id=goal_id, state_file=state_file)
                 atomic_write_state_text(state_file, planned)
-                if shadow_capture is not None:
-                    shadow_capture.committed()
-                if todo_source_migration is not None:
-                    todo_source_migration["applied"] = True
             current_registry.setdefault("schema_version", "0.1")
             current_registry["updated_at"] = updated_at.split("T")[0]
             current_registry["common_runtime_root"] = str(runtime_root)
@@ -633,11 +601,6 @@ def bootstrap_project(
         # retarget that Goal. The TS owner refuses replacing an existing provider.
         if not canonical_existing:
             storage_selection = initialize_goal_storage_target(runtime_root, find_registry_goal(registry, goal_id) or {}, registry_path=registry_path)
-        if shadow_capture is not None:
-            from .control_plane.coordination.runtime_shadow_writer_adapter import settle_todo_runtime_shadow_capture
-
-            shadow_evidence = settle_todo_runtime_shadow_capture({}, registry_path=registry_path,
-                runtime_root=runtime_root, goal_id=goal_id, capture=shadow_capture, emit_disabled=False)
         if sync_global:
             global_sync = sync_project_registry_to_global(
                 registry_path=registry_path,
@@ -648,7 +611,6 @@ def bootstrap_project(
             )
 
     return {
-        **shadow_evidence,
         **({"authority_read": {key: existing_authority[key] for key in (
             "provider_revision", "cursor", "source_authority", "decision_read_from_provider", "legacy_fallback_used",
         )}} if existing_authority is not None else {}),

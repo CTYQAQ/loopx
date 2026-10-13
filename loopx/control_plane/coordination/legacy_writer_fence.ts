@@ -80,6 +80,22 @@ export class LegacyCoordinationWriteError extends Error {
   }
 }
 
+/** 2.0 fresh execution has no Markdown authority. Recovery uses the original
+ * fence/receipt owners below; calling this must never replace those checks. */
+export function legacyCoordinationExecutionRefusal(goalId: string): JsonObject {
+  requireAuthorityStoreId(goalId, "goal id");
+  return {
+    schema_version: LEGACY_COORDINATION_WRITE_CHECK_RESULT_SCHEMA,
+    status: "blocked", reason_code: "canonical_authority_required", goal_id: goalId,
+    reason: "Normal writes require canonical authority; inspect and import the existing Goal with coordination-shadow prepare-import/apply-import, then review its ownership policy. Original receipts and lease release remain available; no source data was changed.",
+  };
+}
+
+export function rejectLegacyCoordinationExecution(goalId: string): never {
+  const refusal = legacyCoordinationExecutionRefusal(goalId);
+  throw new LegacyCoordinationWriteError(String(refusal.reason_code), refusal, String(refusal.reason));
+}
+
 /** Call under the existing primary lock, before receipts, capture or bytes. */
 export async function requireLegacyCoordinationPrimaryWriteAllowed(root: string, goalId: string): Promise<void> {
   await requireShadowPrimaryWriteAllowed(root, goalId);

@@ -1,7 +1,7 @@
 """Todo input transport shared by App and the compatibility facade.
 
 Canonical transactions remain owned by the existing typed provider adapters.
-Only an unpromoted operation loads its original Markdown writer.
+Unpromoted sources remain readable for import; normal mutation requires authority.
 """
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from .contract import (
     normalize_todo_status,
     require_todo_excluded_agents,
 )
+from ..coordination.legacy_writer_fence import reject_legacy_coordination_execution
 from .active_state_editing import TODO_SECTION_HEADINGS
 from .addition import require_replan_successor_scope
 from . import completion_validation as completion_validation_module
@@ -87,8 +88,6 @@ def add_goal_todo(
     operation_id: str | None = None,
     expected_provider_revision: str | None = None,
 ) -> dict[str, Any]:
-    call = dict(locals())
-    call.pop("expected_provider_revision")
     shadow_runtime_root = effective_runtime_root(registry_path, runtime_root_arg)
     if role not in TODO_SECTION_HEADINGS:
         raise ValueError("todo role must be one of: user, agent")
@@ -211,25 +210,7 @@ def add_goal_todo(
         raise ValueError("reviewed provider revision requires canonical authority")
     if operation_id is not None:
         raise ValueError("todo add --operation-id requires promoted canonical authority")
-    from .legacy_mutation import _add_goal_todo_legacy
-
-    return _add_goal_todo_legacy(**call, _prepared={
-        "effective_agent_id": effective_agent_id,
-        "effective_blocks_agent": effective_blocks_agent,
-        "effective_bound_agent": effective_bound_agent,
-        "effective_claimed_by": effective_claimed_by,
-        "effective_excluded_agents": effective_excluded_agents,
-        "effective_goal_bound": effective_goal_bound,
-        "normalized_monitor_metadata": normalized_monitor_metadata,
-        "normalized_resume_when": normalized_resume_when,
-        "normalized_status": normalized_status,
-        "normalized_unblocks_todo_id": normalized_unblocks_todo_id,
-        "replan_obligation_id": replan_obligation_id,
-        "shadow_runtime_root": shadow_runtime_root,
-        "todo_text": todo_text,
-        "updated_at": updated_at,
-        "validation_argv": validation_argv,
-    })
+    reject_legacy_coordination_execution(goal_id)
 
 
 def _update_completion_validation_declaration(
@@ -348,7 +329,6 @@ def update_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    call = dict(locals())
     if priority is not None and clear_priority:
         raise ValueError("provide either priority or clear_priority, not both")
     shadow_runtime_root = effective_runtime_root(registry_path, runtime_root_arg)
@@ -490,12 +470,7 @@ def update_goal_todo(
         task_lease_idempotency_key is not None or task_lease_expected_version is not None
     ) and not (monitor_intent["observation"] is not None and status is None)):
         raise ValueError("update operation id and lease proof require a supported promoted update; no legacy write attempted")
-    from .legacy_mutation import _update_goal_todo_legacy
-
-    return _update_goal_todo_legacy(**call, _prepared={
-        "monitor_intent": monitor_intent,
-        "shadow_runtime_root": shadow_runtime_root,
-    })
+    reject_legacy_coordination_execution(goal_id)
 
 
 @provider_first_terminal_lifecycle("complete")
@@ -537,10 +512,7 @@ def complete_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    call = dict(locals())
-    from .legacy_mutation import _complete_goal_todo_legacy
-
-    return _complete_goal_todo_legacy(**call)
+    reject_legacy_coordination_execution(goal_id)
 
 
 @provider_first_terminal_lifecycle("supersede")
@@ -571,10 +543,7 @@ def supersede_goal_todo(
     state_file: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    call = dict(locals())
-    from .legacy_mutation import _supersede_goal_todo_legacy
-
-    return _supersede_goal_todo_legacy(**call)
+    reject_legacy_coordination_execution(goal_id)
 
 
 @provider_first_terminal_lifecycle("archive")
@@ -589,7 +558,4 @@ def archive_completed_todos(
     state_file: Path | None = None,
     dry_run: bool = True,
 ) -> dict[str, Any]:
-    call = dict(locals())
-    from .legacy_mutation import _archive_completed_todos_legacy
-
-    return _archive_completed_todos_legacy(**call)
+    reject_legacy_coordination_execution(goal_id)

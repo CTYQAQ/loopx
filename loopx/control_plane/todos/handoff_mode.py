@@ -39,7 +39,7 @@ from ..coordination.authority_core import (
     OwnershipGate,
     ownership_gate_requirement,
 )
-from ..goals.active_state_metadata import parse_state_frontmatter, split_state_frontmatter
+from ..goals.active_state_metadata import parse_state_frontmatter
 from .contract import normalize_todo_claimed_by
 
 HANDOFF_MODE_SCHEMA_VERSION = "goal_handoff_mode_v0"
@@ -353,68 +353,5 @@ def set_goal_handoff_mode(
         return canonical
     if operation_id is not None:
         raise HandoffModeError("--operation-id requires canonical authority", code="handoff_mode_operation_id_unsupported")
-    # Compatibility source IO is needed only after canonical routing declines.
-    # Promoted commands and provider failures must survive producer retirement.
-    from .handoff_mode_source import handoff_mode_source
-    from ..coordination.legacy_writer_fence import legacy_todo_write_transaction
-    from ..coordination.runtime_shadow_writer_adapter import (
-        write_captured_todo_state,
-        begin_todo_runtime_shadow_capture,
-        settle_todo_runtime_shadow_capture,
-    )
-
-    _project, resolved_state_file = _resolve_state(
-        registry_path=registry_path,
-        goal_id=goal_id,
-        project=project,
-        state_file=state_file,
-    )
-    # The already resolved root also governs the legacy lock, scan and capture.
-    with legacy_todo_write_transaction(
-        registry_path, goal_id, resolved_state_file, None, "handoff_mode_set",
-        dry_run, runtime_root=runtime_root,
-    ):
-        with resolved_state_file.open(encoding="utf-8", newline="") as source:
-            original = source.read()
-        metadata, body = split_state_frontmatter(original)
-        frontmatter = original[:len(original) - len(body)]
-        request = {
-            "schema_version": "loopx_legacy_handoff_mode_plan_request_v0",
-            "previous_value": metadata.get(HANDOFF_MODE_FRONTMATTER_KEY),
-            "requested_mode": requested, "frontmatter_text": frontmatter,
-            "todos": None, "leases": None,
-        }
-        plan = _plan_legacy_mode(request)
-        payload = {
-            "ok": True, "schema_version": HANDOFF_MODE_SCHEMA_VERSION,
-            "action": "set", "goal_id": goal_id, "state_file": str(resolved_state_file),
-            **{key: value for key, value in plan.items() if key.startswith("previous_mode")},
-            "handoff_mode": requested, "changed": False,
-            **({"dry_run": True} if dry_run else {}),
-        }
-        if plan["outcome"] == "no_change":
-            return payload
-        if plan["outcome"] != "snapshot_required":
-            raise HandoffModeError("unexpected handoff planning phase", code="handoff_mode_plan_unavailable")
-        with handoff_mode_source(registry_path=registry_path, goal_id=goal_id,
-            state_path=resolved_state_file, state_text=original, runtime_root=runtime_root) as facts:
-            try:
-                plan = _plan_legacy_mode({**request, **facts})
-            except HandoffModeError as error:
-                error.payload.update(goal_id=goal_id, requested_mode=requested)
-                raise
-            if plan.get("outcome") != "apply" or not isinstance(plan.get("next_frontmatter_text"), str):
-                raise HandoffModeError("incomplete handoff mutation plan", code="handoff_mode_plan_unavailable")
-            if dry_run:
-                return {**payload, "changed": True}
-            capture = begin_todo_runtime_shadow_capture(
-                registry_path=registry_path, runtime_root=runtime_root, goal_id=goal_id,
-                state_path=resolved_state_file, write_class="handoff_mode_set", original_text=original)
-            write_captured_todo_state(capture, runtime_root=runtime_root, goal_id=goal_id,
-                state_path=resolved_state_file, text=plan["next_frontmatter_text"] + body)
-    payload["changed"] = True
-    return settle_todo_runtime_shadow_capture(
-        payload, registry_path=registry_path, runtime_root=runtime_root,
-        goal_id=goal_id, capture=capture,
-        emit_disabled=False,
-    )
+    from ..coordination.legacy_writer_fence import reject_legacy_coordination_execution
+    reject_legacy_coordination_execution(goal_id)

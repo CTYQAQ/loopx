@@ -127,7 +127,5 @@ def write_monitor_poll_todo_state(
         return canonical
     if lease_proof is not None:
         raise ValueError("Monitor lease proof requires promoted canonical authority; no legacy write attempted")
-    from .legacy_monitor_poll import apply_legacy_monitor_poll
-
-    return apply_legacy_monitor_poll(
-        registry_path=registry_path, runtime_root=runtime_root, request=request)
+    from ..coordination.legacy_writer_fence import reject_legacy_coordination_execution
+    reject_legacy_coordination_execution(goal_id)

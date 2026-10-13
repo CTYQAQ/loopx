@@ -130,14 +130,6 @@ _EXPORTS = {
     "archive_completed_todos": "loopx.control_plane.todos.mutation_api",
     "ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE": "loopx.control_plane.todos.mutation_api",
     "resolve_todo_state": "loopx.control_plane.todos.path_resolution",
-    "add_todo_to_lines": "loopx.control_plane.todos.legacy_mutation",
-    "_add_goal_todo_legacy": "loopx.control_plane.todos.legacy_mutation",
-    "_update_goal_todo_legacy": "loopx.control_plane.todos.legacy_mutation",
-    "_complete_goal_todo_legacy": "loopx.control_plane.todos.legacy_mutation",
-    "apply_todo_update_to_lines": "loopx.control_plane.todos.line_update",
-    "link_generated_successor_todo_ids": "loopx.control_plane.todos.line_update",
-    "link_superseding_todo_id": "loopx.control_plane.todos.line_update",
-    "upsert_todo_metadata": "loopx.control_plane.todos.line_update",
 }
 
 

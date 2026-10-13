@@ -1,4 +1,5 @@
 /** New-Goal target selection; never live inheritance or authority promotion. */
+import {EffectRuntimeRequestError} from "../effect_runtime_errors.ts";
 import type {JsonObject} from "../effect_program.ts";
 import {requireJsonObject} from "../runtime_decode.ts";
 import {requireAuthorityStoreId} from "./authority_store_codec.ts";
@@ -31,7 +32,8 @@ export async function manageNewGoalStorage(request: JsonObject): Promise<JsonObj
       schema_version: CANONICAL_NEW_GOAL_STORAGE_TARGET_SCHEMA, provider: provider(config.new_goal_provider),
       handoff_mode: config.new_goal_handoff_mode,
     };
-    return {schema_version: NEW_GOAL_STORAGE_TARGET_SCHEMA, provider: provider(config.new_goal_provider)};
+    provider(config.new_goal_provider);
+    throw new EffectRuntimeRequestError("LoopX 2.0 requires canonical creation. In Settings > New Goal authority, enable canonical_creation with soft_claim or hard_lease; existing Goals require coordination-shadow prepare-import/apply-import.");
   }
   if (request.action !== "initialize") throw new Error("Unknown new Goal storage action");
   const target = requireJsonObject(request.target, "New Goal storage target");

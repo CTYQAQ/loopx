@@ -1,8 +1,7 @@
 """Storage adapters for the typed team-plan transaction.
 
-Legacy records and their operation receipt share one atomic Markdown write.
-Promoted goals use the existing AuthorityStore transaction and projection outbox.
-Only the unpromoted branch loads capture and Markdown editing dependencies.
+Normal writes use the existing AuthorityStore transaction and projection outbox.
+Historical Markdown operation receipts remain readable after writer retirement.
 Source locks and historical receipt readers remain shared IO.
 Neither adapter grants receiver adoption or execution authority.
 """
@@ -24,7 +23,7 @@ from ...file_lock import (
 )
 from ...registry import find_registry_goal
 from ...state_refresh import now_local
-from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
+from ..effect_runtime import effect_runtime_result
 from ..runtime.public_safety import validate_public_safe_value
 from ..coordination.local_authority import read_canonical_todos_if_promoted
 from ...paths import effective_runtime_root
@@ -40,18 +39,6 @@ class TeamPlanCommitError(ValueError):
         super().__init__(message)
         self.code = code
         self.current_fingerprint = current_fingerprint
-
-
-def write_captured_todo_state(capture: Any, *, runtime_root: Path, goal_id: str,
-                              state_path: Path, text: str) -> None:
-    """Keep the legacy batch IO seam available without importing its producer.
-
-    Existing failure/recovery callers instrument this seam; canonical commits
-    never call it. The capture owner still controls preparation and durability.
-    """
-    from ..coordination.runtime_shadow_writer_adapter import write_captured_todo_state as write
-
-    write(capture, runtime_root=runtime_root, goal_id=goal_id, state_path=state_path, text=text)
 
 
 def team_plan_state_fingerprint(
@@ -231,10 +218,9 @@ def apply_team_plan(
         result["projection_delivery"] = projected.get("projection_delivery")
         return result
 
-    # Lock the original source before consulting its receipt. A management hold
-    # stops fresh writes, not readback of an already-published operation. Keep
-    # receipt identity validation in the shared typed planner.
-    from ..coordination.legacy_writer_fence import require_legacy_todo_write_allowed
+    # Original receipts remain recoverable after fresh Markdown writes retire.
+    # R/T/S matches existing registry writers. No new capture or source write.
+    from ..coordination.legacy_writer_fence import reject_legacy_coordination_execution
     from ..runtime.document_io import verify_state_text_durable
 
     with exclusive_cross_runtime_file_lock(registry_path, operation="team_plan_commit"), \
@@ -254,52 +240,4 @@ def apply_team_plan(
                 **request, "previous_receipt": previous})
             verify_state_text_durable(state, original)
             return dict(replay["result"])
-        require_legacy_todo_write_allowed(
-            registry_path=registry_path, runtime_root=runtime, goal_id=goal_id, state_file=state)
-        # Recovery above needs neither the source producer nor Markdown editing.
-        from ..coordination.runtime_shadow_writer_adapter import (
-            begin_todo_runtime_shadow_capture, settle_todo_runtime_shadow_capture,
-        )
-        from ..todos.active_state_editing import (
-            insert_into_existing_section, insert_new_section, section_bounds,
-            replace_updated_at,
-        )
-        from ..todos.contract import format_todo_metadata_line, parse_todo_metadata_line
-
-        existing = [metadata for line in original.splitlines()
-                    if (metadata := parse_todo_metadata_line(line)) is not None]
-        current_fingerprint = read_fingerprint() if read_fingerprint else None
-        try:
-            planned = effect_runtime_result("work_items.team_plan.plan", {
-                **request, "todos": existing,
-                "current_state_fingerprint": current_fingerprint,
-            })
-        except EffectRuntimeRejected as error:
-            raise TeamPlanCommitError(error.diagnostic_code, str(error), current_fingerprint) from None
-        result = dict(planned["result"])
-        capture = begin_todo_runtime_shadow_capture(registry_path=registry_path,
-            runtime_root=runtime, goal_id=goal_id, state_path=state,
-            write_class="todo_add", original_text=original)
-        lines = original.splitlines()
-        for todo in planned["todos"]:
-            metadata = format_todo_metadata_line(**{key: todo[key] for key in (
-                "todo_id", "status", "task_class", "action_kind", "claimed_by",
-                "updated_at") if key in todo})
-            block = f"- [ ] {todo['text']}\n{metadata}"
-            bounds = section_bounds(lines, "agent")
-            if bounds:
-                insert_into_existing_section(lines, bounds[0], bounds[1], block)
-            else:
-                insert_new_section(lines, "agent", block)
-        # Store outside Todo sections so archival and canonical projections do
-        # not remove operation history. Encoded JSON cannot terminate a comment.
-        encoded = base64.b64encode(json.dumps(planned["receipt"], ensure_ascii=False,
-            separators=(",", ":")).encode()).decode()
-        first_heading = next((i for i, line in enumerate(lines) if line.startswith("#")), len(lines))
-        lines[first_heading:first_heading] = [marker + encoded + " -->", ""]
-        text = replace_updated_at("\n".join(lines) + "\n", str(request["observed_at"]))
-        write_captured_todo_state(capture, runtime_root=runtime, goal_id=goal_id,
-                                  state_path=state, text=text)
-        verify_state_text_durable(state, text)
-    return settle_todo_runtime_shadow_capture(result, registry_path=registry_path,
-        runtime_root=runtime, goal_id=goal_id, capture=capture)
+        reject_legacy_coordination_execution(goal_id)

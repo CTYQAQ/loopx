@@ -374,6 +374,9 @@ export function decideTaskLeaseAcquire(input: AcquireDecisionInput): AcquireDeci
   ) {
     return acquireDecisionResult("rejected", "idempotency_key_reuse");
   }
+  if (input.handoff_mode === "legacy") {
+    return acquireDecisionResult("rejected", "handoff_mode_retired");
+  }
   const repository = normalizeTodoRepository(input.todo?.task_repository);
   const workspace = leaseWorkspace(command.write_workspace);
   if (workspace && workspace.repository.toLowerCase() !== repository?.toLowerCase()) {

@@ -2,11 +2,11 @@ import {observeLeaseWorktree, type LeaseWorkspace} from "./task_lease_workspace.
 import {isCanonicalTodoId} from "../todos/identity.ts";
 import {executeCanonicalTaskLeaseAcquire} from "../coordination/task_lease_acquire.ts";
 import {withCanonicalTaskLeaseAuthority} from "./canonical_task_lease_lifecycle.ts";
-import {evaluateTaskLeaseWriteScopesOverlap, evaluateTaskLeaseAcquireDecision, materializeTaskLeaseAcquire, type AcquireDecisionOtherLease} from "./task_lease_acquire_decision.ts";
+import {evaluateTaskLeaseWriteScopesOverlap, evaluateTaskLeaseAcquireDecision, type AcquireDecisionOtherLease} from "./task_lease_acquire_decision.ts";
 import {leaseOwnerRejection as ownerRejection} from "./task_lease_eligibility.ts";
-import { ShadowManagementError, requireShadowPrimaryWriteAllowed } from "../coordination/shadow_management.ts";
+import { ShadowManagementError } from "../coordination/shadow_management.ts";
 import { parseIsoTimestamp } from "../runtime_timestamp.ts";
-import { LegacyCoordinationWriteError, requireLegacyCoordinationPrimaryWriteAllowed } from "../coordination/legacy_writer_fence.ts";
+import { LegacyCoordinationWriteError, rejectLegacyCoordinationExecution, requireLegacyCoordinationPrimaryWriteAllowed } from "../coordination/legacy_writer_fence.ts";
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,7 +15,7 @@ import {
   EffectRuntimeLockTimeoutError,
   EffectRuntimeRequestError,
 } from "../effect_runtime_errors.ts";
-import { atomicWriteJson, withFileMutationLock } from "../effect_runtime_io.ts";
+import { withFileMutationLock } from "../effect_runtime_io.ts";
 import {
   legacyCoordinationLeaseLockPath,
   taskLeaseLockPath,
@@ -26,7 +26,6 @@ import {
 } from "../effect_program.ts";
 import { requireJsonObject } from "../runtime_decode.ts";
 import {
-  beginLeaseOutboxEntry,
   decodeLocalAuthorityShadowBinding,
   type LocalAuthorityShadowBinding,
 } from "../coordination/local_authority_shadow_outbox.ts";
@@ -972,48 +971,7 @@ async function commitAcquire(
       active ? "acquire_parameters" : "retired",
     );
   }
-  if (decision.next_lease === null) {
-    throw new EffectRuntimeRequestError(
-      "task-lease acquire decision returned apply without next_lease",
-    );
-  }
-
-  const lease = materializeTaskLeaseAcquire(request, request, decision, at);
-  await dependencies.beforeWrite?.(lease);
-  await revalidateAuthoritySources(request.authority.source_receipts);
-  const captureRequired = request.runtime_shadow !== null ||
-    await requireShadowPrimaryWriteAllowed(request.runtime_root, request.goal_id) !== null;
-  const shadowCapture = !captureRequired
-    ? null
-    : await beginLeaseOutboxEntry({
-      runtime_root: request.runtime_root,
-      goal_id: request.goal_id,
-      lease_directory: taskLeaseDirectory(request),
-      write_class: "task_lease_acquire",
-      operation_id: request.idempotency_key,
-      previous_lease: existing,
-      planned_lease: lease,
-      active_todo_ids: [...request.authority.todos.keys()],
-      goal_ref: request.runtime_shadow !== null && "goal_ref" in request.runtime_shadow
-        ? request.runtime_shadow.goal_ref
-        : undefined,
-    });
-  if (shadowCapture?.failure && await requireShadowPrimaryWriteAllowed(request.runtime_root, request.goal_id) !== null) {
-    throw new ShadowManagementError("shadow_capture_prepare_failed", "durable shadow preparation failed; the primary lease was not changed");
-  }
-  await atomicWriteJson(leasePath, lease);
-  await shadowCapture?.commit();
-  const response = successEnvelope(request, lease, leasePath, acquireEffectId(request), false);
-  if (shadowCapture !== null) {
-    response.coordination_runtime_shadow_capture = {
-      entry_id: shadowCapture.entry_id,
-      seq: shadowCapture.seq,
-      source_bytes_digest: shadowCapture.source_bytes_digest,
-      failure: shadowCapture.failure,
-      skipped_reason: shadowCapture.skipped_reason,
-    };
-  }
-  return response;
+  rejectLegacyCoordinationExecution(request.goal_id);
 }
 
 export async function executeTaskLeaseAcquire(

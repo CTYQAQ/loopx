@@ -1,9 +1,9 @@
 """Cheap Python entry guard for the TypeScript-owned coordination fence.
 
-Legacy Todo writes still happen in Python during Stage 2C.  The durable fence
-itself and its validation semantics remain owned by the TypeScript control
-plane; this module only avoids starting that runtime while no fence exists and
-delegates every present-fence decision to the canonical handler.
+Normal legacy execution is rejected by the shared TypeScript admission rule.
+Historical receipt recovery and lease release retain the durable fence check;
+this adapter skips that lookup only when no fence exists and delegates every
+present-fence decision to the canonical handler.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from contextlib import contextmanager
 import hashlib
 import re
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, NoReturn
 
 from ..effect_runtime import effect_runtime_result
 from ...file_lock import exclusive_cross_runtime_file_lock
@@ -76,6 +76,16 @@ class LegacyCoordinationWriterFenced(RuntimeError):
         super().__init__(message)
         self.code = code
         self.payload = payload
+
+
+def reject_legacy_coordination_execution(goal_id: str) -> NoReturn:
+    """Transport the shared 2.0 cutoff; receipt recovery must run first."""
+    result = effect_runtime_result("coordination.local_authority.require_canonical", {"goal_id": goal_id})
+    if (not isinstance(result, dict) or result.get("schema_version") != LEGACY_COORDINATION_WRITE_CHECK_RESULT_SCHEMA
+            or result.get("status") != "blocked"):
+        raise RuntimeError("canonical admission returned an invalid decision")
+    raise LegacyCoordinationWriterFenced(str(result["reason"]), code=str(result["reason_code"]),
+                                        payload={"write_check": result})
 
 
 def legacy_coordination_writer_fence_path(

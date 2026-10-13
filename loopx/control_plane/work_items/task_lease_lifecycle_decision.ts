@@ -266,6 +266,9 @@ export function decideTaskLeaseLifecycle(
       nextLease: { ...lease, active: false, status: "released" },
     });
   }
+  if (input.handoff_mode === "legacy") {
+    return result("rejected", "handoff_mode_retired");
+  }
   if (lease === null || !lease.present || !lease.active) {
     return result("rejected", "lease_not_active");
   }
