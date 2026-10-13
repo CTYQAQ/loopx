@@ -110,7 +110,6 @@ _EXPORTS = {
     "apply_completed_user_todo_lifecycle": "loopx.control_plane.todos.unblock_resume",
     "completion_decision_target": "loopx.control_plane.todos.unblock_resume",
     "require_completion_decision_outcome": "loopx.control_plane.todos.unblock_resume",
-    "_attach_todo_write_correctness_dry_run_packet": "loopx.control_plane.todos.write_correctness",
     "require_user_todo_task_class": "loopx.control_plane.todos.authoring_scope",
     "legacy_todo_write_transaction": "loopx.control_plane.coordination.legacy_writer_fence",
     "canonical_todo_items": "loopx.control_plane.coordination.local_authority",
@@ -136,7 +135,6 @@ _EXPORTS = {
 _ALIASES = {
     "completion_validation_module": "completion_validation",
     "todo_monitor_metadata": "monitor_metadata",
-    "_attach_todo_write_correctness_dry_run_packet": "attach_todo_write_correctness_dry_run_packet",
 }
 
 

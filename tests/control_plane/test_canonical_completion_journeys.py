@@ -190,3 +190,11 @@ def test_canonical_user_gate_scope_journey(tmp_path, monkeypatch, provider):
     root = Path(__file__).resolve().parents[2]
     gates = runpy.run_path(str(root / "examples/control_plane/todo-user-gate-scope-smoke.py"))
     assert gates["main"](provider=provider) == 0
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_canonical_write_correctness_journey(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    preview = runpy.run_path(str(root / "examples/control_plane/todo-write-correctness-smoke.py"))
+    assert preview["main"](provider=provider) == 0

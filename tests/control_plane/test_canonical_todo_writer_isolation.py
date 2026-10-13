@@ -468,6 +468,11 @@ assert 'loopx.control_plane.todos.legacy_mutation' not in sys.modules
 from importlib.util import find_spec
 assert find_spec('loopx.control_plane.todos.line_update') is None
 assert find_spec('loopx.control_plane.todos.legacy_mutation') is None
+assert find_spec('loopx.control_plane.todos.write_correctness') is None
+assert not hasattr(todos, '_attach_todo_write_correctness_dry_run_packet')
+from loopx.control_plane.runtime import local_state_write_correctness as correctness
+assert not hasattr(correctness, 'build_todo_write_correctness_dry_run_packet')
+assert not hasattr(correctness, 'shadow_validate_local_state_write_correctness_packet')
 for name in ('apply_todo_update_to_lines', 'link_generated_successor_todo_ids', 'link_superseding_todo_id', 'upsert_todo_metadata'):
     assert not hasattr(todos, name), name
 try:
