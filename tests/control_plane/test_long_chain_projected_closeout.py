@@ -143,6 +143,9 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
         "settlement_bound": False, "discharge": "todo_bound_writeback",
     }
     control = before["replan_action_packet"]["stride_control"]
+    assert control["schema_version"] == "stride_decision_v2"
+    assert control["actions"] == ["grow", "switch", "verify"]
+    assert "adjustments" not in control
     from loopx.control_plane.quota.turn_envelope import build_turn_envelope
     from loopx.control_plane.quota.cli_projection import compact_quota_should_run_cli_payload
     for transport in (build_turn_envelope(before), compact_quota_should_run_cli_payload(before)):
@@ -167,13 +170,17 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
             "advancement_policy": "as_needed",
         },
         "stride_decision": {
-            "schema_version": "stride_decision_v1",
+            "schema_version": "stride_decision_v2",
             "strategy_version": "evidence_conditioned_v1",
             "reference_context_id": before["replan_action_packet"]["stride_control"]["reference_context_id"],
             "reference_obligation_id": before["replan_action_packet"]["stride_control"]["reference_obligation_id"],
             "basis": "unexplained_gap",
-            "axes": {"work_slice": "grow", "route_distance": "grow", "validation_scope": "hold"},
-            "axis_reasons": {"work_slice": "Complete the coherent alternative.", "route_distance": "Compare a different mechanism.", "validation_scope": "Retain relevant coverage."},
+            "action": "switch",
+            "axes": {
+                "work_slice": {"plan": "Build and compare the complete alternative.", "reason": "A partial component cannot decide the gap."},
+                "route_distance": {"plan": "Replace greedy selection with joint search.", "reason": "Test interactions the incumbent ignores."},
+                "validation_scope": {"plan": "Pair both engines on held-out inputs.", "reason": "Retain comparable independent coverage."},
+            },
             "next_probe": {
                 "scope": "Execute one complete alternative mechanism experiment.",
                 "minimum_evidence": "A complete alternative artifact and a controlled attributable result.",
@@ -211,6 +218,18 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     assert rc == 1
     assert "requires agent_vision.stride_decision" in refused["error"]
     assert _spend_run_count(runtime) == 0
+    old_packet = json.loads(json.dumps(valid_packet))
+    old_decision = old_packet["stride_decision"]
+    old_decision["schema_version"] = "stride_decision_v1"
+    old_decision.pop("action")
+    old_decision["axis_reasons"] = {key: axis["reason"] for key, axis in old_decision["axes"].items()}
+    old_decision["axes"] = {"work_slice": "shrink", "route_distance": "grow", "validation_scope": "hold"}
+    decision.write_text(json.dumps(old_packet))
+    rc, refused = _run_cli(registry, runtime,
+        *_projected_cli_args(refresh, turn_instance_id=TURN_ID), cwd=project)
+    assert rc == 1
+    assert "requires agent_vision.stride_decision" in refused["error"]
+    assert _spend_run_count(runtime) == 0
     decision.write_text(json.dumps(valid_packet))
     refreshed = call(*_projected_cli_args(refresh, turn_instance_id=TURN_ID))
     assert refreshed["vision_checkpoint"]["satisfied"] is True
@@ -223,8 +242,8 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     assert identity["turn_instance_id"] == TURN_ID
     persisted = json.loads(Path(refreshed["json_path"]).read_text())
     assert persisted["autonomous_replan_ack"] == ack
-    assert persisted["agent_vision"]["stride_decision"]["axes"] == {
-        "work_slice": "grow", "route_distance": "grow", "validation_scope": "hold"}
+    assert persisted["agent_vision"]["stride_decision"]["action"] == "switch"
+    assert persisted["agent_vision"]["stride_decision"]["axes"]["route_distance"]["plan"] == "Replace greedy selection with joint search."
     from loopx.control_plane.goals.goal_vision import compact_goal_vision_packet
     assert compact_goal_vision_packet(persisted["agent_vision"])["stride_decision"] == persisted["agent_vision"]["stride_decision"]
     assert _spend_run_count(runtime) == 0

@@ -3,7 +3,7 @@ import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { optionalNonEmptyString, requireJsonObject, requireNonEmptyString } from "../runtime_decode.ts";
 import { visionAuthoringContract } from "../goals/vision_checkpoint.ts";
 import { parseTodoTimestampMicros } from "../runtime_timestamp.ts";
-import {normalizeStrideDecision, normalizeStrideStrategy, strideControlContract, stridePlanningGuidance, strideReviewMismatch} from "./stride_policy.ts";
+import {normalizeStrideDecision, normalizeStrideStrategy, STRIDE_DECISION_SCHEMA, strideControlContract, stridePlanningGuidance, strideReviewMismatch} from "./stride_policy.ts";
 
 const PROGRESS_OUTCOMES = [
   "new_surface", "new_hypothesis", "new_probe_family", "new_runnable_successor",
@@ -352,7 +352,7 @@ export function projectReplanSemantics(value: unknown): JsonObject {
   const structuredReview = normalizeStrideStrategy(context.stride_strategy) !== "off";
   const freshPath = Boolean(String(patch.acceptance_summary ?? "").trim() &&
     FRESH_PATH_DISPOSITIONS.has(String(path.outcome ?? "").trim()) && strings(path.evidence_refs).length);
-  const independentStride = strideDecision?.axis_reasons && object(strideDecision.next_probe).minimum_evidence;
+  const independentStride = strideDecision?.schema_version === STRIDE_DECISION_SCHEMA;
   const missingStride = structuredReview && freshPath && (!strideDecision || !independentStride);
   const staleStride = !!strideDecision && structuredReview &&
     strideDecision.reference_obligation_id !== obligation.obligation_id;

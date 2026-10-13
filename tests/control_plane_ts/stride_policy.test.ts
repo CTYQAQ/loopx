@@ -5,9 +5,11 @@ import {buildVisionCheckpoint, VISION_REFRESH_REQUEST_SCHEMA} from "../../loopx/
 import {projectReplanSemantics} from "../../loopx/control_plane/work_items/replan_semantics.ts";
 
 const contextId = "replan-context-" + "a".repeat(24);
-const proposal = {schema_version: "stride_decision_v1", strategy_version: "evidence_conditioned_v1",
-  reference_context_id: contextId, reference_obligation_id: "replan-" + "a".repeat(16), basis: "unexplained_gap", axes: {work_slice: "grow", route_distance: "grow", validation_scope: "hold"},
-  axis_reasons: {work_slice: "Build a complete alternative.", route_distance: "Test a different mechanism.", validation_scope: "Existing coverage distinguishes it."}, next_probe: {
+const proposal = {schema_version: "stride_decision_v2", strategy_version: "evidence_conditioned_v1",
+  reference_context_id: contextId, reference_obligation_id: "replan-" + "a".repeat(16), basis: "unexplained_gap", action: "switch", axes: {
+    work_slice: {plan: "Build the complete alternate engine and compare it with the incumbent.", reason: "A partial component cannot test the end-to-end explanation."},
+    route_distance: {plan: "Replace greedy selection with joint search; keep the objective fixed.", reason: "The gap may come from interactions greedy selection cannot capture."},
+    validation_scope: {plan: "Run both engines on the same held-out inputs and compare full costs.", reason: "Existing independent coverage distinguishes the mechanisms."}}, next_probe: {
     scope: "Compare a bounded alternative route.", prediction: "The alternative explains the remaining gap.",
     adoption_criterion: "Retain an attributable validated gain.", cost_bound: "One complete experiment before expanding.", minimum_evidence: "An executed alternative and a controlled attributable comparison."}};
 const packet = {schema_version: "goal_vision_replan_contract_v0", agent_id: "agent-a",
@@ -19,24 +21,31 @@ const request = {schema_version: VISION_REFRESH_REQUEST_SCHEMA, phase: "prepare"
   agent_id: "agent-a", merge_patch: false, existing_agent_vision: null,
   require_path_delta_for_durable_change: false, agent_vision_packet: packet};
 
-test("independent axes permit coherent larger route experiments and broader uncertainty validation", () => {
-  assert.deepEqual(normalizeStrideDecision(proposal)[0]?.axes,
-    {work_slice: "grow", route_distance: "grow", validation_scope: "hold"});
-  assert.deepEqual(normalizeStrideDecision({...proposal, basis: "uncertain_evidence"})[0]?.axes,
-    {work_slice: "grow", route_distance: "grow", validation_scope: "hold"});
-  assert.deepEqual(normalizeStrideDecision({...proposal, basis: "supported_progress"})[0]?.axes,
-    {work_slice: "grow", route_distance: "grow", validation_scope: "hold"});
+test("concrete independent plans retain action choice and fit the shared vision budget", () => {
+  for (const basis of ["unexplained_gap", "uncertain_evidence", "supported_progress"]) {
+    const decision = normalizeStrideDecision({...proposal, basis})[0]!;
+    assert.deepEqual(decision.axes, proposal.axes);
+    assert.equal(decision.action, "switch");
+  }
   assert.equal(strideControlContract({stride_strategy: "off"}), null);
+  const contract = strideControlContract({stride_strategy: "evidence_conditioned_v1"})!;
+  assert.deepEqual(contract.actions, ["grow", "switch", "verify"]);
+  assert.equal(Object.hasOwn(contract, "adjustments"), false);
   const prepared = buildVisionCheckpoint(request);
   const decision = (prepared.agent_vision as Record<string, unknown>).stride_decision as Record<string, unknown>;
-  assert.deepEqual(decision.axes, {work_slice: "grow", route_distance: "grow", validation_scope: "hold"});
+  assert.deepEqual(decision.axes, proposal.axes);
   const budget = (prepared.agent_vision as Record<string, unknown>).vision_budget as Record<string, unknown>;
   assert.ok(Number(budget.total_usage) < 1800);
 });
 
 test("invalid, ambiguous, oversized and misplaced control proposals fail authoring", () => {
   for (const patch of [{basis: "plateau_from_elapsed_time"}, {strategy_version: "future_v2"},
-    {axes: {work_slice: "tiny", route_distance: "grow", validation_scope: "grow"}}, {axis_reasons: undefined}, {next_probe: {...proposal.next_probe, minimum_evidence: ""}},
+    {axes: {work_slice: "shrink", route_distance: "grow", validation_scope: "grow"}},
+    {action: "shrink"}, {action: "hold"}, {action: "continue"}, {action: undefined}, {axis_reasons: {}},
+    {axes: {...proposal.axes, work_slice: {plan: "", reason: "Incomplete scope."}}},
+    {axes: {...proposal.axes, route_distance: {plan: "x".repeat(121), reason: "Oversized."}}},
+    {axes: {...proposal.axes, validation_scope: {plan: "Full comparison.", reason: "x".repeat(97)}}},
+    {axes: {...proposal.axes, work_slice: {...proposal.axes.work_slice, adjustment: "shrink"}}}, {next_probe: {...proposal.next_probe, minimum_evidence: ""}},
     {next_probe: {...proposal.next_probe, scope: "x".repeat(121)}}, {reference_context_id: "missing"},
     {permission: "execute_anything"}, {next_probe: {...proposal.next_probe, cost_bound: ""}}]) {
     assert.throws(() => buildVisionCheckpoint({...request, agent_vision_packet: {
@@ -68,13 +77,15 @@ test("an accepted schema and vector do not authorize work or certify gain; stale
   assert.equal(projectReplanSemantics({operation: "qualify", obligation, stride_decision: proposal}).accepted, false);
 });
 
-test("unexplained gap and uncertain evidence do not force smaller experiments", () => {
-  for (const basis of ["unexplained_gap", "uncertain_evidence"]) {
-    const decision = normalizeStrideDecision({...proposal, basis,
-      axes: {work_slice: "grow", route_distance: "grow", validation_scope: "grow"}})[0]!;
-    assert.deepEqual(decision.axes, {work_slice: "grow", route_distance: "grow", validation_scope: "grow"});
+test("all three actions preserve independently planned complete work and validation", () => {
+  const axes = {...proposal.axes,
+    work_slice: {plan: "Finish the expanded engine and paired independent repetitions.", reason: "The complete experiment is needed to resolve uncertainty."},
+    validation_scope: {plan: "Add independent replicates sufficient to distinguish the uncertain effect.", reason: "A single noisy result cannot support adoption."}};
+  for (const action of ["grow", "switch", "verify"]) {
+    const decision = normalizeStrideDecision({...proposal, basis: "uncertain_evidence", action, axes})[0]!;
+    assert.deepEqual(decision.axes, axes);
+    assert.equal(decision.action, action);
   }
-  assert.equal(normalizeStrideDecision({...proposal, axes: {work_slice: "hold", route_distance: "hold", validation_scope: "grow"}})[0]?.axes.work_slice, "hold");
 });
 
 test("Explore evidence and previous adoption are bound without inferring gain or granting authority", async () => {
@@ -115,9 +126,9 @@ test("Explore evidence and previous adoption are bound without inferring gain or
 
 test("recorded fixed-vector decisions remain readable but cannot be newly authored", async () => {
   const {normalizeRecordedStrideDecision} = await import("../../loopx/control_plane/work_items/stride_policy.ts");
-  const {axis_reasons, axes, ...legacy} = proposal;
+  const {action, axes, ...legacy} = proposal;
   const {minimum_evidence, ...oldProbe} = legacy.next_probe;
-  const recorded = {...legacy, next_probe: oldProbe};
+  const recorded = {...legacy, schema_version: "stride_decision_v1", next_probe: oldProbe};
   assert.equal(normalizeRecordedStrideDecision(recorded)?.axes.work_slice, "shrink");
   assert.equal(normalizeStrideDecision(recorded)[0]?.axes.work_slice, "shrink");
   const oldVision = {...packet, stride_decision: recorded};
@@ -143,7 +154,7 @@ test("unrelated shared-pool churn keeps the evidence basis; changed scoped evide
 test("historical off-mode probes preserve normalized text and its reported budget", () => {
   const expected = {scope: "One complete experiment.", prediction: "Distinguish the remaining explanations.",
     adoption_criterion: "Retain a validated gain.", cost_bound: "One bounded comparison."};
-  const historical = {schema_version: proposal.schema_version, strategy_version: proposal.strategy_version,
+  const historical = {schema_version: "stride_decision_v1", strategy_version: proposal.strategy_version,
     reference_context_id: proposal.reference_context_id, reference_obligation_id: proposal.reference_obligation_id,
     basis: "unexplained_gap", next_probe: Object.fromEntries(Object.entries(expected)
       .map(([key, value]) => [key, " ".repeat(4000) + value + " ".repeat(4000)]))};
@@ -152,4 +163,29 @@ test("historical off-mode probes preserve normalized text and its reported budge
   for (const [key, value] of Object.entries(expected)) assert.equal(usage[`stride_decision.next_probe.${key}`], value.length);
   const authored = buildVisionCheckpoint({...request, agent_vision_packet: {...packet, stride_decision: historical}});
   assert.deepEqual((authored.agent_vision as Record<string, unknown>).stride_decision, normalized);
+});
+
+
+test("independent v1 records preserve their values but cannot satisfy a current enabled review", () => {
+  const {action, ...base} = proposal;
+  const historical = {...base, schema_version: "stride_decision_v1",
+    axes: {work_slice: "shrink", route_distance: "grow", validation_scope: "hold"},
+    axis_reasons: {work_slice: "Old rationale.", route_distance: "Old route rationale.", validation_scope: "Old coverage rationale."}};
+  assert.deepEqual(normalizeStrideDecision(historical)[0], historical);
+  const obligation = {obligation_id: proposal.reference_obligation_id, triggers: [{kind: "vision_acceptance_gap"}],
+    replan_context: {stride_strategy: "evidence_conditioned_v1"}};
+  assert.equal(projectReplanSemantics({operation: "qualify", obligation,
+    agent_vision: {...packet, stride_decision: historical}}).reason_code, "stride_decision_required");
+  assert.equal(projectReplanSemantics({operation: "qualify", obligation: {...obligation,
+    replan_context: {stride_strategy: "off"}}, agent_vision: {...packet, stride_decision: historical}}).accepted, true);
+  assert.throws(() => normalizeStrideDecision({...historical, action: "verify"}), /unsupported/);
+  const withReviews = {...proposal,
+    previous_review: {reference_decision_ref: "replan-decision-" + "b".repeat(24), adoption: "executed",
+      information_gain: "new_evidence", goal_gain: "flat", evidence_refs: ["evidence:executed"],
+      lesson: "The completed alternative did not improve the target; retain scoped evidence."},
+    explore_review: {revision: "c".repeat(64), disposition: "used", considered_refs: ["finding-route"],
+      reason: "The comparison covers this assumption; do not repeat unchanged inputs."}};
+  const prepared = buildVisionCheckpoint({...request, agent_vision_packet: {...packet, stride_decision: withReviews}});
+  const budget = (prepared.agent_vision as Record<string, unknown>).vision_budget as Record<string, unknown>;
+  assert.ok(Number(budget.total_usage) < 1800);
 });

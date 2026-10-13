@@ -16,14 +16,17 @@ export function normalizeStrideStrategy(value: unknown): string {
 export function stridePlanningGuidance(value: unknown): string[] {
   if (normalizeStrideStrategy(value) === "off") return [];
   return ["Review actual adoption of the previous decision, new information and authoritative goal outcomes separately. " +
-    "Choose work size, route distance and validation breadth independently, with a reason for each. " +
+    "Choose grow to expand a supported route, switch to test a different mechanism, or verify to resolve a route decision. " +
+    "Describe work size, route distance and validation breadth independently as concrete plans, with a reason for each. " +
+    "Name the reference method and the assumption or mechanism that changes; more tuning alone is not a route switch. " +
     "Work size must cover a complete experiment capable of an interpretable conclusion: a new route may need a larger " +
-    "implementation and uncertain evidence may need broader validation, neither implies shrinking work. " +
+    "implementation and uncertain evidence may need broader validation. Expand useful work when evidence supports it; " +
+    "do not respond to a persistent unexplained gap by repeatedly making the same experiment smaller. " +
     "Do not restart an unfinished coherent experiment or repeat small probes unless changed inputs or a new uncertainty justify it. " +
     "Compare continuation, an alternative mechanism and replication using applicable Explore findings and scoped counterevidence. " +
     "Do not force a pivot from elapsed time, a progress count or one noisy result. " +
     "Missing or refuted evidence is not a universal route ban. Preserve the best qualified artifact and original priorities. " +
-    "Declare the minimum evidence, distinguishing prediction, adoption criterion and full marginal cost; review them next. " +
+    "Declare minimum evidence, a distinguishing prediction, adoption criterion and full marginal cost; review them next. Verify must resolve a named grow-or-switch question, not repeat an unchanged check. " +
     "Use the live stride_control contract for agent_vision.stride_decision. This controls proposal completeness, not execution, " +
     "spawn, acceptance or a promise of utility; existing Todo/path and authority owners still govern work."];
 }
@@ -31,8 +34,12 @@ export function stridePlanningGuidance(value: unknown): string[] {
 export const STRIDE_DECISION_SCHEMA = decisionSchema.schema_version;
 export const STRIDE_PROBE_LIMITS = decisionSchema.probe_field_limits;
 export const STRIDE_AXIS_NAMES = decisionSchema.axis_names;
+export const STRIDE_PLAN_LIMIT = decisionSchema.axis_plan_limit;
 export const STRIDE_REASON_LIMIT = decisionSchema.axis_reason_limit;
 export const STRIDE_REVIEW_LIMIT = decisionSchema.review_text_limit;
+// Persisted v1 records retain their original meaning; never offered for new reviews.
+export const RECORDED_STRIDE_SCHEMA = "stride_decision_v1";
+const recordedAdjustments = ["grow", "hold", "shrink"] as const;
 type BoundedText = (field: string, value: unknown, limit: number) => string;
 function text(field: string, value: unknown, limit: number): string {
   const result = requireNonEmptyString(value, field).trim();
@@ -55,13 +62,14 @@ export function normalizeStrideDecision(value: unknown, bounded: BoundedText = t
   [JsonObject | null, Record<string, number>] {
   if (value === undefined) return [null, {}];
   const input = requireJsonObject(value, "stride_decision");
-  // Old explicit attachments remain valid transport when the feature is off.
-  // The enabled fresh-path qualifier below requires the independent proposal.
-  if (input.axis_reasons === undefined) return normalizeHistoricalStrideDecision(input, bounded);
+  // Off-mode transport and historical readback retain both earlier v1 shapes.
+  // An enabled fresh review requires the current concrete-plan schema.
+  const historical = input.schema_version === RECORDED_STRIDE_SCHEMA;
+  if (historical && input.axis_reasons === undefined) return normalizeHistoricalStrideDecision(input, bounded);
   exactFields(input, ["schema_version", "strategy_version", "reference_context_id", "reference_obligation_id", "basis",
-    "axes", "axis_reasons", "next_probe", "previous_review", "explore_review"], "stride_decision");
-  if (input.schema_version !== decisionSchema.schema_version || normalizeStrideStrategy(input.strategy_version) !== "evidence_conditioned_v1") {
-    throw new EffectRuntimeRequestError("stride_decision requires stride_decision_v1 and evidence_conditioned_v1");
+    "axes", ...(historical ? ["axis_reasons"] : ["action"]), "next_probe", "previous_review", "explore_review"], "stride_decision");
+  if ((!historical && input.schema_version !== decisionSchema.schema_version) || normalizeStrideStrategy(input.strategy_version) !== "evidence_conditioned_v1") {
+    throw new EffectRuntimeRequestError("stride_decision requires stride_decision_v2 and evidence_conditioned_v1; v1 is historical only");
   }
   if (!/^replan-context-[a-f0-9]{24}$/.test(String(input.reference_context_id ?? "")) ||
       !/^replan-[a-f0-9]{16}$/.test(String(input.reference_obligation_id ?? ""))) {
@@ -69,9 +77,7 @@ export function normalizeStrideDecision(value: unknown, bounded: BoundedText = t
   }
   requireStringLiteral(input.basis, decisionSchema.basis_options, "stride_decision.basis");
   const axes = requireJsonObject(input.axes, "stride_decision.axes");
-  const reasons = requireJsonObject(input.axis_reasons, "stride_decision.axis_reasons");
   exactFields(axes, decisionSchema.axis_names, "stride_decision.axes");
-  exactFields(reasons, decisionSchema.axis_names, "stride_decision.axis_reasons");
   const usage: Record<string, number> = {};
   const checked = (field: string, value: unknown, limit: number): string => {
     const label = `stride_decision.${field}`;
@@ -80,18 +86,35 @@ export function normalizeStrideDecision(value: unknown, bounded: BoundedText = t
     usage[label] = result.length; return result;
   };
   const axisReasons: JsonObject = {};
+  const axisPlans: JsonObject = {};
+  const reasons = historical ? requireJsonObject(input.axis_reasons, "stride_decision.axis_reasons") : {};
+  if (historical) exactFields(reasons, decisionSchema.axis_names, "stride_decision.axis_reasons");
+  else {
+    requireStringLiteral(input.action, decisionSchema.actions, "stride_decision.action");
+    usage["stride_decision.action"] = String(input.action).length;
+  }
   for (const axis of decisionSchema.axis_names) {
-    requireStringLiteral(axes[axis], decisionSchema.adjustments, `stride_decision.axes.${axis}`);
-    usage[`stride_decision.axes.${axis}`] = String(axes[axis]).length;
-    axisReasons[axis] = checked(`axis_reasons.${axis}`, reasons[axis], decisionSchema.axis_reason_limit);
+    if (historical) {
+      requireStringLiteral(axes[axis], recordedAdjustments, `stride_decision.axes.${axis}`);
+      usage[`stride_decision.axes.${axis}`] = String(axes[axis]).length;
+      axisReasons[axis] = checked(`axis_reasons.${axis}`, reasons[axis], decisionSchema.axis_reason_limit);
+    } else {
+      const plan = requireJsonObject(axes[axis], `stride_decision.axes.${axis}`);
+      exactFields(plan, ["plan", "reason"], `stride_decision.axes.${axis}`);
+      axisPlans[axis] = {
+        plan: checked(`axes.${axis}.plan`, plan.plan, decisionSchema.axis_plan_limit),
+        reason: checked(`axes.${axis}.reason`, plan.reason, decisionSchema.axis_reason_limit),
+      };
+    }
   }
   const probe = requireJsonObject(input.next_probe, "stride_decision.next_probe");
   exactFields(probe, Object.keys(STRIDE_PROBE_LIMITS), "stride_decision.next_probe");
   const normalized: JsonObject = {};
   for (const [field, limit] of Object.entries(STRIDE_PROBE_LIMITS)) normalized[field] = checked(`next_probe.${field}`, probe[field], limit);
-  const output: JsonObject = {schema_version: decisionSchema.schema_version, strategy_version: input.strategy_version,
+  const output: JsonObject = {schema_version: input.schema_version, strategy_version: input.strategy_version,
     reference_context_id: input.reference_context_id, reference_obligation_id: input.reference_obligation_id,
-    basis: input.basis, axes: {...axes}, axis_reasons: axisReasons, next_probe: normalized};
+    basis: input.basis, ...(historical ? {axes: {...axes}, axis_reasons: axisReasons}
+      : {action: input.action, axes: axisPlans}), next_probe: normalized};
   for (const key of ["strategy_version", "reference_context_id", "reference_obligation_id", "basis"]) usage[`stride_decision.${key}`] = String(input[key]).length;
   if (input.previous_review != null) {
     const review = requireJsonObject(input.previous_review, "stride_decision.previous_review");
@@ -224,8 +247,10 @@ export function strideControlContract(context: JsonObject, obligationId: unknown
   const basis = context.explore_basis as JsonObject | undefined;
   const example: JsonObject = {schema_version: decisionSchema.schema_version, strategy_version: context.stride_strategy,
     reference_context_id: context.context_id ?? null, reference_obligation_id: obligationId,
-    basis: "uncertain_evidence", axes: {work_slice: "hold", route_distance: "hold", validation_scope: "grow"},
-    axis_reasons: {work_slice: "Keep a complete experiment.", route_distance: "Resolve uncertainty before a route change.", validation_scope: "Obtain distinguishable evidence."},
+    basis: "uncertain_evidence", action: "verify", axes: {
+      work_slice: {plan: "Complete a paired comparison of the current candidate and incumbent.", reason: "Resolve the uncertain effect before expanding implementation."},
+      route_distance: {plan: "Keep the current method; vary the unresolved assumption only.", reason: "The existing evidence does not yet distinguish a replacement route."},
+      validation_scope: {plan: "Repeat the comparison on independent inputs under the same constraints.", reason: "Separate a reproducible effect from noise."}},
     next_probe: {scope: "One complete controlled comparison.", prediction: "Distinguish the remaining explanations.",
       adoption_criterion: "Applicable evidence supports the next slice.", cost_bound: "Bound full implementation and validation cost.", minimum_evidence: "Complete compared artifacts and an attributable result."}};
   if (previous) example.previous_review = {reference_decision_ref: previous, adoption: "unknown", information_gain: "unknown", goal_gain: "unknown",
@@ -234,7 +259,8 @@ export function strideControlContract(context: JsonObject, obligationId: unknown
     considered_refs: [], reason: "Example only: inspect applicable findings, counterexamples and alternatives, then replace."};
   return {schema_version: decisionSchema.schema_version, strategy_version: context.stride_strategy,
     reference_context_id: context.context_id ?? null, reference_obligation_id: obligationId,
-    axis_names: decisionSchema.axis_names, adjustments: decisionSchema.adjustments,
+    axis_names: decisionSchema.axis_names, actions: decisionSchema.actions,
+    axis_plan_limit: decisionSchema.axis_plan_limit,
     axis_reason_limit: decisionSchema.axis_reason_limit, probe_field_limits: STRIDE_PROBE_LIMITS,
     review_text_limit: decisionSchema.review_text_limit,
     previous_decision_ref: previous,
@@ -242,7 +268,9 @@ export function strideControlContract(context: JsonObject, obligationId: unknown
     explore_basis: context.explore_basis ?? null, explore_dispositions: decisionSchema.explore_dispositions,
     minimal_example: example,
     attachment: "agent_vision.stride_decision", requires_structured_fresh_path: true,
-    rule: "Enabled fresh Vision path reviews require independent axes/reasons and a complete interpretable experiment. " +
+    rule: "Enabled fresh Vision path reviews require an explicit grow/switch/verify action and a concrete plan/reason for each axis. " +
+      "Grow expands a supported route; switch names the reference method and changed mechanism; verify resolves a named grow-or-switch question. Size every action for a complete interpretable experiment. " +
+      "The minimal example demonstrates syntax, not the recommended action for the current evidence. " +
       "When a previous decision is delivered, assess its adoption, information and goal gain in previous_review against its exact reference. " +
       "When Explore basis is delivered, assess applicable findings/alternatives in explore_review; missing or omitted evidence stays unknown. " +
       "These are Agent claims and proposal-shape obligations, not execution authority or utility certification. Other source-specific exits remain unchanged.",
