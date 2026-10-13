@@ -3,12 +3,23 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
 from test_shadow_observable_e2e import Caller, SOURCE, caller as caller
+from historical_shadow_fixture import HistoricalShadowWorkspace, original_1x_source  # noqa: F401
 
 pytestmark = pytest.mark.stage2c_e2e
+
+
+def original_todo(w: Caller, source: Path, text: str, *extra: str) -> str:
+    """Create pre-upgrade input; every consumer below still runs current code."""
+    original = HistoricalShadowWorkspace(w.registry, w.root, w.state,
+        goal="observable", original_source=source)
+    result = original.original_cli("todo", "add", "--role", "agent", "--text", text, *extra)
+    assert result["ok"] is True, result
+    return result["todo_id"]
 
 NATIVE = r"""
 import {join} from 'node:path';
@@ -44,9 +55,9 @@ def native(w: Caller, action: str, request: dict) -> dict:
                      '-e', NATIVE, json.dumps(value)], ['native', action, json.dumps(request)])
 
 
-def test_canonical_argument_intent_and_atomic_claim(caller: Caller) -> None:
+def test_canonical_argument_intent_and_atomic_claim(caller: Caller, original_source: Path) -> None:
     w = caller
-    todo = w.add('Native canonical input', '--note', 'Preserve operator note', '--required-write-scope', 'src/**')
+    todo = original_todo(w, original_source, 'Native canonical input', '--note', 'Preserve operator note', '--required-write-scope', 'src/**')
     record = w.read(todo)
     builder = "from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection as build; import json,sys; value=build(goal_id='observable', todos=[json.loads(sys.argv[1])]); value['handoff_mode']='hard_lease'; print(json.dumps(value))"
     projection = w.invoke([sys.executable, '-c', builder, json.dumps(record)], ['fixture-projection', json.dumps(record)])
@@ -76,9 +87,9 @@ def test_canonical_argument_intent_and_atomic_claim(caller: Caller) -> None:
     assert w.state.read_bytes() == recovered
 
 
-def test_native_unclaimed_edit_and_explicit_note_clear(caller: Caller) -> None:
+def test_native_unclaimed_edit_and_explicit_note_clear(caller: Caller, original_source: Path) -> None:
     w = caller
-    todo = w.add('Unclaimed correction', '--note', 'Keep until explicitly cleared')
+    todo = original_todo(w, original_source, 'Unclaimed correction', '--note', 'Keep until explicitly cleared')
     record = w.read(todo)
     builder = "from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection as build; import json,sys; value=build(goal_id='observable', todos=[json.loads(sys.argv[1])]); value['handoff_mode']='soft_claim'; print(json.dumps(value))"
     projection = w.invoke([sys.executable, '-c', builder, json.dumps(record)], ['fixture-projection', json.dumps(record)])
@@ -137,9 +148,9 @@ print(json.dumps({'rows':rows}))
 """
 
 
-def test_http_reward_preserves_preview_gate_and_persisted_arguments(caller: Caller) -> None:
+def test_http_reward_preserves_preview_gate_and_persisted_arguments(caller: Caller, original_source: Path) -> None:
     w = caller
-    todo = w.add('HTTP must preserve Todo ownership', '--claimed-by', 'agent-a')
+    todo = original_todo(w, original_source, 'HTTP must preserve Todo ownership', '--claimed-by', 'agent-a')
     record = w.read(todo)
     index = w.root / 'goals' / 'observable' / 'runs' / 'index.jsonl'
     index.parent.mkdir(parents=True, exist_ok=True)
