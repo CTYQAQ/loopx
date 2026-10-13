@@ -148,6 +148,18 @@ receipts retain the accepted authority reason; original receipt recovery preserv
 historical results and rejects a changed reason under the same operation identity.
 This closes that private decision chain, not the remaining monitor/handoff caller
 families, installed import journey or sustained SQLite qualification.
+The remaining actor-module Monitor, binding and terminal consumers now use real
+File/SQLite authority. Imported completions without a typed continuation expose
+an integration gap: the completion reducer permits explicit repair, but the
+outer terminal no-op path discarded that commit. The terminal transaction now
+honors that existing repair decision and retains its original operation receipt;
+shared provider tests cover rejection, preview, replay and subsequent closeout.
+Canonical completion releases its lease atomically, so response-loss recovery
+replaces the obsolete separate-release failure seam. A completed ordinary Todo
+cannot be reopened through metadata update, and fresh unmigrated claims refuse
+without changing the source. These are explicit 2.0 boundaries, not parity with
+the retired Markdown writer's split claim/lease and reopen behavior. Historical
+receipt recovery, broader CI and installed/natural-trial acceptance stay separate.
 The backend configuration catalog now describes the same 2.0 creation boundary.
 Exact-head review, core-developer trial and release authorization remain open. Retained outbox recovery and source
 lease release are concrete remaining callers, not grounds for keeping normal
