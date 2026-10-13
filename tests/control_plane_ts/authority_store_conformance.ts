@@ -1080,20 +1080,24 @@ export function registerAuthorityStoreConformance(
     assert.deepEqual(await store.loadAuthority(), after);
   });
 
-  test(`${providerName} conformance: pre-upgrade terminal receipt recovers before current authority access`, async t => {
+  for (const delegated of [false, true]) test(`${providerName} conformance: original terminal receipt recovers before current authority access (delegated=${delegated})`, async t => {
     const {store} = await factory(t);
     const goalId = "goal-historical-terminal", turnKey = `${goalId}:agent-a:todo-terminal:original-turn`;
     const digest = createHash("sha256").update(
       `loopx-provider-terminal-operation-v0\0complete\0${goalId}\0todo-terminal\0${turnKey}`,
     ).digest("hex").slice(0, 32);
+    const projection = todoTerminalProjection(goalId);
+    // Delegate an idle soft-claim task; active lease fencing is an independent gate.
+    if (delegated) { projection.handoff_mode = "soft_claim"; projection.leases = []; }
     assert.equal((await store.commitAuthority({expected_provider_revision: null, operation_id: "seed-historical-terminal",
-      next_projection: todoTerminalProjection(goalId), events: [], receipts: []})).status, "applied");
+      next_projection: projection, events: [], receipts: []})).status, "applied");
     const request = {
       goal_id: goalId, todo_id: "todo-terminal", expected_role: "agent" as const,
-      command: "complete" as const, actor_agent_id: "agent-a", registered_agents: ["agent-a", "agent-b"],
-      lifecycle_grants: [], authority_reason: null, decision_outcome: null,
+      command: "complete" as const, actor_agent_id: delegated ? "agent-b" : "agent-a", registered_agents: ["agent-a", "agent-b"],
+      lifecycle_grants: delegated ? [{agent_id: "agent-b", actions: ["complete"], requires_reason: true}] : [],
+      authority_reason: delegated ? "Verified the original worker result" : null, decision_outcome: null,
       operation_identity: {kind: "explicit" as const, operation_id: `todo-terminal:${digest}`},
-      lease_idempotency_key: "terminal-lease", lease_expected_version: 1, allow_user_gate_auto_acquire: false,
+      lease_idempotency_key: delegated ? null : "terminal-lease", lease_expected_version: delegated ? null : 1, allow_user_gate_auto_acquire: false,
       requested_no_followup: true, requested_completion_turn_key: turnKey,
       requested_completion_identity_source: "turn_settlement" as const,
       linked_successor_todo_ids: [], successor_intents: [], note: null, evidence: "Declared check passed",
@@ -1104,6 +1108,16 @@ export function registerAuthorityStoreConformance(
     };
     const applied = await executeCoordinationTodoTerminalLifecycle(store, request);
     assert.equal(applied.status, "applied", JSON.stringify(applied));
+    const authority = applied.terminal_decision as JsonObject;
+    if (delegated) {
+      assert.equal(authority.authority_mode, "delegated_orchestration_override");
+      assert.equal(authority.authority_reason, request.authority_reason);
+      const original = applied.original_receipt as JsonObject;
+      assert.equal(((original.result as JsonObject).terminal_decision as JsonObject).authority_reason,
+        request.authority_reason);
+    } else {
+      assert.equal(Object.hasOwn(authority, "authority_reason"), false);
+    }
     const before = await store.loadAuthority();
     const historicalOnly = new Proxy(store, {get(target, key) {
       if (key === "loadAuthority" || key === "commitAuthority") return async () => {
@@ -1117,6 +1131,12 @@ export function registerAuthorityStoreConformance(
     }, async () => {throw new Error("historical recovery precedes current source authorization");});
     assert.equal(recovered.status, "replayed", JSON.stringify(recovered));
     assert.deepEqual(recovered.original_receipt, applied.original_receipt);
+    assert.deepEqual(recovered.terminal_decision, applied.terminal_decision);
+    if (delegated) {
+      const changed = await executeCoordinationTodoTerminalLifecycle(historicalOnly,
+        {...request, authority_reason: "Replacement justification"});
+      assert.equal(changed.reason_code, "coordination_operation_identity_mismatch");
+    }
     assert.deepEqual(await store.loadAuthority(), before);
     assert.equal((await store.readReceipt(`todo-terminal-closeout:${digest}`)).status, "missing");
   });

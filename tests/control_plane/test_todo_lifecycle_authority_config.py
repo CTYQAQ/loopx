@@ -7,7 +7,7 @@ import pytest
 
 from loopx.cli import main
 from loopx.configure_goal import configure_goal
-from loopx.todos import add_goal_todo
+from loopx.todos import add_goal_todo, list_goal_todos
 
 
 GOAL_ID = "todo-lifecycle-authority-config"
@@ -27,6 +27,7 @@ def _registry(tmp_path: Path) -> Path:
     registry.write_text(
         json.dumps(
             {
+                "common_runtime_root": str(tmp_path / "runtime"),
                 "goals": [
                     {
                         "id": GOAL_ID,
@@ -176,11 +177,16 @@ def test_configure_goal_cli_previews_authority_grant(
     assert payload["after"]["todo_lifecycle_authority"] == [grant]
 
 
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_todo_cli_emits_delegated_override_receipt(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch, provider: str,
 ) -> None:
+    from tests.control_plane.canonical_authority_fixture import (
+        initialize_canonical_registry_fixture, isolate_sqlite_runtime,
+    )
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
     registry = _registry(tmp_path)
+    initialize_canonical_registry_fixture(registry, provider=provider)
     configure_goal(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -202,32 +208,39 @@ def test_todo_cli_emits_delegated_override_receipt(
         claimed_by=OWNER_AGENT,
     )
 
-    exit_code = main(
-        [
-            "--registry",
-            str(registry),
-            "--format",
-            "json",
-            "todo",
-            "complete",
-            "--goal-id",
-            GOAL_ID,
-            "--todo-id",
-            todo["todo_id"],
-            "--agent-id",
-            ORCHESTRATION_AGENT,
-            "--authority-reason",
-            "Verified the result before orchestration closeout.",
-            "--evidence",
-            "validation://cli-override",
-        ]
-    )
+    argv = [
+        "--registry",
+        str(registry),
+        "--format",
+        "json",
+        "todo",
+        "complete",
+        "--goal-id",
+        GOAL_ID,
+        "--todo-id",
+        todo["todo_id"],
+        "--agent-id",
+        ORCHESTRATION_AGENT,
+        "--authority-reason",
+        "Verified the result before orchestration closeout.",
+        "--evidence",
+        "validation://cli-override",
+    ]
 
-    assert exit_code == 0
+    assert main(argv) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["mutation_authority"]["mode"] == (
+    assert payload["mutation_authority"]["authority_mode"] == (
         "delegated_orchestration_override"
     )
     assert payload["mutation_authority"]["authority_reason"] == (
         "Verified the result before orchestration closeout."
     )
+
+    before = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)
+    assert before["authority_read"]["source_authority"] == provider + "_v0"
+    assert before["authority_read"]["legacy_fallback_used"] is False
+    assert payload["original_receipt"]["result"]["terminal_decision"]["authority_reason"] == (
+        "Verified the result before orchestration closeout."
+    )
+    assert before["todos"][0]["status"] == "done"
+    assert before["todos"][0]["last_actor_agent_id"] == ORCHESTRATION_AGENT
