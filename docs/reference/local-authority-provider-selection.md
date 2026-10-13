@@ -65,13 +65,14 @@ See [reviewed promotion and recovery](reviewed-coordination-promotion.md) for th
 File or SQLite independently of the execution policy. In the new-Goal default
 candidate, a device without a `goal_storage` namespace creates canonical SQLite
 with `hard_lease`; CLI bootstrap and App creation reuse the same configuration
-and typed initialization owner. **Create canonical authority** can be disabled
-explicitly, or used with File and either `soft_claim` or `hard_lease`. Agents
+and typed initialization owner. The **2.0 alpha candidate requires Create canonical
+authority** with File or SQLite and either `soft_claim` or `hard_lease`. Agents
 inherit the Goal policy; this grants no tool, repository,
 scheduler, account or network permission and does not migrate existing data.
 
-The candidate changes only unconfigured new creation. Released v0 settings and
-v1 with `canonical_creation=false` retain the post-promotion target behavior.
+The 2.0 candidate intentionally ends fresh target-only creation. Released v0
+settings and v1 with `canonical_creation=false` remain readable, but creation
+refuses with a Settings remediation before publishing a registry or provider.
 Opening v0 in the guided editor previews a v1 envelope upgrade with creation
 still disabled; switching editor modes cannot enable it through the new default.
 The CLI continues to accept v0. Existing Goals keep their recorded target,
@@ -135,8 +136,8 @@ prevent duplicate writes or first-Turn submission. A started Turn is read back
 from its original Session, not inferred from a creation checkpoint. This
 recovery does not certify model execution or Goal completion. A missing original
 workspace, conflicting identity or unavailable authority still stops recovery.
-Target-only historical creation retains its adapter; it does not gain the
-canonical transaction's response-loss guarantee.
+Unfinished target-only historical creation must use reviewed import. Its
+recorded target remains migration input, not permission to resume source writes.
 
 If the Host dies after Session acceptance but before upstream startup, the local
 queued Turn is still the original request. Session restoration replays it through
@@ -155,7 +156,7 @@ Agent 和首批任务。使用“重试原操作”在冻结的服务端工作�
 工作区同样适用。原生 File/SQLite 复用 Todo 操作身份与既有 Session/Turn
 接纳规则；已启动的 Turn 必须从原 Session 读回。创建步骤不代表模型运行或
 Goal 验收完成；原工作区、操作身份或 authority 不可用时仍须停止恢复。
-历史 target-only 创建保留其适配器，不获得原生事务的响应丢失恢复保证。
+历史 target-only 创建须走审核导入；原目标仍是迁移输入，不授权恢复旧源写入。
 
 Host 在 Session 接纳后、上游启动前退出时，本地排队 Turn 仍是原请求。
 Session 恢复须先通过既有 Turn 接纳 owner 重放该请求，再准备适配器。
@@ -171,7 +172,8 @@ Turn 恢复支持仍待实测；CLI authority 创建与其他支持范围分别�
 Synthetic workspace data on the candidate's packaged App and installed wheel;
 model execution is disabled in this isolated creation/configuration rehearsal.
 
-Released v0 preferences remain target-only when opened in the candidate editor.
+Historical screenshot: v0 preferences remain visibly disabled in the editor.
+In 2.0 that state blocks new creation until explicitly enabled.
 
 ![Existing File preference stays disabled](images/new-goal-authority/v0-retained.png)
 
@@ -186,8 +188,8 @@ layout or responsive navigation is introduced.
 
 </details>
 
-To disable future canonical creation, preview and apply the same v1 document
-with `canonical_creation=false`. Removing the preference restores the candidate
+A retained `canonical_creation=false` preference blocks new creation in 2.0;
+it no longer enables a Markdown writer. Removing the preference restores the candidate
 SQLite/hard-lease default for future new Goals; removal is **not** opt-out.
 To remove the whole preference:
 
@@ -231,8 +233,9 @@ default admission remain separate; the existing RFC acceptance is unchanged.
 在“设置 → 能力中心 → 此设备默认 → 新 Goal 的权威存储”中，分别选择 File/SQLite
 和 `soft_claim`/`hard_lease`。候选实现让未配置此命名空间的新 Goal 默认建立
 canonical SQLite、使用 `hard_lease`，CLI 与 App 共用配置和类型化创建归属。
-旧 v0 或显式关闭状态仍只固定晋升后的目标；表单以关闭状态预览 v1 升级，
-切换编辑模式也不会自动启用。CLI 继续接受旧格式，已有 Goal 保留原路径。
+2.0 候选明确停止旧源新建：旧 v0 或显式关闭状态仍可读取，但新建会在写入前拒绝；
+表单保留关闭状态，需明确启用后再重试，不会自动开启。
+CLI 配置读取继续接受旧格式，已有 Goal 保留原路径。
 Registry 中的相对 runtime 路径按实际文件位置比较；等价路径不会误触发权威迁移检查。
 Agent 继承 Goal 策略；此设置不授予工具、仓库、账户或网络权限。
 
@@ -247,7 +250,7 @@ CLI 使用上面的完整 JSON 和 preview/apply/inspect/bootstrap 命令；App 
 后的存储丢失须恢复完整备份，不能重新创建空库；通用 force 不能重建。原回执在
 后续写入后仍可读回，重试不得丢失或重复 Todo。
 
-显式设置 `canonical_creation=false` 才关闭之后的新建；remove 删除偏好会恢复候选
+2.0 中 `canonical_creation=false` 会阻止新建，不再启用 Markdown writer；remove 删除偏好会恢复候选
 SQLite/hard-lease 默认，不能用于关闭。两者均不会迁回已有数据、
 删除 fence 或重新开放旧 writer。既有 Goal 升级仍需备份、停止写入、结算租约和
 审核计划；反向迁移须保留新增写入。受支持的旧备份、格式和原回执恢复能力保留。
@@ -266,6 +269,43 @@ boolean and integer facts remain distinct even where Python object equality
 would equate them. This uses the same encoding boundary as capture identity,
 without granting a prose writer any Todo mutation or provider fallback.
 
+## 2.0 normal-write cutoff candidate
+
+This is a breaking alpha implementation, not an upgrade to the compatible 1.x
+line or a declaration of release qualification. Ordinary Todo add/update/claim,
+complete/supersede/archive, source bootstrap and handoff changes, fresh team-plan
+application and Monitor writeback require canonical authority. Fresh source lease
+acquire/renew/transfer and fence admission are refused. Canonical Goals retaining
+`legacy` ownership cannot grant, renew or transfer a new execution; inspect and
+review `handoff-mode plan-migration` / `handoff-mode migrate` first.
+
+Use the existing [cold-source import journey](reviewed-coordination-promotion.md)
+before ordinary writes. Settle retained operations by their original identity;
+inspect and drain prepared/committed captures before import. Original lease
+release and closed-operation recovery remain available with their original CAS
+and identity checks. A changed identity, unavailable provider, changed source
+or unproved cursor remains a failure, never permission to construct empty state.
+Markdown document projections, backup readers, import and historical receipts
+are retained independently of normal source writers.
+
+The candidate removes the Todo mutation implementation and line-update helpers,
+Monitor source writer, and four Todo capture producers after their normal callers
+exit. Their Python facade exports and writer-only tests retire with them; the
+shared typed field, claim, visibility and recovery rules retain their tests. The lease-release
+capture adapter and shared outbox recovery remain live. File/SQLite source CLI,
+canonical Chat, original team-plan replay and interrupted outbox readback have
+focused tests. The normal-wheel import/consumer matrix, packaged Settings journey,
+real PostgreSQL conformance and risk canary pass their focused checks. Historical
+native source-lease fixtures and the backend configuration description still need
+integration; exact-head review remains open. These checks
+do not certify natural multi-developer adoption, sustained D2 or a public release.
+
+2.0 alpha 候选把正常写入统一收口到 canonical authority，明确与兼容的 1.x 线区分。
+旧 Goal 先结算原操作并审核导入；保留原租约释放、历史回执和 outbox 恢复，不能因
+关闭配置而抹掉未结算责任。导入后仍为 legacy ownership 的 Goal 须审核策略迁移，
+不能新授予、续期或转移执行权。删除正常 writer 不等于删除 Markdown 文档显示，
+也不代表完整安装资格、自然试用、D2 或发布已完成。
+
 ## Retirement boundaries before changing the release default
 
 SQLite adoption and Python retirement need separate evidence. A canonical Goal
@@ -276,8 +316,8 @@ to qualify each last caller family independently.
 
 | Retained boundary | Current value and owner | Evidence needed before removal |
 | --- | --- | --- |
-| `todos/mutation_api.py` → `todos/legacy_mutation.py`; `bootstrap.py`, `work_items/team_plan_adapter.py`, `scheduler/legacy_monitor_poll.py` | These are still reachable unpromoted mutation families. Production callers have left the historic `todos.py` re-export; canonical transactions use their concrete typed owners. | Qualify the import-first cutoff for every family below, then delete its normal source-write dispatch and implementation together. Keep Markdown display, historical imports where supported, and import/export recovery. |
-| `runtime_shadow_writer_adapter.py`, `local_authority_shadow_outbox.py` | Source writers prepare capture before the primary write and record commit afterward; outbox records preserve interrupted operations. Typed coordination owners interpret the captured mutations. | Stop the corresponding source producers, classify every pending prepared/committed entry against its source and exact receipt, and prove recovery after producer removal. Clearing configuration cannot cancel an active capture obligation. |
+| `todos/mutation_api.py`; `bootstrap.py`, `work_items/team_plan_adapter.py`, `scheduler/monitor_poll_writeback.py` | The 2.0 candidate refuses fresh unpromoted mutations and removes the legacy Todo/Monitor implementations; 1.x retains its compatibility contract. Canonical transactions use their concrete typed owners. | Qualify the import-first cutoff for every family below, then delete its normal source-write dispatch and implementation together. Keep Markdown display, historical imports where supported, and import/export recovery. |
+| `runtime_shadow_writer_adapter.py`, `local_authority_shadow_outbox.py` | The 2.0 candidate removes four Todo producers. Retained lease release still prepares capture before its source write; outbox records preserve interrupted operations. Typed coordination owners interpret the captured mutations. | Stop the corresponding source producers, classify every pending prepared/committed entry against its source and exact receipt, and prove recovery after producer removal. Clearing configuration cannot cancel an active capture obligation. |
 | `local_authority_shadow_projection.py` | Python transports full source artifacts, rejects floats and unsafe integers before Python/JS digest comparison, and checks identity, size, digest and regular-file readback. `coordination.source.project` remains the typed projection owner. | Preserve exact-byte and malformed-input behavior in the replacement, including symlink rejection, bounded transfer and ambiguous-operation errors. A language-only rewrite is insufficient. |
 | `runtime_shadow.py`, `local_authority_shadow_adapter.py`; retained `configuration.py`, `authority_source_capture.py`, `local_authority_shadow_history.py`, `local_authority_shadow_readback.py` | Configuration, cold-source capture and read-only diagnostics now have concrete owners independent of producers. Explicit shadow bootstrap/drain/promotion and recovery still have live callers. | Retire obsolete producer aliases only after their supported callers exit. Preserve the retained import/history/readback owners and outbox recovery; inspect or cold import succeeding without producers does not make a live drain unused. |
 | `authority_core.py` | Live Todo adapters delegate to typed mutation/ownership rules; scope overlap delegates to the typed lease owner. The lease-mode input compatibility contract is explicitly retained. | Trace direct, internal, dynamic and exported callers separately. Review registered historical input support before retiring its vocabulary; do not infer a fresh grant from old `legacy` inputs. |

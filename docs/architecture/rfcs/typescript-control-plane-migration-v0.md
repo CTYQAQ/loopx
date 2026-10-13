@@ -102,7 +102,18 @@ unpromoted callers remain in ordinary mutation, bootstrap/creation opt-out,
 team-plan, Monitor, ownership/source lease and active capture/binding. Reuse
 their typed admission/transaction owners; treat retained source capture,
 historical receipts and permanent document IO as recovery obligations.
-The existing delivery Todos should carry these concrete exits:
+The 2.0 alpha implementation now removes the normal Todo/Monitor source writers,
+unused line-update helpers and four Todo capture producers, sharing typed refusal across cold-source
+entrypoints while keeping original lease release, team-plan receipts and outbox
+drain. This candidate changes v0/disabled creation admission and fresh legacy
+ownership grants intentionally; it does not change the compatible 1.x line.
+The normal-wheel import/consumer matrix, packaged Settings enable/refusal/readback,
+real PostgreSQL conformance and risk canary have focused passing evidence. The
+native source-lease regression fixtures still need to preserve historical recovery
+without recreating retired writers; the backend configuration catalog description
+also needs alignment. Author integration and exact-head review remain open. Retained outbox recovery and source
+lease release are concrete remaining callers, not grounds for keeping normal
+Todo producers. The existing delivery Todos should carry these concrete exits:
 
 - Qualify the installed import/backup/recovery journey for the declared source
   matrix; importer implementation is already present and is not a missing-code
