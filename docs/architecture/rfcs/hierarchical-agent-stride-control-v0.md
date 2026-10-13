@@ -565,9 +565,11 @@ No new scheduler, selection rule, quota debit or per-result settlement is added.
 
 #### An iterative strategy and engineering boundary
 
-The first strategy is **model-guided, evidence-conditioned vector adjustment**.
-It proposes increasing, retaining or reducing each coordinate, with a reason
-and a falsifiable next probe. It does not optimize a universal novelty score:
+The first strategy is **model-guided, evidence-conditioned experiment planning**.
+It explicitly chooses `grow` (expand a supported route), `switch` (test a
+different mechanism) or `verify` (resolve a specific grow-or-switch question),
+then describes a concrete plan and reason for each coordinate and a falsifiable
+next experiment. It does not optimize a universal novelty score:
 mechanism distance is relative to a declared reference method and goal, while
 slice size is relative to the next useful postcondition and decision risk.
 
@@ -601,10 +603,13 @@ numeric policy. The engineering design has four replaceable boundaries:
 
 The initial TypeScript component remains one selectable strategy,
 `evidence_conditioned_v1`, plus `off`. Its current implementation replaces fixed
-basis-to-vector mappings with three independently declared adjustments and
-bounded reasons. Basis records the Agent's interpretation; it cannot force a
-smaller slice. The next probe declares minimum evidence for a complete,
-interpretable experiment, its prediction, adoption criterion and full cost.
+basis-to-vector mappings with an explicit `grow | switch | verify` action and
+three independently declared concrete plans and reasons. There is no `shrink`
+or idle `hold` decision option. A route switch names the reference method and changed mechanism;
+more tuning cannot establish that change. Basis records the Agent's interpretation,
+not a command to resize work. Verification must resolve a named next decision;
+repeating unchanged checks is not a default policy. The next probe declares
+minimum evidence for a complete, interpretable experiment, its prediction, adoption criterion and full cost.
 
 The existing replan context returns the prior accepted decision and later work.
 A fresh proposal explicitly reviews actual adoption, new information and goal
@@ -618,10 +623,10 @@ research was executed or useful. Ordinary Todo/Next Action carries admitted work
 
 The activation vocabulary and existing Goal/device editor stay unchanged; no
 second selectable strategy or policy database is added. Off retains ordinary
-projection/review semantics. Historical fixed-vector decisions remain read-only
-compatibility and frozen workers retain their exact source. Pin implementation
-revisions for comparisons; do not reinterpret old decisions. The policy seam
-can evolve when evidence warrants it, without maintaining speculative variants.
+projection/review semantics. Both historical v1 decision shapes retain read
+compatibility, but cannot discharge a fresh enabled review. Frozen workers retain
+their exact source. Pin implementation revisions for comparisons; do not
+reinterpret old decisions. The policy seam can evolve when evidence warrants it, without maintaining speculative variants.
 Six effective work Turns remains the review cadence, not the size of a Todo,
 experiment or route change. Matched continuation must qualify actual adoption,
 target benefit and full cost before promotion or synergy claims.

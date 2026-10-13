@@ -423,21 +423,40 @@ installed source; historical fixed-vector declarations remain readable without
 being reinterpreted as new decisions.
 
 The full, compact CLI and Host packets expose `replan_action_packet.stride_control`.
-Declare `agent_vision.stride_decision` with its schema, strategy, actual context
-and admitted obligation references, Agent-assessed `basis`, all three `axes`
-(`grow | hold | shrink`) and one `axis_reasons` entry per axis. Basis is an
-interpretation, not a classifier that selects a whole vector. An unexplained
-goal gap may justify a larger complete alternative implementation; uncertain
-results may justify a coherent experiment with wider validation. Neither forces
-smaller work. Required acceptance and authority never shrink with a coordinate.
+Declare `agent_vision.stride_decision` using `stride_decision_v2`, the strategy,
+actual context and admitted obligation references, Agent-assessed `basis`, and
+an explicit `action`:
+
+- `grow`: expand a supported route's complete implementation, scale or coverage;
+- `switch`: test a different mechanism against the declared reference method;
+- `verify`: resolve a specific uncertainty that determines whether to grow or switch.
+
+Each of the three `axes`
+contains a concrete `plan` (up to 120 characters) and `reason` (up to 96), instead
+of a relative adjustment enum. Work size describes a complete experiment;
+route distance names the reference method and changed assumption or mechanism;
+validation scope describes the evidence needed to decide. Expanding useful work
+is encouraged when supported. A switch can require a larger implementation and
+wider validation, while continued research can resolve uncertainty in the
+existing route. Basis does not select a vector, and tuning alone does not
+establish a route switch. The minimal packet example demonstrates authoring
+syntax; its action is not a recommendation for the current evidence.
+
+`shrink` is not a new decision option. Both historical v1 shapes remain readable
+with their original values, including normalized off-mode attachments, but cannot
+discharge a fresh enabled review. The wire-schema revision changes authoring,
+not the single selectable strategy or the meaning of recorded experiments.
+Required acceptance and authority remain unchanged.
 
 `next_probe` records `scope`, `prediction`, `minimum_evidence`,
-`adoption_criterion` and `cost_bound`. Choose the smallest **complete experiment
+`adoption_criterion` and `cost_bound`. Choose a **complete experiment
 that can reach an interpretable conclusion**, including implementation and
 validation, rather than the smallest Todo. Preserve unfinished useful work and
 the best qualified artifact. Do not repeat a smaller probe merely because the
 previous decision was not adopted or a repeated observation added no information;
 resolve the execution gap or name the changed inputs/new uncertainty first.
+A `verify` action names the grow-or-switch decision its result will inform;
+repeated checking without new information is not a default continuation policy.
 
 When a prior accepted decision is delivered, `previous_review` references its
 exact `replan-decision-*` id and separately records:
@@ -468,9 +487,9 @@ The typed owner validates shape, references and declared provenance before the
 fresh Vision path exit; other source-specific progress, successor and terminal
 exits remain unchanged. All attachment text counts toward the existing
 1,800-character Vision budget. The live packet exposes field limits. Legacy
-recorded declarations and old explicit off-mode attachments retain transport compatibility;
-a newly enabled fresh-path proposal must provide
-independent axes/reasons and minimum evidence.
+recorded declarations and old explicit off-mode attachments retain transport
+compatibility; a newly enabled fresh-path proposal requires v2 action,
+concrete plans/reasons and minimum evidence.
 
 The proposal does not execute or split a Todo, launch a child, submit a candidate,
 spend quota or certify gain. Ordinary Todo/Next Action and existing admission
@@ -479,15 +498,20 @@ Evaluate actual artifact adoption, task outcomes and complete marginal cost
 before calling this strategy beneficial.
 
 **中文：** 初版只保留一套可选策略和总开关，沿用现有配置值，比较时固定确切源码。
-证据标签不再固定生成整组向量；工作大小、路线距离、验证范围分别声明调整和理由。
-工作单位是能产生可解释结论的完整实验：新路线可能需要更大实现，不稳定证据可能
-需要更多验证，两者都不自动要求缩小工作。下一实验须说明最低证据、预测、采用
-条件与完整成本。上轮复盘分别判断实际采用、新信息与目标收益，缺证据保持未知；
+新提案使用 `stride_decision_v2` 数据格式，显式选择 `grow | switch | verify`，三个轴
+分别填写具体 `plan` 与 `reason`，移除 `shrink` 和含糊的 `hold` 选项。grow 扩大有
+支持的路线；switch 尝试不同机制；verify 解决决定扩大或切换的具体不确定性。
+切换需说明参照方法与
+机制变化，不能把调参重命名成新路线。工作单位是能产生可解释结论的完整实验，
+有支持时扩大工作；新路线可能需要更大实现，不稳定证据可能需要更多验证。
+最小示例仅演示格式，不是当前证据的行动推荐。下一实验须说明最低证据、预测、
+采用条件与完整成本。上轮复盘分别判断实际采用、新信息与目标收益，缺证据保持未知；
 不反复缩小未被采用或没有新信息的探针。Explore 开启时，绑定既有图谱/规划的证据
 revision 与具体 finding，说明采用、暂缓、无适用证据或读取不可用及理由，保留范围、
 反例和省略项的读取路径；不开新图或第二个 planner。错源、错引用、过期依据拒绝，
 按原 Turn 身份重新审视；不开额外执行权或配额。机器校验提案结构与引用，不能证明
-模型判断正确或已提升收益。历史固定向量只保留读取兼容，不增加可选策略版本。
+模型判断正确或已提升收益。两种历史 v1 决策保留原义读取兼容，但不能完成新的
+启用策略复盘；数据格式更新不增加可选策略版本。
 
 ### Path Delta
 
