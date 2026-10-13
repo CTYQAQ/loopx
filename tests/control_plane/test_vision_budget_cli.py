@@ -179,3 +179,23 @@ def test_historical_stride_probe_whitespace_roundtrips_with_strategy_off(tmp_pat
     read_budget = goal["latest_runs"][0]["agent_vision"]["vision_budget"]
     for key in ("status", "field_usage", "total_usage", "total_limit"):
         assert read_budget[key] == persisted["vision_budget"][key]
+
+    # Malformed supplied historical values must reject before any append, not
+    # be silently replaced by the compatibility mapping. Omission above is legal.
+    vector = {"work_slice": "shrink", "route_distance": "grow", "validation_scope": "shrink"}
+    changes = [{"axes": value} for value in (None, False, {**vector, "extra": "hold"})]
+    for field in ("reference_context_id", "reference_obligation_id"):
+        for value in ([packet["stride_decision"][field]], {"value": packet["stride_decision"][field]}):
+            changes.append({field: value})
+    journal_before = index.read_bytes()
+    for change in changes:
+        invalid = copy.deepcopy(packet)
+        invalid["stride_decision"].update(change)
+        fixture.write_json(path, invalid)
+        rejected = fixture.run_cli(registry, runtime, vision_path=path,
+            check=False, dry_run=False, autonomous_replan_recorded=False)
+        assert rejected.returncode != 0, change
+        assert index.read_bytes() == journal_before
+    after = fixture.run_status(registry, runtime)
+    after_goal = next(g for g in after["run_history"]["goals"] if g["id"] == fixture.GOAL_ID)
+    assert after_goal["latest_runs"][0]["agent_vision"] == goal["latest_runs"][0]["agent_vision"]
