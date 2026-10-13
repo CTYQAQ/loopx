@@ -1020,8 +1020,10 @@ function terminalTarget(
 function semanticDuplicate(
   todos: ReadonlyMap<string, JsonObject>,
   successor: JsonObject,
+  completingTodoId: string,
 ): JsonObject | undefined {
   return [...todos.values()].find((todo) =>
+    todo.todo_id !== completingTodoId &&
     todo.role === successor.role && todo.archive_state === "active" &&
     todo.status !== "done" && todo.status !== "deferred" && todo.text === successor.text);
 }
@@ -1624,7 +1626,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
         todo_id: successorId,
       });
     }
-    const duplicate = semanticDuplicate(projection.todos, successor);
+    const duplicate = semanticDuplicate(projection.todos, successor, input.todo_id);
     if (duplicate !== undefined) {
       return terminalFailure(
         "todo_semantic_duplicate_conflict",
@@ -1678,6 +1680,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
       completion_recovery: completion.completion_state.recovery,
     } : {}),
     completion_policy: completionPolicy,
+    no_followup: target.todo.no_followup === true,
     completion_identity_key:
       completion === null ? null : completion.completion_identity_key,
     completion_identity_source:

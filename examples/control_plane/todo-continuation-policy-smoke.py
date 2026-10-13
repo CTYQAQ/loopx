@@ -18,6 +18,7 @@ from loopx.control_plane.testing.canary_harness import (  # noqa: E402
     write_fixture_registry,
 )
 from loopx.status import parse_active_state_todos  # noqa: E402
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
 
 
 GOAL_ID = "continuation-policy-fixture"
@@ -78,9 +79,10 @@ def agent_todo(state_file: Path, todo_id: str) -> dict:
     return next(item for item in items if item["todo_id"] == todo_id)
 
 
-def main() -> int:
+def main(*, provider: str = "file") -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-continuation-policy-") as tmp:
         registry_path, state_file = write_fixture(Path(tmp))
+        initialize_canonical_registry_fixture(registry_path, provider=provider)
 
         same_peer = add_todo(registry_path, "Complete one bounded migration slice.")
         same_peer_result = run_json_cli(
@@ -165,7 +167,7 @@ def main() -> int:
             registry_path=registry_path,
         )
         assert returncode == 1, rejected
-        assert "cannot also appear in next_excluded_agents" in rejected["error"]
+        assert "cannot also appear in excluded_agents" in rejected["error"]
         assert agent_todo(state_file, conflict["todo_id"])["status"] == "open"
 
         missing_evidence = add_todo(registry_path, "Require self-merge evidence.")

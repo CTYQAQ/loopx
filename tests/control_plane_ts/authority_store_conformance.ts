@@ -691,7 +691,7 @@ export function registerAuthorityStoreConformance(
     assert.equal(initialized.status, "applied");
     const successorIntent = {
       role: "agent",
-      text: "Continue with the next provider-neutral transaction",
+      text: "Finish the provider-neutral transaction family",
       task_class: "advancement_task",
     };
     const request = {
@@ -784,6 +784,30 @@ export function registerAuthorityStoreConformance(
         assert.deepEqual(await store.loadAuthority(), beforePolicyRejection);
       }
     }
+    // Same-title succession is legal because the parent closes in this CAS.
+    // A different open row with that title still blocks, without consuming the
+    // completion identity or mutating the parent/lease. Retry after its removal.
+    const cleanHead = await store.loadAuthority();
+    assert.equal(cleanHead.status, "loaded");
+    if (cleanHead.status !== "loaded") return;
+    const duplicateProjection = structuredClone(cleanHead.head);
+    (duplicateProjection.todos as Record<string, unknown>[]).push({
+      ...(duplicateProjection.todos as Record<string, unknown>[]).find(todo => todo.todo_id === "todo-terminal")!,
+      todo_id: "todo-other-open",
+    });
+    const seededDuplicate = await store.commitAuthority({expected_provider_revision: cleanHead.provider_revision,
+      operation_id: "seed-other-open", events: [], receipts: [], next_projection: authorityProjectionFixture(goalId,
+        duplicateProjection.todos as Record<string, unknown>[], duplicateProjection.leases as Record<string, unknown>[],
+        "native", {handoff_mode: "hard_lease"})});
+    assert.equal(seededDuplicate.status, "applied");
+    const withDuplicate = await store.loadAuthority();
+    const duplicateRejected = await executeCoordinationTodoTerminalLifecycle(store, commitRequest);
+    assert.equal(duplicateRejected.status, "failed");
+    assert.equal(duplicateRejected.reason_code, "todo_semantic_duplicate_conflict", JSON.stringify(duplicateRejected));
+    assert.deepEqual(await store.loadAuthority(), withDuplicate);
+    if (withDuplicate.status !== "loaded") return;
+    assert.equal((await store.commitAuthority({expected_provider_revision: withDuplicate.provider_revision,
+      operation_id: "remove-other-open", events: [], receipts: [], next_projection: cleanHead.head})).status, "applied");
     const dangling = await executeCoordinationTodoTerminalLifecycle(store, {
       ...commitRequest,
       operation_identity: {kind: "explicit" as const, operation_id: "complete-dangling-successor"},

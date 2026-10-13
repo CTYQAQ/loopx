@@ -20,6 +20,7 @@ from loopx.control_plane.testing.canary_harness import (  # noqa: E402
     write_fixture_registry,
 )
 from loopx.status import parse_active_state_todos  # noqa: E402
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
 
 
 GOAL_ID = "todo-lifecycle-goal"
@@ -38,7 +39,7 @@ UNCLAIMED_SOURCE_TODO = "Prepare an unclaimed successor routing check."
 UNCLAIMED_SUCCESSOR_TODO = "Continue the unclaimed successor routing check."
 
 
-def write_fixture(root: Path) -> tuple[Path, Path]:
+def write_fixture(root: Path, *, provider: str = "file") -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -66,6 +67,7 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
         registered_agents=["codex-main-control", "codex-side-bypass"],
         quota_allowed_slots=None,
     )
+    initialize_canonical_registry_fixture(registry_path, provider=provider)
     return registry_path, state_file
 
 
@@ -301,7 +303,7 @@ def assert_configured_peer_handoff() -> None:
             "--next-excluded-agent",
             "codex-side-bypass",
         )
-        assert "cannot also appear in next_excluded_agents" in (
+        assert "cannot also appear in excluded_agents" in (
             same_agent_handoff["error"]
         ), same_agent_handoff
 

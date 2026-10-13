@@ -35,6 +35,7 @@ from .completion_validation import (
 )
 from .contract import resolve_next_user_task_class
 from .mutation_authority import todo_lifecycle_facts
+from .mutation_response import serialize_added_todo_payload
 from ..coordination.authority_source_capture import authority_registry_source
 from .path_resolution import resolve_todo_state_path
 from .provider_projection import projection_delivery_requires_ack, settle_canonical_todo_projection
@@ -521,7 +522,17 @@ def terminal_canonical_todo_if_promoted(
         "updated_at": payload.get("completed_at") if command == "complete" else (
             payload.get("completed_at") if payload.get("changed") else None
         ),
-        "next_todos": payload.get("generated_successors") or [],
+        "self_merged": bool((payload.get("completion_policy") or {}).get("self_merged")),
+        "next_todos": [
+            serialize_added_todo_payload(
+                add_result={**successor, "already_exists": False},
+                goal_id=goal_id, role=successor["role"], todo_text=successor["text"],
+                agent_id=actor_agent_id, state_file=state_file, project=project,
+                updated_at=successor.get("updated_at"), dry_run=dry_run,
+                added=True, metadata_updated=False, changed=payload.get("changed") is True and not dry_run,
+                handoff_gate={},
+            ) for successor in payload.get("generated_successors") or []
+        ],
         "mutation_authority": terminal_decision,
         "task_lease_fence": terminal_decision,
     }
