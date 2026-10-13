@@ -14,6 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
+from loopx.control_plane.coordination.local_authority import LocalCoordinationAuthorityUnavailable  # noqa: E402
 from loopx.contract import check_contract  # noqa: E402
 from loopx.control_plane.todos.todo_summary import active_state_todo_attention_item  # noqa: E402
 from loopx.quota import build_quota_should_run  # noqa: E402
@@ -26,9 +28,9 @@ PRIMARY_AGENT = "codex-main-control"
 SIDE_AGENT = "codex-product-capability"
 
 
-def write_fixture(root: Path) -> tuple[Path, Path, Path]:
+def write_fixture(root: Path, *, provider: str | None = "file", user_rows: str = "", agent_rows: str = "") -> tuple[Path, Path, Path]:
     repo = root / "repo"
-    repo.mkdir()
+    repo.mkdir(parents=True)
     state = repo / "ACTIVE_GOAL_STATE.md"
     state.write_text(
         "\n".join(
@@ -38,7 +40,10 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
                 "updated_at: 2026-06-26T00:00:00+00:00",
                 "---",
                 "",
+                "## User Todo",
+                user_rows,
                 "## Agent Todo",
+                agent_rows,
                 "",
             ]
         )
@@ -68,23 +73,20 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         ),
         encoding="utf-8",
     )
+    # Seed historical malformed records before authority begins; normal writes
+    # below always go through the real provider. This is not import evidence.
+    if provider is not None:
+        initialize_canonical_registry_fixture(registry, provider=provider)
     return repo, state, registry
 
 
 def assert_raises_message(action: Callable[[], object], expected: str) -> None:
     try:
         action()
-    except ValueError as exc:
+    except (ValueError, LocalCoordinationAuthorityUnavailable) as exc:
         assert expected in str(exc), str(exc)
         return
     raise AssertionError(f"expected ValueError containing {expected!r}")
-
-
-def insert_before_agent_section(state: Path, block: str) -> None:
-    text = state.read_text(encoding="utf-8")
-    marker = "\n## Agent Todo\n"
-    assert marker in text, text
-    state.write_text(text.replace(marker, f"\n{block.rstrip()}\n{marker}", 1), encoding="utf-8")
 
 
 def assert_user_action_does_not_drive_active_state_attention() -> None:
@@ -164,12 +166,12 @@ def assert_user_action_does_not_drive_active_state_attention() -> None:
     assert gate_item["waiting_on"] == "controller", gate_item
 
 
-def main() -> int:
+def main(*, provider: str = "file") -> int:
     assert_user_action_does_not_drive_active_state_attention()
 
     with tempfile.TemporaryDirectory(prefix="loopx-user-gate-scope-") as tmp:
         root = Path(tmp)
-        repo, state, registry = write_fixture(root)
+        repo, state, registry = write_fixture(root, provider=provider)
 
         assert_raises_message(
             lambda: add_goal_todo(
@@ -311,7 +313,7 @@ def main() -> int:
                 evidence="wrong-lane response attempt",
                 dry_run=True,
             ),
-            "response continuation is bound",
+            "bound_agent_mismatch",
         )
         approval_completed = complete_goal_todo(
             registry_path=registry,
@@ -487,9 +489,9 @@ def main() -> int:
             lambda: update_goal_todo(
                 registry_path=registry,
                 goal_id=GOAL_ID,
-                todo_id=str(agent_todo["todo_id"]),
+                todo_id=str(side_agent_todo["todo_id"]),
                 role="agent",
-                agent_id=PRIMARY_AGENT,
+                agent_id=SIDE_AGENT,
                 global_gate=True,
                 dry_run=True,
             ),
@@ -504,8 +506,10 @@ def main() -> int:
         )
         assert clean_check["ok"] is True, clean_check
 
-        insert_before_agent_section(
-            state,
+        fixtures_root = root
+        root = fixtures_root / "unscoped"
+        repo, state, registry = write_fixture(
+            root, provider=provider, user_rows=
             "- [ ] Approve an intentionally unscoped gate.\n"
             "  <!-- loopx:todo todo_id=todo_unscoped_gate status=open task_class=user_gate -->",
         )
@@ -535,8 +539,9 @@ def main() -> int:
         )
         assert repaired_check["ok"] is True, repaired_check
 
-        insert_before_agent_section(
-            state,
+        root = fixtures_root / "unbound"
+        repo, state, registry = write_fixture(
+            root, provider=provider, user_rows=
             "- [ ] Track an unbound non-blocking user action.\n"
             "  <!-- loopx:todo todo_id=todo_unbound_action status=open task_class=user_action -->",
         )
@@ -568,8 +573,9 @@ def main() -> int:
         )
         assert rebound_check["ok"] is True, rebound_check
 
-        insert_before_agent_section(
-            state,
+        root = fixtures_root / "mismatched"
+        repo, state, registry = write_fixture(
+            root, provider=provider, user_rows=
             "- [ ] Resolve a mismatched gate binding.\n"
             f"  <!-- loopx:todo todo_id=todo_mismatched_gate_binding status=open "
             f"task_class=user_gate blocks_agent={SIDE_AGENT} "
@@ -584,7 +590,7 @@ def main() -> int:
         assert mismatched_binding_check["ok"] is False, mismatched_binding_check
         assert any(
             "todo_mismatched_gate_binding" in item
-            and "must bind to blocks_agent" in item
+            and "must bind to the same agent named by blocks_agent" in item
             for item in mismatched_binding_check["errors"]
         ), mismatched_binding_check
         repaired_gate_binding = update_goal_todo(
@@ -604,8 +610,9 @@ def main() -> int:
         )
         assert repaired_binding_check["ok"] is True, repaired_binding_check
 
-        insert_before_agent_section(
-            state,
+        root = fixtures_root / "untyped"
+        repo, state, registry = write_fixture(
+            root, provider=provider, user_rows=
             "- [ ] Track an intentionally untyped user todo.\n"
             "  <!-- loopx:todo todo_id=todo_untyped_user status=open -->",
         )
@@ -618,6 +625,14 @@ def main() -> int:
         assert untyped_check["ok"] is False, untyped_check
         assert any("todo_untyped_user" in item and "requires task_class" in item for item in untyped_check["errors"]), untyped_check
 
+        assert_raises_message(
+            lambda: update_goal_todo(
+                registry_path=registry, goal_id=GOAL_ID,
+                todo_id="todo_untyped_user", role="user",
+                agent_id=PRIMARY_AGENT, status="done",
+            ),
+            "user todo requires explicit --task-class",
+        )
         closed_untyped = update_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -625,11 +640,14 @@ def main() -> int:
             role="user",
             agent_id=PRIMARY_AGENT,
             status="done",
+            task_class="user_action",
+            bound_agent=PRIMARY_AGENT,
         )
         assert closed_untyped["changed"] is True, closed_untyped
 
-        insert_before_agent_section(
-            state,
+        root = fixtures_root / "invalidscope"
+        repo, state, registry = write_fixture(
+            root, provider=provider, user_rows=
             "- [ ] Approve a gate with an unregistered blocked agent.\n"
             "  <!-- loopx:todo todo_id=todo_bad_agent status=open task_class=user_gate blocks_agent=codex-unknown -->\n"
             "- [ ] Approve a gate with conflicting scope.\n"
@@ -645,17 +663,15 @@ def main() -> int:
         assert any("todo_bad_agent" in item and "not registered" in item for item in invalid_scope_check["errors"]), invalid_scope_check
         assert any("todo_both_scopes" in item and "cannot set both" in item for item in invalid_scope_check["errors"]), invalid_scope_check
 
-        state.write_text(
-            state.read_text(encoding="utf-8")
-            + "\n- [ ] Repair a removed continuation value.\n"
+        root = fixtures_root / "hard-cut"
+        repo, state, registry = write_fixture(
+            root, provider=provider, agent_rows=
+            "\n- [ ] Repair a removed continuation value.\n"
             + "  <!-- loopx:todo todo_id=todo_removed_continuation status=open task_class=advancement_task action_kind=review continuation_policy=review_handoff -->\n"
             + "- [ ] Repair removed agent gate routing.\n"
             + f"  <!-- loopx:todo todo_id=todo_removed_agent_gate status=open task_class=advancement_task blocks_agent={SIDE_AGENT} -->\n"
             + "- [ ] Repair an unknown executor exclusion.\n"
-            + "  <!-- loopx:todo todo_id=todo_unknown_exclusion status=open task_class=advancement_task excluded_agents=codex-unknown -->\n"
-            + "- [ ] Repair malformed executor exclusion metadata.\n"
-            + "  <!-- loopx:todo todo_id=todo_malformed_exclusion status=open task_class=advancement_task excluded_agents=%%% -->\n",
-            encoding="utf-8",
+            + "  <!-- loopx:todo todo_id=todo_unknown_exclusion status=open task_class=advancement_task excluded_agents=codex-unknown -->\n",
         )
         hard_cut_check = check_contract(
             registry_path=registry,
@@ -664,22 +680,13 @@ def main() -> int:
             limit=1,
         )
         assert hard_cut_check["ok"] is False, hard_cut_check
-        assert any(
-            "todo_removed_continuation" in item and "removed continuation_policy" in item
-            for item in hard_cut_check["errors"]
-        ), hard_cut_check
-        assert any(
-            "todo_removed_agent_gate" in item and "removed blocks_agent routing" in item
-            for item in hard_cut_check["errors"]
-        ), hard_cut_check
-        assert any(
-            "todo_unknown_exclusion" in item and "unregistered agents" in item
-            for item in hard_cut_check["errors"]
-        ), hard_cut_check
-        assert any(
-            "todo_malformed_exclusion" in item and "malformed excluded_agents" in item
-            for item in hard_cut_check["errors"]
-        ), hard_cut_check
+        for todo_id, code in (
+            ("todo_removed_continuation", "agent_todo_removed_continuation_policy"),
+            ("todo_removed_agent_gate", "agent_todo_blocks_agent_invalid"),
+            ("todo_unknown_exclusion", "todo_excludes_unregistered_agent"),
+        ):
+            assert any(item["code"] == code and todo_id in item["message"]
+                       for item in hard_cut_check["error_diagnostics"]), hard_cut_check
 
         repaired_agent_gate = update_goal_todo(
             registry_path=registry,
@@ -700,6 +707,24 @@ def main() -> int:
             "todo_removed_agent_gate" in item
             for item in repaired_hard_cut_check["errors"]
         ), repaired_hard_cut_check
+
+        # Invalid wire syntax belongs to the retained source inspector. Do not
+        # normalize it into a canonical fixture and claim the error survived.
+        root = fixtures_root / "malformed-source"
+        repo, state, registry = write_fixture(
+            root, provider=None, agent_rows=
+            "- [ ] Repair malformed executor exclusion metadata.\n"
+            "  <!-- loopx:todo todo_id=todo_malformed_exclusion status=open task_class=advancement_task excluded_agents=%%% -->\n",
+        )
+        before_inspection = state.read_bytes()
+        malformed_check = check_contract(
+            registry_path=registry, runtime_root_override=str(root / "runtime"),
+            scan_roots=[repo], limit=1,
+        )
+        assert malformed_check["ok"] is False, malformed_check
+        assert any("todo_malformed_exclusion" in item and "malformed excluded_agents" in item
+                   for item in malformed_check["errors"]), malformed_check
+        assert state.read_bytes() == before_inspection
 
     print("todo-user-gate-scope-smoke ok")
     return 0

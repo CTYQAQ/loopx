@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test the agent-facing todo add command."""
+"""Exercise canonical Todo CLI CRUD, duplicate rejection and soft claims."""
 
 from __future__ import annotations
 
@@ -19,6 +19,9 @@ from loopx.control_plane.testing.canary_harness import (  # noqa: E402
 )
 from loopx.status import parse_active_state_todos  # noqa: E402
 from loopx.quota import build_quota_should_run  # noqa: E402
+from tests.control_plane.canonical_authority_fixture import (  # noqa: E402
+    initialize_canonical_registry_fixture,
+)
 
 
 GOAL_ID = "todo-cli-goal"
@@ -34,7 +37,7 @@ MONITOR_NEXT_DUE_AT = "2026-01-03T00:00:00+00:00"
 MONITOR_EXPIRES_AT = "2026-01-04T00:00:00+00:00"
 
 
-def write_fixture(root: Path, *, register_agents: bool = True) -> tuple[Path, Path]:
+def write_fixture(root: Path, *, register_agents: bool = True, provider: str = "file") -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -48,6 +51,8 @@ def write_fixture(root: Path, *, register_agents: bool = True) -> tuple[Path, Pa
         "# Active Goal State\n\n"
         "## Objective\n\n"
         "Keep this fixture small.\n\n"
+        "## User Todo / Owner Review Reading Queue\n\n"
+        "## Agent Todo\n\n"
         "## Next Action\n\n"
         "- Choose the next bounded step.\n",
         encoding="utf-8",
@@ -64,6 +69,7 @@ def write_fixture(root: Path, *, register_agents: bool = True) -> tuple[Path, Pa
         else None,
         quota_allowed_slots=None,
     )
+    initialize_canonical_registry_fixture(registry_path, provider=provider)
     return registry_path, state_file
 
 
@@ -82,12 +88,12 @@ def run_cli_error(registry_path: Path, *args: str) -> dict:
     return payload
 
 
-def main() -> int:
+def main(*, provider: str = "file") -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-todo-cli-smoke-") as tmp:
         root = Path(tmp)
-        registry_path, state_file = write_fixture(root)
-        legacy_registry_path, _ = write_fixture(root / "legacy", register_agents=False)
-        claim_state_registry_path, claim_state_file = write_fixture(root / "claim-state")
+        registry_path, state_file = write_fixture(root, provider=provider)
+        unregistered_registry_path, _ = write_fixture(root / "unregistered", register_agents=False, provider=provider)
+        claim_state_registry_path, claim_state_file = write_fixture(root / "claim-state", provider=provider)
         original = state_file.read_text(encoding="utf-8")
 
         blocked_todo = run_cli(
@@ -119,10 +125,9 @@ def main() -> int:
             "--agent-id",
             "codex-main-control",
         )
-        assert blocked_claim["error"] == (
-            f"todo claim requires status=open; todo_id '{blocked_todo['todo_id']}' "
-            "is status='blocked'"
-        ), blocked_claim
+        assert blocked_claim["error_code"] == "todo_not_open", blocked_claim
+        assert blocked_claim["todo_status"] == "blocked", blocked_claim
+        assert "requires status=open" in blocked_claim["error"], blocked_claim
         assert claim_state_file.read_text(encoding="utf-8") == before_rejected_claim
 
         bare_user_error = run_cli_error(
@@ -213,7 +218,8 @@ def main() -> int:
         assert "## User Todo / Owner Review Reading Queue" in after_user, after_user
         assert f"- [ ] {USER_TODO}" in after_user, after_user
         assert after_user.index("## User Todo / Owner Review Reading Queue") < after_user.index("## Next Action")
-        assert "updated_at: 2026-01-01T00:00:00+00:00" not in after_user
+        assert "updated_at: 2026-01-01T00:00:00+00:00" in after_user
+        assert user_payload["updated_at"] is not None
 
         duplicate = run_cli(
             registry_path,
@@ -271,8 +277,8 @@ def main() -> int:
         assert agent_payload["note"] == AGENT_TODO_NOTE, agent_payload
         added_fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
         assert added_fields["agent_todos"]["items"][0]["note"] == AGENT_TODO_NOTE, added_fields
-        legacy_agent = run_cli(
-            legacy_registry_path,
+        unregistered_agent = run_cli(
+            unregistered_registry_path,
             "todo",
             "add",
             "--goal-id",
@@ -283,35 +289,44 @@ def main() -> int:
             AGENT_TODO,
         )
         # Omit-note negative (GH-C97): an add without --note must not invent a note.
-        assert legacy_agent["added"] is True, legacy_agent
-        assert not legacy_agent.get("note"), legacy_agent
-        legacy_claim = run_cli_error(
-            legacy_registry_path,
+        assert unregistered_agent["added"] is True, unregistered_agent
+        assert not unregistered_agent.get("note"), unregistered_agent
+        unregistered_claim = run_cli_error(
+            unregistered_registry_path,
             "todo",
             "claim",
             "--goal-id",
             GOAL_ID,
             "--todo-id",
-            legacy_agent["todo_id"],
+            unregistered_agent["todo_id"],
             "--claimed-by",
             "codex-main-control",
         )
-        assert "has no coordination.registered_agents" in legacy_claim["error"], legacy_claim
-        assert "Register this peer identity first" in legacy_claim["error"], legacy_claim
-        assert "--registered-agent codex-main-control" in legacy_claim["error"], legacy_claim
-        wrapped_agent_todo = "- [ ] Summarize the read-only evidence after the user\n  checklist is done."
-        state_file.write_text(
-            state_file.read_text(encoding="utf-8").replace(f"- [ ] {AGENT_TODO}", wrapped_agent_todo),
-            encoding="utf-8",
+        assert unregistered_claim["error_code"] == "actor_not_registered", unregistered_claim
+        assert unregistered_claim["claimed_by"] == "codex-main-control", unregistered_claim
+        # Canonical creation cannot silently change an existing task. The
+        # duplicate must leave both authority and its display unchanged.
+        before_duplicate = state_file.read_bytes()
+        conflicting_duplicate = run_cli_error(
+            registry_path, "todo", "add", "--goal-id", GOAL_ID,
+            "--role", "agent", "--text", AGENT_TODO,
+            "--note", UPDATED_AGENT_TODO_NOTE,
         )
+        assert conflicting_duplicate["error_code"] == "todo_semantic_duplicate_conflict", conflicting_duplicate
+        assert state_file.read_bytes() == before_duplicate
+        unchanged = run_cli(registry_path, "todo", "list", "--goal-id", GOAL_ID,
+                            "--todo-id", agent_payload["todo_id"])
+        assert unchanged["todo"]["note"] == AGENT_TODO_NOTE, unchanged
         metadata_payload = run_cli(
             registry_path,
             "todo",
-            "add",
+            "update",
             "--goal-id",
             GOAL_ID,
-            "--role",
-            "agent",
+            "--todo-id",
+            agent_payload["todo_id"],
+            "--agent-id",
+            "codex-main-control",
             "--text",
             AGENT_TODO,
             "--task-class",
@@ -331,12 +346,10 @@ def main() -> int:
             "--required-decision-scope",
             "direction:action:read_only_evidence_review",
         )
-        assert metadata_payload["added"] is False, metadata_payload
-        assert metadata_payload["already_exists"] is True, metadata_payload
         assert metadata_payload["metadata_updated"] is True, metadata_payload
         assert metadata_payload["task_class"] == "advancement_task", metadata_payload
         assert metadata_payload["action_kind"] == "run_eval", metadata_payload
-        assert metadata_payload["note"] == UPDATED_AGENT_TODO_NOTE, metadata_payload
+        assert metadata_payload["todo_update"]["todo"]["note"] == UPDATED_AGENT_TODO_NOTE, metadata_payload
         assert (
             metadata_payload["continuation_policy"] == "independent_handoff"
         ), metadata_payload
@@ -364,8 +377,10 @@ def main() -> int:
             in after_metadata
         )
         fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
-        assert fields["user_todos"]["items"][0]["text"] == USER_TODO, fields
-        assert fields["user_todos"]["items"][0]["todo_id"].startswith("todo_"), fields
+        user_item = next(item for item in fields["user_todos"]["items"]
+                         if item["todo_id"] == user_payload["todo_id"])
+        assert user_item["text"] == USER_TODO, fields
+        assert user_item["global_gate"] is True, fields
         scoped_user_item = next(
             item for item in fields["user_todos"]["items"] if item["text"] == SCOPED_USER_GATE
         )
@@ -654,7 +669,7 @@ def main() -> int:
         assert claim_payload["changed"] is True, claim_payload
         assert claim_payload["claimed_by"] == "codex-main-control", claim_payload
         claimed_fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
-        claimed_item = claimed_fields["agent_todos"]["items"][0]
+        claimed_item = next(item for item in claimed_fields["agent_todos"]["items"] if item["todo_id"] == metadata_payload["todo_id"])
         assert claimed_item["claimed_by"] == "codex-main-control", claimed_item
         assert claimed_fields["agent_todos"]["claimed_open_count"] == 2, claimed_fields
         assert claimed_fields["agent_todos"]["claimed_advancement_open_count"] == 1, claimed_fields
@@ -711,7 +726,7 @@ def main() -> int:
         assert preserve_claim_payload["changed"] is True, preserve_claim_payload
         assert preserve_claim_payload["claimed_by"] == "codex-main-control", preserve_claim_payload
         preserved_claim_fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
-        preserved_claim_item = preserved_claim_fields["agent_todos"]["items"][0]
+        preserved_claim_item = next(item for item in preserved_claim_fields["agent_todos"]["items"] if item["todo_id"] == metadata_payload["todo_id"])
         assert preserved_claim_item["claimed_by"] == "codex-main-control", preserved_claim_item
         assert preserved_claim_item["task_class"] == "advancement_task", preserved_claim_item
         assert preserved_claim_item["action_kind"] == "run_eval", preserved_claim_item
@@ -736,8 +751,8 @@ def main() -> int:
             "--agent-id",
             "codex-side-bypass",
         )
-        assert "cannot claim" in conflicting_claim["error"], conflicting_claim
-        assert "claimed_by='codex-main-control'" in conflicting_claim["error"], conflicting_claim
+        assert conflicting_claim["error_code"] == "claim_owner_mismatch", conflicting_claim
+        assert conflicting_claim["claim_owner"] == "codex-main-control", conflicting_claim
 
         clear_claim_payload = run_cli(
             registry_path,
@@ -753,17 +768,19 @@ def main() -> int:
         )
         assert clear_claim_payload["changed"] is True, clear_claim_payload
         cleared_fields = parse_active_state_todos(state_file.read_text(encoding="utf-8"))
-        assert "claimed_by" not in cleared_fields["agent_todos"]["items"][0], cleared_fields
+        assert "claimed_by" not in next(item for item in cleared_fields["agent_todos"]["items"] if item["todo_id"] == metadata_payload["todo_id"]), cleared_fields
 
+        # Handwritten content inside a machine-owned region must not be
+        # silently discarded. Business state can commit while display delivery
+        # remains pending, then recover from the same canonical head.
+        valid_display = state_file.read_text(encoding="utf-8")
         stale_continuation = "  Stale continuation after structured metadata."
-        state_lines = state_file.read_text(encoding="utf-8").splitlines()
-        metadata_index = next(
-            index
-            for index, line in enumerate(state_lines)
-            if f"todo_id={metadata_payload['todo_id']}" in line
-        )
+        state_lines = valid_display.splitlines()
+        metadata_index = next(index for index, line in enumerate(state_lines)
+                              if f"todo_id={metadata_payload['todo_id']}" in line)
         state_lines.insert(metadata_index + 1, stale_continuation)
-        state_file.write_text("\n".join(state_lines) + "\n", encoding="utf-8")
+        malformed_display = "\n".join(state_lines) + "\n"
+        state_file.write_text(malformed_display, encoding="utf-8")
 
         update_payload = run_cli(
             registry_path,
@@ -784,6 +801,24 @@ def main() -> int:
         assert update_payload["text_changed"] is True, update_payload
         assert update_payload["status_changed"] is False, update_payload
         assert update_payload["todo"] == UPDATED_AGENT_TODO, update_payload
+
+        assert update_payload["projection_delivery"] == "pending", update_payload
+        assert update_payload["projection_outbox"]["reason_code"] == "todo_projection_render_rejected", update_payload
+        assert state_file.read_text(encoding="utf-8") == malformed_display
+        native_update = run_cli(registry_path, "todo", "list", "--goal-id", GOAL_ID,
+                                "--todo-id", metadata_payload["todo_id"])
+        assert native_update["todo"]["text"] == UPDATED_AGENT_TODO, native_update
+        revision = native_update["authority_read"]["provider_revision"]
+        state_file.write_text(valid_display, encoding="utf-8")
+        recovered = run_cli(registry_path, "todo", "project-markdown", "--goal-id", GOAL_ID,
+                            "--provider-revision", revision, "--execute")
+        assert recovered["provider_revision"] == revision, recovered
+        assert recovered["parse_render_parity"] is True, recovered
+        assert stale_continuation not in state_file.read_text(encoding="utf-8")
+        after_recovery = run_cli(registry_path, "todo", "list", "--goal-id", GOAL_ID,
+                                "--todo-id", metadata_payload["todo_id"])
+        assert after_recovery["authority_read"]["provider_revision"] == revision, after_recovery
+        assert after_recovery["todo"] == native_update["todo"], after_recovery
 
         terminal_update = run_cli_error(
             registry_path,
@@ -818,11 +853,11 @@ def main() -> int:
             "--no-follow-up",
         )
         assert completed_payload["changed"] is True, completed_payload
-        assert completed_payload["status_changed"] is True, completed_payload
+        assert completed_payload["completed"] is True, completed_payload
+        assert completed_payload["terminal_decision"]["next_todo_status"] == "done", completed_payload
         after_update = state_file.read_text(encoding="utf-8")
         assert f"- [x] {UPDATED_AGENT_TODO}" in after_update, after_update
         assert "Summarize the read-only evidence after the user" not in after_update, after_update
-        assert stale_continuation not in after_update, after_update
         assert "status=done" in after_update, after_update
         assert "Validated%20compact%20evidence%20summary." in after_update, after_update
         updated_fields = parse_active_state_todos(after_update)

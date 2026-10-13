@@ -166,3 +166,27 @@ def test_imported_durability_journey(tmp_path, monkeypatch, provider):
     root = Path(__file__).resolve().parents[2]
     durability = runpy.run_path(str(root / "examples/control_plane/todo-durability-fixture-smoke.py"))
     assert durability["main"](provider=provider) == 0
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_canonical_todo_cli_journey(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    cli = runpy.run_path(str(root / "examples/control_plane/todo-cli-smoke.py"))
+    assert cli["main"](provider=provider) == 0
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_canonical_concurrent_writer_journey(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    concurrency = runpy.run_path(str(root / "examples/control_plane/todo-concurrent-write-lock-smoke.py"))
+    assert concurrency["main"](provider=provider) == 0
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_canonical_user_gate_scope_journey(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    gates = runpy.run_path(str(root / "examples/control_plane/todo-user-gate-scope-smoke.py"))
+    assert gates["main"](provider=provider) == 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test active-state todo writers under a contended file lock."""
+"""Canonical writers commit independently of a contended display lock."""
 
 from __future__ import annotations
 
@@ -15,18 +15,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.file_lock import exclusive_file_lock  # noqa: E402
+from loopx.file_lock import exclusive_cross_runtime_file_lock  # noqa: E402
+from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted  # noqa: E402
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
 from loopx.status import parse_active_state_todos  # noqa: E402
 
 
 GOAL_ID = "todo-concurrent-write-lock-goal"
-CHILD_ADD_TODO = "Child add should preserve the parent todo written under lock."
-PARENT_ADD_TODO = "Parent todo written while child add waits on the lock."
+CHILD_ADD_TODO = "Child add preserves another canonical task while display delivery waits."
+PARENT_ADD_TODO = "Parent task commits while child add waits for display delivery."
 UPDATE_TARGET_TODO = "Update target todo should keep unrelated concurrent additions."
-PARENT_UPDATE_TODO = "Parent todo written while child update waits on the lock."
+PARENT_UPDATE_TODO = "Parent task commits while child update waits for display delivery."
 
 
-def write_fixture(root: Path) -> tuple[Path, Path]:
+def write_fixture(root: Path, *, provider: str = "file") -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -73,6 +75,7 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
         + "\n",
         encoding="utf-8",
     )
+    initialize_canonical_registry_fixture(registry_path, provider=provider)
     return registry_path, state_file
 
 
@@ -116,16 +119,21 @@ def wait_json(process: subprocess.Popen[str]) -> dict[str, Any]:
     return json.loads(stdout)
 
 
-def assert_waiting_on_lock(process: subprocess.Popen[str], label: str) -> None:
-    time.sleep(0.35)
-    assert process.poll() is None, (
-        f"{label} process finished before the parent released the lock"
-    )
-
-
-def append_agent_todo(state_file: Path, text: str) -> None:
-    with state_file.open("a", encoding="utf-8") as file:
-        file.write(f"- [ ] {text}\n")
+def wait_for_commit(registry: Path, process: subprocess.Popen[str], text: str,
+                    *, status: str = "open") -> None:
+    runtime = Path(json.loads(registry.read_text())["common_runtime_root"])
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        readback = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL_ID)
+        assert readback and readback["legacy_fallback_used"] is False, readback
+        if any(row["text"] == text and row["status"] == status for row in readback["todos"]):
+            # The provider committed, but display delivery must wait for the
+            # shared cross-runtime lock, not overwrite the parent's narrative.
+            assert process.poll() is None
+            return
+        assert process.poll() is None, process.communicate()
+        time.sleep(0.05)
+    raise AssertionError(f"canonical commit did not become visible: {text}")
 
 
 def agent_items(state_file: Path) -> list[dict[str, Any]]:
@@ -137,11 +145,11 @@ def find_item(state_file: Path, text: str) -> dict[str, Any]:
     return next(item for item in agent_items(state_file) if item.get("text") == text)
 
 
-def main() -> int:
+def main(*, provider: str = "file") -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-todo-lock-smoke-") as tmp:
-        registry_path, state_file = write_fixture(Path(tmp))
+        registry_path, state_file = write_fixture(Path(tmp), provider=provider)
 
-        with exclusive_file_lock(state_file):
+        with exclusive_cross_runtime_file_lock(state_file, operation="fixture_narrative_edit"):
             add_process = start_cli(
                 registry_path,
                 "todo",
@@ -153,10 +161,19 @@ def main() -> int:
                 "--text",
                 CHILD_ADD_TODO,
             )
-            assert_waiting_on_lock(add_process, "todo add")
-            append_agent_todo(state_file, PARENT_ADD_TODO)
+            wait_for_commit(registry_path, add_process, CHILD_ADD_TODO)
+            parent_process = start_cli(
+                registry_path, "todo", "add", "--goal-id", GOAL_ID,
+                "--role", "agent", "--text", PARENT_ADD_TODO,
+            )
+            wait_for_commit(registry_path, parent_process, PARENT_ADD_TODO)
+            state_file.write_text(state_file.read_text().replace(
+                "Exercise todo writer locking.", "Narrative edited while both displays wait."))
+        parent_result = wait_json(parent_process)
+        assert parent_result["added"] is True, parent_result
         add_result = wait_json(add_process)
         assert add_result["added"] is True, add_result
+        assert "Narrative edited while both displays wait." in state_file.read_text()
         assert find_item(state_file, CHILD_ADD_TODO), state_file.read_text(encoding="utf-8")
         assert find_item(state_file, PARENT_ADD_TODO), state_file.read_text(encoding="utf-8")
 
@@ -173,7 +190,7 @@ def main() -> int:
         )
         target_id = target["todo_id"]
 
-        with exclusive_file_lock(state_file):
+        with exclusive_cross_runtime_file_lock(state_file, operation="fixture_narrative_edit"):
             update_process = start_cli(
                 registry_path,
                 "todo",
@@ -191,15 +208,36 @@ def main() -> int:
                 "--claimed-by",
                 "codex-side-bypass",
             )
-            assert_waiting_on_lock(update_process, "todo update")
-            append_agent_todo(state_file, PARENT_UPDATE_TODO)
+            wait_for_commit(registry_path, update_process, UPDATE_TARGET_TODO, status="blocked")
+            parent_process = start_cli(
+                registry_path, "todo", "add", "--goal-id", GOAL_ID,
+                "--role", "agent", "--text", PARENT_UPDATE_TODO,
+            )
+            wait_for_commit(registry_path, parent_process, PARENT_UPDATE_TODO)
+            state_file.write_text(state_file.read_text().replace(
+                "Narrative edited while both displays wait.", "Narrative preserved across update and add."))
+        parent_result = wait_json(parent_process)
+        assert parent_result["added"] is True, parent_result
         update_result = wait_json(update_process)
         assert update_result["changed"] is True, update_result
+        assert "Narrative preserved across update and add." in state_file.read_text()
         updated_target = find_item(state_file, UPDATE_TARGET_TODO)
         assert updated_target["status"] == "blocked", updated_target
         assert updated_target["reason"] == "waiting-on-concurrent-state", updated_target
         assert updated_target["claimed_by"] == "codex-side-bypass", updated_target
         assert find_item(state_file, PARENT_UPDATE_TODO), state_file.read_text(encoding="utf-8")
+
+        final_read = read_canonical_todos_if_promoted(
+            runtime_root=Path(json.loads(registry_path.read_text())["common_runtime_root"]),
+            goal_id=GOAL_ID,
+        )
+        assert final_read and final_read["legacy_fallback_used"] is False, final_read
+        projected = {item["todo_id"]: (item["text"], item["status"], item.get("claimed_by"))
+                     for item in agent_items(state_file)}
+        native = {item["todo_id"]: (item["text"], item["status"], item.get("claimed_by"))
+                  for item in final_read["todos"]}
+        assert len(native) == 5, native
+        assert native == projected, (native, projected)
 
     print("todo-concurrent-write-lock-smoke ok")
     return 0
