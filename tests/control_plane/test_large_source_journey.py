@@ -8,6 +8,7 @@ import json
 import pytest
 
 from test_runtime_shadow_bounded_e2e import cli, enable, workspace
+from historical_shadow_fixture import HistoricalShadowWorkspace, original_1x_source  # noqa: F401
 from loopx.control_plane.coordination.runtime_shadow import build_runtime_shadow_source_snapshot
 from loopx.control_plane.effect_runtime import MAX_REQUEST_BYTES
 from loopx.control_plane.todos.contract import format_todo_metadata_line
@@ -15,7 +16,7 @@ from loopx.control_plane.todos.contract import format_todo_metadata_line
 pytestmark = pytest.mark.stage2c_e2e
 
 
-def test_large_complete_source_can_qualify_promote_and_read_back(tmp_path):
+def test_large_historical_source_can_qualify_promote_and_read_back(tmp_path, original_source):
     registry, runtime, state = workspace(tmp_path)
     note = "完整🙂" * 1600
     blocks = [f"- [ ] Retained work {index}\n  " + format_todo_metadata_line(
@@ -32,7 +33,9 @@ def test_large_complete_source_can_qualify_promote_and_read_back(tmp_path):
 
     boot = cli(registry, runtime, "coordination-shadow", "bootstrap", "--goal-id", "goal-a", "--execute")
     assert boot["bootstrap"]["status"] == "applied"
-    added = cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Captured after full bootstrap")
+    original = HistoricalShadowWorkspace(registry, runtime, state,
+        goal="goal-a", original_source=original_source)
+    added = original.original_add("Captured before upgrading the receiver")
     assert added["coordination_runtime_shadow"]["source_transaction_correlated"] is True
     inspected = cli(registry, runtime, "coordination-shadow", "inspect", "--goal-id", "goal-a")
     assert inspected["inspection"]["status"] == "matched"
