@@ -178,6 +178,94 @@ def real_native_source(root, binary, workspace, *, close_source=False, response_
 
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN"),
                     reason="Requires an explicit real native Host binary; no model service used")
+def test_real_native_interrupt_retains_branch_but_does_not_qualify_checkpoint(tmp_path):
+    """A resumable native interruption is not a completed research boundary.
+
+    This characterizes the provider seam needed by midwake replan handoff. The
+    existing checkpoint must keep rejecting it until the Host proves the joint
+    boundary; a successful native fork alone must not loosen that contract.
+    """
+    import subprocess
+    from loopx.capabilities.benchmark_toolkit.native_codex_goal import StdioNativeGoalTransport
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    (workspace / "candidate.txt").write_text("retained-candidate\n")
+    requests = []
+
+    def response(request, index, message):
+        requests.append(request)
+        if index == 1:
+            message["content"][0]["text"] = "Retained research marker: retained-candidate."
+        elif index in {2, 3}:
+            command = (
+                "python3 -c \"from pathlib import Path; import time; "
+                "Path('boundary-ready').write_text('ready'); time.sleep(30)\""
+                if index == 2 else
+                "cat candidate.txt && printf 'continued-candidate\\n' > continued.txt"
+            )
+            return {"type": "function_call", "id": f"fc_{index}", "call_id": f"call_{index}",
+                    "name": "exec_command", "arguments": json.dumps({"cmd": command,
+                        "yield_time_ms": 1000, "max_output_tokens": 200})}
+        else:
+            message["content"][0]["text"] = "Verified retained inputs and produced the next candidate."
+        return message
+
+    @contextmanager
+    def native_host(env):
+        with StdioNativeGoalTransport.spawn(
+            [env["CODEX_BIN"], "-c", "features.goals=false", "app-server", "--listen", "stdio://"],
+            cwd=str(workspace), env=env, stderr=subprocess.DEVNULL, response_timeout_sec=15,
+        ) as native:
+            native.request("initialize", {"clientInfo": {"name": "handoff_fixture", "version": "0.1.0"},
+                                          "capabilities": {"experimentalApi": True}})
+            native.notify("initialized", {})
+            yield native
+
+    def history(native, session):
+        return native.request("thread/turns/list", {"threadId": session,
+            "sortDirection": "asc", "itemsView": "full", "limit": 100})["data"]
+
+    def wait_terminal(native, session, turn, status):
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            rows = history(native, session)
+            if rows and rows[-1]["id"] == turn and rows[-1]["status"] == status:
+                return rows
+            time.sleep(.02)
+        raise AssertionError("Native handoff did not reach its expected terminal state")
+
+    with real_native_source(tmp_path / "native", os.environ["LOOPX_NATIVE_CHECKPOINT_BIN"],
+            workspace, close_source=True, response_builder=response,
+            sandbox="workspace-write") as (env, source, _, _calls):
+        with native_host(env) as native:
+            native.request("thread/resume", {"threadId": source, "cwd": str(workspace),
+                "sandbox": "workspace-write", "approvalPolicy": "never", "persistExtendedHistory": True})
+            turn = native.request("turn/start", {"threadId": source, "input": [
+                {"type": "text", "text": "Reach the synthetic Host handoff boundary."}]})["turn"]["id"]
+            deadline = time.monotonic() + 10
+            while not (workspace / "boundary-ready").exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            assert (workspace / "boundary-ready").exists()
+            native.request("turn/interrupt", {"threadId": source, "turnId": turn})
+            retained = wait_terminal(native, source, turn, "interrupted")
+            assert len(requests) == 2  # No later model decision consumed the boundary.
+        with pytest.raises(ValueError, match="completed final cursor"):
+            native_session_checkpoint(env, source, timeout=15)
+        with native_host(env) as native:
+            fork = native.request("thread/fork", {"threadId": source, "cwd": str(workspace),
+                "lastTurnId": turn, "persistExtendedHistory": True})["thread"]["id"]
+            assert fork != source and history(native, fork) == retained
+            next_turn = native.request("turn/start", {"threadId": fork, "input": [
+                {"type": "text", "text": "Verify the retained inputs and produce continued.txt."}]})["turn"]["id"]
+            wait_terminal(native, fork, next_turn, "completed")
+            assert (workspace / "continued.txt").read_text() == "continued-candidate\n"
+            assert "retained-candidate" in json.dumps(requests[2])
+            assert history(native, source) == retained
+
+
+@pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN"),
+                    reason="Requires an explicit real native Host binary; no model service used")
 def test_real_native_workspace_readback_rejects_foreign_code_basis(tmp_path):
     from pathlib import Path
     workspace = tmp_path / "source-workspace"

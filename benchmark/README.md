@@ -423,7 +423,13 @@ remains private; inspect the verified inventory before qualifying a complete poi
 
 The current Host hook cannot capture a new replan created **inside an already
 running model wake** before that decision. Those boundaries still need a qualified
-Host handoff; a later snapshot must not be labeled as the missed point. Complete
+Host handoff; a later snapshot must not be labeled as the missed point. A real
+native qualification now demonstrates interrupting at a synthetic tool boundary,
+forking the exact retained history and producing a new artifact while preserving
+the source history. The existing checkpoint correctly rejects that interrupted
+cursor: native resumability does not prove settled LoopX work, a pre-decision
+replan boundary or joint evaluator consistency. The probe does not yet wire the
+worker handoff or reconstruct a separate solver environment. Complete
 LoopX research-state adoption, joint evaluator/Host admission and useful continued work
 remain open. No automatic retention or extra evaluation opportunity is introduced.
 
@@ -531,3 +537,9 @@ runtime receipt 绑定摘要；programmatic adapter 也可指定已放入 guest 
 注册状态、项目研究状态、runtime journal 和 registry；File/SQLite authority
 物化后仍是惰性历史。缺少来源、共享注册表、路径别名或重叠声明会拒绝，捕获
 不授予新的租约、配额、效果或执行权，不能替代完整接续验收。
+
+运行中才出现的 fresh replan 仍缺 Host 交接。真实 native 探针已证明：在合成工具
+边界 interrupt 后，可 fork 完整原生历史、继续读原候选并产出新文件，原历史不变。
+现有 checkpoint 仍正确拒绝该 interrupted cursor；可继续原生会话不等于已结算
+LoopX 工作、replan 决策前边界或 evaluator 联合一致性。该探针没有接入 worker
+自动捕获，也没有证明独立 solver 环境恢复，不能据此宣称每个 replan 已覆盖。
