@@ -12,6 +12,8 @@ from urllib.parse import quote
 
 import pytest
 
+from historical_shadow_fixture import original_1x_source  # noqa: F401
+
 from loopx.bootstrap_command_pack import build_start_goal_guided_packet
 from loopx.control_plane.work_items.delivery_outcome import (
     PROGRESS_DELIVERY_OUTCOMES,
@@ -163,6 +165,7 @@ def _run_cli(
     runtime: Path,
     *args: str,
     cwd: Path = REPO_ROOT,
+    source: Path = REPO_ROOT,
 ) -> tuple[int, dict[str, Any]]:
     result = subprocess.run(
         [
@@ -177,16 +180,40 @@ def _run_cli(
             "json",
             *args,
         ],
-        cwd=cwd,
+        cwd=source if source != REPO_ROOT else cwd,
         check=False,
         capture_output=True,
         text=True,
         env={
             **os.environ,
-            "PYTHONPATH": str(REPO_ROOT),
+            "PYTHONPATH": str(source),
         },
     )
+    assert result.stdout, result.stderr
     return result.returncode, json.loads(result.stdout)
+
+
+def _initialize_settlement_authority(project: Path, runtime: Path) -> None:
+    """Seed a real canonical File store after synthetic source setup.
+
+    This is consumer setup, not import qualification. Read-only source cases
+    stay source-backed; normal settlement mutations must use canonical authority.
+    """
+    from canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import (
+        build_todo_runtime_shadow_projection,
+    )
+
+    state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    parsed = parse_active_state_todos(state.read_text(), item_limit=None)
+    initialize_canonical_authority(
+        runtime, GOAL_ID,
+        build_todo_runtime_shadow_projection(
+            goal_id=GOAL_ID, handoff_mode="soft_claim",
+            todos=parsed["agent_todos"]["items"],
+        ),
+        state_path=state,
+    )
 
 
 def _run_generated_cli(
@@ -895,6 +922,7 @@ def test_codex_app_refresh_stages_validated_memory_and_spend_finalizes_hook(
         separators=(",", ":"),
     )
 
+    _initialize_settlement_authority(project, runtime)
     guard_rc, guard = _run_cli(
         registry_path,
         runtime,
@@ -1094,6 +1122,10 @@ def test_typed_outcome_gap_settles_exact_turn_without_becoming_progress(
     assert "pending resume_when=resume_at" in unscheduled["error"]
     assert _classification_count(runtime, "typed_blocker_writeback") == 0
 
+    # Source-only readback cannot invent a retry clock; canonical settlement
+    # has a separately covered implicit retry contract. Seed authority before
+    # the supported normal mutation, retaining the negative source check above.
+    _initialize_settlement_authority(project, runtime)
     due_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).replace(
         microsecond=0
     ).isoformat().replace("+00:00", "Z")
@@ -1210,6 +1242,7 @@ def test_typed_blocked_retry_without_successor_defers_the_only_todo(
         "--todo-id", TODO_ID,
         "--turn-instance-id", turn_id,
     )
+    _initialize_settlement_authority(project, runtime)
     guard_rc, guard = _run_cli(
         registry_path, runtime, "quota", "should-run", "--codex-app",
         "--goal-id", GOAL_ID, *binding, "--scan-path", str(project), cwd=project,
@@ -1273,6 +1306,7 @@ def test_scheduler_cache_misses_after_todo_state_changes_without_run(
         "--scan-path",
         str(project),
     )
+    _initialize_settlement_authority(project, runtime)
     rc, initial = _run_cli(
         registry_path,
         runtime,
@@ -1302,7 +1336,13 @@ def test_scheduler_cache_misses_after_todo_state_changes_without_run(
         "resume_at:2099-01-01T00:00:00Z",
     )
     assert rc == 0, updated
-    assert updated["status"] == "deferred"
+    assert updated["status"] == "applied"
+    rc, readback = _run_cli(
+        registry_path, runtime, "todo", "list", "--goal-id", GOAL_ID,
+        "--todo-id", TODO_ID,
+    )
+    assert rc == 0, readback
+    assert readback["todo"]["status"] == "deferred"
     assert (index_path.read_bytes() if index_path.exists() else None) == index_before
 
     rc, refreshed = _run_cli(
@@ -1349,6 +1389,7 @@ def test_scheduler_cache_tracks_todo_changes_beyond_display_limit(
         "--scan-path",
         str(project),
     )
+    _initialize_settlement_authority(project, runtime)
     initial_rc, initial = _run_cli(
         registry_path,
         runtime,
@@ -2266,6 +2307,7 @@ def test_recovery_does_not_bind_current_replan_and_reenters_same_turn(
     # to bind an independent successor instead of preserving an obsolete replan.
     state_path.write_text(state_before_replan, encoding="utf-8")
 
+    _initialize_settlement_authority(project, runtime)
     wait_rc, wait = _run_cli(
         registry_path,
         runtime,
@@ -2285,9 +2327,14 @@ def test_recovery_does_not_bind_current_replan_and_reenters_same_turn(
         ALTERNATIVE_TODO_ID,
     )
     assert wait_rc == 0, wait
-    assert wait["external_wait_transition"]["successor_todo_ids"] == [
-        ALTERNATIVE_TODO_ID
-    ]
+    read_rc, readback = _run_cli(
+        registry_path, runtime, "todo", "list", "--goal-id", GOAL_ID,
+        "--todo-id", TODO_ID,
+    )
+    assert read_rc == 0, readback
+    assert readback["todo"]["successor_todo_ids"] == [ALTERNATIVE_TODO_ID]
+    assert readback["todo"]["resume_when"] == f"monitor_changed:{DUE_MONITOR_TODO_ID}"
+    assert readback["todo"]["resume_ready"] is False
 
     current_turn_id = recovery["heartbeat_receipt"]["turn_instance_id"]
     resumed_rc, resumed = _run_cli(
@@ -2466,11 +2513,13 @@ def test_prior_turn_with_several_receipts_recovers_once(tmp_path: Path) -> None:
 @pytest.mark.parametrize("provider", ["legacy", "file", "sqlite"])
 @pytest.mark.parametrize("hidden_count", [0, 6])
 def test_prior_host_closeout_survives_hidden_todo_lifecycle(
+    original_source: Path,
     tmp_path: Path,
     hidden_count: int,
     provider: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The legacy arm writes original 1.x state; every recovery read uses HEAD.
     from canonical_authority_fixture import (
         initialize_canonical_authority,
         isolate_sqlite_runtime,
@@ -2546,6 +2595,7 @@ def test_prior_host_closeout_survives_hidden_todo_lifecycle(
         "Waiting on independent validation.",
         "--successor-todo-id",
         ALTERNATIVE_TODO_ID,
+        source=original_source if provider == "legacy" else REPO_ROOT,
     )
     assert rc == 0, json.dumps(update, indent=2)
     turn_id = recovery["heartbeat_receipt"]["turn_instance_id"]
@@ -2573,10 +2623,12 @@ def test_prior_host_closeout_survives_hidden_todo_lifecycle(
 
 @pytest.mark.parametrize("provider", ["legacy", "file", "sqlite"])
 def test_prior_host_closeout_reads_archived_exact_todo(
+    original_source: Path,
     tmp_path: Path,
     provider: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The legacy arm writes original 1.x state; every recovery read uses HEAD.
     from canonical_authority_fixture import (
         initialize_canonical_authority,
         isolate_sqlite_runtime,
@@ -2650,6 +2702,7 @@ def test_prior_host_closeout_reads_archived_exact_todo(
         AGENT_ID,
         "--next-action-kind",
         "implement",
+        source=original_source if provider == "legacy" else REPO_ROOT,
     )
     assert rc == 0, complete
     rc, archived = _run_cli(
@@ -2662,6 +2715,7 @@ def test_prior_host_closeout_reads_archived_exact_todo(
         "--max-active-done",
         "0",
         "--execute",
+        source=original_source if provider == "legacy" else REPO_ROOT,
     )
     assert rc == 0, archived
     assert archived["moved_count"] == 1
@@ -2716,6 +2770,7 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
         TURN_ID,
     )
 
+    _initialize_settlement_authority(project, runtime)
     guard_rc, guard = _run_cli(
         registry_path,
         runtime,
@@ -3152,6 +3207,7 @@ def test_same_turn_identityless_guard_upgrades_and_settles_full_chain(
         str(project),
     )
 
+    _initialize_settlement_authority(project, runtime)
     first_rc, first = _run_cli(registry_path, runtime, *guard_args)
     upgraded_rc, upgraded = _run_cli(
         registry_path,
@@ -5169,6 +5225,7 @@ def test_pending_action_selection_can_bind_exact_newly_due_monitor(
     assert "settlement_identity" not in first["heartbeat_receipt"]
 
     _append_newly_due_monitor(project)
+    _initialize_settlement_authority(project, runtime)
     selected_rc, selected = _run_cli(
         registry_path,
         runtime,
@@ -5267,6 +5324,7 @@ def test_prior_monitor_turn_accepts_exact_committed_receipt(
         "--available-capability",
         "external_evidence_poll",
     )
+    _initialize_settlement_authority(project, runtime)
     prior_rc, prior = _run_cli(
         registry_path,
         runtime,
@@ -5342,6 +5400,7 @@ def test_prior_monitor_turn_recovery_rejects_wrong_identity_receipt(
         "--available-capability",
         "external_evidence_poll",
     )
+    _initialize_settlement_authority(project, runtime)
     prior_rc, prior = _run_cli(
         registry_path,
         runtime,
@@ -5450,6 +5509,7 @@ def test_receipt_bound_advancement_turn_records_multiple_due_monitors(
         "--available-capability",
         "external_evidence_poll",
     )
+    _initialize_settlement_authority(project, runtime)
     first_rc, first = _run_cli(registry_path, runtime, *guard_args)
 
     assert first_rc == 0, first
@@ -6540,6 +6600,7 @@ def test_same_turn_receipt_replay_defers_newly_due_higher_priority_monitor(
     assert first["heartbeat_receipt"]["settlement_identity"]["todo_id"] == TODO_ID
 
     _append_newly_due_monitor(project)
+    _initialize_settlement_authority(project, runtime)
     capability_args = (
         "--available-capability",
         "network",
@@ -6695,12 +6756,14 @@ def test_same_turn_receipt_replay_defers_newly_due_higher_priority_monitor(
     assert resumed_turn["selected_todo"]["todo_id"] == DUE_MONITOR_TODO_ID
 
 
-@pytest.mark.parametrize("provider", ["legacy", "file", "sqlite"])
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_read_only_settlement_omits_non_causal_delivery_workspace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     provider: str,
 ) -> None:
+    # Normal completion now requires canonical authority. Historical source
+    # fallback has its own original-producer/current-reader case below.
     # The two legal completion phases may commit within one clock tick. Keep
     # the real CLI, authority and hook journal; freeze only their commit clock.
     run = subprocess.run
@@ -6708,10 +6771,9 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     def frozen_completion_clock(argv, *args, **kwargs):
         if isinstance(argv, list) and argv[1:3] == ["-m", "loopx.cli"]:
             program = (
-                "import loopx.control_plane.todos.legacy_mutation as legacy; "
                 "import loopx.control_plane.todos.provider_terminal_lifecycle as native; "
                 "clock=lambda:'2026-09-02T12:00:00+00:00'; "
-                "legacy.now_local=clock; native.now_local=clock; "
+                "native.now_local=clock; "
                 "from loopx.cli import main; raise SystemExit(main())"
             )
             argv = [argv[0], "-c", program, *argv[3:]]
@@ -6740,26 +6802,25 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
         ),
         encoding="utf-8",
     )
-    if provider != "legacy":
-        from canonical_authority_fixture import (
-            initialize_canonical_authority,
-            isolate_sqlite_runtime,
-        )
-        from loopx.control_plane.coordination.runtime_shadow import (
-            build_todo_runtime_shadow_projection,
-        )
+    from canonical_authority_fixture import (
+        initialize_canonical_authority,
+        isolate_sqlite_runtime,
+    )
+    from loopx.control_plane.coordination.runtime_shadow import (
+        build_todo_runtime_shadow_projection,
+    )
 
-        if provider == "sqlite":
-            isolate_sqlite_runtime(tmp_path, monkeypatch)
-        todos = parse_active_state_todos(state_path.read_text(), item_limit=None)
-        initialize_canonical_authority(
-            runtime, GOAL_ID,
-            build_todo_runtime_shadow_projection(
-                goal_id=GOAL_ID, todos=todos["agent_todos"]["items"],
-                handoff_mode="soft_claim",
-            ),
-            state_path=state_path, provider=provider,
-        )
+    if provider == "sqlite":
+        isolate_sqlite_runtime(tmp_path, monkeypatch)
+    todos = parse_active_state_todos(state_path.read_text(), item_limit=None)
+    initialize_canonical_authority(
+        runtime, GOAL_ID,
+        build_todo_runtime_shadow_projection(
+            goal_id=GOAL_ID, todos=todos["agent_todos"]["items"],
+            handoff_mode="soft_claim",
+        ),
+        state_path=state_path, provider=provider,
+    )
     binding = (
         "--agent-id",
         AGENT_ID,
@@ -7039,6 +7100,7 @@ def test_same_turn_terminal_receipt_replay_preempts_autonomous_replan(
         TURN_ID,
     )
 
+    _initialize_settlement_authority(project, runtime)
     first_rc, first = _run_cli(registry_path, runtime, *guard_args)
     assert first_rc == 0, first
     assert first["selected_todo"]["todo_id"] == TODO_ID
@@ -7150,6 +7212,7 @@ def test_settled_turn_defers_prior_unsettled_history_to_fresh_turn(
         TURN_ID,
     )
 
+    _initialize_settlement_authority(project, runtime)
     first_rc, first = _run_cli(registry_path, runtime, *guard_args)
     assert first_rc == 0, first
     assert first["selected_todo"]["todo_id"] == TODO_ID
@@ -7263,6 +7326,7 @@ def test_settled_turn_defers_prior_unsettled_history_to_fresh_turn(
 
 
 def test_legacy_read_only_workspace_mismatch_fails_then_corrects_from_todo_contract(
+    original_source: Path,
     tmp_path: Path,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
@@ -7311,6 +7375,7 @@ def test_legacy_read_only_workspace_mismatch_fails_then_corrects_from_todo_contr
         "--evidence",
         "legacy read-only characterization validated",
         "--no-follow-up",
+        source=original_source,
     )
     assert complete_rc == 0, complete
 
