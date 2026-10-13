@@ -5,6 +5,7 @@ import pytest
 
 from tests.capabilities.test_explore_turn_context import registry
 from loopx.control_plane.effect_runtime import EffectRuntimeRejected
+from loopx.control_plane.coordination.local_authority import LocalCoordinationAuthorityUnavailable
 from loopx.todos import add_goal_todo, update_goal_todo, list_goal_todos
 from loopx.capabilities.explore.result_writeback import (
     prepare_result_attachment,
@@ -125,12 +126,15 @@ def test_todo_additive_owner_preserves_all_links_and_rejects_conflicting_intents
     exact = list_goal_todos(registry_path=args["registry_path"], goal_id="research",
                             todo_id=args["todo_id"])["todo"]
     assert exact["explore_result_node_refs"] == ["prior", "prefix-bound", *additions]
-    with pytest.raises(ValueError):
+    with pytest.raises(LocalCoordinationAuthorityUnavailable, match="cannot replace and append"):
         update_goal_todo(
             **keys,
             explore_result_node_refs=[],
             append_explore_result_node_refs=["other"],
         )
+    assert list_goal_todos(
+        registry_path=args["registry_path"], goal_id="research", todo_id=args["todo_id"]
+    )["todo"] == exact
 
 
 @pytest.mark.parametrize(
@@ -188,13 +192,15 @@ def test_partial_link_failure_replays_without_duplicate_or_primary_rollback(
                                 "path-disabled", "path-missing", "path-no-evidence", "path-overflow"])
 def test_real_cli_inline_validation_precedes_primary_commit(tmp_path, case):
     from tests.control_plane.test_quota_settlement_cli import (
-        _write_fixture, _run_cli, GOAL_ID, AGENT_ID, TODO_ID, TURN_ID,
+        _write_fixture, _run_cli, _initialize_settlement_authority,
+        GOAL_ID, AGENT_ID, TODO_ID, TURN_ID,
     )
 
     project, runtime, path = _write_fixture(tmp_path)
     config = json.loads(path.read_text())
     config["goals"][0]["explore_graph"] = {"enabled": case not in {"disabled", "off-without-result", "path-disabled"}}
     path.write_text(json.dumps(config))
+    _initialize_settlement_authority(project, runtime)
     rc, claimed = _run_cli(path, runtime, "todo", "claim", "--goal-id", GOAL_ID,
                           "--todo-id", TODO_ID, "--agent-id", AGENT_ID,
                           "--claimed-by", AGENT_ID, cwd=project)
@@ -279,32 +285,6 @@ def test_real_cli_normal_writeback_persists_attachment_and_rejects_conflicting_r
         "explore_harness": {"enabled": True},
     }
     path.write_text(json.dumps(config))
-    rc, claimed = _run_cli(
-        path,
-        runtime,
-        "todo",
-        "claim",
-        "--goal-id",
-        GOAL_ID,
-        "--todo-id",
-        TODO_ID,
-        "--agent-id",
-        AGENT_ID,
-        "--claimed-by",
-        AGENT_ID,
-        cwd=project,
-    )
-    assert rc == 0, claimed
-    if source_mode == "linked_path_delta":
-        from loopx.capabilities.explore.result_log import (
-            append_explore_result_event, build_explore_node_event,
-        )
-        append_explore_result_event(explore_result_log_path(runtime, GOAL_ID),
-            build_explore_node_event(goal_id=GOAL_ID, node_id=ATTACHMENT["node_id"],
-                node_kind="question", title=ATTACHMENT["question"],
-                summary=ATTACHMENT["applicability"], status="open"))
-        update_goal_todo(registry_path=path, goal_id=GOAL_ID, todo_id=TODO_ID,
-            agent_id=AGENT_ID, explore_result_node_refs=[ATTACHMENT["node_id"]])
     terminal_proof = {}
     if terminal:
         from canonical_authority_fixture import initialize_canonical_authority
@@ -315,6 +295,13 @@ def test_real_cli_normal_writeback_persists_attachment_and_rejects_conflicting_r
         from loopx.todos import complete_goal_todo
 
         todos = list_goal_todos(registry_path=path, goal_id=GOAL_ID)["todos"]
+        if source_mode == "linked_path_delta":
+            # The evidence scope belongs to the task declaration before its
+            # execution grant; a lease cannot be repurposed by metadata edits.
+            for todo in todos:
+                if todo["todo_id"] == TODO_ID:
+                    todo["explore_result_node_refs"] = [ATTACHMENT["node_id"]]
+
         initialize_canonical_authority(
             runtime,
             GOAL_ID,
@@ -336,6 +323,20 @@ def test_real_cli_normal_writeback_persists_attachment_and_rejects_conflicting_r
             task_lease_idempotency_key="cli-terminal-result",
             task_lease_expected_version=lease["lease"]["version"],
         )
+    else:
+        from tests.control_plane.test_quota_settlement_cli import _initialize_settlement_authority
+        _initialize_settlement_authority(project, runtime)
+    if source_mode == "linked_path_delta":
+        from loopx.capabilities.explore.result_log import (
+            append_explore_result_event, build_explore_node_event,
+        )
+        append_explore_result_event(explore_result_log_path(runtime, GOAL_ID),
+            build_explore_node_event(goal_id=GOAL_ID, node_id=ATTACHMENT["node_id"],
+                node_kind="question", title=ATTACHMENT["question"],
+                summary=ATTACHMENT["applicability"], status="open"))
+        if not terminal:
+            update_goal_todo(registry_path=path, goal_id=GOAL_ID, todo_id=TODO_ID,
+                agent_id=AGENT_ID, explore_result_node_refs=[ATTACHMENT["node_id"]])
     binding = (
         "--goal-id",
         GOAL_ID,
@@ -798,8 +799,6 @@ def test_real_cli_open_capture_release_order_and_readback_replay(tmp_path, provi
         assert rc == 0, packet
         return packet
 
-    run("todo", "claim", "--goal-id", GOAL_ID, "--todo-id", TODO_ID,
-        "--agent-id", AGENT_ID, "--claimed-by", AGENT_ID)
     todos = list_goal_todos(registry_path=path, goal_id=GOAL_ID)["todos"]
     initialize_canonical_authority(runtime, GOAL_ID,
         build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=todos, handoff_mode="hard_lease"),

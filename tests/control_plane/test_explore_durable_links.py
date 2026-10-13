@@ -25,8 +25,6 @@ def test_ninth_capture_keeps_history_and_survives_real_cli_replay(tmp_path, prov
     registry.write_text(json.dumps(config))
     binding = ("--goal-id", GOAL_ID, "--agent-id", AGENT_ID, "--todo-id", TODO_ID,
                "--turn-instance-id", TURN_ID)
-    assert _run_cli(registry, runtime, "todo", "claim", "--claimed-by", AGENT_ID,
-                    *binding[:-2], cwd=project)[0] == 0
     rows = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)["todos"]
     initialize_canonical_authority(runtime, GOAL_ID,
         build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=rows, handoff_mode="hard_lease"),

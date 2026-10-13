@@ -52,6 +52,24 @@ def registry(tmp_path, *, graph=False, planning=False):
             }
         )
     )
+    # Ordinary Explore callers use canonical authority after the 2.0 cutoff.
+    # This consumer seed is not a qualification of legacy import.
+    from canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    from loopx.control_plane.coordination.coordination_state_contract import (
+        TODO_DOMAIN_READ_RECORD_SCHEMA_VERSION, TODO_DOMAIN_RECORD_FIELDS,
+    )
+
+    projection = build_todo_runtime_shadow_projection(
+        goal_id="research", todos=[], handoff_mode="soft_claim"
+    )
+    projection["todo_read_model"].update(
+        schema_version=TODO_DOMAIN_READ_RECORD_SCHEMA_VERSION,
+        contract_fields=list(TODO_DOMAIN_RECORD_FIELDS),
+    )
+    initialize_canonical_authority(
+        tmp_path / "runtime", "research", projection, state_path=tmp_path / "goal.md"
+    )
     return path
 
 
