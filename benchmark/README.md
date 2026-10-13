@@ -477,7 +477,7 @@ remain open. No automatic retention or extra evaluation opportunity is introduce
 The read-only participant above does **not** implement the newer native capsule
 API. The separate controller adapter targets
 [EdgeBench PR #23](https://github.com/ByteDance-Seed/EdgeBench/pull/23), pinned at
-`4db79f4ea332ffd30c265ec7cb076f93471bd201`; this is proposed source, not a released
+`57dce5dd1fded9d5d5cbd44fa59c59d27a068d62`; this is proposed source, not a released
 upstream version. Start that pinned native judge with `sforge serve --checkpoints`.
 Its private controller configuration file has exactly `url`, `admin_secret` and
 `bank_root` (the native log directory's `checkpoints` directory). Keep this file,
@@ -507,8 +507,13 @@ Restore writes its new token only to the explicit
 private result file; stdout contains its path. Wrong authority, corrupt bytes,
 aliases, foreign bank entries, source-run reuse and duplicate native admission
 fail without a fresh evaluation. Redirects cannot forward the admin secret.
-After an uncertain restore response, inspect native readback with the controller;
-do not switch run identities or perform ordinary fresh registration as a retry.
+After an uncertain restore response, repeat the same controller `restore` command
+with `--recover`, preserving the same capsule digest, run identity, result-file
+and optional phase-deadline-file. Recovery reads the original native activation
+through `/api/v1/checkpoint/restore-result`; it does not allocate a registration,
+replay grading or reset cooldown. A successful result may be read back again.
+An absent original activation or lost live authority refuses recovery. Do not
+switch identities or perform ordinary fresh registration as a retry.
 
 For an explicitly owned Docker worker, `capture-worker` can additionally freeze
 its writers while copying declared files and capturing the native capsule. Supply
@@ -570,10 +575,16 @@ with this participant requires the matching explicit restore option; omitting it
 cannot discard its allowance. Existing/aliased files, source movement, changed
 sealed bytes and exhausted work allowance refuse activation. An uncertain native
 response leaves the reserved phase file empty and unusable by the ordinary Host
-entry, preventing a fresh-budget fallback. Reconcile that original native
-operation before any owner-authorized recovery; no automatic replay, new run or
-budget reset is supplied. Omit the option on **new captures** to retain native-only
-transport. Full Host source attribution, source/native clock alignment and the
+entry, preventing a fresh-budget fallback. Before native activation, the adapter
+syncs a private sibling `<phase-file>.restore.json` containing the exact attempt
+binding and destination deadline, without tokens. Explicit `--recover` uses that
+original deadline: recovery delay consumes the remaining allowance, and expiry
+refuses continuation. Result/phase locks prevent concurrent controller recovery;
+partial records, aliases, changed identities and missing records fail closed.
+Do not edit, copy independently or replace the attempt files to retry. The record
+is local provider state, not part of the portable capsule or a new authorization
+source. This recovery is explicit, with no automatic replay or new run. Omit the
+option on **new captures** to retain native-only transport. Full Host source attribution, source/native clock alignment and the
 joint session/research/effect barrier remain qualification requirements.
 
 This is an independently usable **native participant transport**, still partial
@@ -583,7 +594,12 @@ not qualify full research-state adoption or a same-point scientific comparison.
 Never put its controller configuration in `--checkpoint-request` or a worker
 payload. Omit both these controller operations and the native `--checkpoints`
 flag to disable this transport on a fresh judge; preserved capsules stay inert.
-Synthetic native HTTP tests and an explicitly enabled Docker qualification are:
+Native HTTP tests cover lost replies, exact readback, unavailable authority and
+invalid local recovery state. The explicitly enabled Docker qualification also
+loses a reply after real native commit, recovers the original deadline, runs the
+ordinary SForge phase-entry shell in Linux, and produces and grades a synthetic
+candidate without refilling rounds/cooldown. It excludes model inference and
+does not establish full research continuation. Run these checks with:
 
 ```sh
 python -m pytest -q benchmark/tests/test_checkpoint_controller.py

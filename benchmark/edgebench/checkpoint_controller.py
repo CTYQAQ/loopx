@@ -6,12 +6,14 @@ owner seals and verifies the bank bytes. Nothing here belongs in a solver payloa
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import math
 import os
 import re
 import shutil
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -118,13 +120,59 @@ def _phase_budget(raw: bytes, native: dict) -> dict:
             "captured_at_epoch": captured, "remaining_seconds": max(0, epoch - captured)}
 
 
-def _phase_destination(path: Path, *, root: Path, bank: Path) -> Path:
+def _phase_destination(path: Path, *, root: Path, bank: Path, recover: bool = False) -> Path:
     path = Path(path)
     _physical(path.parent)
-    if (not path.is_absolute() or path.resolve() != path or path.exists() or path.is_symlink()
+    if (not path.is_absolute() or path.resolve() != path or (path.exists() and not recover) or path.is_symlink()
             or path.is_relative_to(root) or path.is_relative_to(bank)):
         raise ValueError("Host phase restoration requires a fresh physical file outside artifact/bank roots")
     return path
+
+
+def _private_file(path: Path) -> None:
+    info = _physical(path).stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_nlink != 1:
+        raise ValueError("Recovery requires an owner-only physical regular file")
+
+
+def _sync_parent(path: Path) -> None:
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _activation_epoch(path: Path, binding: dict, remaining: float, recover: bool) -> int:
+    """Provider-local attempt binding; no token or historical authority is stored."""
+    record = path.with_name(path.name + ".restore.json")
+    if recover:
+        _private_file(record)
+        value = json.loads(record.read_bytes())
+        if (not isinstance(value, dict) or set(value) != {"binding", "deadline_epoch"}
+                or value["binding"] != binding):
+            raise ValueError("Host recovery does not match the original activation")
+        epoch = value["deadline_epoch"]
+    else:
+        epoch = math.floor(time.time() + remaining)
+        # Commit this before contacting native admission. A partial record
+        # cannot be recovered, and retry never computes another deadline.
+        with os.fdopen(os.open(record, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as target:
+            json.dump({"binding": binding, "deadline_epoch": epoch}, target)
+            target.flush()
+            os.fsync(target.fileno())
+        _sync_parent(record)
+    if type(epoch) is not int or not 0 < epoch < 2 ** 53:
+        raise ValueError("Destination Host phase clock is incompatible")
+    if epoch - time.time() <= PHASE_WORK_RESERVE_SECONDS:
+        raise ValueError("Original Host activation budget is exhausted")
+    return epoch
+
+
+def _activation_result(result: dict, body: dict) -> None:
+    if (set(result) != {*body, "token"} or any(result.get(k) != v for k, v in body.items())
+            or not isinstance(result.get("token"), str) or not result["token"]):
+        raise ValueError("Native activation result differs from the original request")
 
 
 def capture(controller_file: Path, *, token: str, capture_id: str, destination: Path,
@@ -178,7 +226,7 @@ def capture(controller_file: Path, *, token: str, capture_id: str, destination: 
 
 
 def restore(controller_file: Path, *, root: Path, expected_sha256: str, run_id: str,
-            timeout: float = 30, phase_deadline_file: Path | None = None) -> dict:
+            timeout: float = 30, phase_deadline_file: Path | None = None, recover: bool = False) -> dict:
     """Import verified inert bytes, then ask fresh native authority to admit them.
 
     An explicitly captured Host clock preserves its remaining phase duration.
@@ -211,61 +259,74 @@ def restore(controller_file: Path, *, root: Path, expected_sha256: str, run_id: 
             raise ValueError("Host phase metadata differs from sealed deadline/native clock")
         if phase["remaining_seconds"] <= PHASE_WORK_RESERVE_SECONDS:
             raise ValueError("Captured Host phase has no work allowance beyond its existing reserve")
-        phase_path = _phase_destination(phase_deadline_file, root=root, bank=bank)
+        phase_path = _phase_destination(phase_deadline_file, root=root, bank=bank, recover=recover)
     target = bank / reference["checkpoint_id"]
     stage = Path(tempfile.mkdtemp(prefix=".loopx-native-import-", dir=bank))
     phase_fd = None
     phase_published = False
+    phase_locked = False
     native_attempted = False
     try:
         if phase_path is not None:
             # Empty is unusable by the existing SForge phase-entry shell.
             # An uncertain native response must not fall back to a new budget.
-            phase_fd = os.open(phase_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        effect_runtime_result("runtime.checkpoint_artifacts", {
-            "action": "materialize", "root": str(root), "expected_sha256": expected_sha256,
-            "destination": str(stage / "unit"),
-        }, retry_safe=False)
-        imported = stage / "unit/components/native_judge"
-        _bound_bank(imported, reference)
-        if target.exists():
-            _bound_bank(_physical(target), reference)  # No overwrite, even on retry.
+            if recover:
+                _private_file(phase_path)
+            phase_fd = os.open(phase_path, os.O_RDWR | os.O_NOFOLLOW | (0 if recover else os.O_CREAT | os.O_EXCL), 0o600)
+            fcntl.flock(phase_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            phase_locked = True
+            original_phase = phase_path.read_bytes()
+            phase_published = bool(original_phase)
+        if recover:
+            _bound_bank(_physical(target), reference)
         else:
-            # POSIX rename can replace an empty destination. Reserve its name
-            # exclusively; interruption leaves an unusable point, never grants.
-            target.mkdir(mode=0o700)
-            try:
-                imported.rename(target)
-            except BaseException:
-                target.rmdir()
-                raise
-            descriptor = os.open(bank, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-        phase_epoch = None if phase is None else math.floor(time.time() + phase["remaining_seconds"])
-        if phase_epoch is not None and not 0 < phase_epoch < 2 ** 53:
-            raise ValueError("Destination Host phase clock is incompatible")
+            effect_runtime_result("runtime.checkpoint_artifacts", {
+                "action": "materialize", "root": str(root), "expected_sha256": expected_sha256,
+                "destination": str(stage / "unit"),
+            }, retry_safe=False)
+            imported = stage / "unit/components/native_judge"
+            _bound_bank(imported, reference)
+            if target.exists():
+                _bound_bank(_physical(target), reference)  # No overwrite, even on retry.
+            else:
+                # POSIX rename can replace an empty destination. Reserve its name
+                # exclusively; interruption leaves an unusable point, never grants.
+                target.mkdir(mode=0o700)
+                try:
+                    imported.rename(target)
+                except BaseException:
+                    target.rmdir()
+                    raise
+                descriptor = os.open(bank, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+        body = {"checkpoint_id": reference["checkpoint_id"],
+                "manifest_sha256": reference["manifest_sha256"], "run_id": run_id}
+        phase_epoch = None
+        if phase_path is not None:
+            phase_epoch = _activation_epoch(phase_path, {
+                **body, "artifact_sha256": expected_sha256, "controller_url": controller["url"],
+                "bank_root": str(bank), "phase_path": str(phase_path),
+            }, phase["remaining_seconds"], recover)
+            if original_phase not in (b"", f"{phase_epoch}\n".encode()):
+                raise ValueError("Host phase bytes differ from original activation")
         native_attempted = True
-        result = _post(controller, "/api/v1/checkpoint/restore", {
-            "checkpoint_id": reference["checkpoint_id"], "manifest_sha256": reference["manifest_sha256"],
-            "run_id": run_id,
-        }, timeout)
+        route = "/api/v1/checkpoint/restore-result" if recover else "/api/v1/checkpoint/restore"
+        result = _post(controller, route, body, timeout)
+        _activation_result(result, body)
         if phase_fd is not None:
-            if not isinstance(result.get("token"), str) or not result["token"]:
-                raise ValueError("Native phase activation returned no fresh authority result")
+            if phase_epoch - time.time() <= PHASE_WORK_RESERVE_SECONDS:
+                raise ValueError("Original Host activation budget is exhausted")
             # Charge activation/transport, not offline time or a fresh trial.
             # Native alone owns accepted counters and remaining cooldown.
             encoded = f"{phase_epoch}\n".encode()
+            os.lseek(phase_fd, 0, os.SEEK_SET)
             if os.write(phase_fd, encoded) != len(encoded):
                 raise OSError("Destination Host phase write was incomplete")
             os.fsync(phase_fd)
-            directory = os.open(phase_path.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            _sync_parent(phase_path)
             if phase_path.read_bytes() != f"{phase_epoch}\n".encode():
                 raise ValueError("Destination Host phase readback differs from activation")
             phase_published = True
@@ -273,12 +334,12 @@ def restore(controller_file: Path, *, root: Path, expected_sha256: str, run_id: 
     finally:
         if phase_fd is not None:
             try:
-                if native_attempted and not phase_published:
+                if phase_locked and native_attempted and not phase_published:
                     os.ftruncate(phase_fd, 0)
                     os.fsync(phase_fd)
             finally:
                 os.close(phase_fd)
-            if not native_attempted:
+            if phase_locked and not native_attempted and not recover:
                 phase_path.unlink()
         shutil.rmtree(stage)
 
@@ -306,6 +367,8 @@ def main(argv=None) -> None:
     restore_parser.add_argument("--result-file", required=True, type=Path)
     restore_parser.add_argument("--phase-deadline-file", type=Path,
                                 help="Fresh physical Host phase file, required for a capsule containing that participant")
+    restore_parser.add_argument("--recover", action="store_true",
+                                help="Read the exact original native result and retain its original Host deadline")
     args = parser.parse_args(argv)
     if args.command in {"capture", "capture-worker"}:
         source_token = _physical(args.token_file).read_text().strip()
@@ -326,14 +389,24 @@ def main(argv=None) -> None:
         _physical(args.result_file.parent)
         if args.result_file != args.result_file.resolve():
             raise ValueError("Continuation result must be a normalized physical path")
-        with args.result_file.open("x") as result_file:
+        if args.recover:
+            _private_file(args.result_file)
+        with args.result_file.open("r+" if args.recover else "x") as result_file:
             args.result_file.chmod(0o600)
+            fcntl.flock(result_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            prior_raw = result_file.read() if args.recover else ""
+            prior_result = json.loads(prior_raw) if prior_raw else None
             result = restore(args.controller_file, root=args.root,
                 expected_sha256=args.expected_sha256, run_id=args.run_id,
-                phase_deadline_file=args.phase_deadline_file)
+                phase_deadline_file=args.phase_deadline_file, recover=args.recover)
+            if prior_result is not None and prior_result != result:
+                raise ValueError("Existing private result differs from original native activation")
+            result_file.seek(0)
             json.dump(result, result_file)
+            result_file.truncate()
             result_file.flush()
             os.fsync(result_file.fileno())
+            _sync_parent(args.result_file)
         print(json.dumps({"result_file": str(args.result_file), "run_id": args.run_id}))
 
 

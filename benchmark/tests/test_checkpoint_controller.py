@@ -320,6 +320,65 @@ def test_phase_ambiguity_never_replaces_point_or_refills_budget(controllers, tmp
     assert grades == []
 
 
+@pytest.mark.parametrize("fault", ["wrong_run", "expired", "partial_record", "phase_alias", "result_corrupt", "lost_authority", "busy"])
+def test_recovery_refuses_mismatched_or_unavailable_original_activation(controllers, tmp_path, monkeypatch, fault):
+    import fcntl
+    source, destination, first, second, files, grades = controllers
+    token = register(source, first)
+    source_phase = tmp_path / "source-phase"
+    source_phase.write_text(f"{int(time.time()) + 7200}\n")
+    unit = tmp_path / "unit"
+    point = transport.capture(files[0], token=token, capture_id="9" * 32,
+                              destination=unit, phase_deadline_file=source_phase)
+    phase, result = tmp_path / "phase", tmp_path / "result"
+    args = ["--controller-file", str(files[1]), "restore", "--root", str(unit),
+            "--expected-sha256", point["sha256"], "--run-id", "branch",
+            "--result-file", str(result), "--phase-deadline-file", str(phase)]
+    post = transport._post
+    calls = []
+    def lost(controller, route, body, timeout):
+        calls.append(route)
+        response = post(controller, route, body, timeout)
+        if route.endswith("/restore"):
+            raise TimeoutError("Lost committed result")
+        return response
+    monkeypatch.setattr(transport, "_post", lost)
+    with pytest.raises(TimeoutError):
+        transport.main(args)
+    record = phase.with_name("phase.restore.json")
+    original_epoch = json.loads(record.read_bytes())["deadline_epoch"]
+    lock = None
+    if fault == "wrong_run":
+        args[args.index("--run-id") + 1] = "another-branch"
+    elif fault == "expired":
+        monkeypatch.setattr(transport, "time", SimpleNamespace(time=lambda: original_epoch + 1))
+    elif fault == "partial_record":
+        record.write_bytes(b"{")
+    elif fault == "phase_alias":
+        phase.unlink()
+        phase.symlink_to(source_phase)
+    elif fault == "result_corrupt":
+        result.write_bytes(b"{")
+    elif fault == "lost_authority":
+        destination.state.judge.tokens.clear()
+    elif fault == "busy":
+        lock = phase.open("r+")
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    before = copy.deepcopy((destination.state.judge.tokens, destination.state.judge.run_history))
+    old_bytes = (phase.read_bytes(), result.read_bytes(), record.read_bytes())
+    try:
+        with pytest.raises((ValueError, OSError)):
+            transport.main(args + ["--recover"])
+    finally:
+        if lock:
+            lock.close()
+    assert (phase.read_bytes(), result.read_bytes(), record.read_bytes()) == old_bytes
+    assert (destination.state.judge.tokens, destination.state.judge.run_history) == before
+    assert calls.count("/api/v1/checkpoint/restore") == 1 and grades == []
+    if fault != "lost_authority":
+        assert calls == ["/api/v1/checkpoint/restore"]
+
+
 @pytest.mark.parametrize("raw", [b"", b"nan\n", b"1.5\n", b"9007199254740992\n"])
 def test_invalid_host_epoch_cannot_create_native_point(controllers, tmp_path, raw):
     source, destination, first, second, files, grades = controllers
@@ -365,6 +424,13 @@ def test_partial_phase_write_keeps_committed_native_result_inert(controllers, tm
         transport.restore(files[1], root=unit, expected_sha256=point["sha256"],
                           run_id="phase-branch", phase_deadline_file=target)
     assert target.read_bytes() == b"" and len(destination.state.judge.tokens) == 1 and grades == []
+    original = copy.deepcopy(destination.state.judge.tokens)
+    epoch = json.loads(target.with_name("phase.restore.json").read_bytes())["deadline_epoch"]
+    monkeypatch.setattr(transport, "os", os)
+    fresh = transport.restore(files[1], root=unit, expected_sha256=point["sha256"],
+                              run_id="phase-branch", phase_deadline_file=target, recover=True)
+    assert fresh["token"] in original and destination.state.judge.tokens == original
+    assert int(target.read_bytes()) == epoch and grades == []
 
 
 @pytest.mark.parametrize("fault", ["wrong_admin", "corrupt", "wrong_digest", "aliased", "existing_bank"])
@@ -420,8 +486,8 @@ def test_redirect_never_forwards_controller_authority(tmp_path):
 
 @pytest.mark.skipif(os.environ.get("LOOPX_EDGEBENCH_DOCKER_SMOKE") != "1",
                     reason="Requires explicit isolated native Docker qualification")
-@pytest.mark.parametrize("phase_budget", [False, True])
-def test_real_docker_controller_export_import_and_next_grade(tmp_path, monkeypatch, phase_budget):
+@pytest.mark.parametrize("phase_budget,lose_response", [(False, False), (True, False), (True, True)])
+def test_real_docker_controller_export_import_and_next_grade(tmp_path, monkeypatch, phase_budget, lose_response):
     import uuid
     import docker
     import requests
@@ -498,49 +564,79 @@ def test_real_docker_controller_export_import_and_next_grade(tmp_path, monkeypat
             control = tmp_path / "host-control"
             control.mkdir()
             phase = control / "phase-deadline"
-            fresh = transport.restore(files[1], root=exported, expected_sha256=point["sha256"], run_id="branch",
-                                      phase_deadline_file=phase if phase_budget else None)["token"]
+            args = ["--controller-file", str(files[1]), "restore", "--root", str(exported),
+                    "--expected-sha256", point["sha256"], "--run-id", "branch",
+                    "--result-file", str(control / "result.json")]
+            if phase_budget:
+                args += ["--phase-deadline-file", str(phase)]
+            post = transport._post
+            routes = []
+            def observed_post(controller, route, body, timeout):
+                routes.append(route)
+                result = post(controller, route, body, timeout)
+                if lose_response and route.endswith("/restore"):
+                    raise TimeoutError("Lost reply after real native commit")
+                return result
+            monkeypatch.setattr(transport, "_post", observed_post)
+            if lose_response:
+                with pytest.raises(TimeoutError):
+                    transport.main(args)
+                assert phase.read_bytes() == (control / "result.json").read_bytes() == b""
+                retained_epoch = json.loads((control / "phase-deadline.restore.json").read_bytes())["deadline_epoch"]
+                native_state = copy.deepcopy((destination.state.judge.tokens, destination.state.judge.run_history))
+                now[0] += 60
+                transport.main(args + ["--recover"])
+                transport.main(args + ["--recover"])
+                assert int(phase.read_bytes()) == retained_epoch
+                assert (destination.state.judge.tokens, destination.state.judge.run_history) == native_state
+                assert routes == ["/api/v1/checkpoint/restore", "/api/v1/checkpoint/restore-result",
+                                  "/api/v1/checkpoint/restore-result"]
+            else:
+                transport.main(args)
+            fresh = json.loads((control / "result.json").read_bytes())["token"]
             assert fresh != token and len(grades) == 1
             assert grade(second, fresh, 3).status_code == 429
             now[0] += 3601
+            continued_score = 3
             if phase_budget:
                 # The actual SForge phase shell consumes the restored duration
                 # inside a disposable Linux container, then writes a new candidate.
-                    prefix = host_phase_command(tmp_path, monkeypatch)
-                    guest_control = "/opt/loopx-benchmark/control"
-                    command = prefix + f"printf '%s' \"$remaining\"; printf '{{\"score\":3}}' > '{guest_control}/candidate.json'"
-                    guest = client.containers.create(image.id, ["/bin/bash", "-c", command],
-                        environment={"PATH": guest_control + "/bin:/usr/bin:/bin"},
-                        network_disabled=True, mem_limit="128m", nano_cpus=1_000_000_000)
+                prefix = host_phase_command(tmp_path, monkeypatch)
+                guest_control = "/opt/loopx-benchmark/control"
+                command = prefix + f"printf '%s' \"$remaining\"; printf '{{\"score\":3}}' > '{guest_control}/candidate.json'"
+                guest = client.containers.create(image.id, ["/bin/bash", "-c", command],
+                    environment={"PATH": guest_control + "/bin:/usr/bin:/bin"},
+                    network_disabled=True, mem_limit="128m", nano_cpus=1_000_000_000)
+                try:
+                    # Upload explicitly: a remote Docker daemon cannot read
+                    # the caller's temporary directory through a host mount.
+                    upload = io.BytesIO()
+                    with tarfile.open(fileobj=upload, mode="w") as archive:
+                        for relative in ("opt", "opt/loopx-benchmark", "opt/loopx-benchmark/control",
+                                         "opt/loopx-benchmark/control/bin"):
+                            member = tarfile.TarInfo(relative)
+                            member.type, member.mode = tarfile.DIRTYPE, 0o700
+                            archive.addfile(member)
+                        for relative, data, mode in (
+                            ("phase-deadline", phase.read_bytes(), 0o600),
+                            ("bin/date", f"#!/bin/sh\nprintf '%s\\n' {int(now[0])}\n".encode(), 0o700)):
+                            member = tarfile.TarInfo("opt/loopx-benchmark/control/" + relative)
+                            member.size, member.mode = len(data), mode
+                            archive.addfile(member, io.BytesIO(data))
+                    assert guest.put_archive("/", upload.getvalue())
+                    guest.start()
+                    assert guest.wait(timeout=30)["StatusCode"] == 0
+                    assert 3580 - (60 if lose_response else 0) < int(guest.logs()) <= 3600 - (60 if lose_response else 0)
+                    stream, _ = guest.get_archive(guest_control + "/candidate.json")
                     try:
-                        # Upload explicitly: a remote Docker daemon cannot read
-                        # the caller's temporary directory through a host mount.
-                        upload = io.BytesIO()
-                        with tarfile.open(fileobj=upload, mode="w") as archive:
-                            for relative in ("opt", "opt/loopx-benchmark", "opt/loopx-benchmark/control",
-                                             "opt/loopx-benchmark/control/bin"):
-                                member = tarfile.TarInfo(relative)
-                                member.type, member.mode = tarfile.DIRTYPE, 0o700
-                                archive.addfile(member)
-                            for relative, data, mode in (
-                                ("phase-deadline", phase.read_bytes(), 0o600),
-                                ("bin/date", f"#!/bin/sh\nprintf '%s\\n' {int(now[0])}\n".encode(), 0o700)):
-                                member = tarfile.TarInfo("opt/loopx-benchmark/control/" + relative)
-                                member.size, member.mode = len(data), mode
-                                archive.addfile(member, io.BytesIO(data))
-                        assert guest.put_archive("/", upload.getvalue())
-                        guest.start()
-                        assert guest.wait(timeout=30)["StatusCode"] == 0
-                        assert 3580 < int(guest.logs()) <= 3600
-                        stream, _ = guest.get_archive(guest_control + "/candidate.json")
-                        try:
-                            with tarfile.open(fileobj=io.BytesIO(b"".join(stream))) as archive:
-                                assert json.loads(archive.extractfile("candidate.json").read()) == {"score": 3}
-                        finally:
-                            stream.close()
+                        with tarfile.open(fileobj=io.BytesIO(b"".join(stream))) as archive:
+                            continued_score = json.loads(archive.extractfile("candidate.json").read())["score"]
+                            assert continued_score == 3
                     finally:
-                        guest.remove(force=True)
-            assert grade(second, fresh, 3).json()["round_id"] == "agent-2"
+                        stream.close()
+                finally:
+                    guest.remove(force=True)
+            assert grade(second, fresh, continued_score).json()["round_id"] == "agent-2"
             history = requests.get(second + "/api/v1/history", params={"token": fresh}, timeout=5).json()
             assert history["best_score"] == 7 and history["best_round"] == "agent-1"
             assert grade(second, fresh, 99).status_code == 429 and len(grades) == 2
