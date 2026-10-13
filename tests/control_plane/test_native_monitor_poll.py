@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
-from test_monitor_followthrough_contract import _write_fixture, _add_monitor, GOAL_ID, AGENT_ID
+from test_monitor_followthrough_contract import _write_fixture, GOAL_ID, AGENT_ID
 from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
 from loopx.control_plane.scheduler.monitor_poll_writeback import write_monitor_poll_todo_state
@@ -16,8 +16,12 @@ from loopx.todos import list_goal_todos
 
 def _canonical(tmp_path, native=False, provider="file", lease=None):
     registry, runtime, state = _write_fixture(tmp_path)
-    monitor = _add_monitor(registry, text="Observe a public target", target_key="public-watch",
-        next_due_at="2000-01-01T00:00:00Z")
+    # Import fixture: historical bytes are input, never produced by a retired writer.
+    from loopx.control_plane.todos.contract import format_todo_metadata_line
+    monitor = {"todo_id": "todo_imported_monitor"}
+    state.write_text(state.read_text() + "- [ ] Observe a public target\n" + format_todo_metadata_line(
+        todo_id=monitor["todo_id"], status="open", task_class="continuous_monitor", claimed_by=AGENT_ID,
+        target_key="public-watch", cadence="1h", next_due_at="2000-01-01T00:00:00Z", watch_only="true") + "\n")
     items = list_goal_todos(registry_path=registry, goal_id=GOAL_ID, role="agent")["todos"]
     leases = []
     if lease is not None:

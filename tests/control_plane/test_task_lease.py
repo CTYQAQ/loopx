@@ -22,7 +22,7 @@ from loopx.control_plane.work_items.task_lease import (
     transfer_task_lease,
     write_scopes_overlap,
 )
-from loopx.todos import add_goal_todo
+from loopx.control_plane.todos.contract import format_todo_metadata_line
 
 
 @pytest.mark.parametrize("raw", [None, b'{"status":"active"}', b"{broken", b"\xff"],
@@ -173,7 +173,7 @@ def test_bool_disguised_lease_integers_fail_closed() -> None:
         assert error.value.code == "corrupt_lease"
 
 
-def test_retained_task_lease_lifecycle_preserves_versions(
+def test_cold_source_refuses_renew_transfer_but_preserves_release_cas(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -214,14 +214,9 @@ def test_retained_task_lease_lifecycle_preserves_versions(
         ),
         encoding="utf-8",
     )
-    todo = add_goal_todo(
-        registry_path=registry_path,
-        goal_id="goal-a",
-        role="agent",
-        text="Exercise the retained task-lease lifecycle.",
-        task_class="advancement_task",
-    )
-    todo_id = str(todo["todo_id"])
+    todo_id = "todo_retained_lease"
+    state.write_text(state.read_text() + "- [ ] Historical work\n" +
+        format_todo_metadata_line(todo_id=todo_id, status="open", task_class="advancement_task") + "\n")
     lease_path = task_lease.task_lease_path(
         runtime_root=runtime_root,
         goal_id="goal-a",
@@ -270,40 +265,24 @@ def test_retained_task_lease_lifecycle_preserves_versions(
         )
     assert transfer_without_version.value.code == "version_required"
 
-    renewed = renew_task_lease(
-        registry_path=registry_path,
+    before = lease_path.read_bytes(), state.read_bytes(), registry_path.read_bytes()
+    for operation in (renew_task_lease, transfer_task_lease):
+        extra = ({"new_owner": "agent-b", "new_idempotency_key": "turn-2"}
+                 if operation is transfer_task_lease else {})
+        with pytest.raises(TaskLeaseError) as refusal:
+            operation(registry_path=registry_path, runtime_root=runtime_root,
+                goal_id="goal-a", todo_id=todo_id, owner="agent-a",
+                idempotency_key="turn-1", expected_version=1, **extra)
+        assert refusal.value.code == "canonical_authority_required"
+        assert (lease_path.read_bytes(), state.read_bytes(), registry_path.read_bytes()) == before
+
+    released = release_task_lease(
         runtime_root=runtime_root,
         goal_id="goal-a",
         todo_id=todo_id,
         owner="agent-a",
         idempotency_key="turn-1",
         expected_version=1,
-    )
-    assert renewed["lease"]["version"] == 2
-    assert renewed["lease"]["lease_epoch"] == 1
-
-    transferred = transfer_task_lease(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        todo_id=todo_id,
-        owner="agent-a",
-        idempotency_key="turn-1",
-        new_owner="agent-b",
-        new_idempotency_key="turn-2",
-        expected_version=2,
-    )
-    assert transferred["lease"]["owner"] == "agent-b"
-    assert transferred["lease"]["version"] == 3
-    assert transferred["lease"]["lease_epoch"] == 2
-
-    released = release_task_lease(
-        runtime_root=runtime_root,
-        goal_id="goal-a",
-        todo_id=todo_id,
-        owner="agent-b",
-        idempotency_key="turn-2",
-        expected_version=3,
     )
     assert released["released"] is True
     assert released["lease"]["status"] == "released"
@@ -318,9 +297,9 @@ def test_retained_task_lease_lifecycle_preserves_versions(
         runtime_root=runtime_root,
         goal_id="goal-a",
         todo_id=todo_id,
-        owner="agent-b",
-        idempotency_key="turn-2",
-        expected_version=3,
+        owner="agent-a",
+        idempotency_key="turn-1",
+        expected_version=1,
     )
     assert replayed_release["released"] is True
     assert replayed_release["idempotent"] is True
@@ -331,8 +310,8 @@ def test_retained_task_lease_lifecycle_preserves_versions(
             runtime_root=runtime_root,
             goal_id="goal-a",
             todo_id=todo_id,
-            owner="agent-b",
-            idempotency_key="turn-2",
+            owner="agent-a",
+            idempotency_key="turn-1",
         )
     assert missing_version.value.code == "version_required"
 
@@ -380,7 +359,7 @@ def test_lifecycle_mutation_fails_closed_without_registry(
             expected_version=1,
         )
 
-    assert error.value.code == "todo_not_found"
+    assert error.value.code == "canonical_authority_required"
     assert task_lease.read_lease(lease_path) == before
 
 

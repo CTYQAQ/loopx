@@ -5,6 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
+from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+from loopx.control_plane.coordination.legacy_writer_fence import LegacyCoordinationWriterFenced
+
 from loopx.control_plane.work_items.task_lease import (
     acquire_task_lease,
     release_task_lease,
@@ -77,13 +81,22 @@ def _add(registry: Path) -> dict:
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_retired_and_absent_settings_leave_public_writers_on_primary_only(tmp_path: Path, enabled: bool) -> None:
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_retired_settings_preserve_history_and_require_canonical_writes(tmp_path: Path, monkeypatch, enabled: bool, provider: str) -> None:
     registry, state, runtime = _fixture(tmp_path, enabled=enabled)
     retained = runtime / "authority-shadow" / "file" / GOAL_ID / "historical.json"
     if enabled:
         retained.parent.mkdir(parents=True)
         retained.write_bytes(b'{"historical":true}\n')
     before = retained.read_bytes() if enabled else None
+    source_before = state.read_bytes(), registry.read_bytes()
+    with pytest.raises(LegacyCoordinationWriterFenced, match="canonical authority"):
+        _add(registry)
+    assert (state.read_bytes(), registry.read_bytes()) == source_before
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    initialize_canonical_authority(runtime, GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=GOAL_ID, handoff_mode="hard_lease", todos=[]),
+        state_path=state, provider=provider)
     added = _add(registry)
     todo_id = added["todo_id"]
     acquired = acquire_task_lease(registry_path=registry, runtime_root=runtime, goal_id=GOAL_ID,

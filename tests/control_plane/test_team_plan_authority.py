@@ -446,36 +446,42 @@ def test_capture_free_chat_recovers_committed_projection(canonical_team, capture
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_capture_free_chat_preserves_pre_promotion_receipt(tmp_path, monkeypatch, provider):
-    """Imported history remains readable without recreating or overwriting work."""
+    """Frozen 1.x source is recovered before/after import; 2.0 never recreates it."""
     from loopx.todos import list_goal_todos
     from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    from loopx.control_plane.work_items.team_plan_adapter import apply_team_plan
 
     isolate_sqlite_runtime(tmp_path, monkeypatch)
-    runtime = tmp_path / "runtime"
-    state = tmp_path / "state.md"
-    state.write_text("# Goal\n\n## Agent Todo\n\n")
-    registry = tmp_path / "registry.json"
+    history = json.loads((Path(__file__).parent / "fixtures/team_plan_1x.json").read_text())
+    runtime, state, registry = tmp_path / "runtime", tmp_path / "state.md", tmp_path / "registry.json"
+    state.write_text(history["source"])
     registry.write_text(json.dumps({"common_runtime_root": str(runtime), "goals": [{
         "id": "goal-a", "repo": str(tmp_path), "state_file": "state.md",
         "coordination": {"registered_agents": ["alpha"], "agent_model": "peer_v1"}}]}))
-    service = ChatActionService(store=ChatActionStore(runtime / "chat/actions"), registry_path=registry)
-    plan = _agent_plan()
-    preview = service.preview({"action_kind": "team.plan", "summary": "Assign work", "context": {},
-        "normalized_parameters": {"goal_id": "goal-a", "plan": plan}, "idempotency_key": "legacy-plan"})
-    applied = service.apply(preview["proposal_id"])["proposal"]
-    assert applied["status"] == "applied", applied
-    assert "loopx:team-plan:" in state.read_text()
+    def replay(plan=None):
+        return apply_team_plan(registry_path=registry, goal_id="goal-a", agent_id=None,
+            proposal=plan or history["plan"], expected_state_fingerprint=history["basis"])
+    original = state.read_bytes()
+    assert replay()["action"] == "reused"
+    assert state.read_bytes() == original
+    with pytest.raises(Exception, match="identity mismatch"):
+        replay({**history["plan"], "objective": "Different confirmed request"})
+    assert state.read_bytes() == original
     rows = list_goal_todos(registry_path=registry, goal_id="goal-a")["todos"]
+    assert len(rows) == 1 and rows[0]["text"] == "[P1] Own work"
     projection = build_todo_runtime_shadow_projection(goal_id="goal-a", todos=rows, handoff_mode="soft_claim")
     initialize_canonical_authority(runtime, "goal-a", projection, state_path=state, provider=provider)
+    service = ChatActionService(store=ChatActionStore(runtime / "chat/actions"), registry_path=registry)
+    preview = service.preview({"action_kind": "team.plan", "summary": "New work after import", "context": {},
+        "normalized_parameters": {"goal_id": "goal-a", "plan": _agent_plan()}, "idempotency_key": "new-plan"})
     invoke = _capture_free_chat((runtime, state, service, preview), tmp_path)
-    later = invoke("preview", text="New work after import")
-    assert invoke("apply", proposal=later["proposal_id"])["proposal"]["status"] == "applied"
+    assert invoke("apply", proposal=preview["proposal_id"])["proposal"]["status"] == "applied"
     current = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
+    assert len(current["todos"]) == 2
     display = state.read_bytes()
-    replay = invoke("historical")
-    assert replay["action"] == "reused"
-    assert replay["lane_todo_ids"] == applied["receipt"]["resource_ids"]["lane_todo_ids"]
+    recovered = replay()
+    assert recovered["action"] == "reused"
+    assert recovered["lane_todo_ids"] == history["result"]["lane_todo_ids"]
     assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == current
     assert state.read_bytes() == display
 

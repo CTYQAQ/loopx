@@ -18,7 +18,7 @@ from test_quota_authority_settlement_journey import _source
 import test_quota_settlement_cli as settlement
 
 
-@pytest.mark.parametrize("module", ["mutation_api", "legacy_mutation"])
+@pytest.mark.parametrize("module", ["mutation_api"])
 def test_todo_mutation_import_does_not_load_status(module):
     result = subprocess.run(
         [sys.executable, "-c",
@@ -88,7 +88,7 @@ def without_source_todo_writers(isolated_todo_distribution):
 
 
 def _remove_source_todo_writers(package):
-    (package / "control_plane/todos/line_update.py").unlink()
+    (package / "control_plane/todos/line_update.py").unlink(missing_ok=True)
     (package / "control_plane/todos/legacy_mutation.py").unlink(missing_ok=True)
     capture_adapter = package / "control_plane/coordination/runtime_shadow_writer_adapter.py"
     source = capture_adapter.read_text()
@@ -97,14 +97,14 @@ def _remove_source_todo_writers(package):
                  "write_captured_todo_state", "settle_todo_runtime_shadow_capture"}
     definitions = [node for node in ast.parse(source).body
                    if isinstance(node, ast.FunctionDef) and node.name in producers]
-    assert {node.name for node in definitions} == producers
+    assert {node.name for node in definitions} <= producers
     for node in reversed(definitions):
         del lines[node.lineno - 1:node.end_lineno]
     capture_adapter.write_text("".join(lines))
 
 
 def _remove_monitor_source_modules(package):
-    (package / "control_plane/scheduler/legacy_monitor_poll.py").unlink()
+    (package / "control_plane/scheduler/legacy_monitor_poll.py").unlink(missing_ok=True)
     for name in ("runtime_shadow", "runtime_shadow_writer_adapter",
                  "local_authority_shadow_adapter", "local_authority_shadow_outbox"):
         (package / f"control_plane/coordination/{name}.py").unlink()
@@ -115,14 +115,17 @@ def _remove_monitor_source_modules(package):
 def test_pending_source_outbox_survives_producer_retirement(
     tmp_path, isolated_todo_distribution, window, corrupt_cursor,
 ):
-    from shadow_e2e_fixture import workspace
+    from shadow_e2e_fixture import workspace, seed_legacy_todo_capture
 
     package, command = isolated_todo_distribution
     w = workspace(tmp_path / "shadow", bootstrap=False)
     w.command, w.cwd, w.package = tuple(command), tmp_path, package
     assert w.cli("coordination-shadow", "bootstrap", "--execute")["bootstrap"]["status"] == "applied"
-    original = w.add("Already delivered source work")["todo_id"]
-    w.crash(window, "todo", "add", "--role", "agent", "--text", "Pending source work")
+    original = "todo_original"
+    seed_legacy_todo_capture(w, "Already delivered source work", original)
+    assert w.drain()["ok"] is True
+    seed_legacy_todo_capture(w, "Pending source work", "todo_pending")
+    w.crash(window, "authority-shadow", "drain")
 
     def history():
         result = subprocess.run(
@@ -454,7 +457,7 @@ def test_leased_delivery_settlement_and_recovery_without_source_todo_writers(tmp
     assert settlement._spend_run_count(runtime) == 1
 
 
-def test_explicit_source_writer_import_preserves_the_existing_seam(tmp_path):
+def test_retired_source_writer_exports_are_absent(tmp_path):
     result = subprocess.run(
         [sys.executable, "-c", """
 import sys
@@ -462,11 +465,11 @@ import sysconfig
 import loopx.todos as todos
 assert 'loopx.control_plane.todos.line_update' not in sys.modules
 assert 'loopx.control_plane.todos.legacy_mutation' not in sys.modules
-from loopx.todos import apply_todo_update_to_lines
-from loopx.control_plane.todos import line_update
-assert apply_todo_update_to_lines is line_update.apply_todo_update_to_lines
-for name in ('link_generated_successor_todo_ids', 'link_superseding_todo_id', 'upsert_todo_metadata'):
-    assert getattr(todos, name) is getattr(line_update, name)
+from importlib.util import find_spec
+assert find_spec('loopx.control_plane.todos.line_update') is None
+assert find_spec('loopx.control_plane.todos.legacy_mutation') is None
+for name in ('apply_todo_update_to_lines', 'link_generated_successor_todo_ids', 'link_superseding_todo_id', 'upsert_todo_metadata'):
+    assert not hasattr(todos, name), name
 try:
     getattr(todos, 'unknown_writer_export')
 except AttributeError:

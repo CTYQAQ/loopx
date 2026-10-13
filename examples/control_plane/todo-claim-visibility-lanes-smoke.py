@@ -17,7 +17,6 @@ from loopx.control_plane.agents.capability_gate import (  # noqa: E402
 from loopx.control_plane.todos.quota_selection import project_quota_planning  # noqa: E402
 from loopx.control_plane.todos.contract import parse_todo_metadata_line  # noqa: E402
 from loopx.quota import build_quota_should_run  # noqa: E402
-from loopx.todos import apply_todo_update_to_lines  # noqa: E402
 from work_lane_contract_fixtures import GOAL_ID, status_payload  # noqa: E402
 
 
@@ -413,52 +412,6 @@ def assert_legacy_review_handoff_fails_closed_until_repaired() -> None:
     assert peer_scope["removed_continuation_blocked_count"] == 1
 
 
-def assert_legacy_review_handoff_write_requires_explicit_repair() -> None:
-    original_lines = [
-        "## Agent Todo",
-        "",
-        "- [ ] [P0] Independently review the peer implementation.",
-        "  <!-- loopx:todo todo_id=todo_legacy_write status=open "
-        "task_class=advancement_task action_kind=review "
-        "continuation_policy=review_handoff -->",
-    ]
-
-    for updates in (
-        {"claimed_by": CURRENT_AGENT, "claim_only": True},
-        {"note": "Keep this legacy review blocked."},
-    ):
-        lines = list(original_lines)
-        try:
-            apply_todo_update_to_lines(
-                lines,
-                todo_id="todo_legacy_write",
-                role="agent",
-                updated_at="2026-07-11T06:00:00+08:00",
-                **updates,
-            )
-        except ValueError as exc:
-            assert "repair it" in str(exc), exc
-        else:
-            raise AssertionError("legacy review writes must fail closed")
-        assert lines == original_lines
-
-    repaired_lines = list(original_lines)
-    repaired = apply_todo_update_to_lines(
-        repaired_lines,
-        todo_id="todo_legacy_write",
-        role="agent",
-        continuation_policy="independent_handoff",
-        excluded_agents=[CURRENT_AGENT],
-        updated_at="2026-07-11T06:00:00+08:00",
-    )
-    assert repaired["continuation_policy"] == "independent_handoff", repaired
-    assert repaired["excluded_agents"] == [CURRENT_AGENT], repaired
-    repaired_text = "\n".join(repaired_lines)
-    assert "continuation_policy=review_handoff" not in repaired_text
-    assert "continuation_policy=independent_handoff" in repaired_text
-    assert f"excluded_agents={CURRENT_AGENT}" in repaired_text
-
-
 def assert_claim_visibility_lanes_split_current_other_and_task_class() -> None:
     open_items = [
         todo(
@@ -520,7 +473,6 @@ def main() -> int:
     assert_executor_exclusion_filters_only_the_named_peer()
     assert_quota_routes_unclaimed_handoff_to_an_eligible_peer()
     assert_legacy_review_handoff_fails_closed_until_repaired()
-    assert_legacy_review_handoff_write_requires_explicit_repair()
     assert_claim_visibility_lanes_split_current_other_and_task_class()
     print("todo-claim-visibility-lanes-smoke ok")
     return 0

@@ -165,3 +165,33 @@ def workspace(path: Path, *, bootstrap: bool = True) -> ShadowWorkspace:
         boot = result.cli("coordination-shadow", "bootstrap", "--execute")["bootstrap"]
         assert boot["status"] == "applied", boot
     return result
+
+
+def seed_legacy_todo_capture(workspace: ShadowWorkspace, text: str, todo_id: str) -> str:
+    """Seed a synthetic 1.x persistence boundary for recovery tests, not a writer API.
+
+    The source/prepare/commit order is the historical compatibility contract.
+    Tests exercise the retained decoder and real CLI drain after this fixture.
+    """
+    from loopx.control_plane.coordination.local_authority_shadow_outbox import TodoPartitionCapture
+    from loopx.control_plane.coordination.authority_source_capture import todo_partition_projector
+    from loopx.control_plane.coordination.shadow_goal_scope import shadow_goal_scope
+    from loopx.control_plane.todos.contract import format_todo_metadata_line
+
+    original = workspace.state.read_text()
+    block = "- [ ] " + text + "\n" + format_todo_metadata_line(
+        todo_id=todo_id, status="open", task_class="advancement_task", action_kind="implement") + "\n"
+    assert "## Agent Todo\n" in original
+    updated = original.replace("## Agent Todo\n", "## Agent Todo\n\n" + block, 1)
+    with shadow_goal_scope(workspace.registry, goal_id=workspace.goal) as scope:
+        capture = TodoPartitionCapture.begin(enabled=True, registry_path=workspace.registry,
+            runtime_root=workspace.runtime, goal_id=workspace.goal, state_path=workspace.state,
+            write_class="todo_add", original_text=original,
+            projector=todo_partition_projector(scope.goal, state_path=workspace.state), goal_ref=scope.goal_ref)
+        capture.prepare(updated)
+        assert capture.outcome.recorded, capture.outcome
+        workspace.state.write_text(updated)
+        capture.committed()
+        assert capture.outcome.failure is None
+        assert capture.outcome.entry_id is not None
+        return capture.outcome.entry_id

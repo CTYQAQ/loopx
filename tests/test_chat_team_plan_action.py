@@ -60,6 +60,11 @@ def _fixture(tmp_path: Path, *, agents: tuple[str, ...] = (AGENT_ID,)):
         ),
         encoding="utf-8",
     )
+    from tests.control_plane.canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    initialize_canonical_authority(tmp_path / "runtime", GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=[], handoff_mode="soft_claim"),
+        state_path=state_path)
     service = ChatActionService(
         store=ChatActionStore(tmp_path / "runtime" / "chat" / "actions"),
         registry_path=registry_path,
@@ -416,7 +421,12 @@ def test_failed_batch_retries_same_card_without_partial_work(tmp_path: Path, mon
     preview = _preview(service, _two_lane_plan())
     def fail(*args, **kwargs):
         raise OSError("batch unavailable")
-    monkeypatch.setattr(team_plan_adapter, "write_captured_todo_state", fail)
+    real_effect = team_plan_adapter.effect_runtime_result
+    def fail_commit(method, request):
+        if method == "work_items.team_plan.commit":
+            return fail()
+        return real_effect(method, request)
+    monkeypatch.setattr(team_plan_adapter, "effect_runtime_result", fail_commit)
     failed = service.apply(preview["proposal_id"])["proposal"]
     assert failed["status"] == "failed"
     assert failed["failure"]["error_code"] == "team_plan_commit_failed"
@@ -431,22 +441,26 @@ def test_failed_batch_retries_same_card_without_partial_work(tmp_path: Path, mon
 @pytest.mark.parametrize("has_gap", [False, True])
 def test_lost_response_recovers_original_commit_after_work_changes(tmp_path: Path, monkeypatch, has_gap: bool) -> None:
     from loopx.control_plane.work_items import team_plan_adapter
-    project, _, service = _fixture(tmp_path)
+    project, registry, service = _fixture(tmp_path)
     plan = _two_lane_plan()
     if has_gap:
         plan["lanes"][1]["agent_id"] = "unregistered-agent"
     preview = _preview(service, plan)
-    real = team_plan_adapter.write_captured_todo_state
+    real = team_plan_adapter.settle_canonical_todo_projection
     def lose_response(*args, **kwargs):
         real(*args, **kwargs)
         raise OSError("response lost after commit")
-    monkeypatch.setattr(team_plan_adapter, "write_captured_todo_state", lose_response)
+    monkeypatch.setattr(team_plan_adapter, "settle_canonical_todo_projection", lose_response)
     assert service.apply(preview["proposal_id"])["proposal"]["status"] == "failed"
     assert _todos(project).count("loopx:todo ") == (1 if has_gap else 2)
     monkeypatch.undo()
     state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     # A receiver's later edit must survive historical commit recovery.
-    state.write_text(state.read_text().replace("Advance the intake contract", "Receiver revised the work"))
+    from loopx.control_plane.todos.list_readback import list_goal_todos
+    from loopx.control_plane.todos.mutation_api import update_goal_todo
+    todo = list_goal_todos(registry_path=registry, goal_id=GOAL_ID, role="agent")["todos"][0]
+    update_goal_todo(registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+                     agent_id=todo["claimed_by"], text="Receiver revised the work")
     before = state.read_bytes()
     recovered = service.apply(preview["proposal_id"])["proposal"]
     assert recovered["status"] == "applied"

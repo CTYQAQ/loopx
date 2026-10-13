@@ -147,7 +147,7 @@ def cli_update(tmp_path, monkeypatch, request, update_workspace):
     shutil.copytree(Path(__file__).resolve().parents[2] / "loopx", package,
                     ignore=shutil.ignore_patterns("__pycache__"))
     if request.param:
-        (package / "control_plane/todos/line_update.py").unlink()
+        (package / "control_plane/todos/line_update.py").unlink(missing_ok=True)
     provenance = tmp_path / "cli-origin.txt"
     (package_root / "sitecustomize.py").write_text(
         "import importlib.util\nfrom pathlib import Path\n"
@@ -299,7 +299,7 @@ def test_completion_validation_second_dispatch_preserves_original_identity(
     assert caught.value.payload["recovery_command"][-1] == calls[0]["operation_id"]
 
 
-def test_unpromoted_facade_preserves_empty_edit_no_change(tmp_path):
+def test_unpromoted_facade_requires_import_even_for_empty_edit(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     state = project / "state.md"
@@ -308,11 +308,11 @@ def test_unpromoted_facade_preserves_empty_edit_no_change(tmp_path):
     registry.write_text(json.dumps({"schema_version": 1, "common_runtime_root": str(tmp_path / "runtime"),
         "goals": [{"id": "goal-a", "repo": str(project), "state_file": "state.md",
                    "coordination": {"registered_agents": ["agent-a"]}}]}))
-    created = add_goal_todo(registry_path=registry, goal_id="goal-a", role="agent",
-                            text="Keep legacy compatibility", agent_id="agent-a", note="Keep the note")
+    from loopx.control_plane.coordination.legacy_writer_fence import LegacyCoordinationWriterFenced
+    state.write_text(state.read_text() + "- [ ] Retain source work\n  <!-- loopx:todo todo_id=todo_old note=Keep -->\n")
     before = state.read_bytes()
     for intent in [{}, {"note": ""}, {"note": " \t\n"}]:
-        result = update_goal_todo(registry_path=registry, goal_id="goal-a", todo_id=created["todo_id"],
-                                 agent_id="agent-a", **intent)
-        assert result["ok"] and result["changed"] is False
+        with pytest.raises(LegacyCoordinationWriterFenced, match="canonical authority"):
+            update_goal_todo(registry_path=registry, goal_id="goal-a", todo_id="todo_old",
+                             agent_id="agent-a", **intent)
         assert state.read_bytes() == before

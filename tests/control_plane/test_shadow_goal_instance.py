@@ -14,12 +14,9 @@ from loopx.control_plane.coordination.runtime_shadow import (
     build_runtime_shadow_source_snapshot,
     rollback_coordination_runtime_shadow,
 )
-from loopx.control_plane.coordination.runtime_shadow_writer_adapter import (
-    begin_todo_runtime_shadow_capture,
-    write_captured_todo_state,
-)
+from shadow_e2e_fixture import ShadowWorkspace, seed_legacy_todo_capture
+from loopx.control_plane.todos.mutation_api import add_goal_todo
 from loopx.control_plane.coordination.shadow_management import (
-    ShadowManagementError,
     read_shadow_management_state,
 )
 from loopx.control_plane.coordination.shadow_goal_scope import shadow_goal_scope
@@ -31,7 +28,7 @@ from loopx.control_plane.goals.source_session_registration import (
     FreshSourceSessionRegistration,
     register_fresh_source_session_project,
 )
-from loopx.control_plane.projects.registry_codec import load_project_registry
+from loopx.control_plane.projects.registry_codec import load_project_registry, ProjectRegistryProtocolError
 from loopx.registry import find_registry_goal
 
 
@@ -125,33 +122,9 @@ def _add_todo(
     text: str,
     todo_id: str,
 ) -> str:
-    original = state_path.read_text(encoding="utf-8")
-    heading = "## Agent Todo\n"
-    planned = original.replace(
-        heading,
-        heading
-        + f"\n- [ ] {text}\n"
-        + f"  <!-- loopx:todo todo_id={todo_id} status=open "
-        + f"claimed_by={AGENT_ID} -->\n",
-        1,
-    )
-    capture = begin_todo_runtime_shadow_capture(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id=GOAL_ID,
-        state_path=state_path,
-        write_class="todo_add",
-        original_text=original,
-    )
-    write_captured_todo_state(
-        capture,
-        runtime_root=runtime_root,
-        goal_id=GOAL_ID,
-        state_path=state_path,
-        text=planned,
-    )
-    assert capture.outcome.entry_id is not None
-    return capture.outcome.entry_id
+    # Historical persisted input only; the 2.0 public producer is absent.
+    return seed_legacy_todo_capture(
+        ShadowWorkspace(registry_path, runtime_root, state_path, goal=GOAL_ID), text, todo_id)
 
 
 def _outbox_bytes(runtime_root: Path) -> dict[str, bytes]:
@@ -260,15 +233,6 @@ def test_recreated_goal_cannot_capture_or_drain_the_retired_shadow(
     )
     pending_a = _outbox_bytes(runtime_root)
     in_flight_original = state_path.read_text(encoding="utf-8")
-    in_flight_a = begin_todo_runtime_shadow_capture(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id=GOAL_ID,
-        state_path=state_path,
-        write_class="todo_update",
-        original_text=in_flight_original,
-    )
-
     recreated = recreate_goal_instance(
         RecreateGoalRequest(
             registry_path=registry_path,
@@ -280,17 +244,9 @@ def test_recreated_goal_cannot_capture_or_drain_the_retired_shadow(
     goal_b = dict(recreated["goal_ref"])
     assert goal_b != goal_a
 
-    with pytest.raises(ShadowManagementError, match="retired Goal instance"):
-        write_captured_todo_state(
-            in_flight_a,
-            runtime_root=runtime_root,
-            goal_id=GOAL_ID,
-            state_path=state_path,
-            text=in_flight_original.replace(
-                "Persist Goal A",
-                "Continue retired Goal A",
-            ),
-        )
+    with pytest.raises(ProjectRegistryProtocolError, match="lifecycle-only profile"):
+        add_goal_todo(registry_path=registry_path, runtime_root_arg=str(runtime_root),
+                      goal_id=GOAL_ID, role="agent", text="Continue retired source work", agent_id=AGENT_ID)
     assert state_path.read_text(encoding="utf-8") == in_flight_original
 
     stale = adapter.drain_local_authority_shadow_outbox(
@@ -305,25 +261,6 @@ def test_recreated_goal_cannot_capture_or_drain_the_retired_shadow(
     assert stale.reason_code == "stale_goal_instance"
     assert stale.delivered == 0
     assert _outbox_bytes(runtime_root) == pending_a
-
-    original = state_path.read_text(encoding="utf-8")
-    capture_b = begin_todo_runtime_shadow_capture(
-        registry_path=registry_path,
-        runtime_root=runtime_root,
-        goal_id=GOAL_ID,
-        state_path=state_path,
-        write_class="todo_add",
-        original_text=original,
-    )
-    with pytest.raises(ShadowManagementError, match="durable shadow preparation"):
-        write_captured_todo_state(
-            capture_b,
-            runtime_root=runtime_root,
-            goal_id=GOAL_ID,
-            state_path=state_path,
-            text=original.replace("Persist Goal A", "Mutate Goal B"),
-        )
-    assert state_path.read_text(encoding="utf-8") == original
 
     goal = find_registry_goal(load_project_registry(registry_path), GOAL_ID)
     assert goal is not None

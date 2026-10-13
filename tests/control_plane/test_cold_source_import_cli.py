@@ -7,6 +7,7 @@ of their remaining callers, or full Goal history recovery.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import shutil
@@ -84,7 +85,7 @@ def workspace(tmp_path, monkeypatch, *, storage_target=None):
 
 @pytest.mark.parametrize("old_producers_present", [True, False])
 @pytest.mark.parametrize("configuration", ["absent", "disabled", "retired"])
-def test_unpromoted_default_off_lease_lifecycle_without_shadow_producers(
+def test_unpromoted_cutoff_retains_only_original_lease_replay_and_release(
     tmp_path, monkeypatch, old_producers_present, configuration,
 ):
     _, state, _, _, runtime, receiver, env = workspace(tmp_path, monkeypatch)
@@ -130,33 +131,36 @@ def test_unpromoted_default_off_lease_lifecycle_without_shadow_producers(
         assert not any(path.is_file() for path in (runtime / "authority-transition").rglob("*"))
         return result
 
-    acquired = lease("acquire", "--ttl-seconds", 120, "--write-scope", "docs/**")
-    assert acquired["acquired"] is True
-    version = acquired["lease"]["version"]
-    path = Path(acquired["lease_path"])
+    rejected = lease("acquire", "--ttl-seconds", 120, "--write-scope", "docs/**", success=False)
+    assert rejected["error_code"] == "canonical_authority_required"
+    path = runtime / "goals/cold/task-leases/todo_current.json"
+    assert not path.exists()
+    # Retained 1.x persistence contract, not a fresh acquisition through a retired writer.
+    now = datetime.now(timezone.utc)
+    original = {"schema_version": "task_lease_v0", "goal_id": "cold", "todo_id": "todo_current",
+        "owner": "agent-a", "idempotency_key": "original", "version": 1, "lease_epoch": 1,
+        "status": "active", "write_scopes": ["docs/**"], "acquire_ttl_seconds": 120,
+        "acquired_at": now.isoformat(), "updated_at": now.isoformat(),
+        "expires_at": (now + timedelta(seconds=120)).isoformat()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(original))
     original_lease = path.read_bytes()
     replay = lease("acquire", "--ttl-seconds", 120, "--write-scope", "docs/**")
-    assert replay["idempotent"] is True and replay["lease"] == acquired["lease"]
+    assert replay["idempotent"] is True and replay["lease"] == original
     assert path.read_bytes() == original_lease
-    rejected = lease("renew", "--expected-version", version + 1, "--ttl-seconds", 180, success=False)
+    for action, extra in [("renew", ()), ("transfer", ("--new-owner", "agent-b", "--new-idempotency-key", "receiver"))]:
+        rejected = lease(action, "--expected-version", 1, "--ttl-seconds", 180, *extra, success=False)
+        assert rejected["error_code"] == "canonical_authority_required"
+        assert path.read_bytes() == original_lease
+    rejected = lease("release", "--expected-version", 2, success=False)
     assert rejected["error_code"] == "version_mismatch"
     assert path.read_bytes() == original_lease
-    renewed = lease("renew", "--expected-version", version, "--ttl-seconds", 180)
-    assert renewed["lease"]["version"] == version + 1
-    assert renewed["lease"]["lease_epoch"] == acquired["lease"]["lease_epoch"]
-    transferred = lease("transfer", "--expected-version", version + 1,
-                        "--new-owner", "agent-b", "--new-idempotency-key", "receiver",
-                        "--ttl-seconds", 180)
-    assert transferred["lease"]["owner"] == "agent-b"
-    assert transferred["lease"]["version"] == version + 2
-    assert transferred["lease"]["lease_epoch"] == acquired["lease"]["lease_epoch"] + 1
-    released = lease("release", "--expected-version", version + 2, owner="agent-b", key="receiver")
+    released = lease("release", "--expected-version", 1)
     assert released["released"] is True and released["lease"]["status"] == "released"
     assert released["lease"]["write_scopes"] == ["docs/**"]
-    assert released["lease"]["lease_epoch"] == transferred["lease"]["lease_epoch"]
+    assert released["lease"]["lease_epoch"] == 1
     retained = path.read_bytes()
-    assert lease("release", "--expected-version", version + 2,
-                 owner="agent-b", key="receiver")["idempotent"] is True
+    assert lease("release", "--expected-version", 1)["idempotent"] is True
     assert path.read_bytes() == retained
 
 
@@ -294,7 +298,7 @@ def test_cold_cli_import_and_source_free_original_recovery(
                      "control_plane/coordination/runtime_shadow.py",
                      "control_plane/coordination/local_authority_shadow_adapter.py",
                      "control_plane/todos/legacy_mutation.py", "control_plane/todos/line_update.py"):
-            (receiver / "loopx" / path).unlink()
+            (receiver / "loopx" / path).unlink(missing_ok=True)
     original = state.read_bytes()
     prepared = cli("prepare-import", "--backup-manifest", backup["manifest_path"],
         "--provider", provider, "--target-handoff-mode", "hard_lease")["cold_import"]
@@ -338,7 +342,7 @@ def test_cold_import_recovery_preserves_later_canonical_writes(
                      "control_plane/coordination/runtime_shadow_writer_adapter.py",
                      "control_plane/coordination/local_authority_shadow_adapter.py",
                      "control_plane/coordination/local_authority_shadow_outbox.py"):
-            (receiver / "loopx" / path).unlink()
+            (receiver / "loopx" / path).unlink(missing_ok=True)
     prepared = cli("prepare-import", "--backup-manifest", backup["manifest_path"],
         "--provider", provider, "--target-handoff-mode", "hard_lease")["cold_import"]
     digest = prepared["plan_sha256"]

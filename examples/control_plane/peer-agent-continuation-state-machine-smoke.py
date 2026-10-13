@@ -80,6 +80,22 @@ def write_fixture(root: Path, *, include_review: bool = False) -> tuple[Path, Pa
         quota_allowed_slots=5,
         peer_independent_worktree_required=False,
     )
+    # Import the synthetic historical source through the shipped migration
+    # entrypoint before exercising fresh peer continuation writes.
+    from loopx.state_backup import build_state_backup_plan, execute_state_backup_plan
+    backup = execute_state_backup_plan(build_state_backup_plan(
+        project=project, runtime_root=runtime, output_dir=root / "backup", backup_id="peer-original",
+        include_automations=False, include_skills=False, include_registry_projects=False,
+        registry_path=registry_path))
+    assert backup["ok"], backup
+    prepared = run_cli("coordination-shadow", "prepare-import", "--goal-id", GOAL_ID,
+        "--operation-id", "peer-original", "--backup-manifest", backup["manifest_path"],
+        "--provider", "file", "--target-handoff-mode", "soft_claim",
+        registry_path=registry_path, runtime=runtime, cwd=project)["cold_import"]
+    applied = run_cli("coordination-shadow", "apply-import", "--goal-id", GOAL_ID,
+        "--operation-id", "peer-original", "--plan-sha256", prepared["plan_sha256"],
+        "--writers-stopped", "--execute", registry_path=registry_path, runtime=runtime, cwd=project)
+    assert applied["ok"], applied
     return project, runtime, registry_path
 
 
@@ -137,7 +153,7 @@ def assert_same_peer_continuation() -> None:
             runtime=runtime,
             cwd=project,
         )
-        assert completed["self_merged"] is True, completed
+        assert completed["completion_policy"]["self_merged"] is True, completed
         successor = completed["next_todos"][0]
         assert successor["claimed_by"] == PEER_ALPHA, successor
         second = should_run(project, runtime, registry_path, PEER_ALPHA)
@@ -168,8 +184,8 @@ def assert_review_is_action_semantics_over_generic_handoff() -> None:
             runtime=runtime,
             cwd=project,
         )
-        assert completed["self_merged"] is False, completed
-        assert completed["linked_successor_id"] == REVIEW_TODO_ID, completed
+        assert completed["completion_policy"]["self_merged"] is False, completed
+        assert completed["completion_policy"]["linked_successor_id"] == REVIEW_TODO_ID, completed
 
         beta = should_run(project, runtime, registry_path, PEER_BETA)
         assert beta["decision"] == "run", beta

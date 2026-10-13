@@ -43,34 +43,33 @@ def environment(tmp_path, monkeypatch):
     restart_effect_runtime()
 
 
-def test_creation_freezes_target_and_reconnect_does_not_follow_changed_defaults(environment):
+def test_canonical_creation_freezes_target_and_reconnect_does_not_follow_changed_defaults(environment):
     configure, bootstrap, marker, _, _ = environment
-    configure("sqlite")
+    configure("sqlite", mode="hard_lease")
     preview = bootstrap("first", "--dry-run")
     assert preview["storage_target"]["provider"] == "sqlite"
     assert not marker().exists()
     actual = bootstrap()
-    assert actual["storage_selection"]["promotion_performed"] is False
-    assert json.loads(marker().read_text())["provider"] == "sqlite"
-    configure("file")
+    assert actual["storage_selection"]["authority_initialized"] is True
+    configure("file", mode="soft_claim")
     assert bootstrap()["storage_selection"]["provider"] == "sqlite"
     assert bootstrap("second")["storage_selection"]["provider"] == "file"
-    assert not marker("second").exists()  # An explicit File selector requires a committed head.
 
 
-def test_existing_implicit_file_goal_is_not_retargeted(environment):
-    configure, bootstrap, marker, project, _ = environment
-    # A supported historical Goal has no creation target, independently of the
-    # current release's default for a new Goal.
-    configure("file")
-    bootstrap()
+def test_existing_implicit_file_goal_requires_import_without_retargeting(environment):
+    configure, bootstrap, marker, project, runtime = environment
+    state = project / "state.md"
+    state.write_text("---\ngoal_id: first\n---\n## Agent Todo\n\n- [ ] Keep original work\n")
     registry = project / ".loopx/registry.json"
-    data = json.loads(registry.read_text())
-    data["goals"][0]["coordination"].pop("storage_target")
-    registry.write_text(json.dumps(data))
-    configure("sqlite")
-    assert bootstrap("first", "--dry-run")["storage_target"] is None
-    assert bootstrap()["storage_selection"] is None
+    registry.parent.mkdir()
+    registry.write_text(json.dumps({"common_runtime_root": str(runtime), "goals": [{
+        "id": "first", "repo": str(project), "state_file": str(state)}]}))
+    original = registry.read_bytes(), state.read_bytes()
+    configure("sqlite", mode="hard_lease")
+    for flags in [("--dry-run",), ()]:
+        rejected = bootstrap("first", *flags, expected_code=1)
+        assert "import" in rejected["error"]
+        assert (registry.read_bytes(), state.read_bytes()) == original
     assert not marker().exists()
 
 
@@ -107,16 +106,16 @@ def test_unconfigured_new_goal_defaults_to_canonical_sqlite_and_retains_later_wr
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_explicit_canonical_creation_disabled_remains_target_only(environment, provider):
+def test_explicit_canonical_creation_disabled_requires_settings_update(environment, provider):
     _, bootstrap, _, _, runtime = environment
     configuration = runtime / "machine/configuration.json"
     configuration.write_text(json.dumps({"schema_version": "loopx_machine_configuration_v0", "namespaces": {
         "goal_storage": {"schema_version": "loopx_goal_storage_defaults_v1", "new_goal_provider": provider,
                          "canonical_creation": False, "new_goal_handoff_mode": "soft_claim"}}}))
-    created = bootstrap()
-    assert created["storage_target"] == {"schema_version": "loopx_new_goal_storage_target_v0", "provider": provider}
-    assert created["storage_selection"]["promotion_performed"] is False
-    assert "authority_initialized" not in created["storage_selection"]
+    rejected = bootstrap(expected_code=1)
+    assert "requires canonical creation" in rejected["error"]
+    assert "Settings" in rejected["error"]
+    assert not (runtime / "authority-transition").exists()
 
 
 @pytest.mark.parametrize("invalid_configuration", ["invalid_json", "invalid_namespace", "directory", "broken_symlink"])
@@ -233,19 +232,24 @@ def test_cli_creation_recovery_cannot_recreate_or_adopt_authority(environment, p
     assert not wrong_source.exists()
 
 
-def test_pending_creation_uses_frozen_intent_after_machine_default_changes(environment):
-    configure, bootstrap, marker, project, _ = environment
-    # Independently model the durable boundary: registry/state published, selector absent.
-    configure("file")
-    bootstrap()
-    registry = project / ".loopx/registry.json"
-    data = json.loads(registry.read_text())
-    data["goals"][0].setdefault("coordination", {})["storage_target"] = {
+def test_pending_legacy_creation_requires_import_without_retargeting(environment):
+    from tests.control_plane.shadow_e2e_fixture import workspace
+    configure, bootstrap, _, project, runtime = environment
+    w = workspace(project, bootstrap=False)
+    data = json.loads(w.registry.read_text())
+    data["common_runtime_root"] = str(runtime)
+    data["goals"][0]["id"] = "first"
+    data["goals"][0]["coordination"]["storage_target"] = {
         "schema_version": "loopx_new_goal_storage_target_v0", "provider": "sqlite"}
+    registry = project / ".loopx/registry.json"
+    registry.parent.mkdir()
     registry.write_text(json.dumps(data))
-    configure("file")
-    assert bootstrap()["storage_selection"]["provider"] == "sqlite"
-    assert json.loads(marker().read_text())["provider"] == "sqlite"
+    before = registry.read_bytes(), w.state.read_bytes()
+    configure("file", mode="soft_claim")
+    rejected = bootstrap(expected_code=1)
+    assert "import" in rejected["error"]
+    assert (registry.read_bytes(), w.state.read_bytes()) == before
+    assert not (runtime / "authority").exists()
 
 
 @pytest.fixture
@@ -629,7 +633,7 @@ def test_app_creation_selects_server_configured_non_git_workspace(environment, a
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 @pytest.mark.parametrize("relative_runtime", [False, True])
-@pytest.mark.parametrize("mode", [None, "soft_claim", "hard_lease"])
+@pytest.mark.parametrize("mode", ["soft_claim", "hard_lease"])
 def test_app_creation_retries_storage_before_reporting_success(environment, app, monkeypatch, provider, relative_runtime, mode):
     from loopx.control_plane.coordination import new_goal_storage_transport as goal_storage
     from loopx.todos import add_goal_todo
@@ -756,7 +760,7 @@ def test_app_creation_cannot_adopt_a_competing_goal(environment, app, monkeypatc
     def create_competitor():
         # Real CLI registration, then model its durable pre-initialization
         # boundary independently. No fake success receipt or provider is used.
-        configure("file")
+        configure("file", mode="hard_lease")
         bootstrap("competing", "--project", str(other_project))
         data = json.loads(registry.read_text())
         goal = next(g for g in data["goals"] if g["id"] == "competing")
@@ -803,21 +807,20 @@ def test_machine_editor_is_machine_only_and_configuration_rejects_activation():
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_created_target_is_used_by_reviewed_promotion(environment, provider):
-    from tests.control_plane.shadow_e2e_fixture import ShadowWorkspace
-    configure, bootstrap, _, project, runtime = environment
-    configure(provider)
-    bootstrap()
-    registry = project / ".loopx/registry.json"
-    state = project / ".codex/goals/first/ACTIVE_GOAL_STATE.md"
-    ws = ShadowWorkspace(registry, runtime, state, "first")
-    configured = ws.cli("configure-goal", "--coordination-runtime-shadow-file", "--execute")
-    assert configured["ok"] is True
+def test_historical_target_is_used_by_reviewed_promotion(environment, provider):
+    from tests.control_plane.shadow_e2e_fixture import workspace, seed_legacy_todo_capture
+    from loopx.capabilities.machine_configuration.goal_storage import initialize_goal_storage_target
+    _, _, _, project, _ = environment
+    ws = workspace(project, bootstrap=False)
+    data = json.loads(ws.registry.read_text())
+    data["goals"][0]["coordination"]["storage_target"] = {
+        "schema_version": "loopx_new_goal_storage_target_v0", "provider": provider}
+    ws.registry.write_text(json.dumps(data))
+    assert initialize_goal_storage_target(ws.runtime, data["goals"][0])["promotion_performed"] is False
     assert ws.cli("coordination-shadow", "bootstrap", "--execute")["bootstrap"]["status"] == "applied"
     for n in range(3):
-        assert ws.add(f"Qualify creation target {n}")["ok"] is True
-    assert ws.drain(budget_seconds="60")["ok"] is True
-    assert bootstrap()["storage_selection"]["changed"] is False
+        seed_legacy_todo_capture(ws, f"Historical target work {n}", f"todo_history_{n}")
+        assert ws.drain(budget_seconds="60")["ok"] is True
     preview = ws.cli("coordination-shadow", "promote", "--handoff-mode-migration", "preserve")
     assert preview["promotion"]["status"] == "preview_ready", preview
     plan = project / "reviewed.json"
@@ -829,5 +832,5 @@ def test_created_target_is_used_by_reviewed_promotion(environment, provider):
     # The initializer must not override a promoted selection. The separate legacy
     # bootstrap command still rejects a fenced Goal before reaching this helper.
     from loopx.control_plane.coordination.new_goal_storage_transport import initialize_goal_storage_target
-    goal = json.loads(registry.read_text())["goals"][0]
-    assert initialize_goal_storage_target(runtime, goal)["status"] == "existing_authority_preserved"
+    goal = json.loads(ws.registry.read_text())["goals"][0]
+    assert initialize_goal_storage_target(ws.runtime, goal)["status"] == "existing_authority_preserved"

@@ -179,7 +179,7 @@ def test_real_cli_uses_synthetic_source_runtime_and_readback(tmp_path: Path) -> 
     assert view["research_frontier"]["mode"] == "read_only_shadow"
 
 
-def execution_fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
+def execution_fixture(tmp_path: Path, *, provider: str = "file") -> tuple[Path, Path, Path, dict]:
     project = tmp_path / "project"
     project.mkdir()
     state = project / "ACTIVE_GOAL_STATE.md"
@@ -199,6 +199,11 @@ def execution_fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
     for name in ["a", "b"]:
         append_explore_result_event(path, build_explore_edge_event(
             goal_id=GOAL, from_node="joint", to_node=name, edge_type="depends_on"))
+    from tests.control_plane.canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    initialize_canonical_authority(runtime, GOAL,
+        build_todo_runtime_shadow_projection(goal_id=GOAL, todos=[], handoff_mode="soft_claim"),
+        state_path=state, provider=provider)
     todo = add_goal_todo(
         registry_path=registry, goal_id=GOAL, role="agent", text="Run the bounded joint experiment.",
         task_class="advancement_task", action_kind="joint_probe", claimed_by="fixture-agent",
