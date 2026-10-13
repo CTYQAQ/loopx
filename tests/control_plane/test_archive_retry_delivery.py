@@ -348,6 +348,9 @@ def test_unpromoted_archive_does_not_rebuild_missing_display(tmp_path: Path) -> 
     before = {path: path.read_bytes() for path in authority.rglob("*") if path.is_file()}
     result = _archive_cli(registry)
     assert result.returncode == 1
-    assert "active state file does not exist" in json.loads(result.stdout)["error"]
+    # The 2.0 entry gate rejects unimported authority before display recovery.
+    refused = json.loads(result.stdout)
+    assert refused["error_code"] == "canonical_authority_required"
+    assert "prepare-import" in refused["error"]
     assert not state.exists()
     assert {path: path.read_bytes() for path in authority.rglob("*") if path.is_file()} == before

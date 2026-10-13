@@ -47,6 +47,7 @@ def state_text() -> str:
         + "- [ ] [P2] Keep monitor work after completed items visible.\n\n"
         "## Completed Work Archive\n\n"
         "- [x] [P1] Previously archived completed work.\n"
+        "  <!-- loopx:todo todo_id=todo_previous_archive role=agent status=done task_class=advancement_task -->\n"
     )
 
 
@@ -80,9 +81,11 @@ def user_role_state_text() -> str:
     )
 
 
-def write_fixture(root: Path, *, text: str | None = None) -> tuple[Path, Path, Path]:
+def write_fixture(root: Path, *, text: str | None = None, provider: str = "file", canonical: bool = True) -> tuple[Path, Path, Path]:
+    root = root.resolve()
     project = root / "project"
     runtime = root / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
     state_file = ".codex/goals/todo-archive-completed-goal/ACTIVE_GOAL_STATE.md"
     state_path = project / state_file
     registry_path = project / ".loopx" / "registry.json"
@@ -119,6 +122,19 @@ def write_fixture(root: Path, *, text: str | None = None) -> tuple[Path, Path, P
         + "\n",
         encoding="utf-8",
     )
+    if canonical:
+        saved = run_cli(registry_path, runtime, "backup-state", "--project", str(project),
+            "--output-dir", str(root / "backups"), "--backup-id", "archive-source",
+            "--current-project-only", "--no-skills", "--no-automations", "--execute")
+        prepared = run_cli(registry_path, runtime, "coordination-shadow", "prepare-import",
+            "--goal-id", GOAL_ID, "--operation-id", "archive-source-import",
+            "--backup-manifest", saved["manifest_path"], "--provider", provider,
+            "--target-handoff-mode", "soft_claim")["cold_import"]
+        assert prepared["status"] == "prepared", prepared
+        applied = run_cli(registry_path, runtime, "coordination-shadow", "apply-import",
+            "--goal-id", GOAL_ID, "--operation-id", "archive-source-import",
+            "--plan-sha256", prepared["plan_sha256"], "--writers-stopped", "--execute")["cold_import"]
+        assert applied["status"] == "applied", applied
     return registry_path, runtime, state_path
 
 
@@ -137,14 +153,15 @@ def run_cli(registry_path: Path, runtime: Path, *args: str, check: bool = True) 
             *args,
         ],
         cwd=REPO_ROOT,
-        check=check,
+        check=False,
         capture_output=True,
         text=True,
     )
+    assert not check or result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
 
 
-def assert_user_role_archive_retains_standing_decision() -> None:
+def assert_user_role_archive_retains_standing_decision(*, provider: str = "file") -> None:
     """`--role user` archives ordinary done gates but never a standing receipt.
 
     The shipped CLI accepts `--role`, yet the user-role archive path was only
@@ -155,7 +172,7 @@ def assert_user_role_archive_retains_standing_decision() -> None:
 
     with tempfile.TemporaryDirectory(prefix="loopx-todo-archive-user-role-") as tmp:
         registry_path, runtime, state_path = write_fixture(
-            Path(tmp), text=user_role_state_text()
+            Path(tmp), text=user_role_state_text(), provider=provider
         )
         original = state_path.read_text(encoding="utf-8")
         parsed = parse_active_state_todos(original)
@@ -216,6 +233,12 @@ def assert_user_role_archive_retains_standing_decision() -> None:
             "todo_user_standing_approve"
         ), authority
 
+        receipt = run_cli(registry_path, runtime, "todo", "list", "--goal-id", GOAL_ID,
+            "--todo-id", "todo_user_standing_approve")
+        assert receipt["todo"]["archive_state"] == "active", receipt
+        assert receipt["todo"]["decision_outcome"] == "approve", receipt
+        assert receipt["todo"]["blocks_agent"] == "codex-reviewer", receipt
+
         # Role scoping: compacting the user section must not move Agent Todo work.
         agent_ids = [item["todo_id"] for item in parsed_after["agent_todos"]["items"]]
         assert "todo_agent_completed" in agent_ids, parsed_after
@@ -228,9 +251,9 @@ def assert_user_role_archive_retains_standing_decision() -> None:
         assert status_after["contract_errors"] == [], status_after
 
 
-def main() -> int:
+def main(*, provider: str = "file") -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-todo-archive-completed-") as tmp:
-        registry_path, runtime, state_path = write_fixture(Path(tmp))
+        registry_path, runtime, state_path = write_fixture(Path(tmp), provider=provider)
         original = state_path.read_text(encoding="utf-8")
         parsed = parse_active_state_todos(original)
         assert parsed["agent_todos"]["done_count"] == 15, parsed
@@ -312,7 +335,17 @@ def main() -> int:
         assert updated.count("[P1] Completed implementation lane 1.") == 1
         assert updated.count("[P1] Completed implementation lane 2.") == 1
         assert "excluded_agents=codex-reviewer" in updated
-        assert "updated_at: 2026-01-01T00:00:00+00:00" not in updated
+        # Canonical projection owns Todo regions, not Goal narrative/frontmatter.
+        assert "updated_at: 2026-01-01T00:00:00+00:00" in updated
+        archived_read = run_cli(registry_path, runtime, "todo", "list", "--goal-id", GOAL_ID,
+            "--todo-id", "todo_completed_lane_1")
+        assert archived_read["todo"]["archive_state"] == "archive", archived_read
+        assert archived_read["todo"]["updated_at"] != "2026-01-01T00:00:00+00:00", archived_read
+
+        retained = run_cli(registry_path, runtime, "todo", "list", "--goal-id", GOAL_ID,
+            "--todo-id", "todo_previous_archive")
+        assert retained["todo"]["archive_state"] == "archive", retained
+        assert retained["todo"]["text"] == "[P1] Previously archived completed work.", retained
 
         status_after = run_cli(registry_path, runtime, "status")
         assert status_after["ok"] is True, status_after
@@ -438,8 +471,12 @@ def main() -> int:
         assert lineage_status["ok"] is True, lineage_status
         assert lineage_status["contract_errors"] == [], lineage_status
 
-        state_path.write_text(
-            archived_lineage
+        # A separate unimported source retains reader diagnostics. Canonical
+        # status must not regain authority from edits to its Markdown display.
+        invalid_registry, invalid_runtime, invalid_state = write_fixture(
+            Path(tmp) / "invalid-source", text=state_text(), canonical=False)
+        invalid_state.write_text(
+            state_text()
             + "- [ ] [P1] Contradictory archived work item.\n"
             + "  <!-- loopx:todo todo_id=todo_archived_open status=done "
             + "task_class=advancement_task excluded_agents=codex-reviewer -->\n"
@@ -451,7 +488,7 @@ def main() -> int:
             + "task_class=advancement_task excluded_agents=codex-reviewer -->\n",
             encoding="utf-8",
         )
-        invalid_status = run_cli(registry_path, runtime, "status", check=False)
+        invalid_status = run_cli(invalid_registry, invalid_runtime, "status", check=False)
         assert invalid_status["ok"] is False, invalid_status
         assert any(
             "todo_archived_open" in item and "executor exclusions" in item
@@ -466,7 +503,7 @@ def main() -> int:
             for item in invalid_status["contract_errors"]
         ), invalid_status
 
-    assert_user_role_archive_retains_standing_decision()
+    assert_user_role_archive_retains_standing_decision(provider=provider)
 
     print("todo-archive-completed-smoke ok")
     return 0

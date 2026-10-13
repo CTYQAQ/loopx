@@ -94,15 +94,25 @@ def find_todo_regions(lines: list[str], *, visible: frozenset[int] | None = None
         marked = index < len(lines) and lines[index].rstrip("\r\n") == todo_region_marker(role, "begin")
         if marked:
             index += 1
+        has_task = False
         while index < len(lines):
             content = lines[index].rstrip("\r\n")
             if content == todo_region_marker(role, "end") and marked:
                 break
             if TODO_REGION_PREFIX in content:
                 raise ValueError("nested, mismatched, or malformed Todo region marker")
+            task_line = TODO_TASK_PATTERN.match(content) is not None
+            # The legacy reader folds indented continuation text into its Todo.
+            # Adopt that same row body on the first projection, otherwise the
+            # continuation and every later row survive as duplicate narrative.
+            # Marked output stays strict; headings and invisible examples never
+            # become generated content merely because they follow a task.
+            continuation = (not marked and has_task and content.startswith((" ", "\t"))
+                and re.match(r"^ {0,3}#{1,6}(?:[ \t]|$)", content) is None)
             generated = index in visible and (
                 not content.strip()
-                or TODO_TASK_PATTERN.match(content) is not None
+                or task_line
+                or continuation
                 or parse_todo_metadata_line(content) is not None
                 or content.startswith("<!-- loopx:todo-section-projection-v0 ")
             )
@@ -110,6 +120,7 @@ def find_todo_regions(lines: list[str], *, visible: frozenset[int] | None = None
                 if marked:
                     raise ValueError("non-generated content inside marked Todo region")
                 break
+            has_task = has_task or task_line
             index += 1
         if marked and index == len(lines):
             raise ValueError("unterminated Todo region")

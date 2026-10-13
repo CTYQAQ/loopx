@@ -136,3 +136,11 @@ def test_create_duplicate_projects_existing_open_todo(tmp_path, monkeypatch, pro
     assert duplicate["provider_status"] == "no_change"
     assert duplicate["added"] is False and duplicate["already_exists"] is True
     assert duplicate["changed"] is False
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_imported_archive_complete_journey(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    archive = runpy.run_path(str(root / "examples/control_plane/todo-archive-completed-smoke.py"))
+    assert archive["main"](provider=provider) == 0

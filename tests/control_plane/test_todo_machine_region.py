@@ -148,3 +148,47 @@ def test_state_counts_classify_headings_exactly_as_the_region_writer() -> None:
         ("Owner Reading Queue", "user"),
     ]:
         assert todo_role_for_heading(heading) == expected, heading
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_legacy_continuation_and_following_rows_are_replaced_once(newline):
+    from loopx.control_plane.todos.active_state_todo_parser import parse_todo_source
+    from loopx.control_plane.todos.todo_summary import canonical_todo_read_record, structured_todo_item
+
+    source = (_source() + "- [x] Completed first.\n"
+        "  Continuation detail belongs to the completed task.\n"
+        "  <!-- loopx:todo todo_id=todo_first status=done task_class=advancement_task -->\n"
+        "- [ ] Keep second active.\n"
+        "  <!-- loopx:todo todo_id=todo_second status=open task_class=advancement_task -->\n"
+        "\nHuman explanation stays outside the generated region.\n").replace("\n", newline)
+    active, _, _ = parse_todo_source(source)
+    records = [canonical_todo_read_record(structured_todo_item(item, role="agent",
+        source_section="Agent Todo", text_limit=None)) for item in active["agent"]]
+    records[0].update(archive_state="archive", source_section="Completed Work Archive")
+    projected = render_canonical_todo_sections(source, records, provider_revision="rev-archive")
+    for text in ("Completed first.", "Continuation detail belongs", "Keep second active.", "todo_first", "todo_second"):
+        assert projected.markdown.count(text) == 1
+    assert "Human explanation stays outside the generated region." + newline in projected.markdown
+    assert projected.markdown.index("## Completed Work Archive") < projected.markdown.index("Completed first.")
+    assert not render_canonical_todo_sections(projected.markdown, records, provider_revision="rev-archive").changed
+
+
+@pytest.mark.parametrize("tail", [
+    "  ## Next Action\n\n- [ ] Narrative checkbox.\n",
+    "  ```markdown\n  continuation example\n  ```\n",
+    "  <!-- comment\n  private narrative\n  -->\n",
+    "Human narrative.\n  Indented human narrative.\n",
+])
+def test_legacy_continuation_does_not_consume_following_narrative(tail):
+    source = "## Agent Todo\n- [ ] A task.\n  Its continuation.\n" + tail
+    lines = source.splitlines(keepends=True)
+    region, = find_todo_regions(lines)
+    assert region.end == 3
+    assert "".join(lines[region.end:]) == tail
+
+
+def test_marked_region_still_rejects_unrendered_continuation():
+    source = ("## Agent Todo\n" + todo_region_marker("agent", "begin")
+        + "\n- [ ] A task.\n  Handwritten addition.\n" + todo_region_marker("agent", "end"))
+    with pytest.raises(ValueError, match="non-generated content"):
+        find_todo_regions(source.splitlines())
