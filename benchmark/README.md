@@ -245,8 +245,11 @@ Turn as a substitute; completed-cursor checks stay unchanged. Lost fork replies
 reuse the existing one-attempt recovery path.
 
 Full capture uses the external controller path below. Native-only history plus
-declared files remains an inert subset. Interrupted sessions still cannot enter
-destination Goal admission until joint controller continuation is qualified.
+declared files remains an inert subset. An interrupted cursor can now enter the
+existing explicit session-binding admission for a distinct registered destination
+Goal/Agent. Its pending source guard remains historical input; the receiver must
+obtain a new work admission and lease. Binding alone grants no execution or
+evaluation opportunity.
 Remove the checkpoint request to disable automatic handoff; a direct caller can
 omit the socket option to disable only the transport.
 
@@ -602,9 +605,16 @@ A barrier that cannot be released remains an explicit controller recovery proble
 A real native CLI/worker plus isolated Docker/native-HTTP qualification covers the
 mid-wake path, complete canonical context, conserved evaluator opportunity and
 original source continuation. It uses a deterministic local model and synthetic
-grading. The artifact remains unqualified for scientific restart: isolated joint
-destination admission, useful work, original-effect recovery and subsequent grading
-must still be verified together. No old lease, quota, timer or token is activated.
+grading. A fresh isolated Linux receiver can bind that interrupted native prefix,
+adopt captured research context on its currently leased Todo, restore native
+evaluation/Host allowances and run a new admitted Turn. Qualification covers a
+resumed tool consuming retained code/context, producing a synthetic candidate,
+receiving its next native grade and settling the destination Turn exactly once.
+Lost binding replies and native activation readback retain their original
+identities; wrong-source/digest and advanced-history admission reject. No old
+lease, quota, timer or token is activated. Scientific restart still requires the
+chosen installed source/profile and experiment inputs to be admitted; this
+mechanical fixture proves neither model judgment nor policy benefit.
 Omit the controller file and `controller_handoff` on a new run to disable automatic
 controller capture; removing the checkpoint request disables capture entirely.
 Existing artifacts remain inert, and the source trial is not restarted by disabling it.

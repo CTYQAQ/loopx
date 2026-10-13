@@ -648,7 +648,7 @@ Host 拥有的原生进程组，要求主进程正常响应中断退出并清理
 均经过该实际入口；中途的完整状态请求仍明确不具备资格。原生参与者已显式绑定
 interrupted 末尾 guard、解析后的路由/Turn 身份及原包摘要，拒绝已释放输出、
 后续可见条目或重复匹配调用，并通过原生 fork 保留完整前缀。completed cursor
-检查不放宽。controller 全部 writer 屏障与隔离的研究/评测/预算联合准入仍待验收；
+检查不放宽。下文的集成 controller/receiver 验证已覆盖联合源捕获和隔离目标路径；
 参与者重建不授予新的工作或目标执行权限。
 
 Host profile 还须声明路径可移植性。原生索引可能保留绝对 guest 路径：资格化
@@ -750,10 +750,13 @@ phase 文件参与者还将声明的 Host deadline 与 native 捕获时间绑定
 研究 inventory 与 controller 的 Docker pause/archive 屏障组合起来。controller
 先验证仍有效的请求及准备时的 source witness，再封存 incumbent、评测机会和
 剩余 phase 预算。变化或过期的边界记为未捕获，不能在源恢复后补作原点。
-真实 native CLI/Docker/HTTP 的合成验证覆盖联合捕获及原源接续；仍不代表目标
-联合激活。下一验收是独立目标环境消费保留上下文和代码、取得新权限、开展有用
-工作、结算原 effect 并完成后续评测，同时不补预算并保留丢回复/错误源负例。
-仅捕获里程碑不准入新的研究组。
+真实 native CLI/Docker/HTTP 的合成验证已从联合捕获接到全新 Linux guest：
+目标绑定原生历史，在当前已租用 Todo 上采用保留上下文，恢复同一 capsule 的
+评测机会与 Host phase 预算。源 pending call 只作历史；目标重新取得 guard 后，
+原生工具读取保留代码/上下文、产生合成候选、取得下一次评分，并对目标原 Turn
+单次结算。binding 回复丢失、激活 readback 复用原身份，错误源/digest 和已推进
+历史拒绝。此项关闭测试 profile 的机械联合接续缺口；安装版本与实验输入准入、
+packaged 恢复体验、模型判断及 stride 收益仍需各自验证。
 
 
 inert verification unit 不授予执行权。目标侧使用新的实验/Host 身份，通过既有

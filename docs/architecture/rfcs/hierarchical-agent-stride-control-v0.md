@@ -780,9 +780,9 @@ full-state mid-wake requests remain explicitly unqualified. The native participa
 now binds an explicit interrupted final guard, its parsed routes/Turn identity and
 original packet digest, rejects released output/later visible items or duplicate
 matching calls, and preserves the full prefix in a native fork. Completed-cursor
-checks stay strict. Controller-wide writer exclusion and isolated joint research,
-evaluator and budget admission remain open; participant reconstruction grants no
-new work or destination authority.
+checks stay strict. The integrated controller/receiver qualification below now
+covers the joined source and isolated destination path; participant reconstruction
+by itself still grants no work or destination authority.
 
 The Host profile must also declare path portability. A native index can retain
 absolute guest paths: qualification must either preserve those paths inside a
@@ -821,7 +821,8 @@ Replacement, changed configuration/profile and native automatic Goal activation
 are refused. Real native CLI/resume qualification uses a local static provider
 to carry retained conversation into a new Turn, verify materialized code/negative
 evidence and settle the original LoopX guard/writeback/spend. The quiesced fixture
-swaps fixed guest paths; full environment isolation remains unqualified. This proves
+swaps fixed guest paths; the newer joint receiver fixture below uses a fresh Linux
+guest instead. This earlier test proves
 the conversation participant's adoption and synthetic continuation, not full research/effect adoption, remaining
 whole-trial budget, installed frontend recovery or scientific benefit.
 An explicit checkpoint-aware native judge also exports released public result
@@ -902,18 +903,23 @@ Model inference is excluded. Full Host provenance/clock alignment and joint
 session/research/effect recovery still need their profile's qualification;
 this participant transport cannot certify them.
 
-The automatic source-capture boundary now composes the real worker's held
-fresh-replan decision with its native cursor, canonical research inventory and
-controller-owned Docker pause/archive barrier. The controller verifies the exact
-pending request and prepared source witness before sealing native incumbent,
-opportunity and remaining phase budget. A changed or expired boundary is missed,
-not recaptured after the source resumes. Synthetic native CLI/Docker/HTTP evidence
-covers this capture and original source continuation; it does not qualify a joint
-destination activation. The next acceptance remains one isolated destination:
-consume the captured context/code, obtain fresh Goal/session/evaluator authority,
-perform useful work, settle its original effect and grade without refilling budget.
-Preserve the existing lost-reply and wrong-source negatives in that composed path.
-No new research cells are admitted by the capture milestone alone.
+The automatic source-capture boundary composes the held fresh-replan decision,
+native cursor and canonical research inventory under the controller Docker writer
+barrier. It verifies the exact pending request and prepared source witness before
+sealing incumbent, opportunity and remaining phase budget. A changed or expired
+boundary is missed, never recaptured after source continuation.
+
+The joint receiver qualification now consumes an actual controller-captured
+interrupted point in a fresh Linux guest with no mounted source authority.
+Explicit native binding and leased Todo-context adoption retain the pending call
+as history; a fresh destination guard owns subsequent work. The same nested
+native capsule supplies opportunities and the Host phase deadline. A resumed
+native tool reads retained context/code, creates a synthetic candidate and receives
+its next grade under that deadline, followed by exactly-once destination settlement.
+Lost binding acknowledgment and activation readback reuse their committed identities;
+wrong source/digest and advanced history reject. This closes the joined mechanical
+continuation gap for the tested profile, not installed campaign admission, packaged
+recovery UX, autonomous research quality or a stride-effect claim.
 
 Committed native session admission now retains the captured artifact digest in
 the original atomic session binding. Exact controller retries after a lost binding

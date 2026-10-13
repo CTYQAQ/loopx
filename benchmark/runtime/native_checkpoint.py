@@ -382,6 +382,8 @@ def admit_native_checkpoint_session(env: dict[str, str], unit: Path, expected_sh
     Existing native fork, Goal lifetime and session owners retain their rules.
     Historical research/effects and evaluator/whole-trial budget are not adopted
     by this participant. Admission alone never launches work or a model.
+    An interrupted cursor is retained as history, not as an executable source
+    guard. The destination must obtain its own current work/replan admission.
     """
     from loopx.control_plane.effect_runtime import effect_runtime_result
     from loopx.agent_registry import load_goal_from_registry, require_registered_agent_id
@@ -400,8 +402,6 @@ def admit_native_checkpoint_session(env: dict[str, str], unit: Path, expected_sh
         "action": "verify", "root": str(unit), "expected_sha256": expected_sha256,
     }, timeout=timeout)
     metadata = json.loads((unit / "checkpoint.json").read_bytes())["point_metadata"]
-    if metadata.get("native_session", {}).get("interrupted_guard") is not None:
-        raise ValueError("interrupted session admission requires the joint controller continuation contract")
     source_profile = (metadata.get("session") or {}).get("session_profile_digest")
     if not isinstance(source_profile, str) or not re.fullmatch(r"[0-9a-f]{64}", source_profile):
         raise ValueError("checkpoint session admission requires its captured source session profile")
@@ -438,12 +438,14 @@ def admit_native_checkpoint_session(env: dict[str, str], unit: Path, expected_sh
                 raise ValueError("checkpoint source session profile changed")
             native = metadata["native_session"]
             observed = native_session_checkpoint(env, binding["session_id"],
-                timeout=max(.1, deadline - time.monotonic()))["metadata"]
-            keys = ("completed_turn_id", "turn_ids", "visible_history_sha256", "host_version",
+                timeout=max(.1, deadline - time.monotonic()),
+                interrupted_guard=native.get("interrupted_guard"))["metadata"]
+            cursor_key = "interrupted_turn_id" if native.get("interrupted_guard") is not None else "completed_turn_id"
+            keys = (cursor_key, "turn_ids", "visible_history_sha256", "host_version",
                     "guest_home", "guest_workspace", "config_sha256")
             if binding["session_id"] == native["session_id"] or any(observed[key] != native[key] for key in keys):
                 raise ValueError("checkpoint admitted native session advanced or differs; use its existing continuation")
-            return {"session_id": binding["session_id"], "completed_turn_id": observed["completed_turn_id"],
+            return {"session_id": binding["session_id"], cursor_key: observed[cursor_key],
                 "visible_history_sha256": observed["visible_history_sha256"], "history_verified": True,
                 "model_calls": 0, "execution_authority_granted": False, "continuation_qualified": False,
                 "destination_goal_ref": wake.goal_ref, "destination_agent_id": lineage["agent_id"],

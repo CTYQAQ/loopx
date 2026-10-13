@@ -144,8 +144,10 @@ def _context_session(env, metadata):
     if (not wake.session_id or wake.session_id == native["session_id"] or
             wake.digest != metadata.get("session", {}).get("session_profile_digest")):
         raise ValueError("context adoption requires the admitted destination session profile")
-    observed = native_session_checkpoint(env, wake.session_id, timeout=30)["metadata"]
-    for key in ("visible_history_sha256", "turn_ids", "completed_turn_id", "host_version", "config_sha256"):
+    observed = native_session_checkpoint(env, wake.session_id, timeout=30,
+        interrupted_guard=native.get("interrupted_guard"))["metadata"]
+    cursor_key = "interrupted_turn_id" if native.get("interrupted_guard") is not None else "completed_turn_id"
+    for key in ("visible_history_sha256", "turn_ids", cursor_key, "host_version", "config_sha256"):
         if observed[key] != native[key]:
             raise ValueError("destination native history or configuration moved beyond the captured context")
     return wake.session_id

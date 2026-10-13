@@ -492,7 +492,7 @@ def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay
                 saved_home = home.with_name(home.name + "-retained")
                 config = tmp_path / "captured-config.toml"
                 config.write_bytes((home / "config.toml").read_bytes())
-                with pytest.raises(ValueError, match="joint controller"):
+                with pytest.raises(ValueError, match="distinct destination"):
                     admit_native_checkpoint_session({**env, "CODEX_HOME": str(home)},
                         point, event["sha256"], config, execution=Execution(context="resume"), timeout=20)
                 home.rename(saved_home)
