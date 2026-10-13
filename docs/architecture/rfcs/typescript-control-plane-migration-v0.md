@@ -125,6 +125,12 @@ rollback/rebootstrap and corrupt-history races; it cannot count as another
 primary mutation or report delivery into a superseded generation. Current
 pre-import lease acquisition remains refused, and post-import canonical lease
 CAS, transfer, release and caller envelopes keep their original assertions.
+Observable CLI consumers now exercise both real File and SQLite authority across
+absent, disabled and enabled historical capture settings. Dry-run and rejection
+checks include the canonical head and journal; accepted no-op mode intents retain
+a receipt, while their exact retry leaves that journal unchanged. Bootstrap
+replacement and terminal writes on an unmigrated source refuse before mutation;
+current release still settles a genuine pre-upgrade lease.
 This repairs the executable recovery boundary; it does not qualify every old
 shadow-writer ladder or replace the independent installed/natural-trial gates.
 The backend configuration catalog now describes the same 2.0 creation boundary.
