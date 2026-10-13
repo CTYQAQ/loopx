@@ -145,6 +145,22 @@ selected Todo context; text aliases require exact equality, never a case-folded
 or truncated-prefix match. Supplied selected text survives envelope serialization
 intact. Hosts must honor the reads; signing does not prove execution or model
 adherence. Full Goal requirement coverage and global closeout remain open.
+
+The continuation-audit capsule preserves the source's complete ordered
+`required_before_closeout`, continuation guidance, current `vision_gap_judge`,
+accepted evidence kinds and insufficient-proof conditions. These are decision
+obligations, so display truncation must not remove their clauses or list tails.
+They enter the existing action signature; editing a step, its order or the judge
+changes the signed dimensions. Detailed acceptance-gap records stay in the same
+captured full decision. Historical saved envelopes retain their original
+signatures; this projection change grants no closure or execution authority.
+The 8 KiB warning remains diagnostic when required meaning exceeds it.
+
+中文：验收 capsule 完整保留原来源的有序步骤、继续执行说明、当前结束／继续判断、
+认可的证据种类和不能作为证明的条件；展示裁剪不能丢掉条款或列表尾部。新投影使用
+既有签名维度，历史 envelope 的签名不重写。详细验收记录仍从同次捕获读取，体积
+超过 8 KiB 时保留 warning，不以缩短义务或放大预算替代语义验收。
+
 No new frontend/Lark operation or configuration is introduced. Regenerate saved
 expanded heartbeat prompts to consume the new contract; bootstrap prompts reload
 installed rules on their next wake. This source-checkout change does not upgrade

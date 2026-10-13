@@ -67,10 +67,6 @@ const CONTRACT_CAPSULE_FIELDS: Readonly<Record<string, readonly string[]>> = {
     "schema_version", "keep_active", "pause_allowed", "pause_policy",
     "automation_action",
   ],
-  vision_continuation_audit: [
-    "schema_version", "required", "decision", "selected_todo_is_goal_completion",
-    "closeout_allowed_without_evidence", "trigger_kinds", "recommended_action",
-  ],
   handoff_readiness: [
     "ready", "codex_ready", "handoff_status", "post_handoff_run_seen",
   ],
@@ -85,7 +81,6 @@ const CONTRACT_CAPSULE_TEXT_LIMITS: Readonly<Record<string, Readonly<Record<stri
   execution_obligation: { reason: 240 },
   agent_scope_frontier: { recommended_action: 320, spend_policy: 220 },
   automation_liveness: { pause_policy: 260 },
-  vision_continuation_audit: { recommended_action: 48 },
 };
 
 function object(value: unknown): JsonObject {
@@ -523,6 +518,20 @@ function contractCapsule(
   }
   const unavailableContext = projectTurnStartUnavailableContext(payload.turn_start_capability_hook_dispatch);
   if (unavailableContext) capsule.unavailable_context = unavailableContext;
+  // These existing source fields govern evidence and continuation, rather
+  // than summarize display text. Preserve every clause, order, empty value
+  // and current judge without copying the detailed acceptance-gap ledger.
+  const visionAudit = object(payload.vision_continuation_audit);
+  const visionContract: JsonObject = {};
+  for (const field of [
+    "schema_version", "required", "agent_id", "decision", "trigger_count", "trigger_kinds",
+    "selected_todo_is_goal_completion", "closeout_allowed_without_evidence",
+    "required_before_closeout", "recommended_action", "vision_gap_judge",
+    "authoritative_evidence_kinds", "not_satisfied_by",
+  ]) {
+    if (Object.hasOwn(visionAudit, field)) visionContract[field] = structuredClone(visionAudit[field]);
+  }
+  if (Object.keys(visionContract).length > 0) capsule.vision_continuation_audit = visionContract;
   // Preserve the bounded source diagnosis; the generic capsule list path is
   // for scalar lists and must not stringify structured component checks.
   const diagnostics = object(payload.vision_continuation_audit).outcome_checkpoint_diagnostics;
