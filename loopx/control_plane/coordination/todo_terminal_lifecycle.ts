@@ -1,3 +1,4 @@
+import {EffectRuntimeRequestError} from "../effect_runtime_errors.ts";
 import {planUserCompletion, requireCompletionDecisionOutcome} from "../todos/user_completion.ts";
 import {AUTHORITY_SOURCE_CHANGED, uncheckedAuthoritySource, type AuthoritySourceCheck} from "./authority_source.ts";
 
@@ -1351,7 +1352,8 @@ export async function executeCoordinationTodoTerminalLifecycle(
           requested_completion_identity_source: input.requested_completion_identity_source});
       } catch (error) {
         return terminalFailure("invalid_todo_completion_transaction",
-          error instanceof Error ? error.message : "Invalid original completion identity");
+          error instanceof Error ? error.message : "Invalid original completion identity", {},
+          error instanceof EffectRuntimeRequestError ? "decision_rejection" : "protocol_failure");
       }
       if (fence.outcome === "continue" && fence.reason === "same_turn_terminal_upgrade") {
         const originalInput = {...input, requested_no_followup: false,
@@ -1444,7 +1446,8 @@ export async function executeCoordinationTodoTerminalLifecycle(
     } catch (error) {
       return terminalFailure(
         "invalid_todo_completion_transaction",
-        error instanceof Error ? error.message : "invalid Todo completion transaction",
+        error instanceof Error ? error.message : "invalid Todo completion transaction", {},
+        error instanceof EffectRuntimeRequestError ? "decision_rejection" : "protocol_failure",
       );
     }
     if (completion.decision === "execute_validation" ||

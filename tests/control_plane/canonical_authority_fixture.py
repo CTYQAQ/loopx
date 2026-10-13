@@ -120,7 +120,9 @@ def promoted_create_fixture(tmp_path: Path, *, provider: str = "file") -> tuple[
     return registry_path, runtime_root, state_file
 
 
-def initialize_canonical_registry_fixture(registry_path: Path, *, provider: str = "file") -> None:
+def initialize_canonical_registry_fixture(
+    registry_path: Path, *, provider: str = "file", handoff_mode: str = "soft_claim",
+) -> None:
     """Seed disposable consumer fixtures; this is not cold-source import evidence.
 
     Fixture prose supplies synthetic records only. Normal writes and subsequent
@@ -137,6 +139,6 @@ def initialize_canonical_registry_fixture(registry_path: Path, *, provider: str 
             goal, state_text=state.read_text(encoding="utf-8"), state_path=state, rollout_events=[]
         )
         projection = build_todo_runtime_shadow_projection(
-            goal_id=goal["id"], todos=todos, handoff_mode="soft_claim"
+            goal_id=goal["id"], todos=todos, handoff_mode=handoff_mode
         )
         initialize_canonical_authority(runtime, goal["id"], projection, state_path=state, provider=provider)

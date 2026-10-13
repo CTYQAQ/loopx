@@ -848,6 +848,7 @@ export function registerAuthorityStoreConformance(
       {...commitRequest, operation_identity: {kind: "explicit" as const, operation_id: "unknown-terminal-operation"}});
     assert.equal(noReceipt.status, "failed");
     assert.equal(noReceipt.reason_code, "invalid_todo_completion_transaction");
+    assert.equal(noReceipt.failure_kind, "decision_rejection");
     assert.deepEqual(await store.loadAuthority(), committedHead);
 
     const committedRevisions = [first, second]
@@ -1034,7 +1035,9 @@ export function registerAuthorityStoreConformance(
     for (const change of [{lease_expected_version: 99}, {lease_idempotency_key: "borrowed"},
       {requested_completion_turn_key: "different-turn"}, {actor_agent_id: "agent-b"},
       {validation_declaration: {...TERMINAL_VALIDATION_DECLARATION, validation_label: "different check"}}]) {
-      assert.equal((await executeCoordinationTodoTerminalLifecycle(store, {...closeout, ...change})).status, "failed");
+      const rejected = await executeCoordinationTodoTerminalLifecycle(store, {...closeout, ...change});
+      assert.equal(rejected.status, "failed");
+      assert.equal(rejected.failure_kind, "decision_rejection");
       assert.deepEqual(await store.loadAuthority(), before);
     }
     const missingReceipt = new Proxy(store, {get(target, key) {

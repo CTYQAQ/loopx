@@ -17,6 +17,7 @@ import loopx.control_plane.work_items.task_lease as task_lease_module
 from loopx.control_plane.work_items.task_lease import (
     TaskLeaseError,
     acquire_task_lease,
+    inspect_task_lease,
     release_task_lease,
 )
 from loopx.status import parse_active_state_todos
@@ -101,9 +102,9 @@ def canonical_workspace(request, tmp_path, monkeypatch):
     )
     isolate_sqlite_runtime(tmp_path, monkeypatch)
 
-    def create(root, **kwargs):
+    def create(root, *, handoff_mode="soft_claim", **kwargs):
         registry, state = _write_fixture(root, **kwargs)
-        initialize_canonical_registry_fixture(registry, provider=request.param)
+        initialize_canonical_registry_fixture(registry, provider=request.param, handoff_mode=handoff_mode)
         readback = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)
         assert readback["authority_read"]["source_authority"] == request.param + "_v0"
         assert readback["authority_read"]["legacy_fallback_used"] is False
@@ -119,6 +120,16 @@ def _canonical_todo(registry: Path, todo_id: str) -> dict:
 def _canonical_snapshot(registry: Path, state: Path) -> tuple:
     result = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)
     return result["authority_read"]["provider_revision"], result["todos"], state.read_bytes()
+
+
+def _canonical_lease(registry: Path, tmp_path: Path, todo_id: str) -> dict | None:
+    result = inspect_task_lease(
+        registry_path=registry, runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID, todo_id=todo_id,
+    )
+    assert result["source_authority"] in {"file_v0", "sqlite_v0"}
+    assert result["legacy_fallback_used"] is False
+    return result.get("lease")
 
 
 def _lease_path(tmp_path: Path, todo_id: str) -> Path:
@@ -754,9 +765,9 @@ def test_capability_binding_follows_generated_agent_successor(tmp_path: Path) ->
 
 
 def test_active_task_lease_fences_same_agent_completion_instance(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
     todo = _add_agent_todo(registry)
     lease_key = "turn-owner-instance"
     acquire_task_lease(
@@ -768,72 +779,69 @@ def test_active_task_lease_fences_same_agent_completion_instance(
         idempotency_key=lease_key,
         ttl_seconds=600,
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(TaskLeaseError) as missing_fence:
+    with pytest.raises(LocalCoordinationAuthorityRejection) as missing_fence:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
-            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
             evidence="stale execution instance",
             next_agent_todo="Create a stale successor.",
         )
     assert missing_fence.value.code == "lease_fence_required"
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
-    with pytest.raises(TaskLeaseError) as mismatched_fence:
+    with pytest.raises(LocalCoordinationAuthorityRejection) as mismatched_fence:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
-            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
             task_lease_idempotency_key="other-instance",
             evidence="wrong execution instance",
         )
     assert mismatched_fence.value.code == "lease_cas_mismatch"
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
     completed = complete_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
+        agent_id=AUTHOR_AGENT,
         task_lease_idempotency_key=lease_key,
         task_lease_expected_version=1,
         evidence="lease owner validated the result",
         next_agent_todo="Create the canonical successor.",
     )
-    assert completed["task_lease_fence"] == {
-        "schema_version": "task_lease_v0",
-        "required": True,
-        "active": True,
-        "owner": AUTHOR_AGENT,
-        "version": 1,
-        "lease_epoch": 1,
-        "execution_instance_verified": True,
-        "released": True,
-    }
-    assert (
-        json.loads(_lease_path(tmp_path, todo["todo_id"]).read_text(encoding="utf-8"))[
-            "status"
-        ]
-        == "released"
-    )
+    decision = completed["task_lease_fence"]
+    assert decision["outcome"] == "apply"
+    assert decision["lease_fence"] == "required"
+    tombstone = _canonical_lease(registry, tmp_path, todo["todo_id"])
+    assert tombstone["status"] == "released"
+    assert tombstone["owner"] == AUTHOR_AGENT
+    assert tombstone["version"] == tombstone["lease_epoch"] == 1
+    completed_state = _canonical_snapshot(registry, state)
 
     replayed = complete_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
-        evidence="late result from another execution instance",
-        next_agent_todo="Create a duplicate stale successor.",
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+        agent_id=AUTHOR_AGENT, task_lease_idempotency_key=lease_key,
+        task_lease_expected_version=1, evidence="lease owner validated the result",
+        next_agent_todo="Create the canonical successor.",
     )
+    with pytest.raises(LocalCoordinationAuthorityRejection) as changed_intent:
+        complete_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+            agent_id=AUTHOR_AGENT, evidence="late result from another execution instance",
+            next_agent_todo="Create a duplicate stale successor.",
+        )
+    assert changed_intent.value.code == "coordination_operation_identity_mismatch"
     assert replayed["idempotent_replay"] is True
     assert replayed["changed"] is False
-    agent_todos = parse_active_state_todos(state.read_text(encoding="utf-8"))[
-        "agent_todos"
-    ]["items"]
+    assert _canonical_snapshot(registry, state) == completed_state
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == tombstone
+    agent_todos = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)["todos"]
     todo_titles = [
         str(item.get("title") or item.get("text") or "") for item in agent_todos
     ]
@@ -842,9 +850,9 @@ def test_active_task_lease_fences_same_agent_completion_instance(
 
 
 def test_released_lease_generation_rejects_stale_completion_fences(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
     todo = _add_agent_todo(registry)
     runtime_root = tmp_path / "runtime"
     first = acquire_task_lease(
@@ -869,7 +877,7 @@ def test_released_lease_generation_rejects_stale_completion_fences(
         registry_path=registry,
     )
     assert released["lease"]["status"] == "released"
-    assert _lease_path(tmp_path, todo["todo_id"]).exists()
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"])["status"] == "released"
 
     with pytest.raises(TaskLeaseError) as reused_execution:
         acquire_task_lease(
@@ -894,70 +902,68 @@ def test_released_lease_generation_rejects_stale_completion_fences(
     )
     assert second["lease"]["version"] == 2
     assert second["lease"]["lease_epoch"] == 2
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(TaskLeaseError) as old_key:
+    with pytest.raises(LocalCoordinationAuthorityRejection) as old_key:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
-            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
             task_lease_idempotency_key="execution-one",
             task_lease_expected_version=1,
             evidence="stale first execution",
             no_followup=True,
         )
     assert old_key.value.code == "lease_cas_mismatch"
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
-    with pytest.raises(TaskLeaseError) as old_version:
+    with pytest.raises(LocalCoordinationAuthorityRejection) as old_version:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
-            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
             task_lease_idempotency_key="execution-two",
             task_lease_expected_version=1,
             evidence="stale version from the first generation",
             no_followup=True,
         )
     assert old_version.value.code == "version_mismatch"
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
-    with pytest.raises(TaskLeaseError) as missing_version:
+    with pytest.raises(LocalCoordinationAuthorityRejection) as missing_version:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
-            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
             task_lease_idempotency_key="execution-two",
             evidence="incomplete fence",
             no_followup=True,
         )
     assert missing_version.value.code == "version_required"
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
     completed = complete_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
+        agent_id=AUTHOR_AGENT,
         task_lease_idempotency_key="execution-two",
         task_lease_expected_version=2,
         evidence="current generation completed",
         no_followup=True,
     )
-    assert completed["task_lease_fence"]["lease_epoch"] == 2
-    tombstone = json.loads(
-        _lease_path(tmp_path, todo["todo_id"]).read_text(encoding="utf-8")
-    )
+    assert completed["task_lease_fence"]["next_lease"]["lease_epoch"] == 2
+    tombstone = _canonical_lease(registry, tmp_path, todo["todo_id"])
     assert tombstone["status"] == "released"
     assert tombstone["version"] == 2
     assert tombstone["lease_epoch"] == 2
 
 
-def test_completion_turn_key_rejects_cross_turn_replay(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_completion_turn_key_rejects_cross_turn_replay(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(registry)
 
     completed = complete_goal_todo(
@@ -970,10 +976,10 @@ def test_completion_turn_key_rejects_cross_turn_replay(tmp_path: Path) -> None:
         no_followup=True,
     )
     assert completed["completed"] is True
-    completed_todo = _agent_todo(state, todo["todo_id"])
+    completed_todo = _canonical_todo(registry, todo["todo_id"])
     assert completed_todo["completion_turn_key"] == "turn-a"
     assert completed_todo["completion_continuation"] == "no_followup"
-    completed_state = state.read_text(encoding="utf-8")
+    completed_state = _canonical_snapshot(registry, state)
 
     with pytest.raises(ValueError, match="different completion_turn_key"):
         complete_goal_todo(
@@ -985,7 +991,7 @@ def test_completion_turn_key_rejects_cross_turn_replay(tmp_path: Path) -> None:
             completion_turn_key="turn-b",
             no_followup=True,
         )
-    assert state.read_text(encoding="utf-8") == completed_state
+    assert _canonical_snapshot(registry, state) == completed_state
 
     replayed = complete_goal_todo(
         registry_path=registry,
@@ -998,17 +1004,18 @@ def test_completion_turn_key_rejects_cross_turn_replay(tmp_path: Path) -> None:
     )
     assert replayed["idempotent_replay"] is True
     assert replayed["changed"] is False
+    assert _canonical_snapshot(registry, state) == completed_state
 
 
-def test_terminal_upgrade_cannot_replace_existing_successor(tmp_path: Path) -> None:
-    registry, _state = _write_fixture(tmp_path, multi_agent=False)
+def test_terminal_upgrade_cannot_replace_existing_successor(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False)
     todo = _add_agent_todo(registry)
 
     completed = complete_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
+        agent_id=AUTHOR_AGENT,
         completion_turn_key="turn-a",
         evidence="ordinary completion created the successor",
         next_agent_todo="Continue the durable successor.",
@@ -1016,42 +1023,46 @@ def test_terminal_upgrade_cannot_replace_existing_successor(tmp_path: Path) -> N
     assert completed["changed"] is True
     assert completed["completion_continuation"] == "successor"
 
-    with pytest.raises(ValueError, match="cannot replace an existing successor"):
+    completed_state = _canonical_snapshot(registry, state)
+    with pytest.raises(ValueError, match="operation id already names a different coordination request"):
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
-            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
             completion_turn_key="turn-a",
             evidence="terminal closeout must not erase the successor",
             no_followup=True,
         )
+    assert _canonical_snapshot(registry, state) == completed_state
 
 
-def test_terminal_upgrade_requires_original_completion_turn_key(tmp_path: Path) -> None:
-    registry, _state = _write_fixture(tmp_path, multi_agent=False)
+def test_terminal_upgrade_requires_original_completion_turn_key(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False)
     todo = _add_agent_todo(registry)
 
     completed = complete_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
+        agent_id=AUTHOR_AGENT,
         completion_turn_key="turn-a",
         evidence="ordinary completion from the original turn",
     )
     assert completed["changed"] is True
     assert completed["completion_continuation"] == "active_goal"
 
+    completed_state = _canonical_snapshot(registry, state)
     with pytest.raises(ValueError, match="requires the original completion_turn_key"):
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
-            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
             evidence="an unscoped caller cannot claim terminal closeout",
             no_followup=True,
         )
+    assert _canonical_snapshot(registry, state) == completed_state
 
 
 def test_terminal_upgrade_rejects_untyped_legacy_completion_until_repaired(
@@ -1112,25 +1123,22 @@ def test_terminal_upgrade_rejects_untyped_legacy_completion_until_repaired(
     assert upgraded["completion_recovery"] == "same_turn_terminal_closeout"
 
 
-def test_unfenced_completion_leaves_no_lease_artifacts(tmp_path: Path) -> None:
-    registry, _state = _write_fixture(tmp_path, multi_agent=False)
+def test_unfenced_completion_leaves_no_lease_artifacts(tmp_path: Path, canonical_workspace) -> None:
+    registry, _state = canonical_workspace(tmp_path, multi_agent=False)
     todo = _add_agent_todo(registry)
 
     completed = complete_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
+        agent_id=AUTHOR_AGENT,
         evidence="no lease was ever taken",
         no_followup=True,
     )
 
     assert completed["ok"] is True
-    assert completed["task_lease_fence"] == {
-        "schema_version": "task_lease_v0",
-        "required": False,
-        "active": False,
-    }
+    assert completed["task_lease_fence"]["lease_fence"] == "not_required"
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) is None
     lease_dir = _lease_path(tmp_path, todo["todo_id"]).parent
     assert list(lease_dir.glob("todo_*.json")) == []
 
@@ -1180,8 +1188,8 @@ def test_divergent_claim_completion_leaves_foreign_lease_untouched(
     assert json.loads(lease_before)["owner"] == AUTHOR_AGENT
 
 
-def test_dry_run_completion_does_not_release_lease(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path, multi_agent=False)
+def test_dry_run_completion_does_not_release_lease(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
     todo = _add_agent_todo(registry)
     lease_key = "dry-run-instance"
     acquire_task_lease(
@@ -1193,13 +1201,13 @@ def test_dry_run_completion_does_not_release_lease(tmp_path: Path) -> None:
         idempotency_key=lease_key,
         ttl_seconds=600,
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
     completed = complete_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
+        agent_id=AUTHOR_AGENT,
         task_lease_idempotency_key=lease_key,
         task_lease_expected_version=1,
         evidence="dry run must not touch the lease",
@@ -1208,11 +1216,10 @@ def test_dry_run_completion_does_not_release_lease(tmp_path: Path) -> None:
     )
 
     assert completed["dry_run"] is True
-    assert completed["task_lease_fence"]["execution_instance_verified"] is True
-    assert "released" not in completed["task_lease_fence"]
-    lease_path = _lease_path(tmp_path, todo["todo_id"])
-    assert json.loads(lease_path.read_text(encoding="utf-8"))["status"] == "active"
-    assert state.read_text(encoding="utf-8") == before
+    assert completed["task_lease_fence"]["lease_fence"] == "required"
+    assert completed["task_lease_fence"]["next_lease"]["status"] == "released"
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"])["status"] == "active"
+    assert _canonical_snapshot(registry, state) == before
 
 
 def test_release_failure_after_commit_keeps_completion_ok(
@@ -1342,12 +1349,12 @@ def test_reopened_todo_completes_unfenced_after_lease_release(
 
 
 def test_cli_release_after_auto_release_replays_terminal_tombstone(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The public CLI replays the retained terminal result, not `missing`."""
 
-    registry, _state = _write_fixture(tmp_path, multi_agent=False)
+    registry, _state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
     todo = _add_agent_todo(registry)
     lease_key = "double-release-instance"
     acquire_task_lease(
@@ -1363,14 +1370,13 @@ def test_cli_release_after_auto_release_replays_terminal_tombstone(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
-        claimed_by=AUTHOR_AGENT,
+        agent_id=AUTHOR_AGENT,
         task_lease_idempotency_key=lease_key,
         task_lease_expected_version=1,
         evidence="completion already released the lease",
         no_followup=True,
     )
-    lease_path = _lease_path(tmp_path, todo["todo_id"])
-    tombstone = json.loads(lease_path.read_text(encoding="utf-8"))
+    tombstone = _canonical_lease(registry, tmp_path, todo["todo_id"])
 
     exit_code = cli_main(
         [
@@ -1404,13 +1410,13 @@ def test_cli_release_after_auto_release_replays_terminal_tombstone(
     assert released["lease"]["version"] == 1
     assert released["lease"]["lease_epoch"] == 1
     assert "missing" not in released
-    assert json.loads(lease_path.read_text(encoding="utf-8")) == tombstone
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == tombstone
 
 
-def test_exception_after_verified_fence_leaves_lease_intact(
-    tmp_path: Path,
+def test_invalid_completion_keeps_existing_lease_and_state(
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(tmp_path, multi_agent=False)
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
     todo = _add_agent_todo(registry)
     lease_key = "post-fence-failure-instance"
     acquire_task_lease(
@@ -1422,26 +1428,25 @@ def test_exception_after_verified_fence_leaves_lease_intact(
         idempotency_key=lease_key,
         ttl_seconds=600,
     )
-    lease_path = _lease_path(tmp_path, todo["todo_id"])
-    lease_before = lease_path.read_text(encoding="utf-8")
-    state_before = state.read_text(encoding="utf-8")
+    lease_before = _canonical_lease(registry, tmp_path, todo["todo_id"])
+    state_before = _canonical_snapshot(registry, state)
 
     with pytest.raises(ValueError, match="successor_todo_ids"):
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
-            claimed_by=AUTHOR_AGENT,
+            agent_id=AUTHOR_AGENT,
             task_lease_idempotency_key=lease_key,
             task_lease_expected_version=1,
             successor_todo_ids=["!!not-a-todo-id!!"],
-            evidence="fails after the fence verified",
+            evidence="invalid successor must leave state and lease unchanged",
             no_followup=True,
         )
 
-    assert lease_path.read_text(encoding="utf-8") == lease_before
-    assert json.loads(lease_before)["status"] == "active"
-    assert state.read_text(encoding="utf-8") == state_before
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == lease_before
+    assert lease_before["status"] == "active"
+    assert _canonical_snapshot(registry, state) == state_before
 
 
 def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -> None:
