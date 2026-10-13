@@ -1505,6 +1505,13 @@ export async function executeCoordinationTodoTerminalLifecycle(
     );
   }
 
+  // The completion owner explicitly permits repairing imported records whose
+  // terminal continuation was never typed. A terminal status alone must not
+  // discard that commit decision. Reuse the existing fence reason; ordinary
+  // terminal replay remains a no-op and cannot add new successor intent.
+  const untypedCompletionRepair = completion?.decision === "commit" &&
+    completion.fence.reason === "untyped_completion_repair";
+
   // Persist the accepted delegation justification in both changed and no-op
   // receipts. Replay returns the stored value; historical receipts stay intact.
   const terminalDecisionReceipt = authority.authority_mode === "delegated_orchestration_override"
@@ -1524,7 +1531,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
         "decision_rejection",
       );
     }
-    return commitTerminalResult(store, input, requestSha, head, {
+    if (!untypedCompletionRepair) return commitTerminalResult(store, input, requestSha, head, {
       todo_id: input.todo_id,
       command: input.command,
       changed: false,
@@ -1666,7 +1673,8 @@ export async function executeCoordinationTodoTerminalLifecycle(
     ? planUserCompletion(todo, [...projection.todos.values()], input.decision_outcome) : null;
   const dependent = followthrough && Object.keys(followthrough.updates).length
     ? projection.todos.get(String(todo.unblocks_todo_id)) : undefined;
-  const changed = authority.outcome === "apply" || edit?.changed === true || terminalUpgradeReceipt !== null;
+  const changed = authority.outcome === "apply" || edit?.changed === true ||
+    terminalUpgradeReceipt !== null || untypedCompletionRepair;
   const result: JsonObject = {
     ...(input.user_update == null ? {} : {todo_update: todoUpdateResultFacts(authorityTodo, target.todo)}),
     todo_id: input.todo_id,
