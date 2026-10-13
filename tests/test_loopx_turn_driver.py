@@ -39,7 +39,7 @@ from loopx.control_plane.turn_driver.subagent_execution_topology import (
 )
 from loopx.control_plane.turn_driver.executor import BuiltInHostError
 from loopx.control_plane.quota.live_decision import bind_scheduler_followup_cli_routes
-from loopx.todos import complete_goal_todo
+from loopx.todos import list_goal_todos
 
 
 def _envelope(
@@ -951,6 +951,7 @@ def test_default_agent_session_reuses_planning_across_completed_todos(tmp_path, 
         "  <!-- loopx:todo todo_id=todo_fixture0002 status=open task_class=advancement_task "
         "action_kind=fixture claimed_by=codex-fixture priority=P1 -->",
     ))
+    _promote_turn_fixture(project, runtime)
     binary, log = _fake_codex(tmp_path)
     monkeypatch.setenv("FAKE_CODEX_LOG", str(log))
     home = tmp_path / "codex-home"
@@ -1408,32 +1409,42 @@ def _promote_turn_fixture(project: Path, runtime: Path) -> None:
         / "loopx-turn-fixture"
         / "ACTIVE_GOAL_STATE.md"
     )
+    parsed = parse_active_state_todos(state.read_text(encoding="utf-8"), item_limit=None)
     projection = build_todo_runtime_shadow_projection(
         goal_id="loopx-turn-fixture",
         handoff_mode="soft_claim",
-        todos=[
-            {
-                "schema_version": "todo_item_v0",
-                "index": 1,
-                "done": False,
-                "text": "[P0] Advance one public fixture.",
-                "todo_id": "todo_fixture0001",
-                "role": "agent",
-                "status": "open",
-                "archive_state": "active",
-                "source_section": "Agent Todo",
-                "task_class": "advancement_task",
-                "action_kind": "fixture",
-                "claimed_by": "codex-fixture",
-                "priority": "P0",
-            }
-        ],
+        todos=parsed["agent_todos"]["items"],
     )
     initialize_canonical_authority(
         runtime,
         "loopx-turn-fixture",
         projection,
         state_path=state,
+    )
+
+
+def _replace_canonical_completion_turn_key(runtime: Path, key: str | None) -> None:
+    """Perturb a disposable provider revision to exercise terminal recovery fencing."""
+    store_module = (Path(__file__).resolve().parents[1] / "loopx/control_plane/coordination/local_authority_provider.ts").as_uri()
+    codec_module = (Path(__file__).resolve().parents[1] / "loopx/control_plane/coordination/authority_store_codec.ts").as_uri()
+    script = (
+        f"import {{openLocalAuthorityStore}} from {json.dumps(store_module)};"
+        f"import {{canonicalAuthoritySha256}} from {json.dumps(codec_module)};"
+        "const store=await openLocalAuthorityStore(process.argv[1],'loopx-turn-fixture');"
+        "const head=await store.loadAuthority();"
+        "const todo=head.head.todos.find(item=>item.todo_id==='todo_fixture0001');"
+        "if(!todo)throw Error('fixture Todo missing');"
+        "const key=JSON.parse(process.argv[2]);"
+        "if(key===null)delete todo.completion_turn_key;else todo.completion_turn_key=key;"
+        "head.head.todo_read_model.records_sha256=canonicalAuthoritySha256(head.head.todos);"
+        "const result=await store.commitAuthority({expected_provider_revision:head.provider_revision,"
+        "operation_id:'fixture-completion-key-change',events:[],receipts:[],next_projection:head.head});"
+        "if(result.status!=='applied')throw Error(JSON.stringify(result));"
+    )
+    subprocess.run(
+        ["node", "--no-warnings", "--experimental-strip-types", "--input-type=module",
+         "-e", script, str(runtime), json.dumps(key)],
+        check=True, capture_output=True, text=True, timeout=30,
     )
 
 
@@ -2382,6 +2393,7 @@ def test_turn_run_once_cli_completes_selected_todo_after_validation(
     next_action: str,
 ) -> None:
     project, runtime, registry = _write_live_fixture(tmp_path)
+    _promote_turn_fixture(project, runtime)
     host_project = project / "isolated-host-workspace"
     host_project.mkdir()
     host_script = """
@@ -2530,16 +2542,11 @@ raise SystemExit(0 if artifact.read_text(encoding="utf-8") == "completed" else 7
     next_obligation = next_plan["turn_envelope"]["replan_action_packet"]
     assert next_obligation["decision"] == "replan_required"
 
-    recovered_completion = complete_goal_todo(
-        registry_path=registry,
-        goal_id="loopx-turn-fixture",
-        todo_id="todo_fixture0001",
-        role="agent",
-        agent_id="codex-fixture",
-        completion_turn_key=payload["resume_turn_key"],
-    )
-    assert recovered_completion["idempotent_replay"] is True
-    assert recovered_completion["changed"] is False
+    stored_completion = list_goal_todos(
+        registry_path=registry, goal_id="loopx-turn-fixture", todo_id="todo_fixture0001",
+    )["todo"]
+    assert stored_completion["status"] == "done"
+    assert stored_completion["completion_turn_key"] == payload["resume_turn_key"]
 
     replayed_output = io.StringIO()
     with contextlib.redirect_stdout(replayed_output):
@@ -2727,6 +2734,7 @@ def test_turn_run_once_cli_repairs_committed_quota_spend_after_receipt_crash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, runtime, registry = _write_live_fixture(tmp_path)
+    _promote_turn_fixture(project, runtime)
     host_project = project / "isolated-host-workspace"
     host_project.mkdir()
     host_script, validation_script = _completion_host_and_validation_scripts()
@@ -2834,6 +2842,7 @@ def test_turn_run_once_cli_projects_declared_successor_continuation(
             "task_class=advancement_task priority=P2 -->",
         ),
     )
+    _promote_turn_fixture(project, runtime)
     host_project = project / "isolated-host-workspace"
     host_project.mkdir()
     host_script, validation_script = _completion_host_and_validation_scripts()
@@ -2866,6 +2875,7 @@ def test_turn_run_once_cli_projects_durable_no_followup_continuation(
         tmp_path,
         todo_metadata_extra="no_followup=true",
     )
+    _promote_turn_fixture(project, runtime)
     host_project = project / "isolated-host-workspace"
     host_project.mkdir()
     host_script, validation_script = _completion_host_and_validation_scripts()
@@ -2903,6 +2913,7 @@ def test_turn_run_once_cli_terminal_recovery_rejects_unowned_completion(
         tmp_path,
         todo_metadata_extra="no_followup=true",
     )
+    _promote_turn_fixture(project, runtime)
     host_project = project / "isolated-host-workspace"
     host_project.mkdir()
     host_script, validation_script = _completion_host_and_validation_scripts()
@@ -2930,15 +2941,7 @@ def test_turn_run_once_cli_terminal_recovery_rejects_unowned_completion(
     state = state_path.read_text(encoding="utf-8")
     current_turn_field = f" completion_turn_key={turn_key}"
     assert current_turn_field in state
-    replacement = (
-        ""
-        if durable_completion_turn_key is None
-        else f" completion_turn_key={durable_completion_turn_key}"
-    )
-    state_path.write_text(
-        state.replace(current_turn_field, replacement),
-        encoding="utf-8",
-    )
+    _replace_canonical_completion_turn_key(runtime, durable_completion_turn_key)
 
     event_path = (
         runtime / "goals" / "loopx-turn-fixture" / "rollout-event-log.jsonl"
@@ -3068,6 +3071,7 @@ def test_turn_run_once_cli_replays_declared_successor_after_interruption(
             "task_class=advancement_task priority=P2 -->",
         ),
     )
+    _promote_turn_fixture(project, runtime)
     host_project = project / "isolated-host-workspace"
     host_project.mkdir()
     host_script, validation_script = _completion_host_and_validation_scripts()
@@ -3406,6 +3410,7 @@ def test_turn_run_once_cli_uses_built_in_codex_host_and_typed_writeback(
         ),
         encoding="utf-8",
     )
+    _promote_turn_fixture(project, runtime)
     subprocess.run(
         ["git", "init", "--initial-branch", "main", str(project)],
         check=True,

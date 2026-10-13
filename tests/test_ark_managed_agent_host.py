@@ -14,6 +14,11 @@ from loopx.control_plane.testing.canary_harness import (
     run_json_cli,
     write_fixture_registry,
 )
+from loopx.control_plane.coordination.runtime_shadow import (
+    build_todo_runtime_shadow_projection,
+)
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_authority
+from loopx.control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from loopx.doctor import collect_doctor
 from loopx.heartbeat_prompt import build_heartbeat_prompt
 from loopx.host_loop_activation import (
@@ -455,6 +460,14 @@ def test_fresh_host_reconstructs_frontier_from_durable_loopx_state(
     tmp_path: Path,
 ) -> None:
     project, runtime, registry = _write_continuity_fixture(tmp_path)
+    state = project / ".codex" / "goals" / CONTINUITY_GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    todos = parse_active_state_todos(state.read_text(encoding="utf-8"), item_limit=None)
+    projection = build_todo_runtime_shadow_projection(
+        goal_id=CONTINUITY_GOAL_ID,
+        handoff_mode="soft_claim",
+        todos=todos["agent_todos"]["items"],
+    )
+    initialize_canonical_authority(runtime, CONTINUITY_GOAL_ID, projection, state_path=state)
 
     first_host = _fresh_host_quota_read(
         project=project,
