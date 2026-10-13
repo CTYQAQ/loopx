@@ -1,40 +1,14 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { atomicWriteJson } from "../../loopx/control_plane/effect_runtime_io.ts";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
-
-import {
-  executeTaskLeaseAcquire,
-  TASK_LEASE_ACQUIRE_REQUEST_SCHEMA_VERSION,
-} from "../../loopx/control_plane/work_items/task_lease_acquire.ts";
-import {
-  executeTaskLeaseLifecycle,
-  TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION,
-} from "../../loopx/control_plane/work_items/task_lease_lifecycle.ts";
+import { atomicWriteJson } from "../../loopx/control_plane/effect_runtime_io.ts";
+import { executeTaskLeaseAcquire } from "../../loopx/control_plane/work_items/task_lease_acquire.ts";
+import { executeTaskLeaseLifecycle } from "../../loopx/control_plane/work_items/task_lease_lifecycle.ts";
 import { evaluateTaskLeaseLifecycleDecision } from "../../loopx/control_plane/work_items/task_lease_lifecycle_decision.ts";
 import { shadowManagementStatePath } from "../../loopx/control_plane/coordination/shadow_management.ts";
-
-const ACQUIRE_NOW = new Date("2026-09-01T03:00:00.000Z");
-
-test("maintenance corruption blocks native acquire and release before lease mutation", async (t) => {
-  const root = await workspace(t);
-  const acquired = await executeTaskLeaseAcquire(await acquireRequest(root));
-  assert.equal(acquired.ok, true);
-  const path = join(root, "runtime", "goals", "goal-a", "task-leases", "todo_target.json");
-  const before = await readFile(path, "utf8");
-  await atomicWriteJson(shadowManagementStatePath(join(root, "runtime"), "goal-a"), {});
-  const released = await executeTaskLeaseLifecycle(await lifecycleRequest(root, "release"));
-  assert.equal(released.ok, false);
-  assert.equal(released.error_code, "shadow_management_state_invalid");
-  assert.equal(await readFile(path, "utf8"), before);
-  const retry = await executeTaskLeaseAcquire(await acquireRequest(root, {idempotency_key: "new-key"}));
-  assert.equal(retry.ok, false);
-  assert.equal(retry.error_code, "shadow_management_state_invalid");
-  assert.equal(await readFile(path, "utf8"), before);
-});
+import type { JsonObject } from "../../loopx/control_plane/effect_program.ts";
 
 function lifecycleDecision(
   operation: "renew" | "transfer" | "release",
@@ -150,1604 +124,270 @@ test("soft-claim rejects renew and transfer before missing version; release keep
   assert.equal(cleanup.next_lease?.lease_epoch, 7);
 });
 
-async function workspace(t: TestContext): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "loopx-task-lease-lifecycle-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  return root;
+// Independent 1.x artifacts from the last pre-cutoff base. Only $ROOT paths
+// relocate; original operation IDs, digests, generation tuples and tokens do not.
+// No old acquire/renew/fence producer is executed to prepare candidate tests.
+interface HistoricalScenario {
+  request: JsonObject;
+  files: Record<string, JsonObject>;
 }
-
-async function authoritySource(root: string, content = "authority-v1") {
-  const path = join(root, "authority-source.json");
-  await writeFile(path, content, "utf8");
-  return {
-    source_id: "authority",
-    path,
-    state: "file",
-    sha256: createHash("sha256").update(content).digest("hex"),
+const historical = JSON.parse(await readFile(new URL(
+  "../control_plane/fixtures/task_lease_1x.json", import.meta.url), "utf8")) as {
+    source_commit: string; scenarios: Record<string, HistoricalScenario>;
   };
+const now = () => new Date("2026-09-01T03:03:00Z");
+async function restore(t: TestContext, name = "original") {
+  const root = await mkdtemp(join(tmpdir(), "loopx-lease-recovery-"));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const fixture = JSON.parse(JSON.stringify(historical.scenarios[name]).replaceAll("$ROOT", root)) as HistoricalScenario;
+  await writeFile(join(root, "authority.json"), "authority-v1");
+  for (const [relative, value] of Object.entries(fixture.files)) {
+    const path = join(root, "runtime", relative);
+    await mkdir(dirname(path), {recursive: true});
+    await writeFile(path, JSON.stringify(value));
+  }
+  const path = join(root, "runtime/goals/goal-a/task-leases/todo_target.json");
+  const record = async () => JSON.parse(await readFile(path, "utf8")) as JsonObject;
+  const receiptPath = Object.keys(fixture.files).find(p => p.includes("/.lifecycle"));
+  return {root, ...fixture, path, record,
+    receiptPath: receiptPath ? join(root, "runtime", receiptPath) : null};
+}
+function lifecycle(f: {request: JsonObject}, operation: string, overrides: JsonObject = {}): JsonObject {
+  return {...f.request, schema_version: "loopx_task_lease_lifecycle_native_v0", operation,
+    expected_version: 1, new_owner: null, new_idempotency_key: null, lock_token: null,
+    committed: false, release_lease: false, fence_owner: null, fence_idempotency_key: null,
+    fence_expected_version: null, fence_expected_lease_epoch: 1, ...overrides};
+}
+function closeRequest(f: {request: JsonObject}, fence: JsonObject, overrides: JsonObject = {}): JsonObject {
+  return lifecycle(f, "fence_close", {authority: null, owner: null, idempotency_key: null,
+    expected_version: null, lock_token: fence.lock_token, fence_operation_id: fence.fence_operation_id,
+    committed: true, release_lease: true, fence_owner: fence.owner ?? null,
+    fence_idempotency_key: fence.idempotency_key ?? null, fence_expected_version: fence.version ?? null,
+    fence_expected_lease_epoch: fence.lease_epoch ?? null, ...overrides});
+}
+async function receipt(f: {receiptPath: string | null}): Promise<JsonObject> {
+  assert.ok(f.receiptPath);
+  return JSON.parse(await readFile(f.receiptPath, "utf8"));
 }
 
-type RequestOverrides = Record<string, unknown>;
-
-async function authority(
-  root: string,
-  overrides: RequestOverrides = {},
-): Promise<Record<string, unknown>> {
-  return {
-    handoff_mode: "hard_lease",
-    registered_agent_candidates: [["agent-a", "agent-b"]],
-    todos: [
-      {
-        todo_id: "todo_target",
-        status: "open",
-        claimed_by: null,
-        excluded_agents: [],
-      },
-    ],
-    todo_projection_error: null,
-    source_receipts: [await authoritySource(root)],
-    ...overrides,
-  };
-}
-
-async function acquireRequest(
-  root: string,
-  overrides: RequestOverrides = {},
-): Promise<Record<string, unknown>> {
-  return {
-    schema_version: TASK_LEASE_ACQUIRE_REQUEST_SCHEMA_VERSION,
-    runtime_root: join(root, "runtime"),
-    goal_id: "goal-a",
-    todo_id: "todo_target",
-    owner: "agent-a",
-    idempotency_key: "lease-a",
-    ttl_seconds: 600,
-    write_scopes: [],
-    expected_version: null,
-    authority: await authority(root),
-    ...overrides,
-  };
-}
-
-async function lifecycleRequest(
-  root: string,
-  operation: string,
-  overrides: RequestOverrides = {},
-): Promise<Record<string, unknown>> {
-  return {
-    schema_version: TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION,
-    operation,
-    runtime_root: join(root, "runtime"),
-    goal_id: "goal-a",
-    todo_id: "todo_target",
-    owner: "agent-a",
-    idempotency_key: "lease-a",
-    expected_version: 1,
-    ttl_seconds: 600,
-    new_owner: null,
-    new_idempotency_key: null,
-    lock_token: null,
-    committed: false,
-    release_lease: false,
-    fence_owner: null,
-    fence_idempotency_key: null,
-    fence_expected_version: null,
-    fence_expected_lease_epoch: 1,
-    authority: await authority(root),
-    ...overrides,
-  };
-}
-
-async function lease(root: string): Promise<Record<string, unknown>> {
-  return JSON.parse(
-    await readFile(
-      join(root, "runtime", "goals", "goal-a", "task-leases", "todo_target.json"),
-      "utf8",
-    ),
-  ) as Record<string, unknown>;
-}
-
-test("native lifecycle renew, transfer, and release preserve CAS generations", async (t) => {
-  const root = await workspace(t);
-  const acquired = await executeTaskLeaseAcquire(await acquireRequest(root), {
-    now: () => ACQUIRE_NOW,
+for (const operation of ["renew", "transfer", "terminal_verify", "holder_verify"]) {
+  test(`2.0 refuses fresh source ${operation} without touching an original lease`, async t => {
+    const f = await restore(t); const before = await readFile(f.path, "utf8");
+    const result = await executeTaskLeaseLifecycle(lifecycle(f, operation,
+      operation === "transfer" ? {new_owner: "agent-b", new_idempotency_key: "lease-b"} : {}), {now});
+    assert.equal(result.error_code, "canonical_authority_required");
+    assert.equal(await readFile(f.path, "utf8"), before);
   });
-  assert.equal(acquired.ok, true);
+}
 
-  const renewed = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "renew"),
-    { now: () => new Date("2026-09-01T03:01:00.000Z") },
-  );
-  assert.equal(renewed.ok, true);
-  assert.equal(renewed.renewed, true);
-  assert.equal((renewed.lease as Record<string, unknown>).version, 2);
+test("maintenance corruption blocks acquire and original release before mutation", async t => {
+  const f = await restore(t); const before = await readFile(f.path, "utf8");
+  await atomicWriteJson(shadowManagementStatePath(join(f.root, "runtime"), "goal-a"), {});
+  for (const result of [await executeTaskLeaseAcquire(f.request),
+    await executeTaskLeaseLifecycle(lifecycle(f, "release"))]) {
+    assert.equal(result.error_code, "shadow_management_state_invalid");
+    assert.equal(await readFile(f.path, "utf8"), before);
+  }
+});
 
-  const transferred = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "transfer", {
-      owner: "agent-a",
-      idempotency_key: "lease-a",
-      expected_version: 2,
-      new_owner: "agent-b",
-      new_idempotency_key: "lease-b",
-    }),
-    { now: () => new Date("2026-09-01T03:02:00.000Z") },
-  );
-  assert.equal(transferred.ok, true);
-  assert.equal(transferred.transferred, true);
-  assert.equal((transferred.lease as Record<string, unknown>).owner, "agent-b");
-  assert.equal((transferred.lease as Record<string, unknown>).lease_epoch, 2);
-  assert.equal((transferred.lease as Record<string, unknown>).version, 3);
+for (const [overrides, error] of [
+  [{expected_version: "1"}, "invalid_request"],
+  [{expected_version: null}, "version_required"],
+  [{delegated_authority: "false"}, "invalid_request"],
+  [{operation: "terminal_verify", fence_operation_id: "../../escape"}, "invalid_fence_operation_id"],
+  [{operation: "fence_close", lock_token: "   "}, "invalid_lock_token"],
+] as const) test(`lifecycle input rejection: ${error} ${JSON.stringify(overrides)}`, async t => {
+  const f = await restore(t); const before = await readFile(f.path, "utf8");
+  const r = await executeTaskLeaseLifecycle(lifecycle(f, "release", overrides));
+  assert.equal(r.error_code, error); assert.equal(await readFile(f.path, "utf8"), before);
+});
 
-  const released = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "release", {
-      owner: "agent-b",
-      idempotency_key: "lease-b",
-      expected_version: 3,
-      authority: null,
-    }),
-    { now: () => new Date("2026-09-01T03:03:00.000Z") },
-  );
-  assert.equal(released.ok, true);
+for (const [overrides, error] of [
+  [{owner: "agent-b"}, "lease_cas_mismatch"],
+  [{idempotency_key: "other"}, "lease_cas_mismatch"],
+  [{expected_version: 0}, "version_mismatch"],
+] as const) test(`original release preserves the lease on ${JSON.stringify(overrides)}`, async t => {
+  const f = await restore(t); const before = await readFile(f.path, "utf8");
+  const r = await executeTaskLeaseLifecycle(lifecycle(f, "release", {authority: null, ...overrides}), {now});
+  assert.equal(r.error_code, error); assert.equal(await readFile(f.path, "utf8"), before);
+});
+
+test("original release allows expiry, preserves generation and replays its tombstone", async t => {
+  const f = await restore(t); const original = await f.record();
+  const request = lifecycle(f, "release", {authority: null});
+  const released = await executeTaskLeaseLifecycle(request, {now: () => new Date("2026-09-02T00:00:00Z")});
   assert.equal(released.released, true);
-  assert.equal((await lease(root)).status, "released");
+  const after = await f.record();
+  assert.equal(after.version, original.version); assert.equal(after.lease_epoch, original.lease_epoch);
+  assert.equal(after.status, "released");
+  const replay = await executeTaskLeaseLifecycle(request, {now});
+  assert.equal(replay.idempotent, true); assert.deepEqual(await f.record(), after);
 });
 
-for (const scenario of [
-  {
-    name: "unregistered",
-    errorCode: "owner_not_registered",
-    newOwner: "agent-c",
-    authority: {},
-  },
-  {
-    name: "excluded",
-    errorCode: "owner_excluded_from_todo",
-    newOwner: "agent-b",
-    authority: {
-      todos: [{
-        todo_id: "todo_target",
-        status: "open",
-        claimed_by: null,
-        excluded_agents: ["agent-b"],
-      }],
-    },
-  },
-  {
-    name: "claim conflict",
-    errorCode: "owner_conflicts_with_claim",
-    newOwner: "agent-b",
-    authority: {
-      registered_agent_candidates: [["agent-a", "agent-b", "agent-c"]],
-      todos: [{
-        todo_id: "todo_target",
-        status: "open",
-        claimed_by: "agent-c",
-        excluded_agents: [],
-      }],
-    },
-  },
-  {
-    name: "closed todo",
-    errorCode: "todo_not_open",
-    newOwner: "agent-b",
-    authority: {
-      todos: [{
-        todo_id: "todo_target",
-        status: "done",
-        claimed_by: null,
-        excluded_agents: [],
-      }],
-    },
-  },
-  {
-    name: "missing todo",
-    errorCode: "todo_not_found",
-    newOwner: "agent-b",
-    authority: { todos: [] },
-  },
-] as const) {
-  test(`transfer rejection identifies the requested new owner: ${scenario.name}`, async (t) => {
-    const root = await workspace(t);
-    await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-    const rejected = await executeTaskLeaseLifecycle(
-      await lifecycleRequest(root, "transfer", {
-        new_owner: scenario.newOwner,
-        new_idempotency_key: "lease-target",
-        authority: await authority(root, scenario.authority),
-      }),
-      { now: () => new Date("2026-09-01T03:01:00.000Z") },
-    );
-    assert.equal(rejected.ok, false);
-    assert.equal(rejected.error_code, scenario.errorCode);
-    assert.equal(rejected.owner, scenario.newOwner);
-    assert.equal((await lease(root)).owner, "agent-a");
-    assert.equal((await lease(root)).version, 1);
+test("original release survives pre-write loss and missing leases remain a no-op", async t => {
+  const f = await restore(t); const request = lifecycle(f, "release", {authority: null});
+  const failed = await executeTaskLeaseLifecycle(request, {now, beforeWrite: () => {throw new Error("write interrupted");}});
+  assert.equal(failed.ok, false); assert.equal((await f.record()).status, "active");
+  assert.equal((await executeTaskLeaseLifecycle(request, {now})).released, true);
+  assert.equal((await executeTaskLeaseLifecycle(request, {now})).idempotent, true);
+  const other = await restore(t); await rm(other.path);
+  const missing = await executeTaskLeaseLifecycle(lifecycle(other, "release", {expected_version: 0, authority: null}), {now});
+  assert.equal(missing.ok, true); assert.equal(missing.missing, true); assert.equal(missing.released, false);
+});
+
+for (const name of ["renew", "transfer"]) {
+  for (const state of ["committed", "prepared"]) test(`1.x ${name} ${state} receipt recovers matching bytes once`, async t => {
+    const f = await restore(t, name); const before = await readFile(f.path, "utf8");
+    if (state === "prepared") await atomicWriteJson(f.receiptPath!, {...await receipt(f), state});
+    const r = await executeTaskLeaseLifecycle(f.request, {now, beforeWrite: () => assert.fail("recovery must not repeat a lease write")});
+    assert.equal(r.ok, true); assert.equal(r.idempotent, true);
+    assert.equal((await receipt(f)).state, "committed");
+    assert.equal(await readFile(f.path, "utf8"), before);
+  });
+  for (const state of ["committed", "prepared"]) test(`1.x ${name} ${state} cannot overwrite a later lease`, async t => {
+    const f = await restore(t, name);
+    await atomicWriteJson(f.receiptPath!, {...await receipt(f), state});
+    await atomicWriteJson(f.path, {...await f.record(), version: 9, lease_epoch: 9, idempotency_key: "later"});
+    const before = await readFile(f.path, "utf8");
+    const r = await executeTaskLeaseLifecycle(f.request, {now});
+    assert.equal(r.error_code, state === "committed" ? "lifecycle_receipt_state_mismatch" : "canonical_authority_required");
+    assert.equal(await readFile(f.path, "utf8"), before);
+  });
+  test(`1.x ${name} rejects changed identity parameters and malformed receipts`, async t => {
+    const f = await restore(t, name); const before = await readFile(f.path, "utf8");
+    assert.equal((await executeTaskLeaseLifecycle({...f.request, ttl_seconds: 300}, {now})).error_code, "idempotency_key_reuse");
+    const original = await receipt(f);
+    await atomicWriteJson(f.receiptPath!, {...original, planned_lease: {...original.planned_lease as JsonObject, owner: 42}});
+    assert.equal((await executeTaskLeaseLifecycle(f.request, {now})).error_code, "corrupt_lifecycle_receipt");
+    assert.equal(await readFile(f.path, "utf8"), before);
   });
 }
 
-test("lifecycle decode failures preserve the requested action", async (t) => {
-  const root = await workspace(t);
-  const rejected = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "renew", { expected_version: "1" }),
-  );
+for (const name of ["terminal-held", "holder-held", "terminal-aborted", "auto-held", "auto-postwrite"]) {
+  test(`1.x ${name} resumes after restart and closes only the original generation`, async t => {
+    const f = await restore(t, name); const before = await f.record();
+    const r = await executeTaskLeaseLifecycle(f.request, {now});
+    assert.equal(r.ok, true, JSON.stringify(r));
+    const fence = r.fence as JsonObject;
+    assert.equal(fence.fence_operation_id, (await receipt(f)).operation_id);
+    assert.deepEqual(await f.record(), before);
+    const close = closeRequest(f, fence);
+    const closed = await executeTaskLeaseLifecycle(close, {now});
+    assert.equal(closed.released, true, JSON.stringify(closed));
+    assert.equal((await f.record()).status, "released");
+    assert.equal((await f.record()).version, before.version);
+    assert.equal((await executeTaskLeaseLifecycle(close, {now})).idempotent, true);
+  });
+}
 
-  assert.equal(rejected.ok, false);
-  assert.equal(rejected.action, "renew");
-  assert.equal(rejected.error_code, "invalid_request");
+test("1.x pre-write auto-acquire intent cannot mint a new lease after cutoff", async t => {
+  const f = await restore(t, "auto-prewrite");
+  const r = await executeTaskLeaseLifecycle(f.request, {now, beforeWrite: () => assert.fail("fresh lease writer retired")});
+  assert.equal(r.error_code, "canonical_authority_required", JSON.stringify(r));
+  await assert.rejects(readFile(f.path), {code: "ENOENT"});
 });
 
-test("lifecycle replay is idempotent and parameter reuse fails without mutation", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const request = await lifecycleRequest(root, "renew");
-  const first = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  const afterFirst = await lease(root);
-  const replay = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:30:00.000Z"),
-  });
-  assert.equal(first.ok, true);
-  assert.equal(replay.ok, true);
-  assert.equal(replay.idempotent, true);
-  assert.deepEqual(await lease(root), afterFirst);
-
-  const reuse = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "renew", { ttl_seconds: 300 }),
-    { now: () => new Date("2026-09-01T03:02:00.000Z") },
-  );
-  assert.equal(reuse.ok, false);
-  assert.equal(reuse.error_code, "idempotency_key_reuse");
-  assert.deepEqual(await lease(root), afterFirst);
+test("closed original fence replays without a lock and refuses a later generation", async t => {
+  const f = await restore(t, "terminal-closed"); const before = await f.record();
+  const r = await executeTaskLeaseLifecycle(f.request, {now});
+  assert.equal(r.ok, true); assert.equal((r.fence as JsonObject).closed, true);
+  assert.equal((r.fence as JsonObject).lock_token, undefined);
+  assert.deepEqual(await f.record(), before);
+  await atomicWriteJson(f.path, {...before, status: "active", version: 9, lease_epoch: 9, idempotency_key: "later"});
+  const later = await readFile(f.path, "utf8");
+  assert.equal((await executeTaskLeaseLifecycle(f.request, {now})).error_code, "fence_state_invalid");
+  assert.equal(await readFile(f.path, "utf8"), later);
 });
 
-test("lifecycle rejects stale versions and expired leases before writeback", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root, { ttl_seconds: 30 }), {
-    now: () => ACQUIRE_NOW,
-  });
-
-  const stale = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "renew", { expected_version: 0 }),
-    { now: () => new Date("2026-09-01T03:01:00.000Z") },
-  );
-  assert.equal(stale.ok, false);
-  assert.equal(stale.error_code, "version_mismatch");
-  assert.equal((await lease(root)).version, 1);
-
-  const expired = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "renew", { expected_version: 1 }),
-    { now: () => new Date("2026-09-01T03:01:00.001Z") },
-  );
-  assert.equal(expired.ok, false);
-  assert.equal(expired.error_code, "lease_not_active");
-  assert.equal((await lease(root)).version, 1);
+test("closed legacy no-op replays only while no lease is present", async t => {
+  const f = await restore(t, "noop-closed");
+  const r = await executeTaskLeaseLifecycle(f.request, {now});
+  assert.equal(r.ok, true); assert.equal((r.fence as JsonObject).required, false);
+  const original = await restore(t);
+  await atomicWriteJson(f.path, await original.record());
+  const before = await readFile(f.path, "utf8");
+  assert.equal((await executeTaskLeaseLifecycle(f.request, {now})).error_code, "canonical_authority_required");
+  assert.equal(await readFile(f.path, "utf8"), before);
 });
 
-test("lifecycle accepts active leases with high-precision fractional seconds", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const existing = await lease(root);
-  existing.expires_at = "2026-09-01T03:10:00.123456789Z";
-  await writeFile(
-    join(root, "runtime", "goals", "goal-a", "task-leases", "todo_target.json"),
-    JSON.stringify(existing),
-    "utf8",
-  );
-
-  const renewed = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "renew"),
-    { now: () => new Date("2026-09-01T03:01:00.000Z") },
-  );
-
-  assert.equal(renewed.ok, true);
-  assert.equal(renewed.renewed, true);
-});
-
-test("holder verification is hard-lease-only and fence close releases only its verified lease", async (t) => {
-  const root = await workspace(t);
-  const hardAuthority = await authority(root, {
-    todos: [{
-      todo_id: "todo_target",
-      status: "open",
-      claimed_by: "agent-a",
-      excluded_agents: [],
-    }],
+for (const field of ["owner", "version", "lease_epoch", "idempotency_key"] as const) {
+  test(`held fence refuses changed ${field} and preserves later state`, async t => {
+    const f = await restore(t, "terminal-held");
+    const original = await f.record();
+    await atomicWriteJson(f.path, {...original, [field]: field === "owner" ? "agent-b" : field === "idempotency_key" ? "later" : 9});
+    const before = await readFile(f.path, "utf8");
+    const r = await executeTaskLeaseLifecycle(f.request, {now});
+    assert.equal(r.ok, false); assert.equal(await readFile(f.path, "utf8"), before);
   });
-  await executeTaskLeaseAcquire(
-    await acquireRequest(root, { authority: hardAuthority }),
-    { now: () => ACQUIRE_NOW },
-  );
+}
 
-  const checked = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "holder_verify", {
-      authority: hardAuthority,
-      idempotency_key: null,
-      expected_version: null,
-      owner: "agent-a",
-    }),
-    { now: () => new Date("2026-09-01T03:01:00.000Z") },
-  );
-  assert.equal(checked.ok, true);
-  const fence = checked.fence as Record<string, unknown>;
-  assert.equal(fence.owner, "agent-a");
-  assert.equal(fence.version, 1);
-  assert.equal(typeof fence.lock_token, "string");
-
-  const closed = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      // Holder verification is actor/lease-tuple based; the close bridge can
-      // recover the private execution key from its durable fence receipt.
-      fence_idempotency_key: null,
-      fence_expected_version: 1,
-    }),
-  }, { now: () => new Date("2026-09-01T03:02:00.000Z") });
-  assert.equal(closed.ok, true);
-  assert.equal(closed.released, true);
-  assert.equal((await lease(root)).status, "released");
-
-  const soft = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "holder_verify", {
-      authority: await authority(root, { handoff_mode: "soft_claim" }),
-      idempotency_key: null,
-      expected_version: null,
-    }),
-    { now: () => new Date("2026-09-01T03:03:00.000Z") },
-  );
-  assert.equal(soft.ok, false);
-  assert.equal(soft.error_code, "handoff_mode_forbids_lease");
-});
-
-test("holder verification adopts one explicit retry receipt and fresh gates mint new ids", async (t) => {
-  const root = await workspace(t);
-  const hardAuthority = await authority(root, {
-    todos: [{
-      todo_id: "todo_target",
-      status: "open",
-      claimed_by: "agent-a",
-      excluded_agents: [],
-    }],
+for (const name of ["terminal-held", "auto-postwrite"]) for (const change of ["claim", "excluded", "unregistered", "source"]) {
+  test(`${name} receipt does not bypass changed ${change} authority`, async t => {
+    const f = await restore(t, name); const before = await readFile(f.path, "utf8");
+    const authority = f.request.authority as JsonObject;
+    const todo = (authority.todos as JsonObject[])[0];
+    if (change === "claim") todo.claimed_by = "agent-b";
+    if (change === "excluded") todo.excluded_agents = ["agent-a"];
+    if (change === "unregistered") authority.registered_agent_candidates = [["agent-b"]];
+    if (change === "source") await writeFile(join(f.root, "authority.json"), "later source");
+    const r = await executeTaskLeaseLifecycle(f.request, {now});
+    assert.equal(r.ok, false); assert.equal(r.error_code, change === "source" ? "authority_source_changed"
+      : name === "terminal-held" ? "authority_todo_mismatch" : "handoff_mode_lease_claim_divergence");
+    assert.equal(await readFile(f.path, "utf8"), before);
   });
-  await executeTaskLeaseAcquire(
-    await acquireRequest(root, { authority: hardAuthority }),
-    { now: () => ACQUIRE_NOW },
-  );
-  const request = await lifecycleRequest(root, "holder_verify", {
-    authority: hardAuthority,
-    idempotency_key: null,
-    expected_version: null,
-    owner: "agent-a",
-    fence_operation_id: "a".repeat(64),
+}
+
+for (const [field, value] of [["fence_operation_id", "a".repeat(64)], ["goal_id", "other-goal"], ["runtime_root", "$NEW_RUNTIME"]]) {
+  test(`receipt identity cannot move across ${field}`, async t => {
+    const f = await restore(t, "terminal-held"); const before = await readFile(f.path, "utf8");
+    const r = await executeTaskLeaseLifecycle({...f.request, [field]: value === "$NEW_RUNTIME" ? join(f.root, "other-runtime") : value}, {now});
+    assert.equal(r.ok, false); assert.equal(await readFile(f.path, "utf8"), before);
   });
+}
 
-  const first = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
+for (const field of ["fence_expected_version", "fence_expected_lease_epoch"] as const) {
+  test(`original fence close rejects ${field} drift`, async t => {
+    const f = await restore(t, "terminal-held");
+    const r = await executeTaskLeaseLifecycle(f.request, {now}); assert.equal(r.ok, true);
+    const before = await readFile(f.path, "utf8");
+    const close = closeRequest(f, r.fence as JsonObject, {[field]: 0});
+    assert.equal((await executeTaskLeaseLifecycle(close, {now})).error_code, "fence_cas_mismatch");
+    assert.equal(await readFile(f.path, "utf8"), before);
   });
-  const firstFence = first.fence as Record<string, unknown>;
-  const retry = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:01.000Z"),
-  });
-  const retryFence = retry.fence as Record<string, unknown>;
-  assert.equal(retry.ok, true);
-  assert.equal(retryFence.idempotent, true);
-  assert.equal(retryFence.lock_token, firstFence.lock_token);
-  assert.equal(retryFence.fence_operation_id, firstFence.fence_operation_id);
+}
 
-  const firstClose = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: firstFence.lock_token,
-      committed: false,
-      release_lease: false,
-      fence_owner: "agent-a",
-      fence_idempotency_key: null,
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-      fence_operation_id: firstFence.fence_operation_id,
-    }),
-  );
-  assert.equal(firstClose.ok, true);
-  assert.equal(firstClose.released, false);
-
-  const fresh = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "holder_verify", {
-      authority: hardAuthority,
-      idempotency_key: null,
-      expected_version: null,
-      owner: "agent-a",
-    }),
-    { now: () => new Date("2026-09-01T03:01:02.000Z") },
-  );
-  const freshFence = fresh.fence as Record<string, unknown>;
-  assert.equal(fresh.ok, true);
-  assert.notEqual(freshFence.fence_operation_id, firstFence.fence_operation_id);
-  assert.notEqual(freshFence.lock_token, firstFence.lock_token);
-
-  const freshClose = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: freshFence.lock_token,
-      committed: false,
-      release_lease: false,
-      fence_owner: "agent-a",
-      fence_idempotency_key: null,
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-      fence_operation_id: freshFence.fence_operation_id,
-    }),
-  );
-  assert.equal(freshClose.ok, true);
-});
-
-test("fence close retires a lease that expires after verification", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(
-    await acquireRequest(root, { ttl_seconds: 1 }),
-    { now: () => ACQUIRE_NOW },
-  );
-
-  const checked = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "terminal_verify"),
-    { now: () => new Date("2026-09-01T03:00:00.500Z") },
-  );
-  assert.equal(checked.ok, true);
-  const fence = checked.fence as Record<string, unknown>;
-
-  const closed = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-    }),
-    { now: () => new Date("2026-09-01T03:00:02.000Z") },
-  );
-
-  assert.equal(closed.ok, true);
-  assert.equal(closed.released, true);
-  assert.equal((await lease(root)).status, "released");
-  assert.equal((await lease(root)).version, 1);
-  assert.equal((await lease(root)).lease_epoch, 1);
-});
-
-test("fence close write failure leaves the lease unchanged and unlocks", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const checked = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "terminal_verify"),
-    { now: () => new Date("2026-09-01T03:01:00.000Z") },
-  );
-  const fence = checked.fence as Record<string, unknown>;
-
-  const failed = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-    }),
-    {
-      now: () => new Date("2026-09-01T03:02:00.000Z"),
-      beforeWrite: () => {
-        throw new Error("simulated fence release write failure");
-      },
-    },
-  );
-  assert.equal(failed.ok, false);
-  assert.equal(failed.error_code, "unexpected_handler_error");
-  assert.equal((await lease(root)).status, "active");
-
-  const cleanup = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "release", { authority: null }),
-    { now: () => new Date("2026-09-01T03:03:00.000Z") },
-  );
-  assert.equal(cleanup.ok, true);
-  assert.equal(cleanup.released, true);
-});
-
-test("user-gate auto-acquire returns a persistent fence that can be closed", async (t) => {
-  const root = await workspace(t);
-  const runtimeShadow = {
-    schema_version: "loopx_coordination_runtime_shadow_binding_v0",
-    provider: "file_v0",
-  };
-  const facts = await authority(root, {
-    todos: [{
-      todo_id: "todo_target",
-      status: "open",
-      claimed_by: null,
-      excluded_agents: [],
-      role: "user",
-      task_class: "user_gate",
-    }],
-  });
-  const checked = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "terminal_verify", {
-      authority: facts,
-      owner: "agent-a",
-      idempotency_key: null,
-      expected_version: null,
-      allow_user_gate_auto_acquire: true,
-      runtime_shadow: runtimeShadow,
-    }),
-    { now: () => ACQUIRE_NOW },
-  );
-  assert.equal(checked.ok, true);
-  const autoCapture = checked.coordination_runtime_shadow_capture as Record<string, unknown>;
-  assert.equal(autoCapture.entry_id, null);
-  assert.equal(autoCapture.seq, null);
-  assert.equal(autoCapture.skipped_reason, "bootstrap_required");
-  assert.equal(autoCapture.failure, null);
-  const fence = checked.fence as Record<string, unknown>;
-  assert.equal(fence.auto_acquired, true);
-  assert.equal((await lease(root)).status, "active");
-
-  const closed = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: (await lease(root)).idempotency_key,
-      fence_expected_version: (await lease(root)).version,
-      runtime_shadow: runtimeShadow,
-    }),
-  }, { now: () => new Date("2026-09-01T03:01:00.000Z") });
-  assert.equal(closed.ok, true);
-  assert.equal(closed.released, true);
-  const closeCapture = closed.coordination_runtime_shadow_capture as Record<string, unknown>;
-  assert.equal(closeCapture.entry_id, null);
-  assert.equal(closeCapture.seq, null);
-  assert.equal(closeCapture.skipped_reason, "bootstrap_required");
-  assert.equal(closeCapture.failure, null);
-  assert.equal((await lease(root)).status, "released");
-});
-
-test("terminal fence retries an auto-acquire after the lease write window", async (t) => {
-  const root = await workspace(t);
-  const facts = await authority(root, {
-    todos: [{
-      todo_id: "todo_target",
-      status: "open",
-      claimed_by: null,
-      excluded_agents: [],
-      role: "user",
-      task_class: "user_gate",
-    }],
-  });
-  const request = await lifecycleRequest(root, "terminal_verify", {
-    authority: facts,
-    owner: "agent-a",
-    idempotency_key: null,
-    expected_version: null,
-    allow_user_gate_auto_acquire: true,
-  });
-  let injected = false;
-  const first = await executeTaskLeaseLifecycle(request, {
-    now: () => ACQUIRE_NOW,
-    beforeWrite: async (next) => {
-      if (injected) return;
-      injected = true;
-      const leasePath = join(
-        root,
-        "runtime",
-        "goals",
-        "goal-a",
-        "task-leases",
-        "todo_target.json",
-      );
-      await atomicWriteJson(leasePath, next);
-      throw new Error("simulated response loss after auto-acquire write");
-    },
-  });
-  assert.equal(first.ok, false);
-  assert.equal((await lease(root)).status, "active");
-
-  const retry = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:00:01.000Z"),
-  });
-  assert.equal(retry.ok, true);
-  const fence = retry.fence as Record<string, unknown>;
-  assert.equal(fence.auto_acquired, true);
-  assert.equal((await lease(root)).version, 1);
-
-  const closed = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      fence_operation_id: fence.fence_operation_id,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: (await lease(root)).idempotency_key,
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-  });
-  assert.equal(closed.ok, true);
-  assert.equal(closed.released, true);
-});
-
-test("auto-acquire keeps its token claim until the held receipt is durable", async (t) => {
-  const root = await workspace(t);
-  const facts = await authority(root, {
-    todos: [{
-      todo_id: "todo_target",
-      status: "open",
-      claimed_by: null,
-      excluded_agents: [],
-      role: "user",
-      task_class: "user_gate",
-    }],
-  });
-  const request = await lifecycleRequest(root, "terminal_verify", {
-    authority: facts,
-    owner: "agent-a",
-    idempotency_key: null,
-    expected_version: null,
-    allow_user_gate_auto_acquire: true,
-  });
-  let resumeVerifier: () => void = () => {
-    throw new Error("verifier gate was not initialized");
-  };
-  let verifierEntered: () => void = () => {
-    throw new Error("verifier start gate was not initialized");
-  };
-  const verifierGate = new Promise<void>((resolve) => {
-    resumeVerifier = resolve;
-  });
-  const verifierStarted = new Promise<void>((resolve) => {
-    verifierEntered = resolve;
-  });
-  const leasePath = join(
-    root,
-    "runtime",
-    "goals",
-    "goal-a",
-    "task-leases",
-    "todo_target.json",
-  );
-  const verifier = executeTaskLeaseLifecycle(request, {
-    now: () => ACQUIRE_NOW,
-    beforeWrite: async (next) => {
-      // Expose the exact response-loss window: the acquired receipt exists,
-      // and the lease has been written, but the verifier has not published
-      // its held receipt yet.
-      await atomicWriteJson(leasePath, next);
-      verifierEntered();
-      await verifierGate;
-    },
-  });
-  await verifierStarted;
-
-  const receiptDirectory = join(
-    root,
-    "runtime",
-    "goals",
-    "goal-a",
-    "task-leases",
-    ".lifecycle-fences",
-  );
-  const [receiptName] = await readdir(receiptDirectory);
-  const acquiredReceipt = JSON.parse(
-    await readFile(join(receiptDirectory, receiptName), "utf8"),
-  ) as Record<string, unknown>;
-  assert.equal(acquiredReceipt.state, "acquired");
-  assert.equal(typeof acquiredReceipt.lock_token, "string");
-
-  let interruptedClose: Record<string, unknown>;
+// The recovered lock is still a real transferable capability. A concurrent
+// verifier must not steal it while the original closer owns its token claim.
+test("recovered fence close excludes a concurrent verifier until its write commits", {timeout: 10_000}, async t => {
+  const f = await restore(t, "terminal-held");
+  const verified = await executeTaskLeaseLifecycle(f.request, {now}); assert.equal(verified.ok, true);
+  let entered!: () => void; let release!: () => void;
+  const writing = new Promise<void>(resolve => {entered = resolve;});
+  const proceed = new Promise<void>(resolve => {release = resolve;});
+  const closing = executeTaskLeaseLifecycle(closeRequest(f, verified.fence as JsonObject),
+    {now, beforeWrite: async () => {entered(); await proceed;}});
+  await writing;
   try {
-    interruptedClose = await executeTaskLeaseLifecycle(
-      await lifecycleRequest(root, "fence_close", {
-        authority: null,
-        owner: null,
-        idempotency_key: null,
-        expected_version: null,
-        lock_token: acquiredReceipt.lock_token,
-        fence_operation_id: acquiredReceipt.operation_id,
-        committed: false,
-        release_lease: false,
-        fence_owner: "agent-a",
-        fence_idempotency_key: acquiredReceipt.fence_idempotency_key,
-        fence_expected_version: acquiredReceipt.fence_expected_version,
-        fence_expected_lease_epoch: acquiredReceipt.fence_expected_lease_epoch,
-      }),
-    );
-  } finally {
-    // Keep the test from hanging if the contention assertion fails.
-    resumeVerifier();
-  }
-  assert.equal(interruptedClose.ok, false);
-  assert.equal(interruptedClose.error_code, "fence_token_invalid");
-
-  const checked = await verifier;
-  assert.equal(checked.ok, true);
-  const heldReceipt = JSON.parse(
-    await readFile(join(receiptDirectory, receiptName), "utf8"),
-  ) as Record<string, unknown>;
-  assert.equal(heldReceipt.state, "held");
-
-  const fence = checked.fence as Record<string, unknown>;
-  const cleanup = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      fence_operation_id: fence.fence_operation_id,
-      committed: false,
-      release_lease: false,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "auto-todo_target",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-  );
-  assert.equal(cleanup.ok, true);
+    const retry = await executeTaskLeaseLifecycle(f.request, {now});
+    assert.equal(retry.ok, false); assert.equal(retry.error_code, "fence_token_invalid");
+    assert.equal((await f.record()).status, "active");
+  } finally {release();}
+  assert.equal((await closing).released, true);
 });
 
-test("a concurrent fence verifier cannot reopen a receipt while close owns its claim", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const verifyRequest = await lifecycleRequest(root, "terminal_verify");
-  const checked = await executeTaskLeaseLifecycle(verifyRequest, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(checked.ok, true);
-  const fence = checked.fence as Record<string, unknown>;
-
-  let releaseClose: () => void = () => {
-    throw new Error("close gate was not initialized");
-  };
-  let closeEntered: () => void = () => {
-    throw new Error("close start gate was not initialized");
-  };
-  const closeGate = new Promise<void>((resolve) => {
-    releaseClose = resolve;
-  });
-  const closeHookEntered = new Promise<void>((resolve) => {
-    closeEntered = resolve;
-  });
-  const closePromise = executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      fence_operation_id: fence.fence_operation_id,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-    {
-      beforeWrite: async () => {
-        closeEntered();
-        await closeGate;
-      },
-    },
-  );
-  await closeHookEntered;
-
-  let concurrentRetry: Record<string, unknown>;
-  try {
-    concurrentRetry = await executeTaskLeaseLifecycle(verifyRequest, {
-      now: () => new Date("2026-09-01T03:01:01.000Z"),
-    });
-  } finally {
-    // Always unblock the close attempt so a failed assertion cannot leave a
-    // pending promise holding the test process open.
-    releaseClose();
-  }
-  assert.equal(concurrentRetry.ok, false);
-  assert.equal(concurrentRetry.error_code, "fence_token_invalid");
-
-  const closed = await closePromise;
-  assert.equal(closed.ok, true);
-  assert.equal(closed.released, true);
-  const receiptPath = join(
-    root,
-    "runtime",
-    "goals",
-    "goal-a",
-    "task-leases",
-    ".lifecycle-fences",
-    `${fence.fence_operation_id}.json`,
-  );
-  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as Record<string, unknown>;
-  assert.equal(receipt.state, "closed");
-  assert.equal((receipt.response as Record<string, unknown>).action, "fence_close");
-});
-
-test("held and closed fence receipts replay without changing their intent", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const verifyRequest = await lifecycleRequest(root, "terminal_verify");
-  const first = await executeTaskLeaseLifecycle(verifyRequest, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(first.ok, true);
-  const firstFence = first.fence as Record<string, unknown>;
-  const replay = await executeTaskLeaseLifecycle(verifyRequest, {
-    now: () => new Date("2026-09-01T03:01:01.000Z"),
-  });
-  assert.equal(replay.ok, true);
-  assert.equal(replay.fence?.lock_token, firstFence.lock_token);
-  assert.equal(replay.fence?.idempotent, true);
-
-  const closeRequest = {
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: firstFence.lock_token,
-      fence_operation_id: firstFence.fence_operation_id,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-  };
-  const closed = await executeTaskLeaseLifecycle(closeRequest);
-  assert.equal(closed.ok, true);
-  assert.equal(closed.released, true);
-  const staleCleanupLockPath = join(
-    root,
-    "runtime",
-    "goals",
-    "goal-a",
-    "task-leases",
-    ".task-leases.ts-effect.lock",
-  );
-  await writeFile(
-    staleCleanupLockPath,
-    JSON.stringify({ pid: process.pid, token: firstFence.lock_token }),
-    "utf8",
-  );
-  const closeReplay = await executeTaskLeaseLifecycle(closeRequest);
-  assert.equal(closeReplay.ok, true);
-  assert.equal(closeReplay.idempotent, true);
-  await assert.rejects(readFile(staleCleanupLockPath), { code: "ENOENT" });
-  const changedClose = await executeTaskLeaseLifecycle({
-    ...closeRequest,
-    release_lease: false,
-  });
-  assert.equal(changedClose.ok, false);
-  assert.equal(changedClose.error_code, "fence_operation_reuse");
-});
-
-test("closed non-required terminal fences replay without a retired lock token", async (t) => {
-  const root = await workspace(t);
-  const request = await lifecycleRequest(root, "terminal_verify", {
-    authority: await authority(root, { handoff_mode: "legacy" }),
-    idempotency_key: "completion-turn-a",
-    expected_version: null,
-    require_active_when_fence_supplied: false,
-  });
-
-  const first = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(first.ok, true);
-  const firstFence = first.fence as Record<string, unknown>;
-  assert.equal(firstFence.required, false);
-  assert.equal(firstFence.active, false);
-  assert.equal(firstFence.lock_token, undefined);
-
-  const hardReplay = await executeTaskLeaseLifecycle({
-    ...request,
-    authority: await authority(root),
-  });
-  assert.equal(hardReplay.ok, false);
-  assert.equal(hardReplay.error_code, "handoff_mode_requires_lease");
-
-  const replay = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:02:00.000Z"),
-  });
-  assert.equal(replay.ok, true);
-  const replayFence = replay.fence as Record<string, unknown>;
-  assert.equal(replayFence.required, false);
-  assert.equal(replayFence.active, false);
-  assert.equal(replayFence.closed, true);
-  assert.equal(replayFence.idempotent, true);
-  assert.equal(replayFence.lock_token, undefined);
-
-  await assert.rejects(
-    readFile(join(
-      root,
-      "runtime",
-      "goals",
-      "goal-a",
-      "task-leases",
-      ".task-leases.ts-effect.lock",
-    )),
-    { code: "ENOENT" },
-  );
-});
-
-test("aborted required fence close re-verifies the same lease generation", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const request = await lifecycleRequest(root, "terminal_verify");
-  const first = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(first.ok, true);
-  const firstFence = first.fence as Record<string, unknown>;
-
-  const aborted = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: firstFence.lock_token,
-      fence_operation_id: firstFence.fence_operation_id,
-      committed: false,
-      release_lease: false,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-  });
-  assert.equal(aborted.ok, true);
-  assert.equal(aborted.released, false);
-  assert.equal((await lease(root)).status, "active");
-
-  const retry = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:01.000Z"),
-  });
-  assert.equal(retry.ok, true);
-  const retryFence = retry.fence as Record<string, unknown>;
-  assert.equal(retryFence.required, true);
-  assert.equal(retryFence.active, true);
-  assert.notEqual(retryFence.lock_token, firstFence.lock_token);
-
-  const cleanup = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: retryFence.lock_token,
-      fence_operation_id: retryFence.fence_operation_id,
-      committed: false,
-      release_lease: false,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-  });
-  assert.equal(cleanup.ok, true);
-});
-
-test("closed non-required fence cannot bypass a lease acquired later", async (t) => {
-  const root = await workspace(t);
-  const legacyRequest = await lifecycleRequest(root, "terminal_verify", {
-    authority: await authority(root, { handoff_mode: "legacy" }),
-    idempotency_key: "completion-turn-a",
-    expected_version: null,
-    require_active_when_fence_supplied: false,
-  });
-  const first = await executeTaskLeaseLifecycle(legacyRequest, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(first.ok, true);
-  assert.equal((first.fence as Record<string, unknown>).required, false);
-
-  await executeTaskLeaseAcquire(await acquireRequest(root), {
-    now: () => new Date("2026-09-01T03:01:01.000Z"),
-  });
-  const replay = await executeTaskLeaseLifecycle(legacyRequest, {
-    now: () => new Date("2026-09-01T03:01:02.000Z"),
-  });
-  assert.equal(replay.ok, false);
-  assert.equal(replay.error_code, "lease_cas_mismatch");
-  assert.equal((await lease(root)).status, "active");
-});
-
-test("closed terminal receipt rejects an old generation after lease reacquire", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const request = await lifecycleRequest(root, "terminal_verify");
-  const checked = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(checked.ok, true);
-  const fence = checked.fence as Record<string, unknown>;
-  const closed = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      fence_operation_id: fence.fence_operation_id,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-  });
-  assert.equal(closed.ok, true);
-  assert.equal((await lease(root)).status, "released");
-
-  await executeTaskLeaseAcquire(await acquireRequest(root, {
-    idempotency_key: "lease-b",
-  }), {
-    now: () => new Date("2026-09-01T03:02:00.000Z"),
-  });
-  assert.equal((await lease(root)).version, 2);
-  assert.equal((await lease(root)).lease_epoch, 2);
-
-  const replay = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:02:01.000Z"),
-  });
-  assert.equal(replay.ok, false);
-  assert.equal(replay.error_code, "fence_state_invalid");
-  assert.equal((await lease(root)).status, "active");
-});
-
-test("held fence replay revalidates the canonical todo authority", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const request = await lifecycleRequest(root, "terminal_verify");
-  const first = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(first.ok, true);
-
-  const changedAuthority = await authority(root, {
-    todos: [{
-      todo_id: "todo_target",
-      status: "open",
-      claimed_by: "agent-b",
-      excluded_agents: [],
-    }],
-  });
-  const replay = await executeTaskLeaseLifecycle(
-    { ...request, authority: changedAuthority },
-    { now: () => new Date("2026-09-01T03:01:01.000Z") },
-  );
-  assert.equal(replay.ok, false);
-  assert.equal(replay.error_code, "authority_todo_mismatch");
-
-  const cleanup = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "release", { authority: null }),
-    { now: () => new Date("2026-09-01T03:02:00.000Z") },
-  );
-  assert.equal(cleanup.ok, true);
-  assert.equal(cleanup.released, true);
-});
-
-test("partial caller Todo snapshots inherit derived canonical metadata", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const request = await lifecycleRequest(root, "terminal_verify", {
-    authority: await authority(root, {
-      todos: [{
-        todo_id: "todo_target",
-        status: "open",
-        claimed_by: "agent-a",
-        excluded_agents: [],
-        task_class: "advancement_task",
-      }],
-    }),
-    todo: {
-      todo_id: "todo_target",
-      status: "open",
-      claimed_by: "agent-a",
-      excluded_agents: [],
-    },
-  });
-  const checked = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(checked.ok, true);
-  const fence = checked.fence as Record<string, unknown>;
-  const closed = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      fence_operation_id: fence.fence_operation_id,
-      committed: false,
-      release_lease: false,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-  });
-  assert.equal(closed.ok, true);
-
-  const explicitMismatch = await executeTaskLeaseLifecycle({
-    ...request,
-    todo: {
-      todo_id: "todo_target",
-      status: "open",
-      claimed_by: "agent-a",
-      excluded_agents: [],
-      task_class: "continuous_monitor",
-    },
-  });
-  assert.equal(explicitMismatch.ok, false);
-  assert.equal(explicitMismatch.error_code, "authority_todo_mismatch");
-});
-
-test("fence operation replay is independent of the caller process id", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const firstRequest = await lifecycleRequest(root, "terminal_verify", {
-    owner_pid: 999999,
-  });
-  const first = await executeTaskLeaseLifecycle(firstRequest, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(first.ok, true);
-  const firstFence = first.fence as Record<string, unknown>;
-
-  const retry = await executeTaskLeaseLifecycle(
-    { ...firstRequest, owner_pid: process.pid },
-    { now: () => new Date("2026-09-01T03:01:01.000Z") },
-  );
-  assert.equal(retry.ok, true);
-  const retryFence = retry.fence as Record<string, unknown>;
-  assert.equal(retryFence.fence_operation_id, firstFence.fence_operation_id);
-  assert.notEqual(retryFence.lock_token, firstFence.lock_token);
-
-  const closed = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: retryFence.lock_token,
-      fence_operation_id: retryFence.fence_operation_id,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-  });
-  assert.equal(closed.ok, true);
-  assert.equal(closed.released, true);
-});
-
-test("legacy fence receipts default omitted optional fields to null", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const request = await lifecycleRequest(root, "terminal_verify");
-  const first = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-  });
-  assert.equal(first.ok, true);
-  const fence = first.fence as Record<string, unknown>;
-  const receiptDirectory = join(
-    root,
-    "runtime",
-    "goals",
-    "goal-a",
-    "task-leases",
-    ".lifecycle-fences",
-  );
-  const [name] = await readdir(receiptDirectory);
-  const receiptPath = join(receiptDirectory, name);
-  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as Record<string, unknown>;
-  delete receipt.close_request_digest;
-  delete receipt.verify_response;
-  await writeFile(receiptPath, JSON.stringify(receipt), "utf8");
-
-  const replay = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:01.000Z"),
-  });
-  assert.equal(replay.ok, true);
-  assert.equal(replay.fence?.idempotent, true);
-
-  const closed = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      fence_operation_id: fence.fence_operation_id,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 1,
-    }),
-  });
-  assert.equal(closed.ok, true);
-
-  const cleanup = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "release", { authority: null }),
-    { now: () => new Date("2026-09-01T03:02:00.000Z") },
-  );
-  assert.equal(cleanup.ok, true);
-  assert.equal(cleanup.released, true);
-});
-
-test("fence close rejects a stale lease epoch without releasing the lease", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const checked = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "terminal_verify"),
-    { now: () => new Date("2026-09-01T03:01:00.000Z") },
-  );
-  const fence = checked.fence as Record<string, unknown>;
-  const staleClose = await executeTaskLeaseLifecycle({
-    ...await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: fence.lock_token,
-      fence_operation_id: fence.fence_operation_id,
-      committed: true,
-      release_lease: true,
-      fence_owner: "agent-a",
-      fence_idempotency_key: "lease-a",
-      fence_expected_version: 1,
-      fence_expected_lease_epoch: 0,
-    }),
-  });
-  assert.equal(staleClose.ok, false);
-  assert.equal(staleClose.error_code, "fence_cas_mismatch");
-  assert.equal((await lease(root)).status, "active");
-
-  await assert.rejects(
-    readFile(join(
-      root,
-      "runtime",
-      "goals",
-      "goal-a",
-      "task-leases",
-      ".task-leases.ts-effect.lock",
-    )),
-    { code: "ENOENT" },
-  );
-});
-
-test("fence operation ids are strict and caller Todo snapshots cannot override authority", async (t) => {
-  const root = await workspace(t);
-  const invalid = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "terminal_verify", {
-      fence_operation_id: "../../escape",
-    }),
-  );
-  assert.equal(invalid.ok, false);
-  assert.equal(invalid.error_code, "invalid_fence_operation_id");
-
-  const mismatch = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "terminal_verify", {
-      todo: {
-        todo_id: "todo_target",
-        status: "open",
-        claimed_by: "agent-b",
-        excluded_agents: [],
-      },
-    }),
-  );
-  assert.equal(mismatch.ok, false);
-  assert.equal(mismatch.error_code, "authority_todo_mismatch");
-});
-
-test("prepared lifecycle receipts recover after a pre-write failure", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const request = await lifecycleRequest(root, "renew");
-  const failed = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-    beforeWrite: () => {
-      throw new Error("simulated response loss");
-    },
-  });
-  assert.equal(failed.ok, false);
-  assert.equal((await lease(root)).version, 1);
-
-  const retry = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:01.000Z"),
-  });
-  assert.equal(retry.ok, true);
-  assert.equal(retry.renewed, true);
-  assert.equal((await lease(root)).version, 2);
-});
-
-test("release reports missing leases and validates the version first", async (t) => {
-  const root = await workspace(t);
-  const missingVersion = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "release", {
-      authority: null,
-      expected_version: null,
-    }),
-  );
-  assert.equal(missingVersion.ok, false);
-  assert.equal(missingVersion.error_code, "version_required");
-
-  const missing = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "release", {
-      authority: null,
-      expected_version: 0,
-    }),
-  );
-  assert.equal(missing.ok, true);
-  assert.equal(missing.released, false);
-  assert.equal(missing.missing, true);
-});
-
-test("release accepts an expired active lease and replays its tombstone", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(
-    await acquireRequest(root, { ttl_seconds: 1 }),
-    { now: () => ACQUIRE_NOW },
-  );
-  const request = await lifecycleRequest(root, "release", {
-    authority: null,
-    expected_version: 1,
-  });
-  const first = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:00:02.000Z"),
-  });
-  const afterFirst = await lease(root);
-  const replay = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T04:00:00.000Z"),
-  });
-  assert.equal(first.ok, true);
-  assert.equal(first.released, true);
-  assert.equal(replay.ok, true);
-  assert.equal(replay.idempotent, true);
-  assert.deepEqual(await lease(root), afterFirst);
-});
-
-test("release rejects owner, key, and version drift without mutation", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const ownerMismatch = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "release", {
-      authority: null,
-      owner: "agent-b",
-      expected_version: 1,
-    }),
-  );
-  assert.equal(ownerMismatch.ok, false);
-  assert.equal(ownerMismatch.error_code, "lease_cas_mismatch");
-
-  const keyMismatch = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "release", {
-      authority: null,
-      idempotency_key: "lease-other",
-      expected_version: 1,
-    }),
-  );
-  assert.equal(keyMismatch.ok, false);
-  assert.equal(keyMismatch.error_code, "lease_cas_mismatch");
-
-  const versionMismatch = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "release", {
-      authority: null,
-      expected_version: 0,
-    }),
-  );
-  assert.equal(versionMismatch.ok, false);
-  assert.equal(versionMismatch.error_code, "version_mismatch");
-  assert.equal((await lease(root)).status, "active");
-});
-
-test("release retry after response loss commits one tombstone", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const request = await lifecycleRequest(root, "release", { authority: null });
-  const failed = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-    beforeWrite: () => {
-      throw new Error("simulated response loss");
-    },
-  });
-  assert.equal(failed.ok, false);
-  assert.equal((await lease(root)).status, "active");
-
-  const committed = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:02:00.000Z"),
-  });
-  assert.equal(committed.ok, true);
-  assert.equal(committed.released, true);
-  assert.equal((await lease(root)).status, "released");
-
-  const replay = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:03:00.000Z"),
-  });
-  assert.equal(replay.ok, true);
-  assert.equal(replay.idempotent, true);
-  assert.equal((await lease(root)).status, "released");
-});
-
-test("malformed lifecycle receipts fail closed as receipt corruption", async (t) => {
-  const root = await workspace(t);
-  await executeTaskLeaseAcquire(await acquireRequest(root), { now: () => ACQUIRE_NOW });
-  const request = await lifecycleRequest(root, "renew");
-  await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:01:00.000Z"),
-    beforeWrite: () => {
-      throw new Error("leave prepared receipt");
-    },
-  });
-  const receiptDirectory = join(
-    root,
-    "runtime",
-    "goals",
-    "goal-a",
-    "task-leases",
-    ".lifecycle-operations",
-  );
-  const [receiptName] = await readdir(receiptDirectory);
-  const receiptPath = join(receiptDirectory, receiptName);
-  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as Record<string, unknown>;
-  receipt.planned_lease = {
-    ...(receipt.planned_lease as Record<string, unknown>),
-    owner: 42,
-  };
-  await writeFile(receiptPath, JSON.stringify(receipt), "utf8");
-
-  const rejected = await executeTaskLeaseLifecycle(request, {
-    now: () => new Date("2026-09-01T03:02:00.000Z"),
-  });
-  assert.equal(rejected.ok, false);
-  assert.equal(rejected.error_code, "corrupt_lifecycle_receipt");
-  assert.equal((await lease(root)).version, 1);
-});
-
-test("lifecycle boundary rejects non-boolean flags and unsafe fence tokens", async (t) => {
-  const root = await workspace(t);
-  const invalidFlag = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "renew", {
-      delegated_authority: "false",
-    }),
-  );
-  assert.equal(invalidFlag.ok, false);
-  assert.equal(invalidFlag.error_code, "invalid_request");
-
-  const invalidToken = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "fence_close", {
-      authority: null,
-      owner: null,
-      idempotency_key: null,
-      expected_version: null,
-      lock_token: "   ",
-    }),
-  );
-  assert.equal(invalidToken.ok, false);
-  assert.equal(invalidToken.error_code, "invalid_lock_token");
-});
-
-test("fence close keeps its held fence when the authority source changed", async (t) => {
-  const root = await workspace(t);
-  const runtimeShadow = {
-    schema_version: "loopx_coordination_runtime_shadow_binding_v0",
-    provider: "file_v0",
-  };
-  const hardAuthority = await authority(root, {
-    todos: [{
-      todo_id: "todo_target",
-      status: "open",
-      claimed_by: "agent-a",
-      excluded_agents: [],
-    }],
-  });
-  await executeTaskLeaseAcquire(
-    await acquireRequest(root, { authority: hardAuthority }),
-    { now: () => ACQUIRE_NOW },
-  );
-  const checked = await executeTaskLeaseLifecycle(
-    await lifecycleRequest(root, "holder_verify", {
-      authority: hardAuthority,
-      idempotency_key: null,
-      expected_version: null,
-      owner: "agent-a",
-    }),
-    { now: () => new Date("2026-09-01T03:01:00.000Z") },
-  );
-  assert.equal(checked.ok, true);
-  const fence = checked.fence as Record<string, unknown>;
-
-  const closeRequest = await lifecycleRequest(root, "fence_close", {
-    authority: hardAuthority,
-    owner: null,
-    idempotency_key: null,
-    expected_version: null,
-    lock_token: fence.lock_token,
-    committed: true,
-    release_lease: true,
-    fence_owner: "agent-a",
-    fence_idempotency_key: null,
-    fence_expected_version: 1,
-    runtime_shadow: runtimeShadow,
-  });
-  // An equivalent rewrite of the canonical registry after the close snapshot.
-  // The decision facts are unchanged; only the source bytes moved.
-  const rewritten = await authoritySource(root, "authority-v2");
-
-  const stale = await executeTaskLeaseLifecycle(closeRequest, {
-    now: () => new Date("2026-09-01T03:02:00.000Z"),
-  });
-  assert.equal(stale.ok, false);
+test("recovered fence close preserves its proof across source drift and pre-write failure", async t => {
+  const f = await restore(t, "terminal-held");
+  const verified = await executeTaskLeaseLifecycle(f.request, {now}); assert.equal(verified.ok, true);
+  const close = closeRequest(f, verified.fence as JsonObject, {authority: f.request.authority,
+    runtime_shadow: {schema_version: "loopx_coordination_runtime_shadow_binding_v0", provider: "file_v0"}});
+  await writeFile(join(f.root, "authority.json"), "changed source");
+  const stale = await executeTaskLeaseLifecycle(close, {now});
   assert.equal(stale.error_code, "authority_source_changed");
-  assert.equal((await lease(root)).status, "active");
-
-  // The adapter answers a source mismatch by re-reading the graph and retrying
-  // the same held fence.  A retryable precondition must not have consumed it.
-  const retried = await executeTaskLeaseLifecycle({
-    ...closeRequest,
-    authority: { ...hardAuthority, source_receipts: [rewritten] },
-  }, { now: () => new Date("2026-09-01T03:02:01.000Z") });
-  assert.equal(retried.ok, true);
-  assert.equal(retried.released, true);
-  assert.equal((await lease(root)).status, "released");
+  assert.equal((await f.record()).status, "active");
+  await writeFile(join(f.root, "authority.json"), "authority-v1");
+  const failed = await executeTaskLeaseLifecycle(close, {now, beforeWrite: () => {throw new Error("close interrupted");}});
+  assert.equal(failed.ok, false); assert.equal((await f.record()).status, "active");
+  const replay = await executeTaskLeaseLifecycle(f.request, {now});
+  assert.equal(replay.ok, true);
+  assert.equal((await executeTaskLeaseLifecycle(closeRequest(f, replay.fence as JsonObject), {now})).released, true);
 });
-
-for (const dimension of ["version", "epoch"] as const) {
-  test(`legacy lifecycle rejects exhausted ${dimension} before persistent mutation`, async t => {
-    const root = await workspace(t);
-    const acquired = await executeTaskLeaseAcquire(await acquireRequest(root)); assert.equal(acquired.ok, true);
-    const path = join(root, "runtime", "goals", "goal-a", "task-leases", "todo_target.json");
-    const lease = JSON.parse(await readFile(path, "utf8"));
-    lease[dimension === "version" ? "version" : "lease_epoch"] = Number.MAX_SAFE_INTEGER;
-    await writeFile(path, JSON.stringify(lease)); const before = await readFile(path, "utf8");
-    const result = await executeTaskLeaseLifecycle(await lifecycleRequest(root, dimension === "version" ? "renew" : "transfer", {
-      expected_version: lease.version,
-      ...(dimension === "epoch" ? {new_owner: "agent-b", new_idempotency_key: "lease-b"} : {}),
-    }));
-    assert.equal(result.error_code, "lease_generation_exhausted", JSON.stringify(result));
-    assert.equal(await readFile(path, "utf8"), before);
-  });
-}

@@ -93,18 +93,19 @@ for (const provider of ["file", ...(process.env.LOOPX_TEST_POSTGRES_URL ? ["post
       validation_label: "ordinary-check", validation_timeout_seconds: 5};
     const records = [todo({completion_validation_required: true,
       completion_validation_sha256: canonicalAuthoritySha256(declaration)}), todo({todo_id: "todo_probe"})];
-    await replace(store, projection(records, head.goal_acceptance as JsonObject), "add-probe");
+    await replace(store, {...projection(records, head.goal_acceptance as JsonObject), handoff_mode: "hard_lease"}, "add-probe");
     const basis = await loaded(store);
     const doc = {...(head.goal_acceptance as JsonObject).document as JsonObject,
       scope: {kind: "selected_work", todo_ids: ["todo_probe"]}};
     assert.equal((await configureGoalAcceptance(store, {goal_id: "goal-a", operation_id: "scope-correction",
       actor_agent_id: null, expected_provider_revision: basis.provider_revision, document: doc})).status, "applied");
-    assert.equal((await executeCoordinationTodoClaim(store, claim)).status, "applied");
-    const plan = await executeCoordinationTodoTerminalLifecycle(store, {...terminal, validation_declaration: declaration});
+    assert.equal((await executeCoordinationTodoClaim(store, {...claim, lease_request: {idempotency_key: "execution-a", expected_version: null, ttl_seconds: 60}})).status, "applied");
+    assert.equal((await executeCanonicalTaskLeaseAcquire(store, acquire)).status, "no_change");
+    const plan = await executeCoordinationTodoTerminalLifecycle(store, {...terminal, validation_declaration: declaration,
+      lease_idempotency_key: "execution-a", lease_expected_version: 1});
     assert.equal(plan.status, "execute_validation");
     assert.equal((plan.validation_effect as JsonObject).validation_label, "ordinary-check");
     assert.deepEqual(plan.goal_acceptance_validation_effects ?? [], []);
-    assert.equal((await executeCanonicalTaskLeaseAcquire(store, acquire)).status, "applied");
     assert.equal(acceptanceWorkGuard((await loaded(store)).head, "goal-a", "todo_probe")?.allowed, false);
   });
   test(`${provider}: absent acceptance preserves ordinary completion, receipts, and unrelated fields`, async t => {
@@ -118,14 +119,15 @@ for (const provider of ["file", ...(process.env.LOOPX_TEST_POSTGRES_URL ? ["post
     assert.equal((await executeCoordinationTodoTerminalLifecycle(store, terminal)).status, "replayed");
   });
 
-  test(`${provider}: unbound work rejects claim/lease/completion with actor precedence and no writes`, async t => {
-    const {store} = await seeded(t, provider, "unbound");
+  test(`${provider}: unbound work preserves actor and lease precedence without writes`, async t => {
+    const {store, head} = await seeded(t, provider, "unbound");
+    await replace(store, {...head, handoff_mode: "hard_lease"}, "supported-policy");
     const before = await loaded(store);
     assert.equal((await executeCoordinationTodoClaim(store, {...claim, actor_agent_id: "intruder"})).reason_code, "actor_not_registered");
-    assert.equal((await executeCoordinationTodoClaim(store, claim)).reason_code, "goal_acceptance_unbound");
+    assert.equal((await executeCoordinationTodoClaim(store, {...claim, lease_request: {idempotency_key: "execution-a", expected_version: null, ttl_seconds: 60}})).reason_code, "goal_acceptance_unbound");
     assert.equal((await executeCanonicalTaskLeaseAcquire(store, {...acquire, owner: "intruder"})).reason_code, "owner_not_registered");
     assert.equal((await executeCanonicalTaskLeaseAcquire(store, acquire)).reason_code, "goal_acceptance_unbound");
-    assert.equal((await executeCoordinationTodoTerminalLifecycle(store, terminal)).reason_code, "goal_acceptance_unbound");
+    assert.equal((await executeCoordinationTodoTerminalLifecycle(store, terminal)).reason_code, "handoff_mode_requires_lease");
     assert.deepEqual(await loaded(store), before);
     assert.equal((await store.readReceipt("complete")).status, "missing");
   });
@@ -164,7 +166,8 @@ for (const provider of ["file", ...(process.env.LOOPX_TEST_POSTGRES_URL ? ["post
   });
 
   test(`${provider}: acquisition replay checks current acceptance after current lease proof`, async t => {
-    const {store} = await seeded(t, provider, "bound");
+    const {store, head} = await seeded(t, provider, "bound");
+    await replace(store, {...head, handoff_mode: "hard_lease"}, "supported-policy");
     assert.equal((await executeCanonicalTaskLeaseAcquire(store, acquire)).status, "applied");
     const current = await loaded(store);
     await replace(store, {...current.head, goal_acceptance: acceptance(current.head.todos as JsonObject[], false)}, "unbind");

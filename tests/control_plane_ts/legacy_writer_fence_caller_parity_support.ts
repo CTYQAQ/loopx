@@ -87,7 +87,7 @@ export const TS_ROWS: ParityRow[] = [
     }))
   ),
   { id: "ts-terminal_verify_auto_acquire_keyed-engaged", caller: "terminal_verify_auto_acquire_keyed", fence_state: "engaged" },
-  { id: "ts-acquire-absent", caller: "acquire", fence_state: "absent" },
+  { id: "ts-acquire-absent-cutoff", caller: "acquire", fence_state: "absent" },
   { id: "ts-release-absent", caller: "release", fence_state: "absent" },
 ];
 
@@ -177,22 +177,14 @@ function lifecycleRequest(ws: Workspace, operation: string, extra: JsonObject): 
 }
 
 async function acquireParityLease(ws: Workspace): Promise<void> {
-  const acquired = await executeTaskLeaseAcquire({
-    schema_version: "loopx_task_lease_acquire_native_v0",
-    runtime_root: ws.runtimeRoot,
-    goal_id: GOAL,
-    todo_id: "todo_abc",
-    owner: "agent-a",
-    idempotency_key: PARITY_KEY,
-    write_scopes: [],
-    ttl_seconds: 600,
-    expected_version: null,
-    authority: ws.authority,
-  }, CLOCK);
-  if (acquired.ok !== true) throw new Error(`parity fixture acquire failed: ${JSON.stringify(acquired)}`);
-  const lease = acquired.lease as JsonObject;
-  ws.leaseVersion = lease.version as number;
-  ws.leaseEpoch = lease.lease_epoch as number;
+  const historical = JSON.parse(await readFile(new URL(
+    "../control_plane/fixtures/task_lease_parity_1x.json", import.meta.url), "utf8").then(
+      text => text.replaceAll("{runtime_root}", ws.runtimeRoot))) as {files: Record<string, JsonObject>};
+  for (const [path, record] of Object.entries(historical.files)) {
+    await atomicWriteJson(join(ws.runtimeRoot, path), record);
+  }
+  ws.leaseVersion = 1;
+  ws.leaseEpoch = 1;
 }
 
 async function holdParityFence(ws: Workspace): Promise<void> {

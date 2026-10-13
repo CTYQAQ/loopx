@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,7 +50,7 @@ async function tempRequest(t: TestContext): Promise<Record<string, unknown>> {
     write_scopes: ["docs/**"],
     expected_version: null,
     authority: {
-      handoff_mode: "legacy",
+      handoff_mode: "hard_lease",
       registered_agent_candidates: [["agent-cli"]],
       todos: [{
         todo_id: "todo_cli_native",
@@ -69,26 +69,34 @@ async function tempRequest(t: TestContext): Promise<Record<string, unknown>> {
   };
 }
 
-test("native task-lease command writes and replays one JSON envelope", async (t) => {
+test("native CLI refuses fresh source execution and replays an original lease", async (t) => {
   const input = await tempRequest(t);
+  const leaseDirectory = join(String(input.runtime_root), "goals", "goal-cli", "task-leases");
+  const leasePath = join(leaseDirectory, "todo_cli_native.json");
   const first = runCli(input);
-  assert.equal(first.status, 0);
-  assert.equal(first.value.ok, true);
-  assert.equal(first.value.acquired, true);
+  assert.notEqual(first.status, 0);
+  assert.equal(first.value.ok, false);
+  assert.equal(first.value.error_code, "canonical_authority_required");
+  await assert.rejects(readFile(leasePath), { code: "ENOENT" });
 
+  // Historical record; future expiry makes the CLI test independent of wall-clock timing.
+  await mkdir(leaseDirectory, { recursive: true });
+  const original = JSON.stringify({
+    schema_version: "task_lease_v0", goal_id: "goal-cli", todo_id: "todo_cli_native",
+    owner: "agent-cli", idempotency_key: "turn-cli", write_scopes: ["docs/**"],
+    acquire_ttl_seconds: 120, version: 1, lease_epoch: 1, status: "active",
+    acquired_at: "2026-08-27T03:00:00Z", updated_at: "2026-08-27T03:00:00Z",
+    expires_at: "2099-01-01T00:00:00Z",
+  });
+  await writeFile(leasePath, original);
   const replay = runCli(input);
   assert.equal(replay.status, 0);
+  assert.equal(replay.value.ok, true);
+  assert.equal(replay.value.acquired, false);
   assert.equal(replay.value.idempotent, true);
-  assert.equal(
-    (replay.value.settlement as Record<string, unknown>).effect_id,
-    (first.value.settlement as Record<string, unknown>).effect_id,
-  );
-  const leasePath = String(first.value.lease_path);
-  assert.equal(
-    (JSON.parse(await readFile(leasePath, "utf8")) as Record<string, unknown>)
-      .version,
-    1,
-  );
+  assert.equal((replay.value.settlement as Record<string, unknown>).effect_id,
+    "goal-cli:agent-cli:todo_cli_native:turn-cli");
+  assert.equal(await readFile(leasePath, "utf8"), original);
 });
 
 test("native task-lease command returns one typed malformed-input envelope", () => {

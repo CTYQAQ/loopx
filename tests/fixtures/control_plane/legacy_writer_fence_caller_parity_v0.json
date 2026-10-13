@@ -942,57 +942,80 @@
       }
     },
     {
-      "id": "ts-acquire-absent",
+      "id": "ts-acquire-absent-cutoff",
       "surface": "ts_entry",
       "caller": "acquire",
       "fence_state": "absent",
       "expect": {
-        "ok": true,
+        "ok": false,
         "schema_version": "task_lease_v0",
         "action": "acquire",
-        "acquired": true,
-        "idempotent": false,
-        "lease": {
-          "schema_version": "task_lease_v0",
-          "goal_id": "goal-a",
-          "todo_id": "todo_abc",
-          "owner": "agent-a",
-          "idempotency_key": "lease:parity-acquire",
-          "write_scopes": [],
-          "acquire_ttl_seconds": 600,
-          "version": 1,
-          "lease_epoch": 1,
-          "acquired_at": "2026-09-07T00:00:00Z",
-          "updated_at": "2026-09-07T00:00:00Z",
-          "expires_at": "2026-09-07T00:10:00Z",
-          "status": "active"
-        },
+        "error": "Normal writes require canonical authority; inspect and import the existing Goal with coordination-shadow prepare-import/apply-import, then review its ownership policy. Original receipts and lease release remain available; no source data was changed.",
+        "error_code": "canonical_authority_required",
         "lease_path": "{runtime_root}/goals/goal-a/task-leases/todo_abc.json",
+        "write_check": {
+          "schema_version": "loopx_legacy_coordination_write_check_result_v0",
+          "status": "blocked",
+          "reason_code": "canonical_authority_required",
+          "goal_id": "goal-a",
+          "reason": "Normal writes require canonical authority; inspect and import the existing Goal with coordination-shadow prepare-import/apply-import, then review its ownership policy. Original receipts and lease release remain available; no source data was changed."
+        },
         "settlement": {
-          "effect_id": "goal-a:agent-a:todo_abc:lease:parity-acquire",
-          "receipts": [
-            {
-              "step": "validation",
-              "status": "committed",
-              "effect_id": "goal-a:agent-a:todo_abc:lease:parity-acquire"
-            },
-            {
-              "step": "durable_writeback",
-              "status": "committed",
-              "effect_id": "goal-a:agent-a:todo_abc:lease:parity-acquire"
-            }
-          ]
+          "effect_id": null,
+          "receipts": [],
+          "failure": {
+            "step": "validation",
+            "kind": "permission_denied",
+            "code": "canonical_authority_required"
+          }
         }
       },
       "effect": {
-        "added": [
-          "goals/goal-a/task-leases/todo_abc.json"
-        ],
+        "added": [],
         "removed": [],
         "changed": []
       },
       "retry": null,
-      "baseline": null
+      "baseline": {
+        "pre_2_0": {
+          "ok": true,
+          "schema_version": "task_lease_v0",
+          "action": "acquire",
+          "acquired": true,
+          "idempotent": false,
+          "lease": {
+            "schema_version": "task_lease_v0",
+            "goal_id": "goal-a",
+            "todo_id": "todo_abc",
+            "owner": "agent-a",
+            "idempotency_key": "lease:parity-acquire",
+            "write_scopes": [],
+            "acquire_ttl_seconds": 600,
+            "version": 1,
+            "lease_epoch": 1,
+            "acquired_at": "2026-09-07T00:00:00Z",
+            "updated_at": "2026-09-07T00:00:00Z",
+            "expires_at": "2026-09-07T00:10:00Z",
+            "status": "active"
+          },
+          "lease_path": "{runtime_root}/goals/goal-a/task-leases/todo_abc.json",
+          "settlement": {
+            "effect_id": "goal-a:agent-a:todo_abc:lease:parity-acquire",
+            "receipts": [
+              {
+                "step": "validation",
+                "status": "committed",
+                "effect_id": "goal-a:agent-a:todo_abc:lease:parity-acquire"
+              },
+              {
+                "step": "durable_writeback",
+                "status": "committed",
+                "effect_id": "goal-a:agent-a:todo_abc:lease:parity-acquire"
+              }
+            ]
+          }
+        }
+      }
     },
     {
       "id": "ts-release-absent",

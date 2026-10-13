@@ -200,10 +200,9 @@ test("managed fence engagement rejects a different existing source file", async 
   await assert.rejects(access(legacyCoordinationWriterFencePath(f.root, "goal-a")));
 });
 
-test("active native lease requires durable prepare even without a caller capture hint", async (t) => {
+test("original lease release requires durable prepare without a caller capture hint", async (t) => {
   const f = await bootstrapFixture(t);
   const part = join(f.root, "authority-shadow", "outbox", "goal-a", "leases");
-  await writeFile(part, "prepare unavailable");
   const authority = {handoff_mode: "hard_lease", registered_agent_candidates: [["agent-a"]],
     todos: [{todo_id: "todo_one", status: "open", claimed_by: null, excluded_agents: []}],
     todo_projection_error: null, source_receipts: [{source_id: "state", path: f.statePath, state: "file",
@@ -211,21 +210,29 @@ test("active native lease requires durable prepare even without a caller capture
   const request = {schema_version: TASK_LEASE_ACQUIRE_REQUEST_SCHEMA_VERSION, runtime_root: f.root,
     goal_id: "goal-a", todo_id: "todo_one", owner: "agent-a", idempotency_key: "lease-a",
     ttl_seconds: 600, write_scopes: [], expected_version: null, authority};
-  const held = await executeTaskLeaseAcquire(request);
-  assert.equal(held.ok, false);
-  assert.equal(held.error_code, "shadow_capture_prepare_failed", JSON.stringify(held));
+  assert.equal((await executeTaskLeaseAcquire(request)).error_code, "canonical_authority_required");
   const leasePath = join(f.root, "goals", "goal-a", "task-leases", "todo_one.json");
   await assert.rejects(access(leasePath));
-  await rm(part);
-  const applied = await executeTaskLeaseAcquire(request);
-  assert.equal(applied.ok, true, JSON.stringify(applied));
-  assert.equal(typeof (applied.coordination_runtime_shadow_capture as Record<string, unknown>).entry_id, "string");
+  await atomicWriteJson(leasePath, {schema_version: "task_lease_v0", goal_id: "goal-a", todo_id: "todo_one",
+    owner: "agent-a", idempotency_key: "lease-a", acquire_ttl_seconds: 600, write_scopes: [],
+    version: 1, lease_epoch: 1, acquired_at: "2026-09-01T03:00:00Z", updated_at: "2026-09-01T03:00:00Z",
+    expires_at: "2026-09-01T03:10:00Z", status: "active"});
   const before = await readFile(leasePath, "utf8");
-  await atomicWriteJson(join(part, "drain-cursor.json"), {});
-  const released = await executeTaskLeaseLifecycle({schema_version: TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION,
+  const release = {schema_version: TASK_LEASE_LIFECYCLE_REQUEST_SCHEMA_VERSION,
     operation: "release", runtime_root: f.root, goal_id: "goal-a", todo_id: "todo_one",
-    owner: "agent-a", idempotency_key: "lease-a", expected_version: 1, authority});
-  assert.equal(released.ok, false);
-  assert.equal(released.error_code, "shadow_capture_prepare_failed", JSON.stringify(released));
+    owner: "agent-a", idempotency_key: "lease-a", expected_version: 1, authority};
+  await writeFile(part, "prepare unavailable");
+  const unavailable = await executeTaskLeaseLifecycle(release);
+  assert.equal(unavailable.error_code, "shadow_capture_prepare_failed", JSON.stringify(unavailable));
   assert.equal(await readFile(leasePath, "utf8"), before);
+  await rm(part);
+  await atomicWriteJson(join(part, "drain-cursor.json"), {});
+  const corrupt = await executeTaskLeaseLifecycle(release);
+  assert.equal(corrupt.error_code, "shadow_capture_prepare_failed", JSON.stringify(corrupt));
+  assert.equal(await readFile(leasePath, "utf8"), before);
+  await rm(join(part, "drain-cursor.json"));
+  const released = await executeTaskLeaseLifecycle(release);
+  assert.equal(released.released, true, JSON.stringify(released));
+  assert.equal(typeof (released.coordination_runtime_shadow_capture as Record<string, unknown>).entry_id, "string");
+  assert.equal(JSON.parse(await readFile(leasePath, "utf8")).status, "released");
 });

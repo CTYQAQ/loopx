@@ -861,7 +861,7 @@ test("retained execution fences distinguish recovery; soft released owner copy n
         assert.equal(recovery.lease_state, state);
         assert.equal(recovery.owner_relation, owner === "agent-a" ? "same_owner" : "foreign_owner");
         assert.equal(recovery.action, state === "active" ? owner === "agent-a" ? "inspect_current_proof" : "reconcile_lease_owner"
-          : mode === "soft_claim" ? "resolve_acquire_rejection" : "acquire_fresh_lease");
+          : mode !== "hard_lease" ? "resolve_acquire_rejection" : "acquire_fresh_lease");
         assert.equal(JSON.stringify(result).includes("private-execution-key"), false);
         assert.deepEqual(await store.loadAuthority(), before);
         assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
@@ -1000,7 +1000,7 @@ for (const blocker of ["scope", "acceptance"]) test(`recovery respects ${blocker
   const other = todo({todo_id: "todo_other", claimed_by: "agent-b"});
   const todos = [...head.head.todos as Record<string, unknown>[], other];
   await store.commitAuthority({operation_id: "scope-conflict", expected_provider_revision: head.provider_revision,
-    events: [], receipts: [], next_projection: {...head.head, handoff_mode: "legacy", todos,
+    events: [], receipts: [], next_projection: {...head.head, handoff_mode: "hard_lease", todos,
       todo_read_model: {schema_version: TODO_DOMAIN_READ_RECORD_SCHEMA, todo_count: 2,
         records_sha256: canonicalAuthoritySha256(todos), contract_fields: [...TODO_DOMAIN_RECORD_CONTRACT.fields]},
       leases: [

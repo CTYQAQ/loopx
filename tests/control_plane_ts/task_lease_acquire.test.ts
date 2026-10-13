@@ -45,7 +45,7 @@ async function request(
   overrides: Record<string, unknown> = {},
 ): Promise<Record<string, unknown>> {
   const authority = {
-    handoff_mode: "legacy",
+    handoff_mode: "hard_lease",
     registered_agent_candidates: [["agent-a", "agent-b"]],
     todos: [
       {
@@ -91,72 +91,49 @@ async function persistedLease(
   return JSON.parse(await readFile(leasePath(root, todoId), "utf8"));
 }
 
-test("native acquire owns validation, generation, persistence, and canonical receipts", async (t) => {
+// Frozen 1.x persisted shape, formerly asserted by the fresh-acquire test.
+// Recovery setup must not depend on a writer that the candidate has retired.
+async function seedOriginalLease(root: string): Promise<void> {
+  await mkdir(join(root, "runtime", "goals", "goal-a", "task-leases"), { recursive: true });
+  await writeFile(leasePath(root), JSON.stringify({
+    schema_version: "task_lease_v0", goal_id: "goal-a", todo_id: "todo_target",
+    owner: "agent-a", idempotency_key: "turn-1", write_scopes: ["loopx/**"],
+    acquire_ttl_seconds: 120, version: 1, lease_epoch: 1,
+    acquired_at: "2026-08-27T03:00:00Z", updated_at: "2026-08-27T03:00:00Z",
+    expires_at: "2026-08-27T03:02:00Z", status: "active",
+  }));
+}
+
+test("fresh source acquisition requires import before creating an execution grant", async (t) => {
   const root = await workspace(t);
   const result = await executeTaskLeaseAcquire(await request(root), { now: () => FIXED_NOW });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.acquired, true);
-  assert.equal(result.idempotent, false);
-  assert.equal("handoff_mode" in result, false);
-  assert.deepEqual(result.settlement, {
-    effect_id: "goal-a:agent-a:todo_target:turn-1",
-    receipts: [
-      { step: "validation", status: "committed", effect_id: "goal-a:agent-a:todo_target:turn-1" },
-      {
-        step: "durable_writeback",
-        status: "committed",
-        effect_id: "goal-a:agent-a:todo_target:turn-1",
-      },
-    ],
-  });
-  assert.deepEqual(await persistedLease(root), {
-    schema_version: "task_lease_v0",
-    goal_id: "goal-a",
-    todo_id: "todo_target",
-    owner: "agent-a",
-    idempotency_key: "turn-1",
-    write_scopes: ["loopx/**"],
-    acquire_ttl_seconds: 120,
-    version: 1,
-    lease_epoch: 1,
-    acquired_at: "2026-08-27T03:00:00Z",
-    updated_at: "2026-08-27T03:00:00Z",
-    expires_at: "2026-08-27T03:02:00Z",
-    status: "active",
-  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, "canonical_authority_required");
+  assert.match(String(result.error), /import/u);
+  await assert.rejects(readFile(leasePath(root)), { code: "ENOENT" });
 });
 
-test("exact replay is idempotent and does not rewrite the lease", async (t) => {
+test("original acquisition replay is idempotent without rewriting its lease", async (t) => {
   const root = await workspace(t);
+  await seedOriginalLease(root);
+  const before = await readFile(leasePath(root), "utf8");
   let writes = 0;
-  const first = await executeTaskLeaseAcquire(await request(root), {
-    now: () => FIXED_NOW,
-    beforeWrite: () => {
-      writes += 1;
-    },
-  });
-  const second = await executeTaskLeaseAcquire(await request(root), {
+  const replay = await executeTaskLeaseAcquire(await request(root), {
     now: () => new Date("2026-08-27T03:00:30.000Z"),
-    beforeWrite: () => {
-      writes += 1;
-    },
+    beforeWrite: () => { writes += 1; },
   });
-
-  assert.equal(first.acquired, true);
-  assert.equal(second.acquired, false);
-  assert.equal(second.idempotent, true);
-  assert.equal(writes, 1);
-  assert.equal(
-    (second.settlement as Record<string, unknown>).effect_id,
-    "goal-a:agent-a:todo_target:turn-1",
-  );
-  assert.equal((await persistedLease(root)).version, 1);
+  assert.equal(replay.ok, true);
+  assert.equal(replay.acquired, false);
+  assert.equal(replay.idempotent, true);
+  assert.equal(writes, 0);
+  assert.equal((replay.settlement as Record<string, unknown>).effect_id,
+    "goal-a:agent-a:todo_target:turn-1");
+  assert.equal(await readFile(leasePath(root), "utf8"), before);
 });
 
 test("replay key reuse, CAS mismatch, and active same-todo contention stay typed", async (t) => {
   const root = await workspace(t);
-  await executeTaskLeaseAcquire(await request(root), { now: () => FIXED_NOW });
+  await seedOriginalLease(root);
 
   const reuse = await executeTaskLeaseAcquire(
     await request(root, { ttl_seconds: 300 }),
@@ -183,7 +160,7 @@ test("replay key reuse, CAS mismatch, and active same-todo contention stay typed
   assert.equal(contention.error_code, "todo_lease_conflict");
 });
 
-test("retired generations reject key reuse and mint monotonic version and epoch", async (t) => {
+test("retired generations reject key reuse and refuse a new source execution", async (t) => {
   const root = await workspace(t);
   await mkdir(join(root, "runtime", "goals", "goal-a", "task-leases"), { recursive: true });
   await writeFile(
@@ -210,13 +187,13 @@ test("retired generations reject key reuse and mint monotonic version and epoch"
   assert.equal(reuse.error_code, "idempotency_key_reuse");
   assert.match(String(reuse.error), /expired or released/u);
 
+  const before = await readFile(leasePath(root), "utf8");
   const acquired = await executeTaskLeaseAcquire(
     await request(root, { idempotency_key: "new-key", expected_version: 7 }),
     { now: () => FIXED_NOW },
   );
-  assert.equal(acquired.ok, true);
-  assert.equal((await persistedLease(root)).version, 8);
-  assert.equal((await persistedLease(root)).lease_epoch, 2);
+  assert.equal(acquired.error_code, "canonical_authority_required");
+  assert.equal(await readFile(leasePath(root), "utf8"), before);
 });
 
 test("timezone-less legacy expiration remains UTC", async (t) => {
@@ -279,7 +256,8 @@ test("effective overlapping leases conflict while ineligible leases self-disarm"
     await request(root, { authority }),
     { now: () => FIXED_NOW },
   );
-  assert.equal(acquired.ok, true);
+  assert.equal(acquired.error_code, "canonical_authority_required");
+  await assert.rejects(readFile(leasePath(root)), { code: "ENOENT" });
 });
 
 test("legacy scope strings retain Python splitting and fnmatch behavior", async (t) => {
@@ -465,43 +443,21 @@ test("source CAS rejects stale authority facts before lease read or write", asyn
   await assert.rejects(() => readFile(leasePath(root), "utf8"), { code: "ENOENT" });
 });
 
-test("source CAS is rechecked after the decision and immediately before write", async (t) => {
+test("source cutoff precedes write hooks and repeated attempts remain effect-free", async (t) => {
   const root = await workspace(t);
   const input = await request(root);
-
-  const result = await executeTaskLeaseAcquire(input, {
-    now: () => FIXED_NOW,
-    beforeWrite: () => writeFile(
-      join(root, "authority-source.json"),
-      "authority-changed-after-decision",
-      "utf8",
-    ),
-  });
-
-  assert.equal(result.error_code, "authority_source_changed");
-  await assert.rejects(() => readFile(leasePath(root), "utf8"), { code: "ENOENT" });
-});
-
-test("failed pre-write attempt leaves no partial lease and a retry succeeds", async (t) => {
-  const root = await workspace(t);
-  const input = await request(root);
-  await assert.rejects(
-    () => executeTaskLeaseAcquire(input, {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await executeTaskLeaseAcquire(input, {
       now: () => FIXED_NOW,
-      beforeWrite: () => {
-        throw new Error("simulated crash");
-      },
-    }),
-    /simulated crash/u,
-  );
-  await assert.rejects(() => readFile(leasePath(root), "utf8"), { code: "ENOENT" });
-
-  const retry = await executeTaskLeaseAcquire(input, { now: () => FIXED_NOW });
-  assert.equal(retry.ok, true);
-  assert.equal((await persistedLease(root)).version, 1);
+      beforeWrite: () => { assert.fail("retired writer hook must never run"); },
+    });
+    assert.equal(result.error_code, "canonical_authority_required");
+    await assert.rejects(readFile(leasePath(root)), { code: "ENOENT" });
+    assert.equal(await readFile(join(root, "authority-source.json"), "utf8"), "authority-v1");
+  }
 });
 
-test("corrupt bool integers fail closed and legacy epoch advances", async (t) => {
+test("corrupt bool integers fail closed and valid retired records stay unchanged", async (t) => {
   const root = await workspace(t);
   await mkdir(join(root, "runtime", "goals", "goal-a", "task-leases"), { recursive: true });
   await writeFile(
@@ -531,9 +487,10 @@ test("corrupt bool integers fail closed and legacy epoch advances", async (t) =>
     }),
     "utf8",
   );
+  const before = await readFile(leasePath(root), "utf8");
   const migrated = await executeTaskLeaseAcquire(await request(root), { now: () => FIXED_NOW });
-  assert.equal(migrated.ok, true);
-  assert.equal((await persistedLease(root)).lease_epoch, 2);
+  assert.equal(migrated.error_code, "canonical_authority_required");
+  assert.equal(await readFile(leasePath(root), "utf8"), before);
 });
 
 for (const acquireTtlSeconds of [0, -1]) {
@@ -680,8 +637,8 @@ for (const { expiresAt, active } of [
       assert.equal(result.error_code, "todo_lease_conflict");
       assert.deepEqual(await persistedLease(root), existing);
     } else {
-      assert.equal(result.ok, true);
-      assert.equal((await persistedLease(root)).owner, "agent-a");
+      assert.equal(result.error_code, "canonical_authority_required");
+      assert.deepEqual(await persistedLease(root), existing);
     }
   });
 }
@@ -690,7 +647,7 @@ for (const field of ["version", "lease_epoch"] as const) {
   test(`legacy acquisition rejects exhausted ${field} before durable writeback`, async t => {
     const root = await workspace(t);
     const command = await request(root);
-    assert.equal((await executeTaskLeaseAcquire(command, {now: () => FIXED_NOW})).ok, true);
+    await seedOriginalLease(root);
     const lease = {...await persistedLease(root), status: "released", [field]: Number.MAX_SAFE_INTEGER};
     await writeFile(leasePath(root), JSON.stringify(lease));
     const before = await readFile(leasePath(root), "utf8");

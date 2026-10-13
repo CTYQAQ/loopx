@@ -80,12 +80,11 @@ for (const provider of ["file", "sqlite"] as const) {
   });
 }
 
-test("creation opt-in reuses execution policy vocabulary; legacy is only a compatibility target", async () => {
+test("2.0 creation requires canonical authority and a supported execution policy", async () => {
   await assert.rejects(manageNewGoalStorage({action: "resolve", configuration: {schema_version: "loopx_goal_storage_defaults_v1",
     new_goal_provider: "sqlite", canonical_creation: true, new_goal_handoff_mode: "legacy"}}), /soft_claim or hard_lease/);
-  assert.deepEqual(await manageNewGoalStorage({action: "resolve", configuration: {schema_version: "loopx_goal_storage_defaults_v1",
-    new_goal_provider: "sqlite", canonical_creation: false, new_goal_handoff_mode: "hard_lease"}}),
-    {schema_version: "loopx_new_goal_storage_target_v0", provider: "sqlite"});
+  await assert.rejects(manageNewGoalStorage({action: "resolve", configuration: {schema_version: "loopx_goal_storage_defaults_v1",
+    new_goal_provider: "sqlite", canonical_creation: false, new_goal_handoff_mode: "hard_lease"}}), /requires canonical creation/);
 });
 
 test("completed File creation cannot recreate a lost authority document", async () => {

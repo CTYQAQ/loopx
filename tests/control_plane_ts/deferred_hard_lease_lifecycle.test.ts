@@ -198,7 +198,9 @@ for (const provider of ["file", "sqlite"] as const) {
       assert.equal((await executeCoordinationTodoUpdate(store, resume("resume-after-wait"))).status, "applied");
       const retry = await executeCoordinationTodoUpdate(store, {...input, operation_id: "defer-again"});
       assert.equal(retry.status, "failed");
-      assert.equal((retry.recovery as JsonObject).action, "acquire_fresh_lease");
+      assert.equal((retry.recovery as JsonObject).action,
+        mode === "legacy" ? "resolve_acquire_rejection" : "acquire_fresh_lease");
+      if (mode === "legacy") assert.equal((retry.recovery as JsonObject).reason_code, "handoff_mode_retired");
       assert.equal((await executeCoordinationTodoUpdate(store, {...resume("old-proof"),
         patch: {note: "Unauthorized execution"}, planning_intent: {},
         lease_idempotency_key: "old-execution", lease_expected_version: 3})).status, "failed");
