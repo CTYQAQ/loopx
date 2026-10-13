@@ -6,7 +6,6 @@ research-point qualification. Typed quota/artifact owners retain those rules.
 from __future__ import annotations
 
 import hashlib
-import json
 import select
 import socket
 import subprocess
@@ -17,7 +16,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from loopx.control_plane.effect_runtime import effect_runtime_result
-from .checkpoint import _mark_replan_attempt, held_quota_decision, read_checkpoint_request
+from .checkpoint import _mark_replan_attempt, _participant_id, held_quota_decision, read_checkpoint_request
 
 
 class CheckpointWake:
@@ -67,9 +66,9 @@ class CheckpointWake:
             hashlib.sha256(self.raw).hexdigest())
 
     def _capture(self, held, deadline):
-        """Capture declared inert files; never downgrade a full-state request."""
-        if any(self.request.get(key) for key in ("native_session", "loopx_state", "evaluation_opportunity")):
-            raise ValueError("Interrupted full-state capture requires qualified native pending history and the controller writer barrier")
+        """Capture declared files/native history; never downgrade research/effects."""
+        if any(self.request.get(key) for key in ("loopx_state", "evaluation_opportunity")):
+            raise ValueError("Interrupted full-state capture requires the controller writer barrier")
         destination = self.root / held["intent"]["obligation_id"]
         metadata = {"operator_metadata": self.request["point_metadata"],
                     "request_sha256": hashlib.sha256(self.raw).hexdigest(),
@@ -80,10 +79,36 @@ class CheckpointWake:
         window = min(time.time() + 30, time.time() + deadline - time.monotonic())
         if window <= time.time():
             raise TimeoutError("original wake budget expired before capture")
-        components = self.request["components"]
+        components = list(self.request["components"])
+        native = None
+        if self.request.get("native_session"):
+            from .native_checkpoint import native_session_checkpoint
+            guard = {"cli": self.env["LOOPX_CLI"], "workspace": self.env["LOOPX_PROJECT"],
+                     "registry": self.env["LOOPX_REGISTRY"], "runtime_root": self.env["LOOPX_RUNTIME_ROOT"],
+                     "goal_id": self.env["LOOPX_GOAL_ID"], "agent_id": self.env["LOOPX_AGENT_ID"],
+                     "turn_instance_id": held["quota"]["heartbeat_receipt"]["turn_instance_id"],
+                     "capture_root": str(self.capture_root), "socket_path": self.socket_path,
+                     "decision_sha256": held["sha256"]}
+            native = native_session_checkpoint(self.env, self.receipt["session"]["session_id"],
+                timeout=max(.1, window - time.time()), interrupted_guard=guard)
+            allocated = {}
+            for entry in native["components"]:
+                component_id = _participant_id(components, entry["id"])
+                allocated[entry["id"]] = component_id
+                components.append({**entry, "id": component_id})
+            decision_id = _participant_id(components, "held_decision")
+            components.append({"id": decision_id, "source_path": str(held["path"])})
+            metadata["native_session"] = {**native["metadata"], "store_members": [
+                {**member, "id": allocated[member["id"]]} for member in native["metadata"]["store_members"]]}
+            metadata["held_decision_component_id"] = decision_id
         probe = effect_runtime_result("runtime.checkpoint_artifacts", {
             "action": "probe", "components": components, "deadline_epoch_ms": window * 1000,
         }, timeout=max(.1, window - time.time()), retry_safe=False)
+        if native is not None:
+            confirmed = native_session_checkpoint(self.env, self.receipt["session"]["session_id"],
+                timeout=max(.1, window - time.time()), interrupted_guard=guard)
+            if confirmed != native:
+                raise ValueError("interrupted native cursor moved before sealing")
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         return effect_runtime_result("runtime.checkpoint_artifacts", {
             "action": "capture", "components": components, "destination": str(destination),

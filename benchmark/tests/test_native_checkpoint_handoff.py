@@ -345,7 +345,7 @@ def test_checkpoint_interrupt_timeout_reaps_without_qualifying_capture(tmp_path)
 
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN") or os.name != "posix",
                    reason="Requires the real native CLI and private Unix transport")
-@pytest.mark.parametrize("capture", ["files", "full", "off"])
+@pytest.mark.parametrize("capture", ["files", "native", "full", "off"])
 def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay(tmp_path, capture):
     """Use run_once, its renderer/listener/session owner and the actual quota CLI."""
     import sys
@@ -364,7 +364,7 @@ def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay
     request = tmp_path / "request.json"
     request.write_text(json.dumps({"destination": str(logs.parent / "checkpoints"),
         "components": [{"id": "code", "source_path": str(candidate)}],
-        "point_metadata": {}, "trigger": "fresh_replan", "native_session": capture == "full"}))
+        "point_metadata": {}, "trigger": "fresh_replan", "native_session": capture in {"native", "full"}, "loopx_state": capture == "full"}))
     skills = tmp_path / "skills"
     skills.mkdir()
     cli = tmp_path / "loopx-cli"
@@ -418,8 +418,9 @@ def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay
             guard = next(line for line in body.splitlines() if "quota should-run" in line)
             guard = guard.replace('${LOOPX_TURN:?}', TURN_ID)
             guards.append(guard)
+            rendered_guard = ("LOOPX_TURN=" + TURN_ID + "\n" + guard.replace(TURN_ID, "${LOOPX_TURN:?}")) if capture == "native" else guard
             return {"type": "function_call", "id": "fc_midwake", "call_id": "call_midwake",
-                    "name": "exec_command", "arguments": json.dumps({"cmd": guard,
+                    "name": "exec_command", "arguments": json.dumps({"cmd": rendered_guard,
                         "yield_time_ms": 10000, "max_output_tokens": 100})}
         if index == 3 and capture != "off":
             # The resumed source deliberately rereads the same obligation. It
@@ -451,15 +452,47 @@ def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay
             return
         assert len(result["checkpoint_handoffs"]) == 1
         event = result["checkpoint_handoffs"][0]
-        assert event["captured"] is (capture == "files")
+        assert event["captured"] is (capture in {"files", "native"})
         assert event["research_point_qualified"] is False
         assert len(calls) == 4 and (project / "continued.txt").read_text() == "continued"
         assert "heartbeat_receipt" in json.dumps(requests[2])
         assert any(item.get("type") == "function_call_output" and item.get("call_id") == "call_midwake"
                    and "aborted" in item.get("output", "") for item in requests[2]["input"])
-        if capture == "files":
+        if capture in {"files", "native"}:
             point = logs.parent / "checkpoints" / event["obligation_id"]
             assert (point / "components" / "code").read_text() == "original candidate"
+            if capture == "native":
+                manifest = json.loads((point / "checkpoint.json").read_text())
+                native = manifest["point_metadata"]["native_session"]
+                assert "completed_turn_id" not in native
+                assert native["interrupted_guard"]["native_call_id"] == "call_midwake"
+                assert native["interrupted_guard"]["decision_sha256"] == event["decision_sha256"]
+                # Reconstruct the earlier captured store after the source has
+                # already continued. Fixed guest paths require an isolated home;
+                # retain and restore the source bytes around this synthetic test.
+                from benchmark.runtime.native_checkpoint import fork_native_checkpoint, admit_native_checkpoint_session
+                from benchmark.runtime.codex import Execution
+                home = Path(native["guest_home"])
+                saved_home = home.with_name(home.name + "-retained")
+                config = tmp_path / "captured-config.toml"
+                config.write_bytes((home / "config.toml").read_bytes())
+                with pytest.raises(ValueError, match="joint controller"):
+                    admit_native_checkpoint_session({**env, "CODEX_HOME": str(home)},
+                        point, event["sha256"], config, execution=Execution(context="resume"), timeout=20)
+                home.rename(saved_home)
+                try:
+                    forked = fork_native_checkpoint({**env, "CODEX_HOME": str(home)},
+                        point, event["sha256"], config, timeout=20)
+                    assert forked["history_verified"] and forked["model_calls"] == 0
+                    assert forked["interrupted_turn_id"] == native["interrupted_turn_id"]
+                    assert forked["session_id"] != native["session_id"]
+                    recovered = fork_native_checkpoint({**env, "CODEX_HOME": str(home)},
+                        point, event["sha256"], config, timeout=20)
+                    assert recovered == forked  # No second fork after a lost reply.
+                finally:
+                    if home.exists():
+                        home.rename(home.with_name(home.name + "-receiver"))
+                    saved_home.rename(home)
         else:
             assert "full-state capture" in event["error"]
             assert not list((logs.parent / "checkpoints").glob("*/checkpoint.json"))

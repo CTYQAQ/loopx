@@ -228,19 +228,29 @@ captured TurnEnvelope. With checkpointing off the renderer, process lifecycle
 and model-visible output stay unchanged. Ordinary guards and repeated replan
 obligations are released without restarting the native CLI. On a first replan,
 the worker selects through the typed owner, interrupts the source, records its
-session, and captures explicitly declared inert files. Failed optional capture
+session, and captures explicitly declared inert files and optional native history. Failed optional capture
 still resumes the source with its original packet; altered packet bytes or lost
 session identity fail closed. All resumptions share the original wake deadline.
 
-This is **not a qualified complete research checkpoint**. Selection before
-interruption is not proof that the native tool has never yielded. The worker
-records each handoff and currently rejects mid-wake requests for native session,
-canonical research or evaluation participants rather than silently reducing them
-to files. The completed-cursor path remains strict. The next joint acceptance
-must bind the pending native history, the controller's all-writer barrier and
-isolated useful continuation before research runs use this profile. Remove the
-checkpoint request to disable automatic handoff; a direct caller can omit the
-socket option to disable only the transport.
+This is **not a qualified complete research checkpoint**. With `native_session`
+requested, the actual worker can seal an explicit interrupted cursor: all retained
+pages, the failed final guard command with no released output or later visible
+item, its parsed CLI routes/Turn identity, and the original held decision bytes.
+A second matching guard is ambiguous and rejects. The exact renderer Turn
+assignment is supported; other shell programs and expansions are unsupported
+by this conservative provider profile. History is
+rechecked against the byte witness before publication. A native fork reconstructs
+that entire captured prefix, including the aborted tool, without using a completed
+Turn as a substitute; completed-cursor checks stay unchanged. Lost fork replies
+reuse the existing one-attempt recovery path.
+
+Canonical research/evaluation requests still reject at this mid-wake path. Native
+history plus declared files is not a controller-wide writer barrier or authority
+admission. Interrupted sessions cannot enter destination Goal admission until the
+joint controller continuation contract is qualified. The next acceptance composes
+that barrier, research/evaluator/budget adoption and isolated useful continuation.
+Remove the checkpoint request to disable automatic handoff; a direct caller can
+omit the socket option to disable only the transport.
 
 Add `"native_session": true` to include Codex's completed native cursor, all
 retained history pages, rollout/compaction records and native index/history SQLite

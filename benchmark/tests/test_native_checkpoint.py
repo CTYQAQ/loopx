@@ -308,6 +308,7 @@ def test_real_fork_admission_and_native_resume_use_retained_state(tmp_path, caps
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    monkeypatch.chdir(workspace)  # Real settlement verifies the producing workspace.
     candidate = workspace / "candidate.txt"
     candidate.write_text("retained candidate: 7\n")
     research = workspace / "research.txt"
@@ -784,3 +785,63 @@ print('Captured public best 7; continued candidate 8; consumed round agent-3; no
         settled = read_heartbeat_settlement(runtime, goal_id=destination_goal, agent_id=destination_agent,
             todo_id=destination_todo, turn_instance_id=turn_id, registry_path=registry)
         assert settled.progress["state"] == "settled"
+
+
+def test_interrupted_cursor_requires_exact_unreleased_final_guard(tmp_path, monkeypatch):
+    """A stopped command is eligible only at the declared pre-output boundary."""
+    import copy
+    import shlex
+    from benchmark.runtime.native_checkpoint import _verify_interrupted_guard
+
+    guard = {"cli": "/fixture/loopx", "workspace": str(tmp_path), "registry": "/fixture/registry.json",
+             "runtime_root": "/fixture/runtime", "goal_id": "research", "agent_id": "worker",
+             "turn_instance_id": "turn-1", "capture_root": "/fixture/decisions", "socket_path": "/tmp/fixture/socket",
+             "decision_sha256": "a" * 64}
+    argv = [guard["cli"], "--registry", guard["registry"], "--runtime-root", guard["runtime_root"],
+            "--format", "json", "quota", "should-run", "--goal-id", "research", "--agent-id", "worker",
+            "--turn-instance-id", "turn-1", "--turn-envelope", "--decision-output-root", guard["capture_root"],
+            "--decision-handoff-socket", guard["socket_path"]]
+    command = shlex.join(["/bin/bash", "-lc", shlex.join(argv)])
+    item = {"type": "commandExecution", "id": "guard-call", "command": command, "cwd": str(tmp_path),
+            "status": "failed", "exitCode": 137, "aggregatedOutput": None}
+    turns = [{"id": "retained-compaction", "status": "completed", "items": [{"type": "contextCompaction"}]},
+             {"id": "pending", "status": "interrupted", "items": [item]}]
+    env, calls = fixture(tmp_path, monkeypatch, [{"data": turns[:1], "nextCursor": "next"},
+                                               {"data": turns[1:], "nextCursor": None}])
+    captured = native_session_checkpoint(env, "fixture-session", timeout=10, interrupted_guard=guard)
+    assert captured["metadata"]["turn_ids"] == ["retained-compaction", "pending"]
+    assert "completed_turn_id" not in captured["metadata"]
+    assert captured["metadata"]["interrupted_guard"]["native_call_id"] == "guard-call"
+    assert "thread/fork" not in calls
+
+    rendered = copy.deepcopy(turns)
+    rendered[-1]["items"][-1]["command"] = shlex.join(["/bin/bash", "-lc",
+        "LOOPX_TURN=turn-1\n" + shlex.join(argv).replace("--turn-instance-id turn-1", '--turn-instance-id "${LOOPX_TURN:?}"')])
+    _verify_interrupted_guard(rendered, guard)
+    variants = []
+    for field, value in [("aggregatedOutput", "score already exposed"), ("cwd", "/elsewhere"),
+                         ("status", "completed"), ("command", shlex.join(["/bin/bash", "-lc", shlex.join(argv) + "; touch later"]))]:
+        changed = copy.deepcopy(turns)
+        changed[-1]["items"][-1][field] = value
+        variants.append(changed)
+    for option, value in [("--turn-instance-id", "wrong-turn"), ("--decision-handoff-socket", "/tmp/other"),
+                          ("--registry", "/other.json"), ("--goal-id", "other")]:
+        altered = list(argv)
+        altered[altered.index(option) + 1] = value
+        changed = copy.deepcopy(turns)
+        changed[-1]["items"][-1]["command"] = shlex.join(["/bin/bash", "-lc", shlex.join(altered)])
+        variants.append(changed)
+    changed = copy.deepcopy(turns)
+    changed[-1]["items"].append({"type": "reasoning", "text": "later decision"})
+    variants.append(changed)
+    changed = copy.deepcopy(turns)
+    changed[-1]["status"] = "completed"
+    variants.append(changed)
+    changed = copy.deepcopy(turns)
+    changed[-1]["items"].insert(0, copy.deepcopy(item))
+    variants.append(changed)
+    for changed in variants:
+        with pytest.raises(ValueError):
+            _verify_interrupted_guard(changed, guard)
+    with pytest.raises(ValueError, match="call identity"):
+        _verify_interrupted_guard(turns, {**guard, "native_call_id": "different"})

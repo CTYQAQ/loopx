@@ -776,9 +776,13 @@ installs the rendezvous for an explicit fresh-replan request, deduplicates the
 original obligation, and resumes the same source session with the original guard
 and remaining wake budget. Ordinary/duplicate guards do not restart the native
 CLI. Declared file capture and failed optional capture use this real entrypoint;
-full-state mid-wake requests remain explicitly unqualified. Interrupted-cursor
-validation, the controller's all-writer barrier and isolated joint continuation
-remain the next acceptance; completed-cursor checks remain strict.
+full-state mid-wake requests remain explicitly unqualified. The native participant
+now binds an explicit interrupted final guard, its parsed routes/Turn identity and
+original packet digest, rejects released output/later visible items or duplicate
+matching calls, and preserves the full prefix in a native fork. Completed-cursor
+checks stay strict. Controller-wide writer exclusion and isolated joint research,
+evaluator and budget admission remain open; participant reconstruction grants no
+new work or destination authority.
 
 The Host profile must also declare path portability. A native index can retain
 absolute guest paths: qualification must either preserve those paths inside a

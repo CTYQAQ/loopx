@@ -7,23 +7,26 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import math
 import os
 import re
 import shutil
+import shlex
 import sqlite3
 import subprocess
 import time
 import tomllib
 from pathlib import Path
+from contextlib import redirect_stdout, redirect_stderr
 from typing import Any
 
 from loopx.capabilities.benchmark_toolkit.native_codex_goal import StdioNativeGoalTransport
 from .codex import Execution
 
 
-def _complete_history(request, session_id: str) -> list[dict[str, Any]]:
+def _complete_history(request, session_id: str, *, interrupted_guard: dict | None = None) -> list[dict[str, Any]]:
     turns = []
     cursor = None
     seen = set()
@@ -43,15 +46,93 @@ def _complete_history(request, session_id: str) -> list[dict[str, Any]]:
         seen.add(cursor)
     if not turns or any(t.get("status") not in {"completed", "failed", "interrupted"} or not t.get("id") for t in turns):
         raise ValueError("native checkpoint requires complete retained turns")
-    if turns[-1].get("status") != "completed":
-        raise ValueError("native checkpoint requires a completed final cursor")
+    if interrupted_guard is None:
+        if turns[-1].get("status") != "completed":
+            raise ValueError("native checkpoint requires a completed final cursor")
+    else:
+        _verify_interrupted_guard(turns, interrupted_guard)
     ids = [t["id"] for t in turns]
     if len(set(ids)) != len(ids):
         raise ValueError("native checkpoint history contains duplicate turns")
     return turns
 
 
-def native_session_checkpoint(env: dict[str, str], session_id: str, *, timeout: float) -> dict[str, Any]:
+def _guard_cli_arguments(command: str, guard: dict) -> list[str]:
+    """Parse the provider shell wrapper plus the renderer's optional Turn assignment."""
+    outer = shlex.split(command)
+    if len(outer) != 3 or Path(outer[0]).name not in {"bash", "zsh", "sh"} or outer[1] != "-lc":
+        raise ValueError("native pending guard is not a supported single shell command")
+    lines = outer[2].strip().splitlines()
+    if len(lines) == 2 and shlex.split(lines[0]) == ["LOOPX_TURN=" + guard["turn_instance_id"]]:
+        script = lines[1].replace('"${LOOPX_TURN:?}"', shlex.quote(guard["turn_instance_id"]))
+    elif len(lines) == 1:
+        script = lines[0]
+    else:
+        raise ValueError("native pending guard contains an unsupported shell program")
+    # Conservative provider syntax profile, not Goal/state classification.
+    # Only the exact renderer assignment above is expanded; never execute shell.
+    if not re.fullmatch(r"[A-Za-z0-9_./:=+@ '\"-]+", script):
+        raise ValueError("native pending guard contains unsupported shell syntax")
+    argv = shlex.split(script)
+    if not argv or argv[0] != guard["cli"]:
+        raise ValueError("native pending guard executable differs")
+    return argv[1:]
+
+
+def _verify_interrupted_guard(turns: list[dict], guard: dict) -> None:
+    """Provider-specific stopped-tool cursor, never a relaxed completed cursor.
+
+    Only the single simple command emitted by the heartbeat renderer is eligible.
+    Other than the exact renderer Turn assignment, shell programs and expansions
+    are unsupported, even if they eventually call quota. CLI parsing owns option
+    semantics; this adapter binds the native command item to the Host's held packet and rejects any later native item.
+    """
+    from loopx.cli import build_parser
+
+    tail = turns[-1]
+    items = tail.get("items") or []
+    if tail.get("status") != "interrupted" or not items:
+        raise ValueError("native checkpoint requires an interrupted pending guard")
+    item = items[-1]
+    if (item.get("type") != "commandExecution" or item.get("status") != "failed" or
+            item.get("aggregatedOutput") is not None or not item.get("id") or
+            item.get("cwd") != guard["workspace"]):
+        raise ValueError("native checkpoint has output or work beyond its pending guard")
+    parser = build_parser()
+    def arguments(command):
+        argv = _guard_cli_arguments(command, guard)
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                return vars(parser.parse_args(argv))
+        except (SystemExit, ValueError) as error:
+            raise ValueError("native pending guard arguments are invalid") from error
+    args = arguments(item.get("command", ""))
+    expected = {"command": "quota", "quota_command": "should-run", "format": "json",
+                "registry": guard["registry"], "runtime_root": guard["runtime_root"],
+                "goal_id": guard["goal_id"], "agent_id": guard["agent_id"],
+                "turn_instance_id": guard["turn_instance_id"], "turn_envelope": True,
+                "decision_output_root": guard["capture_root"],
+                "decision_output_dir": None, "decision_handoff_socket": guard["socket_path"]}
+    if any(args.get(key) != value for key, value in expected.items()):
+        raise ValueError("native pending guard differs from the held packet routes or identity")
+    # A second matching guard after a tool yield cannot stand in for the first
+    # held call. Compare parsed routes, not only command spelling or item count.
+    for prior_turn in turns:
+        for previous in prior_turn.get("items", []):
+            if previous is item or previous.get("type") != "commandExecution":
+                continue
+            try:
+                prior_args = arguments(previous.get("command", ""))
+            except ValueError:
+                continue
+            if all(prior_args.get(key) == value for key, value in expected.items()):
+                raise ValueError("native pending guard is ambiguous after an earlier matching call")
+    if guard.get("native_call_id") is not None and item["id"] != guard["native_call_id"]:
+        raise ValueError("native pending guard call identity differs")
+
+
+def native_session_checkpoint(env: dict[str, str], session_id: str, *, timeout: float,
+                              interrupted_guard: dict | None = None) -> dict[str, Any]:
     home = Path(env["CODEX_HOME"])
     if not session_id or timeout <= 0:
         raise ValueError("native checkpoint requires a session and an open capture window")
@@ -81,7 +162,7 @@ def native_session_checkpoint(env: dict[str, str], session_id: str, *, timeout: 
         if (not workspace.is_absolute() or workspace.resolve(strict=True) != workspace or
                 readback["thread"].get("cwd") != str(workspace)):
             raise ValueError("native checkpoint session workspace differs from the declared code basis")
-        turns = _complete_history(request, session_id)
+        turns = _complete_history(request, session_id, interrupted_guard=interrupted_guard)
         ids = [t["id"] for t in turns]
     members = []
     for entry in sorted(home.iterdir()):
@@ -93,7 +174,10 @@ def native_session_checkpoint(env: dict[str, str], session_id: str, *, timeout: 
         raise ValueError("native checkpoint session index is unavailable")
     encoded = json.dumps(turns, sort_keys=True, separators=(",", ":")).encode()
     return {"components": members, "metadata": {
-        "session_id": session_id, "completed_turn_id": ids[-1], "turn_ids": ids,
+        "session_id": session_id, "turn_ids": ids,
+        **({"completed_turn_id": ids[-1]} if interrupted_guard is None else {
+            "interrupted_turn_id": ids[-1], "interrupted_guard": {
+                **interrupted_guard, "native_call_id": turns[-1]["items"][-1]["id"]}}),
         "visible_history_sha256": hashlib.sha256(encoded).hexdigest(), "host_version": version,
         "guest_home": str(home), "guest_workspace": env["LOOPX_PROJECT"],
         "path_profile": "preserve_guest_paths_in_isolated_environment",
@@ -157,6 +241,20 @@ def _fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: st
     }, timeout=timeout)
     manifest = json.loads((unit / "checkpoint.json").read_text())
     native = manifest["point_metadata"]["native_session"]
+    if native.get("interrupted_guard") is not None:
+        component_id = manifest["point_metadata"].get("held_decision_component_id")
+        if component_id not in {entry["id"] for entry in manifest["components"]}:
+            raise ValueError("interrupted checkpoint lacks its held decision participant")
+        raw = (unit / "components" / component_id).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != native["interrupted_guard"]["decision_sha256"]:
+            raise ValueError("interrupted checkpoint held decision digest differs")
+        guard = native["interrupted_guard"]
+        intent = effect_runtime_result("runtime.checkpoint_artifacts", {
+            "action": "select_replan", "quota": json.loads(raw), "goal_id": guard["goal_id"],
+            "agent_id": guard["agent_id"], "turn_instance_id": guard["turn_instance_id"],
+        }, timeout=max(.1, deadline - time.monotonic()))
+        if not intent["capture"] or intent != manifest["point_metadata"].get("replan"):
+            raise ValueError("interrupted checkpoint original replan binding differs")
     home = Path(env["CODEX_HOME"])
     if str(home) != native["guest_home"] or env["LOOPX_PROJECT"] != native["guest_workspace"]:
         raise ValueError("native checkpoint requires its qualified fixed guest paths")
@@ -187,8 +285,17 @@ def _fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: st
             raise ValueError("native checkpoint member inventory is invalid")
         names.add(name)
         component_ids.add(component_id)
+    interrupted_guard = native.get("interrupted_guard")
+    if interrupted_guard is not None:
+        if ("completed_turn_id" in native or not native.get("interrupted_turn_id") or
+                not native.get("turn_ids") or native["turn_ids"][-1] != native["interrupted_turn_id"]):
+            raise ValueError("native checkpoint mixes completed and interrupted cursors")
+        cursor_basis = {"interrupted_turn_id": native["interrupted_turn_id"],
+                        "interrupted_guard": interrupted_guard}
+    else:
+        cursor_basis = {"completed_turn_id": native["completed_turn_id"]}
     basis = {"checkpoint_sha256": expected_sha256, "source_session_id": native["session_id"],
-        "completed_turn_id": native["completed_turn_id"], "config_sha256": native["config_sha256"],
+        **cursor_basis, "config_sha256": native["config_sha256"],
         "destination_goal_id": env.get("LOOPX_GOAL_ID"), "destination_agent_id": env.get("LOOPX_AGENT_ID"),
         "guest_workspace": env["LOOPX_PROJECT"], "guest_home": str(home)}
     attempt = None
@@ -248,7 +355,8 @@ def _fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: st
             finally:
                 os.close(directory)
             fork = request("thread/fork", {"threadId": native["session_id"],
-                "lastTurnId": native["completed_turn_id"], "cwd": env["LOOPX_PROJECT"],
+                **({"lastTurnId": native["completed_turn_id"]} if interrupted_guard is None else {}),
+                "cwd": env["LOOPX_PROJECT"],
                 "sandbox": "read-only", "approvalPolicy": "never", "deferGoalContinuation": True,
                 "excludeTurns": True})
             session = fork.get("thread", {}).get("id")
@@ -257,12 +365,12 @@ def _fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: st
         if (fork.get("thread", {}).get("forkedFromId") != native["session_id"] or
                 fork["thread"].get("cwd") != env["LOOPX_PROJECT"]):
             raise ValueError("native fork provenance differs from the original attempt")
-        turns = _complete_history(request, session)
+        turns = _complete_history(request, session, interrupted_guard=interrupted_guard)
         encoded = json.dumps(turns, sort_keys=True, separators=(",", ":")).encode()
         if ([t["id"] for t in turns] != native["turn_ids"] or
                 hashlib.sha256(encoded).hexdigest() != native["visible_history_sha256"]):
             raise ValueError("native checkpoint reconstructed history differs")
-    return {"session_id": session, "completed_turn_id": native["completed_turn_id"],
+    return {"session_id": session, **cursor_basis,
             "visible_history_sha256": native["visible_history_sha256"], "history_verified": True,
             "model_calls": 0, "execution_authority_granted": False, "continuation_qualified": False}
 
@@ -292,6 +400,8 @@ def admit_native_checkpoint_session(env: dict[str, str], unit: Path, expected_sh
         "action": "verify", "root": str(unit), "expected_sha256": expected_sha256,
     }, timeout=timeout)
     metadata = json.loads((unit / "checkpoint.json").read_bytes())["point_metadata"]
+    if metadata.get("native_session", {}).get("interrupted_guard") is not None:
+        raise ValueError("interrupted session admission requires the joint controller continuation contract")
     source_profile = (metadata.get("session") or {}).get("session_profile_digest")
     if not isinstance(source_profile, str) or not re.fullmatch(r"[0-9a-f]{64}", source_profile):
         raise ValueError("checkpoint session admission requires its captured source session profile")
