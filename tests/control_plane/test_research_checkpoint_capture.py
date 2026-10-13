@@ -127,8 +127,12 @@ def test_worker_keeps_work_running_when_staged_capture_declaration_fails(
         assert not (project / "host-input.txt").exists()
 
 
-@pytest.mark.parametrize("opportunity,corrupt", [(False, False), (True, False), (True, True)])
-def test_real_cli_settlement_capture_verification_and_inert_materialization(tmp_path, monkeypatch, opportunity, corrupt):
+@pytest.mark.parametrize("opportunity,corrupt,collisions", [
+    (False, False, False), (True, False, False), (True, True, False),
+    (True, False, True), (True, True, True), ("empty", False, True),
+])
+def test_real_cli_settlement_capture_verification_and_inert_materialization(
+        tmp_path, monkeypatch, opportunity, corrupt, collisions):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     project, runtime, registry = cli._write_fixture(tmp_path)
     binding = ("--agent-id", cli.AGENT_ID, "--todo-id", cli.TODO_ID, "--turn-instance-id", cli.TURN_ID)
@@ -145,10 +149,13 @@ def test_real_cli_settlement_capture_verification_and_inert_materialization(tmp_
     incumbent_bytes = b"opaque older adopted candidate"
     opportunity_packet = {"meaning": "synthetic opportunity participant; no admission", "native_incumbent": {
         "round": "agent-1", "archive_sha256": hashlib.sha256(incumbent_bytes).hexdigest(), "archive_bytes": len(incumbent_bytes)}}
+    if opportunity == "empty":
+        opportunity_packet["native_incumbent"] = None
     def export(env, *, timeout, incumbent_path):
         assert 0 < timeout <= 30
         observed.append(True)
-        incumbent_path.write_bytes(incumbent_bytes)
+        if opportunity_packet["native_incumbent"] is not None:
+            incumbent_path.write_bytes(incumbent_bytes)
         return opportunity_packet
     monkeypatch.setattr("benchmark.runtime.sforge_checkpoint.capture_opportunity", export)
     if corrupt:
@@ -160,9 +167,16 @@ def test_real_cli_settlement_capture_verification_and_inert_materialization(tmp_
     (project / "solution.py").write_text("retained_candidate = 7\n")
     request = tmp_path / "request.json"
     target = logs / "checkpoints" / "point"
+    caller_components = []
+    if collisions:
+        for name in ("evaluation_opportunity", "evaluation_opportunity_1", "evaluation_incumbent", "evaluation_incumbent_1"):
+            member = project / name
+            member.write_text("caller-owned " + name)
+            caller_components.append({"id": name, "source_path": str(member)})
     request.write_text(json.dumps({"destination": str(target), "components": [
         {"id": "code", "source_path": str(project / "solution.py")},
         {"id": "research", "source_path": str(project / f".codex/goals/{cli.GOAL_ID}/ACTIVE_GOAL_STATE.md")},
+        *caller_components,
     ], "point_metadata": {"meaning": "synthetic capture; no model/session or evaluator qualification"},
         **({"evaluation_opportunity": True} if opportunity else {})}))
     env = {"LOOPX_CHECKPOINT_REQUEST": str(request), "LOOPX_WAKE_LOG_DIR": str(wake),
@@ -195,8 +209,15 @@ def test_real_cli_settlement_capture_verification_and_inert_materialization(tmp_
     assert receipt["checkpoint"]["research_point_qualified"] is False
     assert goal_state.read_bytes() == retained_goal
     if opportunity:
-        assert json.loads((target / "components/evaluation_opportunity").read_text()) == opportunity_packet
-        assert (target / "components/evaluation_incumbent").read_bytes() == incumbent_bytes
+        mapping = json.loads((target / "checkpoint.json").read_text())["point_metadata"]["evaluation_opportunity"]
+        assert json.loads((target / "components" / mapping["component_id"]).read_text()) == opportunity_packet
+        if opportunity == "empty":
+            assert mapping["incumbent_component_id"] is None
+            assert not (wake / cli.TURN_ID / "checkpoint-incumbent.tar.gz").exists()
+        else:
+            assert (target / "components" / mapping["incumbent_component_id"]).read_bytes() == incumbent_bytes
+        for member in caller_components:
+            assert (target / "components" / member["id"]).read_text() == "caller-owned " + member["id"]
 
     digest = receipt["checkpoint"]["sha256"]
     restored = effect_runtime_result("runtime.checkpoint_artifacts", {"action": "materialize", "root": str(target),
@@ -204,13 +225,16 @@ def test_real_cli_settlement_capture_verification_and_inert_materialization(tmp_
     assert restored["activation_performed"] is False
     assert (tmp_path / "inert/components/code").read_text() == "retained_candidate = 7\n"
     if opportunity:
-        assert (tmp_path / "inert/components/evaluation_incumbent").read_bytes() == incumbent_bytes
+        if opportunity != "empty":
+            assert (tmp_path / "inert/components" / mapping["incumbent_component_id"]).read_bytes() == incumbent_bytes
+        for member in caller_components:
+            assert (tmp_path / "inert/components" / member["id"]).read_text() == "caller-owned " + member["id"]
     before = (target / "checkpoint.json").read_bytes()
     capture_after_wake(env, receipt)
     assert receipt["checkpoint"]["reason"] == "destination_already_present_no_replay"
     assert (target / "checkpoint.json").read_bytes() == before
     assert goal_state.read_bytes() == retained_goal
-    assert len(observed) == int(opportunity)
+    assert len(observed) == int(bool(opportunity))
 
 
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN"),

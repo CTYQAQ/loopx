@@ -375,9 +375,16 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
             opportunity = capture_opportunity(env, timeout=max(.1, deadline - time.time()), incumbent_path=incumbent)
             evidence.write_text(json.dumps(opportunity), encoding="utf-8")
             evidence.chmod(0o600)
-            components = [*components, {"id": "evaluation_opportunity", "source_path": str(evidence)}]
+            opportunity_id = _participant_id(components, "evaluation_opportunity")
+            components = [*components, {"id": opportunity_id, "source_path": str(evidence)}]
+            incumbent_id = None
             if opportunity["native_incumbent"] is not None:
-                components = [*components, {"id": "evaluation_incumbent", "source_path": str(incumbent)}]
+                incumbent_id = _participant_id(components, "evaluation_incumbent")
+                components = [*components, {"id": incumbent_id, "source_path": str(incumbent)}]
+            # Local provider evidence mapping, not evaluation admission. Keep
+            # caller IDs intact and bind the witness to the allocated archive.
+            metadata["evaluation_opportunity"] = {"component_id": opportunity_id,
+                                                   "incumbent_component_id": incumbent_id}
         if request.get("native_session"):
             from .native_checkpoint import native_session_checkpoint
             from .codex import Execution
@@ -445,7 +452,7 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
                 raise ValueError("LoopX registry differs from the scoped participant inventory")
         if opportunity is not None and opportunity["native_incumbent"] is not None:
             selected = opportunity["native_incumbent"]
-            witness = probe["source_witness"].get("evaluation_incumbent", [])
+            witness = probe["source_witness"].get(metadata["evaluation_opportunity"]["incumbent_component_id"], [])
             if (len(witness) != 1 or witness[0].get("path") != "" or witness[0].get("kind") != "file" or
                     witness[0].get("sha256") != selected["archive_sha256"] or
                     witness[0].get("size") != selected["archive_bytes"]):
