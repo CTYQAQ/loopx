@@ -22,7 +22,10 @@ from loopx.control_plane.coordination.coordination_state_contract_generated impo
 from loopx.control_plane.coordination.runtime_shadow import build_runtime_shadow_source_snapshot
 from loopx.control_plane.coordination.shadow_management import read_shadow_management_state
 from loopx.control_plane.effect_runtime import effect_runtime_result
-from tests.control_plane.shadow_e2e_fixture import ShadowWorkspace
+from tests.control_plane.historical_shadow_fixture import (
+    HistoricalShadowWorkspace,
+    original_1x_source,  # noqa: F401
+)
 from tests.control_plane.test_shadow_management_e2e import (
     REPO_ROOT, _bootstrap, _candidate, _cli, _workspace,
 )
@@ -122,14 +125,14 @@ def _durable_files(root: Path) -> dict[str, bytes]:
 
 @pytest.mark.parametrize("archive", ["candidate", "outbox"])
 def test_pending_rollback_checks_corrupted_archive_before_finishing_and_can_retry_exact_repair(
-    tmp_path: Path, archive: str,
+    tmp_path: Path, archive: str, original_source: Path,
 ) -> None:
     registry, runtime = _workspace(tmp_path)
     first = _bootstrap(registry, runtime)
     _bootstrap(registry, runtime, "goal-b")
     _, state = _source(registry, runtime)
-    w = ShadowWorkspace(registry, runtime, state, "goal-a")
-    w.crash("before_commit", "todo", "add", "--role", "agent", "--text", "Pending retained mutation")
+    w = HistoricalShadowWorkspace(registry, runtime, state, "goal-a", original_source=original_source)
+    w.original_crash("before_commit", "todo", "add", "--role", "agent", "--text", "Pending retained mutation")
     candidate, outbox = _candidate(runtime, "goal-a"), runtime / "authority-shadow/outbox/goal-a"
     pending_bytes = _durable_files(outbox)
     assert any(name.endswith(".prepared.json") for name in pending_bytes)

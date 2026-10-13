@@ -4,11 +4,14 @@ Every row runs one public command against a workspace whose durable legacy
 writer fence is in one state, and compares the complete printed envelope, the
 exit status, and the primary-record effect with the literal expectation in
 tests/fixtures/control_plane/legacy_writer_fence_caller_parity_v0.json.
-Nothing is mocked; the fence is engaged by the real TypeScript owner.
+Immutable 1.x produces the imported source records and the historical control
+row; all fenced callers and canonical transitions run this checkout. Nothing is
+mocked; the fence is engaged by the current TypeScript owner.
 """
 from __future__ import annotations
 
 import json
+from copy import copy
 import shutil
 import sys
 from collections.abc import Callable, Iterator
@@ -17,6 +20,7 @@ from pathlib import Path
 import pytest
 from test_shadow_observable_e2e import Caller
 from test_shadow_observable_native_e2e import native
+from tests.control_plane.historical_shadow_fixture import original_1x_source  # noqa: F401
 
 pytestmark = pytest.mark.stage2c_e2e
 
@@ -44,8 +48,9 @@ def _posix_runtime_paths(value: object) -> object:
 class Workspace:
     """One seeded goal; rows are executed against it in fixture order."""
 
-    def __init__(self, path: Path, mode: str, name: str) -> None:
+    def __init__(self, path: Path, mode: str, name: str, original_source: Path) -> None:
         self.w = Caller(path, mode, name)
+        self.original_source = original_source
         self.ids: dict[str, str] = {}
         self.lease_version = 0
         self.lease_owner = "agent-a"
@@ -54,6 +59,16 @@ class Workspace:
 
     def call(self, *args: str) -> dict:
         return self.w.call(*args)
+
+    def original_call(self, *args: str) -> dict:
+        original = copy(self.w)
+        original.env = {**self.w.env, "PYTHONPATH": str(self.original_source)}
+        return original.call(*args)
+
+    def original_add(self, text: str) -> str:
+        result = self.original_call("todo", "add", "--role", "agent", "--text", text)
+        assert result["ok"] is True, result
+        return result["todo_id"]
 
     def exit(self) -> int:
         return int(self.w.rows[-1]["exit"])
@@ -76,9 +91,9 @@ class Workspace:
                 text = text.replace(self.ids[key], "{" + key + "}")
         return _posix_runtime_paths(json.loads(text))
 
-    def observe(self, args: tuple[str, ...]) -> dict:
+    def observe(self, args: tuple[str, ...], *, historical: bool = False) -> dict:
         before, outbox_before = self.w.primary(), self.outbox()
-        envelope = self.call(*args)
+        envelope = self.original_call(*args) if historical else self.call(*args)
         after, outbox_after = self.w.primary(), self.outbox()
         return {
             "envelope": self.normalize(envelope),
@@ -106,46 +121,50 @@ def seed_and_fence(ws: Workspace, todo_keys: tuple[str, ...]) -> None:
     assert native(ws.w, "seed", projection)["status"] == "applied"
 
 
-def build_seeded(path: Path, mode: str, name: str, *, gate: bool) -> Workspace:
-    ws = Workspace(path, mode, name)
-    assert ws.call("handoff-mode", "set", "--mode", "hard_lease")["ok"] is True
-    ws.ids["todo_a"] = ws.w.add("Parity target A")
-    ws.ids["todo_b"] = ws.w.add("Parity leased B")
-    ws.ids["todo_c"] = ws.w.add("Parity fresh acquisition C")
+def build_seeded(path: Path, mode: str, name: str, original_source: Path, *, gate: bool) -> Workspace:
+    ws = Workspace(path, mode, name, original_source)
+    assert ws.original_call("handoff-mode", "set", "--mode", "hard_lease")["ok"] is True
+    ws.ids["todo_a"] = ws.original_add("Parity target A")
+    ws.ids["todo_b"] = ws.original_add("Parity leased B")
+    ws.ids["todo_c"] = ws.original_add("Parity fresh acquisition C")
     if gate:
-        gate_add = ws.call("todo", "add", "--role", "user", "--task-class", "user_gate", "--global-gate",
+        gate_add = ws.original_call("todo", "add", "--role", "user", "--task-class", "user_gate", "--global-gate",
                            "--text", "Approve the parity plan")
         assert gate_add["ok"] is True, gate_add
         ws.ids["todo_gate"] = gate_add["todo_id"]
     ws.control = {"cli-task_lease_acquire-absent": ws.observe((
         "task-lease", "acquire", "--todo-id", ws.ids["todo_b"], "--owner", "agent-a",
-        "--idempotency-key", "parity-lease", "--ttl-seconds", "3600"))}
+        "--idempotency-key", "parity-lease", "--ttl-seconds", "3600"), historical=True)}
     lease = ws.control["cli-task_lease_acquire-absent"]["envelope"]
     assert lease.get("acquired") is True, lease
     ws.lease_version = int(lease["lease"]["version"])
+    rejected = ws.observe(lease_args(ws, "acquire"))
+    assert rejected["envelope"].get("error_code") == "canonical_authority_required", rejected
+    assert rejected["effect"] == {"added": [], "removed": [], "changed": []}
+    assert rejected["outbox_added"] == []
     seed_and_fence(ws, ("todo_a", "todo_b", "todo_c", "todo_gate") if gate else ("todo_a", "todo_b", "todo_c"))
     return ws
 
 
-def build_w3(path: Path) -> Workspace:
-    ws = build_seeded(path, "absent", "fence-parity-invalid", gate=False)
+def build_w3(path: Path, original_source: Path) -> Workspace:
+    ws = build_seeded(path, "absent", "fence-parity-invalid", original_source, gate=False)
     marker = json.loads(ws.fence_path().read_text(encoding="utf-8"))
     marker["state"] = "disengaged"
     ws.fence_path().write_text(json.dumps(marker), encoding="utf-8")
     return ws
 
 
-def build_w4(path: Path) -> Workspace:
-    ws = build_seeded(path, "absent", "fence-parity-unreadable", gate=False)
+def build_w4(path: Path, original_source: Path) -> Workspace:
+    ws = build_seeded(path, "absent", "fence-parity-unreadable", original_source, gate=False)
     ws.fence_path().unlink()
     ws.fence_path().mkdir()
     return ws
 
 
-def build_w5(path: Path) -> Workspace:
-    ws = Workspace(path, "absent", "fence-parity-no-store")
-    assert ws.call("handoff-mode", "set", "--mode", "hard_lease")["ok"] is True
-    ws.ids["todo_a"] = ws.w.add("Parity target A")
+def build_w5(path: Path, original_source: Path) -> Workspace:
+    ws = Workspace(path, "absent", "fence-parity-no-store", original_source)
+    assert ws.original_call("handoff-mode", "set", "--mode", "hard_lease")["ok"] is True
+    ws.ids["todo_a"] = ws.original_add("Parity target A")
     ws.fence_path().parent.mkdir(parents=True, exist_ok=True)
     ws.fence_path().write_text(json.dumps({
         "schema_version": "loopx_legacy_coordination_writer_fence_v0", "state": "engaged", "goal_id": "observable",
@@ -201,8 +220,8 @@ def row_args(ws: Workspace, caller: str) -> tuple[str, ...]:
 
 
 WORKSPACES = {
-    "w1": lambda path: build_seeded(path, "absent", "fence-parity-engaged", gate=True),
-    "w2": lambda path: build_seeded(path, "enabled", "fence-parity-engaged-capture", gate=False),
+    "w1": lambda path, source: build_seeded(path, "absent", "fence-parity-engaged", source, gate=True),
+    "w2": lambda path, source: build_seeded(path, "enabled", "fence-parity-engaged-capture", source, gate=False),
     "w3": build_w3,
     "w4": build_w4,
     "w5": build_w5,
@@ -217,14 +236,14 @@ def load_rows() -> list[dict]:
 
 
 @pytest.fixture(scope="module")
-def workspaces(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[[str], Workspace]]:
+def workspaces(tmp_path_factory: pytest.TempPathFactory, original_source: Path) -> Iterator[Callable[[str], Workspace]]:
     built: dict[str, Workspace] = {}
 
     def get(key: str) -> Workspace:
         # Single-row mutation probes need only this row's workspace. Keep reuse
         # and ordered mutations within a module, never across worker processes.
         if key not in built:
-            built[key] = WORKSPACES[key](tmp_path_factory.mktemp(key))
+            built[key] = WORKSPACES[key](tmp_path_factory.mktemp(key), original_source)
         return built[key]
 
     yield get
@@ -234,6 +253,9 @@ def workspaces(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[[s
 
 def observe_row(ws: Workspace, row: dict) -> dict:
     if ws.control and row["id"] in ws.control:
+        # This literal row characterizes the imported original grant, not a
+        # supported current source writer (whose refusal is checked in setup).
+        assert row["fence_state"] == "absent"
         return ws.control[row["id"]]
     return ws.observe(row_args(ws, row["caller"]))
 

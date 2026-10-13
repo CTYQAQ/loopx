@@ -1,7 +1,7 @@
-"""Real public CLI and independent native TypeScript file-profile qualification.
+"""Current qualification and recovery of immutable 1.x file-profile histories.
 
-The production writers, file provider and parsers run unchanged. Tests control
-only process scheduling and deliberately edited source bytes.
+Only original_cli/original native calls produce retired source mutations.
+Inspection, qualification, promotion and recovery always use this checkout.
 """
 from __future__ import annotations
 
@@ -13,6 +13,11 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from tests.control_plane.historical_shadow_fixture import (
+    historical_workspace_factory,  # noqa: F401
+    original_1x_source,  # noqa: F401
+)
 
 from loopx.control_plane.effect_runtime import EffectRuntimeRejected
 
@@ -46,10 +51,10 @@ def workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
     return registry, runtime, state
 
 
-def cli(registry: Path, runtime: Path, *arguments: str, success: bool = True) -> dict:
+def cli(registry: Path, runtime: Path, *arguments: str, success: bool = True, source: Path = REPO) -> dict:
     completed = subprocess.run([sys.executable, "-m", "loopx.cli", "--registry", str(registry),
-        "--runtime-root", str(runtime), "--format", "json", *arguments], cwd=REPO,
-        env={**os.environ, "PYTHONPATH": str(REPO)}, capture_output=True, text=True,
+        "--runtime-root", str(runtime), "--format", "json", *arguments], cwd=source,
+        env={**os.environ, "PYTHONPATH": str(source)}, capture_output=True, text=True,
         timeout=45, check=False)
     assert completed.stdout.strip(), completed.stderr
     payload = json.loads(completed.stdout)
@@ -59,6 +64,11 @@ def cli(registry: Path, runtime: Path, *arguments: str, success: bool = True) ->
     return payload
 
 
+def original_cli(source: Path, registry: Path, runtime: Path, *arguments: str) -> dict:
+    """Produce synthetic original history; never select this source for readback."""
+    return cli(registry, runtime, *arguments, source=source)
+
+
 def enable(registry: Path) -> dict:
     value = json.loads(registry.read_text())
     value["goals"][0]["coordination"]["runtime_shadow"]["enabled"] = True
@@ -66,10 +76,10 @@ def enable(registry: Path) -> dict:
     return value["goals"][0]
 
 
-def native(tmp_path: Path, module: str, function: str, request: dict) -> dict:
+def native(tmp_path: Path, module: str, function: str, request: dict, *, source: Path = REPO) -> dict:
     path = tmp_path / "native-request.json"
     path.write_text(json.dumps(request), encoding="utf-8")
-    script = (f"import {{ {function} }} from {json.dumps((REPO / module).as_uri())};"
+    script = (f"import {{ {function} }} from {json.dumps((source / module).as_uri())};"
         "import {readFile} from 'node:fs/promises';"
         f"process.stdout.write(JSON.stringify(await {function}(JSON.parse(await readFile(process.argv[1],'utf8')))));" )
     process = subprocess.run(["node", "--no-warnings", "--experimental-strip-types", "--input-type=module", "-e", script, str(path)],
@@ -87,14 +97,14 @@ def history(tmp_path: Path, runtime: Path) -> list[dict]:
     return result["proof"]["transactions"]
 
 
-def acquire_native(tmp_path: Path, registry: Path, runtime: Path, todo_id: str) -> dict:
+def acquire_original_native(source: Path, tmp_path: Path, registry: Path, runtime: Path, todo_id: str) -> dict:
     return native(tmp_path, "loopx/control_plane/work_items/task_lease_acquire.ts", "executeTaskLeaseAcquire", {
         "schema_version": TASK_LEASE_ACQUIRE_REQUEST_SCHEMA, "runtime_root": str(runtime), "goal_id": "goal-a",
         "todo_id": todo_id, "owner": "agent-b", "idempotency_key": "native-" + todo_id, "ttl_seconds": 120,
         "write_scopes": [], "expected_version": None,
         "authority": task_lease_acquire_authority_facts(registry_path=registry, goal_id="goal-a", todo_id=todo_id),
         "runtime_shadow": {"schema_version": "loopx_coordination_runtime_shadow_binding_v0", "provider": "file_v0"},
-    })
+    }, source=source)
 
 
 def test_source_snapshot_preserves_inventory_without_projecting_orphan_leases(
@@ -124,17 +134,17 @@ def test_source_snapshot_preserves_inventory_without_projecting_orphan_leases(
     assert history(tmp_path, runtime)[0]["projection"]["leases"] == []
 
 
-def test_public_cli_and_independent_native_writer_qualify_one_complete_lineage(tmp_path: Path) -> None:
+def test_historical_cli_and_native_writer_lineage_qualifies_in_current_receiver(tmp_path: Path, original_source: Path) -> None:
     registry, runtime, state = workspace(tmp_path)
-    cli(registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "soft_claim")
-    archived = cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Previously completed task", "--claimed-by", "agent-a")
-    cli(registry, runtime, "todo", "complete", "--goal-id", "goal-a", "--todo-id", archived["todo_id"],
+    original_cli(original_source, registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "soft_claim")
+    archived = original_cli(original_source, registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Previously completed task", "--claimed-by", "agent-a")
+    original_cli(original_source, registry, runtime, "todo", "complete", "--goal-id", "goal-a", "--todo-id", archived["todo_id"],
         "--agent-id", "agent-a", "--evidence", "validation://completed", "--no-follow-up")
-    cli(registry, runtime, "todo", "archive-completed", "--goal-id", "goal-a", "--max-active-done", "0", "--execute")
-    cli(registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "hard_lease")
-    first = cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Existing first task")
-    second = cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Existing second task")
-    baseline_lease = cli(registry, runtime, "task-lease", "acquire", "--goal-id", "goal-a", "--todo-id", first["todo_id"],
+    original_cli(original_source, registry, runtime, "todo", "archive-completed", "--goal-id", "goal-a", "--max-active-done", "0", "--execute")
+    original_cli(original_source, registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "hard_lease")
+    first = original_cli(original_source, registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Existing first task")
+    second = original_cli(original_source, registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Existing second task")
+    baseline_lease = original_cli(original_source, registry, runtime, "task-lease", "acquire", "--goal-id", "goal-a", "--todo-id", first["todo_id"],
         "--owner", "agent-a", "--idempotency-key", "baseline-lease", "--ttl-seconds", "120")
     assert not (runtime / "authority-shadow" / "file-v0").exists()
     enable(registry)
@@ -148,9 +158,9 @@ def test_public_cli_and_independent_native_writer_qualify_one_complete_lineage(t
         "authority": task_lease_acquire_authority_facts(registry_path=registry, goal_id="goal-a", todo_id=second["todo_id"]),
         "runtime_shadow": {"schema_version": "loopx_coordination_runtime_shadow_binding_v0", "provider": "file_v0"},
     }
-    acquired = native(tmp_path, "loopx/control_plane/work_items/task_lease_acquire.ts", "executeTaskLeaseAcquire", native_request)
+    acquired = native(tmp_path, "loopx/control_plane/work_items/task_lease_acquire.ts", "executeTaskLeaseAcquire", native_request, source=original_source)
     assert acquired["acquired"] is True, acquired
-    additions = [cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", f"New captured task {index}") for index in range(2)]
+    additions = [original_cli(original_source, registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", f"New captured task {index}") for index in range(2)]
     for addition in additions:
         assert addition["coordination_runtime_shadow"]["source_transaction_correlated"] is True
     inspect = cli(registry, runtime, "coordination-shadow", "inspect", "--goal-id", "goal-a")
@@ -184,7 +194,7 @@ def test_public_cli_and_independent_native_writer_qualify_one_complete_lineage(t
 
 
 def test_reviewed_promotion_survives_restart_and_enables_managed_codex_preflight(
-    tmp_path: Path,
+    tmp_path: Path, original_source: Path,
 ) -> None:
     registry, runtime, _state = workspace(tmp_path)
     registry_payload = json.loads(registry.read_text(encoding="utf-8"))
@@ -203,7 +213,7 @@ def test_reviewed_promotion_survives_restart_and_enables_managed_codex_preflight
         json.dumps(registry_payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    delegated = cli(
+    delegated = original_cli(original_source,
         registry,
         runtime,
         "todo",
@@ -221,7 +231,7 @@ def test_reviewed_promotion_survives_restart_and_enables_managed_codex_preflight
         "--claimed-by",
         "agent-b",
     )
-    cli(
+    original_cli(original_source,
         registry,
         runtime,
         "task-lease",
@@ -247,7 +257,7 @@ def test_reviewed_promotion_survives_restart_and_enables_managed_codex_preflight
         "goal-a",
         "--execute",
     )
-    cli(
+    original_cli(original_source,
         registry,
         runtime,
         "todo",
@@ -393,13 +403,13 @@ def test_reviewed_promotion_survives_restart_and_enables_managed_codex_preflight
     assert not (runtime / "goals" / "goal-a" / "turns").exists()
 
 
-def test_unrecorded_canonical_change_cannot_become_qualified_after_a_later_public_write(tmp_path: Path) -> None:
+def test_unrecorded_historical_source_change_cannot_become_qualified_after_a_later_write(tmp_path: Path, original_source: Path) -> None:
     registry, runtime, state = workspace(tmp_path)
     enable(registry)
     cli(registry, runtime, "coordination-shadow", "bootstrap", "--goal-id", "goal-a", "--execute")
     original = state.read_text()
     state.write_text(original.replace("handoff_mode: hard_lease", "handoff_mode: soft_claim"))
-    added = cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "After unrecorded mutation")
+    added = original_cli(original_source, registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "After unrecorded mutation")
     assert added["added"] is True
     qualified = cli(registry, runtime, "coordination-shadow", "qualify", "--goal-id", "goal-a", success=False)
     assert qualified["qualification"]["qualified"] is False
@@ -423,23 +433,23 @@ def test_snapshot_changed_between_python_builder_and_native_inspection_is_reject
     assert result["reason_code"] == "source_changed_retry"
 
 
-def test_public_handoff_todo_and_atomic_monitor_batch_capture_each_primary_mutation(tmp_path: Path) -> None:
+def test_historical_handoff_todo_and_monitor_batch_qualify_each_primary_mutation(tmp_path: Path, original_source: Path) -> None:
     registry, runtime, _state = workspace(tmp_path)
     enable(registry)
     cli(registry, runtime, "coordination-shadow", "bootstrap", "--goal-id", "goal-a", "--execute")
-    cli(registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "soft_claim")
+    original_cli(original_source, registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "soft_claim")
     assert len(history(tmp_path, runtime)) == 2
-    cli(
+    original_cli(original_source,
         registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent",
         "--text", "Validate the retained projection", "--evidence", "validation://todo-add",
     )
     assert len(history(tmp_path, runtime)) == 3
-    monitor = cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent",
+    monitor = original_cli(original_source, registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent",
         "--text", "Observe the public release", "--task-class", "continuous_monitor", "--action-kind", "monitor",
         "--claimed-by", "agent-a", "--target-key", "release:bounded", "--cadence", "30m",
         "--next-due-at", "2000-01-01T00:00:00+00:00", "--watch-only")
     assert len(history(tmp_path, runtime)) == 4
-    result = cli(registry, runtime, "quota", "monitor-poll", "--goal-id", "goal-a", "--agent-id", "agent-a",
+    result = original_cli(original_source, registry, runtime, "quota", "monitor-poll", "--goal-id", "goal-a", "--agent-id", "agent-a",
         "--runtime-profile", "generic_cli", "--available-capability", "network", "--todo-id", monitor["todo_id"],
         "--target-key", "release:bounded", "--result-hash", "release-v1", "--material-change",
         "--next-agent-todo", "Validate the released head", "--next-action-kind", "validate_release_head",
@@ -460,7 +470,7 @@ def test_public_handoff_todo_and_atomic_monitor_batch_capture_each_primary_mutat
     assert qualified["qualification"]["evidence"]["operation_count"] == 4
 
 
-def test_disabling_configuration_cannot_cancel_an_active_capture_obligation(tmp_path: Path) -> None:
+def test_historical_disabled_configuration_retains_intervening_capture_evidence(tmp_path: Path, original_source: Path) -> None:
     registry, runtime, state = workspace(tmp_path)
     enable(registry)
     cli(registry, runtime, "coordination-shadow", "bootstrap", "--goal-id", "goal-a", "--execute")
@@ -468,8 +478,8 @@ def test_disabling_configuration_cannot_cancel_an_active_capture_obligation(tmp_
     config = json.loads(registry.read_text())
     config["goals"][0]["coordination"]["runtime_shadow"]["enabled"] = False
     registry.write_text(json.dumps(config))
-    cli(registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "soft_claim")
-    cli(registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "hard_lease")
+    original_cli(original_source, registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "soft_claim")
+    original_cli(original_source, registry, runtime, "handoff-mode", "set", "--goal-id", "goal-a", "--mode", "hard_lease")
     assert state.read_bytes() == initial
     enable(registry)
     # The identical final source must not erase the two intervening mutations.
@@ -481,41 +491,46 @@ def test_disabling_configuration_cannot_cancel_an_active_capture_obligation(tmp_
     assert qualified["qualification"]["evidence"]["operation_count"] == 2
 
 
-def test_native_lease_writer_cannot_reuse_a_sequence_when_its_cursor_is_missing(tmp_path: Path) -> None:
+def test_current_drain_recovers_historical_native_sequence_after_missing_cursor(tmp_path: Path, original_source: Path) -> None:
     registry, runtime, _state = workspace(tmp_path)
-    first = cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "First lease task")
-    second = cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Second lease task")
+    first = original_cli(original_source, registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "First lease task")
+    second = original_cli(original_source, registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Second lease task")
     enable(registry)
     cli(registry, runtime, "coordination-shadow", "bootstrap", "--goal-id", "goal-a", "--execute")
-    cli(registry, runtime, "task-lease", "acquire", "--goal-id", "goal-a", "--todo-id", first["todo_id"],
+    original_cli(original_source, registry, runtime, "task-lease", "acquire", "--goal-id", "goal-a", "--todo-id", first["todo_id"],
         "--owner", "agent-a", "--idempotency-key", "first-lease", "--ttl-seconds", "120")
     assert len(history(tmp_path, runtime)) == 2
     cursor = runtime / "authority-shadow/outbox/goal-a/leases/drain-cursor.json"
     cursor.unlink()
-    acquired = acquire_native(tmp_path, registry, runtime, second["todo_id"])
+    acquired = acquire_original_native(original_source, tmp_path, registry, runtime, second["todo_id"])
     assert acquired["acquired"] is True, acquired
     pending = list(cursor.parent.glob("*.prepared.json"))
     assert len(pending) == 1
     assert json.loads(pending[0].read_text())["seq"] == 2
     assert not cursor.exists()  # The writer recovers a sequence, never a cursor.
-    cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent", "--text", "Trigger bounded drain")
+    cli(registry, runtime, "authority-shadow", "drain", "--goal-id", "goal-a")
     transactions = history(tmp_path, runtime)
     lease_receipts = [row["receipts"][0] for row in transactions[1:] if row["receipts"][0]["partition"] == "leases"]
     assert [receipt["seq"] for receipt in lease_receipts] == [1, 2]
     assert len({receipt["entry_id"] for receipt in lease_receipts}) == 2
-    assert cli(registry, runtime, "coordination-shadow", "qualify", "--goal-id", "goal-a")["qualification"]["qualified"] is True
+    # Explicit drain is not a third primary operation. The default three-operation
+    # policy must still refuse, while the two witnessed lease receipts qualify.
+    default = cli(registry, runtime, "coordination-shadow", "qualify", "--goal-id", "goal-a", success=False)
+    assert default["qualification"]["qualified"] is False
+    assert default["qualification"]["evidence"]["operation_count"] == 2
+    qualified = cli(registry, runtime, "coordination-shadow", "qualify", "--goal-id", "goal-a", "--minimum-operations", "2")
+    assert qualified["qualification"]["qualified"] is True
 
 
-def test_public_committed_primary_cannot_be_relabelled_abandoned_by_native_request(tmp_path: Path) -> None:
-    from shadow_e2e_fixture import workspace as crash_workspace
+def test_historical_committed_primary_cannot_be_relabelled_abandoned_by_native_request(tmp_path: Path, historical_workspace) -> None:
 
     from loopx.control_plane.coordination import (
         local_authority_shadow_adapter as adapter,
     )
     from loopx.control_plane.coordination import local_authority_shadow_outbox as outbox
 
-    w = crash_workspace(tmp_path)
-    w.crash("before_commit", "todo", "add", "--role", "agent", "--text", "A committed primary is never abandoned")
+    w = historical_workspace(tmp_path)
+    w.original_crash("before_commit", "todo", "add", "--role", "agent", "--text", "A committed primary is never abandoned")
     directory = outbox.partition_directory(w.runtime, w.goal, "todos")
     [entry] = outbox.list_entries(directory)
     # The batch drain owns public commits now, so the witnessed selection is

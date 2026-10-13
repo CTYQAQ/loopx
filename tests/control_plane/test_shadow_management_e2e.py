@@ -16,6 +16,11 @@ import time
 
 import pytest
 
+from tests.control_plane.historical_shadow_fixture import (
+    HistoricalShadowWorkspace,
+    original_1x_source,  # noqa: F401
+)
+
 from loopx.control_plane.coordination.shadow_management import read_shadow_management_state
 from loopx.control_plane.coordination.runtime_shadow import build_runtime_shadow_source_snapshot
 from loopx.control_plane.coordination.coordination_state_contract_generated import (
@@ -78,7 +83,7 @@ def _bootstrap(registry: Path, runtime: Path, goal: str = "goal-a") -> dict:
     return _cli(registry, runtime, "coordination-shadow", "bootstrap", "--goal-id", goal, "--execute")["bootstrap"]
 
 
-def test_public_rollback_preserves_other_goal_and_replays_after_primary_changes(tmp_path: Path) -> None:
+def test_public_rollback_preserves_other_goal_and_replays_after_historical_primary_changes(tmp_path: Path, original_source: Path) -> None:
     registry, runtime = _workspace(tmp_path)
     first = _bootstrap(registry, runtime)
     _bootstrap(registry, runtime, "goal-b")
@@ -87,8 +92,9 @@ def test_public_rollback_preserves_other_goal_and_replays_after_primary_changes(
     result = _cli(registry, runtime, "coordination-shadow", "rollback", "--goal-id", "goal-a",
                   "--provider-revision", first["provider_revision"], "--execute")["rollback"]
     assert result["status"] == "applied"
-    _cli(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent",
-         "--text", "Write primary while awaiting bootstrap", "--claimed-by", "agent-a")
+    original = HistoricalShadowWorkspace(registry, runtime, tmp_path / "goal-a/ACTIVE_GOAL_STATE.md", "goal-a", original_source=original_source)
+    original.original_cli("todo", "add", "--role", "agent",
+                          "--text", "Write primary while awaiting bootstrap", "--claimed-by", "agent-a")
     assert not _candidate(runtime, "goal-a").exists()
     second = _bootstrap(registry, runtime)
     assert first["capture_lineage_id"] != second["capture_lineage_id"]
@@ -104,12 +110,12 @@ def test_public_rollback_preserves_other_goal_and_replays_after_primary_changes(
 
 _DRAIN_PHASE = {"before": "before_commit", "after": "after_commit"}
 
-# The public write keeps its own inline drain, but the pause now happens inside
-# the real native batch: the private fault driver runs the same
+# Original history is prepared by immutable 1.x before this current drain.
+# The pause happens inside the real native batch: the fault driver runs the same
 # ``drainShadowOutbox`` the production RPC handler runs and stops at the actual
 # commit boundary. Releasing it lets that same batch continue, so a commit or a
 # cursor update attempted after the generation changed is still real.
-_DELAYED_WRITER = """
+_DELAYED_DRAIN = """
 import json, pathlib, subprocess, sys, time
 from loopx.control_plane.coordination import local_authority_shadow_adapter as adapter
 from loopx.cli import main
@@ -146,24 +152,26 @@ raise SystemExit(main(sys.argv[4:]))
 """
 
 
-def _paused_writer(tmp_path: Path, registry: Path, runtime: Path, timing: str) -> tuple[subprocess.Popen, Path, dict]:
+def _paused_drain(tmp_path: Path, registry: Path, runtime: Path, timing: str, original_source: Path) -> tuple[subprocess.Popen, Path, dict]:
     barrier = tmp_path / "commit-barrier.json"
     release = tmp_path / "commit-release"
-    args = _arguments(registry, runtime, "todo", "add", "--goal-id", "goal-a", "--role", "agent",
-                      "--text", "Transaction across a management boundary", "--claimed-by", "agent-a")
+    original = HistoricalShadowWorkspace(registry, runtime, tmp_path / "goal-a/ACTIVE_GOAL_STATE.md", "goal-a", original_source=original_source)
+    original.original_crash("before_commit", "todo", "add", "--role", "agent",
+                            "--text", "Transaction across a management boundary", "--claimed-by", "agent-a")
+    args = _arguments(registry, runtime, "authority-shadow", "drain", "--goal-id", "goal-a")
     child = subprocess.Popen(
-        [sys.executable, "-c", _DELAYED_WRITER, str(barrier), str(release), _DRAIN_PHASE[timing], *args],
+        [sys.executable, "-c", _DELAYED_DRAIN, str(barrier), str(release), _DRAIN_PHASE[timing], *args],
         cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     deadline = time.monotonic() + 20
     while not barrier.exists():
         if child.poll() is not None:
             stdout, stderr = child.communicate()
-            pytest.fail(f"public writer exited before real commit RPC: {stdout}\n{stderr}")
+            pytest.fail(f"current drain exited before real commit RPC: {stdout}\n{stderr}")
         if time.monotonic() > deadline:
             child.kill()
             stdout, stderr = child.communicate()
-            pytest.fail(f"public writer did not reach real commit RPC: {stdout}\n{stderr}")
+            pytest.fail(f"current drain did not reach real commit RPC: {stdout}\n{stderr}")
         time.sleep(.01)
     # Atomic JSON is unnecessary for authority here; retry the test notification only.
     for _ in range(100):
@@ -183,17 +191,18 @@ def _release(child: subprocess.Popen, path: Path) -> dict:
         child.kill()
         child.communicate()
         raise
-    assert child.returncode == 0, f"{stdout}\n{stderr}"
-    return json.loads(stdout)
+    payload = json.loads(stdout)
+    assert child.returncode == (0 if payload["ok"] else 1), f"{stdout}\n{stderr}"
+    return payload
 
 
 @pytest.mark.parametrize("timing", ["before", "after"])
-def test_late_real_commit_cannot_cross_rollback_and_rebootstrap(tmp_path: Path, timing: str) -> None:
+def test_late_real_commit_cannot_cross_rollback_and_rebootstrap(tmp_path: Path, timing: str, original_source: Path) -> None:
     registry, runtime = _workspace(tmp_path)
     first = _bootstrap(registry, runtime)
     _bootstrap(registry, runtime, "goal-b")
     other = _candidate(runtime, "goal-b").read_bytes()
-    child, release, barrier = _paused_writer(tmp_path, registry, runtime, timing)
+    child, release, barrier = _paused_drain(tmp_path, registry, runtime, timing, original_source)
     try:
         request = barrier["request"]
         assert request["schema_version"] == "loopx_shadow_drain_v0"
@@ -220,7 +229,8 @@ def test_late_real_commit_cannot_cross_rollback_and_rebootstrap(tmp_path: Path, 
         payload = _release(child, release)
         # The resumed batch reports this write from its own drain evidence; it
         # must never claim a delivery into the generation that replaced it.
-        assert payload["coordination_runtime_shadow"]["outcome"] != "delivered"
+        assert payload["ok"] is False, payload
+        assert payload["drained_count"] == 0, payload
         assert _candidate(runtime, "goal-a").read_bytes() == candidate
         assert _candidate(runtime, "goal-b").read_bytes() == other
         assert {str(path.relative_to(archived)): path.read_bytes() for path in archived.rglob("*") if path.is_file()} == retained
@@ -239,10 +249,10 @@ def test_late_real_commit_cannot_cross_rollback_and_rebootstrap(tmp_path: Path, 
             child.communicate()
 
 
-def test_corrupt_history_after_real_commit_cannot_authorize_cursor_cleanup(tmp_path: Path) -> None:
+def test_corrupt_history_after_real_commit_cannot_authorize_cursor_cleanup(tmp_path: Path, original_source: Path) -> None:
     registry, runtime = _workspace(tmp_path)
     first = _bootstrap(registry, runtime)
-    child, release, barrier = _paused_writer(tmp_path, registry, runtime, "after")
+    child, release, barrier = _paused_drain(tmp_path, registry, runtime, "after", original_source)
     try:
         # The commit already happened: the durable candidate moved past bootstrap.
         assert barrier["request"]["goal_id"] == "goal-a"
@@ -255,7 +265,8 @@ def test_corrupt_history_after_real_commit_cannot_authorize_cursor_cleanup(tmp_p
         record["committed"][0]["provider_revision"] = "file:1:" + "0" * 24
         candidate.write_text(json.dumps(record))
         corrupt = candidate.read_bytes()
-        _release(child, release)
+        refused = _release(child, release)
+        assert refused["ok"] is False and refused["drained_count"] == 0, refused
         assert {path.name: path.read_bytes() for path in directory.glob("*.json")} == entries
         assert candidate.read_bytes() == corrupt
         assert not (directory / "drain-cursor.json").exists()

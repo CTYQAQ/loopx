@@ -119,6 +119,12 @@ the current receiver. A source intent stopped before its business commit is
 retained for import/reconciliation; it cannot authorize a new 2.0 source write.
 Current consumer fixtures use canonical authority, while registered-peer legacy
 assignment and original result shapes are checked only as historical receipts.
+Bounded qualification, lease-fence caller parity and management interleavings
+now also consume pinned historical originals. Current explicit drain owns the
+rollback/rebootstrap and corrupt-history races; it cannot count as another
+primary mutation or report delivery into a superseded generation. Current
+pre-import lease acquisition remains refused, and post-import canonical lease
+CAS, transfer, release and caller envelopes keep their original assertions.
 This repairs the executable recovery boundary; it does not qualify every old
 shadow-writer ladder or replace the independent installed/natural-trial gates.
 The backend configuration catalog now describes the same 2.0 creation boundary.
