@@ -216,11 +216,14 @@ def test_revision_lost_response_still_projects_exact_new_declaration(promoted, m
         real(method, request, **kwargs)
         raise EffectRuntimeResponseAmbiguous(method, timeout=1)
     monkeypatch.setattr(provider_update, "effect_runtime_result", lose_response)
-    with pytest.raises(EffectRuntimeResponseAmbiguous):
+    with pytest.raises(LocalCoordinationAuthorityUnavailable) as error:
         update_goal_todo(registry_path=registry, goal_id="goal-a", todo_id=created["todo_id"],
                          role="agent", agent_id="agent-a", update_operation_id="revise-after-loss",
                          update_expected_provider_revision=read(runtime)["provider_revision"],
                          validation_command_json=json.dumps([sys.executable, "-c", "raise SystemExit(3)"]))
+    assert error.value.code == "runtime_response_ambiguous"
+    assert error.value.payload["operation_id"] == "revise-after-loss"
+    assert error.value.payload["recovery_command"][-1] == "revise-after-loss"
     project(registry, runtime)
     canonical = read(runtime)["todos"][0]
     stored = read_completion_validation_declaration(runtime_root=runtime, goal_id="goal-a",

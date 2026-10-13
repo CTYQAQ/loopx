@@ -1241,6 +1241,30 @@ def test_legacy_unscoped_completion_projects_executable_identity_repair(
         ),
         encoding="utf-8",
     )
+    from canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.authority_source_capture import (
+        build_runtime_shadow_source_snapshot,
+    )
+    from loopx.history import load_registry
+
+    runtime_root = tmp_path / "runtime"
+    goal = next(
+        goal
+        for goal in load_registry(registry_path)["goals"]
+        if goal["id"] == GOAL_ID
+    )
+    projection, _ = build_runtime_shadow_source_snapshot(
+        goal=goal,
+        runtime_root=runtime_root,
+        state_path=state,
+        registry_path=registry_path,
+    )
+    initialize_canonical_authority(
+        runtime_root,
+        GOAL_ID,
+        projection,
+        state_path=state,
+    )
 
     assert cli_main(
         [
