@@ -771,9 +771,14 @@ returns the retained original guard only after successful context exit. A real
 CLI test exceeds the tool-yield interval and resumes the same source session
 without another quota receipt. The aborted tool remains visible; this is a new
 native turn, not transparent live-stack recovery. The adapter does not yet prove
-that no model action preceded its interruption. Automatic worker wiring,
-interrupted-cursor validation and the controller's all-writer barrier remain the
-next joint acceptance; completed-cursor checks remain strict.
+that no model action preceded its interruption. The actual heartbeat worker now
+installs the rendezvous for an explicit fresh-replan request, deduplicates the
+original obligation, and resumes the same source session with the original guard
+and remaining wake budget. Ordinary/duplicate guards do not restart the native
+CLI. Declared file capture and failed optional capture use this real entrypoint;
+full-state mid-wake requests remain explicitly unqualified. Interrupted-cursor
+validation, the controller's all-writer barrier and isolated joint continuation
+remain the next acceptance; completed-cursor checks remain strict.
 
 The Host profile must also declare path portability. A native index can retain
 absolute guest paths: qualification must either preserve those paths inside a

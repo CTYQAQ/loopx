@@ -642,8 +642,12 @@ Host 拥有的原生进程组，要求主进程正常响应中断退出并清理
 捕获；只有捕获上下文成功退出才返回原 guard 的接续正文。真实 CLI 测试等待
 超过工具 yield 周期后，仍能在同一来源 session 显式接续且不新增 quota receipt。
 被中断的工具保留 aborted 记录；接续是新的原生 turn，不是透明恢复执行栈。
-它尚未证明中断之前没有模型动作；自动 worker 接线、interrupted cursor 验证及
-controller 的全部 writer 屏障仍属下一步联合验收，completed cursor 检查不放宽。
+它尚未证明中断之前没有模型动作。实际 heartbeat worker 现已在显式 fresh-replan
+请求下安装 rendezvous，按原义务去重，并用原 guard 和剩余 wake 预算接续同一
+来源 session；普通或重复 guard 不重启原生 CLI。声明文件的捕获与可选捕获失败
+均经过该实际入口；中途的完整状态请求仍明确不具备资格。interrupted cursor
+验证、controller 的全部 writer 屏障和隔离联合接续仍属下一步验收，completed
+cursor 检查不放宽。
 
 Host profile 还须声明路径可移植性。原生索引可能保留绝对 guest 路径：资格化
 须在新隔离环境保留这些路径，或使用 Host 支持的 import/rebinding API；手改

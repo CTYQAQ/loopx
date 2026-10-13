@@ -7,11 +7,11 @@ import json
 import os
 import shlex
 import socket
-import stat
 import tempfile
 from pathlib import Path
 
 from ..control_plane.quota.error_codes import QuotaCommandValidationError
+from ..control_plane.turn_driver.decision_capture import validate_handoff_socket
 
 
 def prepare_decision_capture(args: argparse.Namespace) -> Path | None:
@@ -90,21 +90,6 @@ def bind_capture_selection_transport(payload: dict, args: argparse.Namespace) ->
     if getattr(args, "turn_envelope", False):
         suffix += " --turn-envelope"
     selection["command_args_template"] = template + suffix
-
-
-def validate_handoff_socket(value: str) -> Path:
-    """A caller-owned local transport, not an authority or admission endpoint."""
-    path = Path(value)
-    try:
-        if (os.name != "posix" or not hasattr(socket, "AF_UNIX") or not path.is_absolute() or
-                path.resolve(strict=True) != path or
-                not stat.S_ISSOCK(path.stat().st_mode) or
-                path.parent.stat().st_mode & 0o077 or
-                path.stat().st_uid != os.getuid()):
-            raise OSError("expected a same-user socket in a private physical directory")
-    except OSError as exc:
-        raise QuotaCommandValidationError(f"invalid decision handoff socket: {exc}") from exc
-    return path
 
 
 def handoff_decision(directory: Path | None, socket_path: str | None) -> None:

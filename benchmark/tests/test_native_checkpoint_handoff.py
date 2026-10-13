@@ -341,3 +341,128 @@ def test_checkpoint_interrupt_timeout_reaps_without_qualifying_capture(tmp_path)
         with pytest.raises(subprocess.TimeoutExpired):
             interrupt_checkpoint_process(process, timeout=.1)
         assert process.poll() is not None
+
+
+@pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN") or os.name != "posix",
+                   reason="Requires the real native CLI and private Unix transport")
+@pytest.mark.parametrize("capture", ["files", "full", "off"])
+def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay(tmp_path, capture):
+    """Use run_once, its renderer/listener/session owner and the actual quota CLI."""
+    import sys
+    import tomllib
+    from pathlib import Path
+    from benchmark.runtime.worker import run_once
+    from tests.control_plane.test_quota_settlement_cli import (
+        AGENT_ID, GOAL_ID, TURN_ID, _write_fixture, _configure_autonomous_replan_fixture,
+        _heartbeat_receipt_count, _run_cli,
+    )
+
+    project, runtime, registry = _write_fixture(tmp_path / "authority")
+    logs = tmp_path / "trial" / "wakes"
+    candidate = project / "candidate.txt"
+    candidate.write_text("original candidate")
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"destination": str(logs.parent / "checkpoints"),
+        "components": [{"id": "code", "source_path": str(candidate)}],
+        "point_metadata": {}, "trigger": "fresh_replan", "native_session": capture == "full"}))
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    cli = tmp_path / "loopx-cli"
+    cli.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' -m loopx.cli "$@"\n')
+    cli.chmod(0o700)
+    requests, guards = [], []
+
+    def texts(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, list):
+            for child in value:
+                yield from texts(child)
+        elif isinstance(value, dict):
+            for child in value.values():
+                yield from texts(child)
+
+    def response(payload, index, message):
+        requests.append(payload)
+        if index == 2:
+            # The Host preflight was ordinary. A new admitted replan arises
+            # later in this same native wake; only the fixture state is synthetic.
+            preflights = list(logs.glob("*/checkpoint-start-guard.json"))
+            if preflights:
+                packet = json.loads(preflights[0].read_text())
+                identity = packet["heartbeat_receipt"]["settlement_identity"]
+                rc, refreshed = _run_cli(registry, runtime, "refresh-state", "--goal-id", GOAL_ID,
+                    "--agent-id", AGENT_ID, "--todo-id", identity["todo_id"],
+                    "--turn-instance-id", identity["turn_instance_id"],
+                    "--classification", "validated_progress", "--delivery-batch-scale", "implementation",
+                    "--delivery-outcome", "outcome_progress", "--delivery-boundary", "in_flight_continuation",
+                    "--no-global-sync", "--suppress-external-sinks", cwd=project)
+                assert rc == 0, json.dumps(refreshed)
+                rc, settled = _run_cli(registry, runtime, *shlex.split(refreshed["settlement_owed"]["command"])[1:], cwd=project)
+                assert rc == 0, settled
+            index_path = runtime / "goals" / GOAL_ID / "runs" / "index.jsonl"
+            prior_runs = index_path.read_text() if index_path.exists() else ""
+            _configure_autonomous_replan_fixture(project, runtime, registry)
+            # Preserve the actual preflight settlement evidence. The reusable
+            # fixture replaces the index; its two later synthetic observations
+            # must not erase the already settled original Host Turn.
+            from datetime import datetime, timezone, timedelta
+            later = []
+            for offset, line in enumerate(index_path.read_text().splitlines(), 1):
+                row = json.loads(line)
+                row["generated_at"] = (datetime.now(timezone.utc) + timedelta(seconds=offset)).isoformat()
+                Path(row["json_path"]).write_text(json.dumps(row))
+                later.append(json.dumps(row) + "\n")
+            index_path.write_text(prior_runs + "".join(later))
+            body = next(t for t in texts(payload) if "quota should-run" in t and "```sh" in t)
+            guard = next(line for line in body.splitlines() if "quota should-run" in line)
+            guard = guard.replace('${LOOPX_TURN:?}', TURN_ID)
+            guards.append(guard)
+            return {"type": "function_call", "id": "fc_midwake", "call_id": "call_midwake",
+                    "name": "exec_command", "arguments": json.dumps({"cmd": guard,
+                        "yield_time_ms": 10000, "max_output_tokens": 100})}
+        if index == 3 and capture != "off":
+            # The resumed source deliberately rereads the same obligation. It
+            # must be released without another capture or native interruption.
+            return {"type": "function_call", "id": "fc_duplicate", "call_id": "call_duplicate",
+                    "name": "exec_command", "arguments": json.dumps({"cmd": guards[0] +
+                        "\nprintf continued > continued.txt", "yield_time_ms": 10000,
+                        "max_output_tokens": 100})}
+        message["content"][0]["text"] = "Source research." if index == 1 else "Continued research."
+        return message
+
+    with real_native_source(tmp_path / "provider", os.environ["LOOPX_NATIVE_CHECKPOINT_BIN"], project,
+            close_source=True, response_builder=response, sandbox="danger-full-access") as (env, _, _, calls):
+        base_url = tomllib.loads((Path(env["CODEX_HOME"]) / "config.toml").read_text())["model_providers"]["fixture"]["base_url"]
+        env.update(LOOPX_CLI=str(cli), LOOPX_REGISTRY=str(registry), LOOPX_RUNTIME_ROOT=str(runtime),
+                   LOOPX_GOAL_ID=GOAL_ID, LOOPX_AGENT_ID=AGENT_ID, LOOPX_WAKE_LOG_DIR=str(logs),
+                   LOOPX_CODEX_HOME=str(tmp_path / "worker-home"), LOOPX_SHARED_SKILLS=str(skills),
+                   MODEL_NAME="fixture", REASONING_EFFORT="high", OPENAI_BASE_URL=base_url,
+                   OPENAI_API_KEY="synthetic-local-only", LOOPX_CODEX_TURN_TIMEOUT_SEC="60")
+        if capture != "off":
+            env["LOOPX_CHECKPOINT_REQUEST"] = str(request)
+        result = run_once(env)
+        assert result["ok"] and not result["timed_out"], result
+        assert _heartbeat_receipt_count(runtime, TURN_ID) == 1
+        if capture == "off":
+            assert "checkpoint_handoffs" not in result
+            assert "--decision-handoff-socket" not in guards[0]
+            assert not list(logs.glob("*/decisions"))
+            return
+        assert len(result["checkpoint_handoffs"]) == 1
+        event = result["checkpoint_handoffs"][0]
+        assert event["captured"] is (capture == "files")
+        assert event["research_point_qualified"] is False
+        assert len(calls) == 4 and (project / "continued.txt").read_text() == "continued"
+        assert "heartbeat_receipt" in json.dumps(requests[2])
+        assert any(item.get("type") == "function_call_output" and item.get("call_id") == "call_midwake"
+                   and "aborted" in item.get("output", "") for item in requests[2]["input"])
+        if capture == "files":
+            point = logs.parent / "checkpoints" / event["obligation_id"]
+            assert (point / "components" / "code").read_text() == "original candidate"
+        else:
+            assert "full-state capture" in event["error"]
+            assert not list((logs.parent / "checkpoints").glob("*/checkpoint.json"))
+        # The private endpoint belongs to this wake and is gone after readback.
+        argv = shlex.split(guards[0])
+        assert not Path(argv[argv.index("--decision-handoff-socket") + 1]).exists()

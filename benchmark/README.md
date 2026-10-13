@@ -221,16 +221,26 @@ and one guard receipt. This qualifies interruption/recovery after the Host
 receives the packet, not absence of earlier inference, independent writer
 quiescence, or an automatically captured research checkpoint.
 
-This transport is a prerequisite, **not automatic mid-wake checkpoint capture**.
-The actual native Host/CLI test binds the pending command event, forks while the
-real guard output is withheld, and verifies no duplicate guard receipt. It does
-not pause writers, reconcile branch effects or certify an interrupted cursor.
-Native tools can yield control before their subprocess exits; withholding stdout
-alone is not a model or writer barrier. The production worker still needs the
-Host rendezvous connected to its controller-owned writer barrier, canonical state
-adoption and isolated useful continuation before this profile can launch research
-runs. Omit the option to disable the transport; no socket, hold or extra read is
-then performed.
+The heartbeat worker now installs that listener when its explicit checkpoint
+request uses `fresh_replan`. The renderer carries the private handoff endpoint
+into guard, selection and reentry commands; this path also uses the existing
+captured TurnEnvelope. With checkpointing off the renderer, process lifecycle
+and model-visible output stay unchanged. Ordinary guards and repeated replan
+obligations are released without restarting the native CLI. On a first replan,
+the worker selects through the typed owner, interrupts the source, records its
+session, and captures explicitly declared inert files. Failed optional capture
+still resumes the source with its original packet; altered packet bytes or lost
+session identity fail closed. All resumptions share the original wake deadline.
+
+This is **not a qualified complete research checkpoint**. Selection before
+interruption is not proof that the native tool has never yielded. The worker
+records each handoff and currently rejects mid-wake requests for native session,
+canonical research or evaluation participants rather than silently reducing them
+to files. The completed-cursor path remains strict. The next joint acceptance
+must bind the pending native history, the controller's all-writer barrier and
+isolated useful continuation before research runs use this profile. Remove the
+checkpoint request to disable automatic handoff; a direct caller can omit the
+socket option to disable only the transport.
 
 Add `"native_session": true` to include Codex's completed native cursor, all
 retained history pages, rollout/compaction records and native index/history SQLite

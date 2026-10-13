@@ -476,7 +476,8 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
 
 @contextmanager
 def held_quota_decision(listener, capture_root: Path, *, goal_id: str, agent_id: str,
-                        turn_instance_id: str, native_process=None, interrupt_timeout: float = 10):
+                        turn_instance_id: str | None, native_process=None, interrupt_timeout: float = 10,
+                        interrupt_when=None, deadline: float | None = None):
     """Host-side counterpart of the explicit quota pre-output transport.
 
     The existing typed owner decides whether this exact packet admits a fresh
@@ -490,14 +491,24 @@ def held_quota_decision(listener, capture_root: Path, *, goal_id: str, agent_id:
     returns a source-only continuation body containing the original packet,
     rather than acknowledging a dead socket. This is not a complete workspace
     barrier, destination admission, or a qualified interrupted native cursor.
+    interrupt_when selects capture candidates through the typed intent before
+    interruption; false releases ordinary/duplicate guards without a native
+    restart. Selection is not a pre-decision proof: interrupted cursor
+    qualification must still reject any native work beyond the pending guard.
     Without native_process this is output ordering only; a slow capture can
     outlive the native tool's yield interval and does not stop inference.
     """
     if not capture_root.is_absolute() or capture_root.resolve(strict=True) != capture_root:
         raise ValueError("decision capture root must be a physical absolute directory")
+    def remaining():
+        limit = 120 if deadline is None else min(120, deadline - time.monotonic())
+        if limit <= 0:
+            raise TimeoutError("original wake budget expired during decision handoff")
+        return limit
+
     channel, _ = listener.accept()
     with channel:
-        channel.settimeout(120)
+        channel.settimeout(remaining())
         with channel.makefile("rb") as stream:
             line = stream.readline(4097)
         message = json.loads(line)
@@ -513,23 +524,28 @@ def held_quota_decision(listener, capture_root: Path, *, goal_id: str, agent_id:
             raise ValueError("decision handoff digest mismatch")
         quota = json.loads(raw)
         interrupted = None
-        if native_process is not None:
+        if native_process is not None and interrupt_when is None:
             from .worker import interrupt_checkpoint_process
 
             # Interrupt before the typed selector: even this read can outlive a
             # native tool yield. Keep original bytes for same-identity recovery.
-            interrupted = interrupt_checkpoint_process(native_process, timeout=interrupt_timeout)
+            interrupted = interrupt_checkpoint_process(native_process, timeout=min(interrupt_timeout, remaining()))
         intent = effect_runtime_result("runtime.checkpoint_artifacts", {
             "action": "select_replan", "quota": quota, "goal_id": goal_id,
-            "agent_id": agent_id, "turn_instance_id": turn_instance_id,
-        })
+            "agent_id": agent_id, "turn_instance_id": (turn_instance_id if turn_instance_id is not None
+                else (quota.get("heartbeat_receipt") or {}).get("turn_instance_id")),
+        }, timeout=remaining())
+        if native_process is not None and interrupt_when is not None and interrupt_when(intent):
+            from .worker import interrupt_checkpoint_process
+
+            interrupted = interrupt_checkpoint_process(native_process, timeout=min(interrupt_timeout, remaining()))
         held = {"path": path, "sha256": message["sha256"], "quota": quota, "intent": intent}
-        if native_process is not None:
+        if interrupted is not None:
             held["native_process_return_code"] = interrupted
         yield held
         if path.read_bytes() != raw:
             raise ValueError("original decision changed while held")
-        if native_process is None:
+        if interrupted is None:
             channel.sendall(json.dumps({"released": True, "sha256": message["sha256"]}).encode() + b"\n")
         else:
             # Expose only after capture/readback succeeds. A failing consumer

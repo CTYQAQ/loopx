@@ -10,7 +10,7 @@ import signal
 import subprocess
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -38,7 +38,8 @@ def loopx_command(env: dict[str, str]) -> list[str]:
     ]
 
 
-def heartbeat_body(env: dict[str, str], turn_id: str, *, native_goal: bool) -> str:
+def heartbeat_body(env: dict[str, str], turn_id: str, *, native_goal: bool,
+                   decision_handoff_socket: str | None = None) -> str:
     command = loopx_command(env) + [
         "heartbeat-prompt",
         "--thin",
@@ -59,13 +60,15 @@ def heartbeat_body(env: dict[str, str], turn_id: str, *, native_goal: bool) -> s
         command += ["--turn-instance-id", turn_id]
     if env.get("LOOPX_TURN_ENVELOPE", "0") not in {"0", "1"}:
         raise ValueError("LOOPX_TURN_ENVELOPE must be 0 or 1")
-    if env.get("LOOPX_TURN_ENVELOPE") == "1":
+    if env.get("LOOPX_TURN_ENVELOPE") == "1" or decision_handoff_socket is not None:
         if native_goal:
             raise ValueError("TurnEnvelope capture requires a host-owned heartbeat Turn")
         # Wake identity comes from this worker, never from model-authored text.
         root = Path(env["LOOPX_WAKE_LOG_DIR"]) / turn_id / "decisions"
         root.mkdir(mode=0o700, exist_ok=False)
         command += ["--decision-output-root", str(root)]
+        if decision_handoff_socket is not None:
+            command += ["--decision-handoff-socket", decision_handoff_socket]
     result = subprocess.run(
         command,
         cwd=env["LOOPX_PROJECT"],
@@ -301,6 +304,7 @@ def run_once(env: dict[str, str]) -> dict:
         "timed_out": False,
     }
     session_wake = None
+    checkpoint_context = ExitStack()
     pending_path = (
         Path(env.get("LOOPX_RUNTIME_ROOT", str(home))) / "benchmark-pending-turn.json"
     )
@@ -327,6 +331,9 @@ def run_once(env: dict[str, str]) -> dict:
             wire_api=env.get("CODEX_WIRE_API", "responses"),
             skills=Path(env["LOOPX_SHARED_SKILLS"]) if execution.uses_loopx else None,
         )
+        from benchmark.runtime.checkpoint_wake import CheckpointWake
+
+        checkpoint_wake = checkpoint_context.enter_context(CheckpointWake(env, receipt))
         body = "Finish the task."
         if stage == "plan":
             from benchmark.runtime.planning import task_plan_packet
@@ -336,7 +343,8 @@ def run_once(env: dict[str, str]) -> dict:
             (wake / "planning-input.json").write_text(body, encoding="utf-8")
             (wake / "planning-schema.json").write_text(json.dumps(planning_before["result_schema"]))
         elif execution.mode in {"heartbeat", "loopx-goal"}:
-            body = heartbeat_body(env, turn_id, native_goal=execution.native_goal)
+            body = heartbeat_body(env, turn_id, native_goal=execution.native_goal,
+                                  decision_handoff_socket=checkpoint_wake.socket_path)
         elif execution.mode == "plain":
             body = Path(env["LOOPX_TASK_DOC"]).read_text(encoding="utf-8")
         session_wake = None
@@ -371,24 +379,25 @@ def run_once(env: dict[str, str]) -> dict:
                     else native_command(env, execution, stage, wake, session_wake)
                 )
                 with (wake / "stdout.jsonl").open("w") as stdout:
-                    with child_process(
-                        command, env=env, stdout=stdout, stderr=stderr
-                    ) as process:
-                        allowance = 150 if execution.mode == "turn" and stage == "execute" else 0
-                        if stage == "plan":
-                            limit = env.get("LOOPX_PLANNING_TIMEOUT_SEC")
-                            # SForge planning has no stage cap: the same absolute
-                            # trial deadline bounds this subprocess and its handoff.
-                            timeout = (float(limit) if limit is not None else
-                                       max(0, float(env["LOOPX_PHASE_DEADLINE_EPOCH"]) - time.time()))
-                        else:
-                            timeout = (None if execution.timeout_seconds is None
-                                       else execution.timeout_seconds + allowance)
-                        process.communicate(
-                            input=body, timeout=timeout
-                        )
-                        receipt["return_code"] = process.returncode
-                        receipt["ok"] = process.returncode == 0
+                    allowance = 150 if execution.mode == "turn" and stage == "execute" else 0
+                    if stage == "plan":
+                        limit = env.get("LOOPX_PLANNING_TIMEOUT_SEC")
+                        # SForge planning has no stage cap: the same absolute
+                        # trial deadline bounds this subprocess and its handoff.
+                        timeout = (float(limit) if limit is not None else
+                                   max(0, float(env["LOOPX_PHASE_DEADLINE_EPOCH"]) - time.time()))
+                    else:
+                        timeout = (None if execution.timeout_seconds is None
+                                   else execution.timeout_seconds + allowance)
+                    if checkpoint_wake.listener is not None:
+                        receipt["return_code"] = checkpoint_wake.run(
+                            execution, body, wake, session_wake, stdout, stderr, timeout)
+                        receipt["ok"] = receipt["return_code"] == 0
+                    else:
+                        with child_process(command, env=env, stdout=stdout, stderr=stderr) as process:
+                            process.communicate(input=body, timeout=timeout)
+                            receipt["return_code"] = process.returncode
+                            receipt["ok"] = process.returncode == 0
                 if stage == "plan" and receipt["ok"]:
                     from benchmark.runtime.planning import task_plan_packet, validate_plan_readback
 
@@ -421,6 +430,7 @@ def run_once(env: dict[str, str]) -> dict:
         receipt["error_kind"] = type(exc).__name__
         raise
     finally:
+        checkpoint_context.close()
         try:
             if session_wake is not None:
                 session_wake.observe(wake / "stdout.jsonl")
