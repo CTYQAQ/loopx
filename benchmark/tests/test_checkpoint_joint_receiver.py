@@ -25,7 +25,7 @@ from benchmark.tests.test_checkpoint_controller import controllers  # noqa: F401
     not os.environ.get("LOOPX_JOINT_RECEIVER_POINT"),
     reason="Requires a real controller point in a fresh isolated guest",
 )
-def test_captured_interrupted_point_continues_with_fresh_authority(
+def test_captured_point_continues_with_fresh_authority(
     tmp_path, monkeypatch, capsys, request
 ):
     from benchmark.edgebench.checkpoint_controller import restore
@@ -48,7 +48,12 @@ def test_captured_interrupted_point_continues_with_fresh_authority(
     manifest = json.loads((unit / "checkpoint.json").read_bytes())
     digest, metadata = manifest["sha256"], manifest["point_metadata"]
     native, snapshot = metadata["native_session"], metadata["worker_file_snapshot"]
-    assert snapshot["prepared_source_verified"] and native["interrupted_guard"]
+    assert snapshot["prepared_source_verified"]
+    assert ("interrupted_guard" in native) != ("completed_turn_id" in native)
+    if "completed_turn_id" in native:
+        assert native["completed_turn_id"] == native["turn_ids"][-1]
+    else:
+        assert native["interrupted_guard"]["decision_sha256"] == metadata["decision_sha256"]
     config = Path(os.environ["LOOPX_JOINT_RECEIVER_CONFIG"])
     workspace, home = Path(native["guest_workspace"]), Path(native["guest_home"])
     assert not workspace.exists() and not home.exists(), (
@@ -215,6 +220,15 @@ def test_captured_interrupted_point_continues_with_fresh_authority(
     assert guard["interaction_contract"]["agent_channel"]["delivery_allowed"]
     _, branch, _, url, controller_files, grades = request.getfixturevalue("controllers")
     capsule = unit / "components" / snapshot["native_capsule_component_id"]
+    opportunity = json.loads((capsule / "checkpoint.json").read_bytes())["point_metadata"][
+        "native_reference"
+    ]["opportunity"]
+    remaining_cooldown = opportunity["remaining_cooldown_seconds"]
+    # Explicit fixture boundaries: either already eligible at capture, or a
+    # cooldown longer than this entire 60-second native work window. A short
+    # partial cooldown would make a timing-dependent expectation ambiguous.
+    assert remaining_cooldown == 0 or remaining_cooldown > 60
+    cooldown_pending = remaining_cooldown > 60
     phase = tmp_path / "phase-deadline"
     fresh = restore(
         controller_files[1],
@@ -249,20 +263,26 @@ def test_captured_interrupted_point_continues_with_fresh_authority(
     script = workspace / "continue.py"
     script.write_text("""import json,time,requests
 from pathlib import Path
-b=json.loads(Path('judge.json').read_text()); url,token=b['url'],b['token']
-h=requests.get(url+'/api/v1/history',params={'token':token},timeout=5).json()
+b=json.loads(Path('judge.json').read_text()); url,submission_token=b['url'],b['token']
+h=requests.get(url+'/api/v1/history',params={'token':submission_token},timeout=5).json()
 assert h['best_score']==7 and h['agent_submissions']==1
 assert Path('candidate.txt').read_text()=='original candidate'
 Path('candidate.txt').write_text('8')
-r=requests.post(url+'/api/v1/submit',data={'token':token},files={'archive':('candidate.tar.gz',b'8')},timeout=5)
-r.raise_for_status(); sid=r.json()['submission_id']
-for _ in range(100):
- result=requests.get(url+'/api/v1/result/'+sid,timeout=5).json()
- if result['status']=='completed':break
- time.sleep(.01)
-assert result['status']=='completed'
-print('Retained candidate and public best 7 used; candidate 8 graded.')
-""")
+r=requests.post(url+'/api/v1/submit',data={'token':submission_token},files={'archive':('candidate.tar.gz',b'8')},timeout=5)
+if EXPECTED_COOLDOWN_PENDING:
+ assert r.status_code==429
+ h=requests.get(url+'/api/v1/history',params={'token':submission_token},timeout=5).json()
+ assert h['agent_submissions']==1 and h['best_score']==7
+ print('Candidate 8 validated locally; captured cooldown still blocks submission.')
+else:
+ r.raise_for_status(); sid=r.json()['submission_id']
+ for _ in range(100):
+  result=requests.get(url+'/api/v1/result/'+sid,timeout=5).json()
+  if result['status']=='completed':break
+  time.sleep(.01)
+ assert result['status']=='completed'
+ print('Retained candidate and public best 7 used; candidate 8 graded.')
+""".replace("EXPECTED_COOLDOWN_PENDING", repr(cooldown_pending)))
     requests = []
 
     class Provider(BaseHTTPRequestHandler):
@@ -360,8 +380,13 @@ print('Retained candidate and public best 7 used; candidate 8 graded.')
         assert result.returncode == 0, result.stderr
         (logs / "stdout.jsonl").write_text(result.stdout)
         wake.observe(logs / "stdout.jsonl")
-        assert len(requests) == 2 and "candidate 8 graded" in json.dumps(requests[1])
-        assert len(grades) == 1 and candidate.read_text() == "8"
+        assert len(requests) == 2
+        expected = "cooldown still blocks submission" if cooldown_pending else "candidate 8 graded"
+        assert expected in json.dumps(requests[1]), json.dumps([
+            item for item in requests[1].get("input", [])
+            if item.get("type") == "function_call_output"
+        ])
+        assert len(grades) == (0 if cooldown_pending else 1) and candidate.read_text() == "8"
         retained = native_session_checkpoint(env, admitted["session_id"], timeout=30)[
             "metadata"
         ]

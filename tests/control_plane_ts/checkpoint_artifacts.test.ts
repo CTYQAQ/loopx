@@ -207,3 +207,28 @@ test("replan capture selection requires the original admitted identity and grant
     {...quota.heartbeat_receipt, settlement_identity: {...identity, todo_id: "todo_conflict"}}}}), /admitted identity/);
   await assert.rejects(checkpointArtifacts({...request, quota: {...quota, ok: false}}), /matching current/);
 });
+
+test("committed semantic replan can capture before work selection without inventing settlement authority", async () => {
+  const id = "replan-0123456789abcdef", turn = "fixture-turn";
+  const quota = {ok: true, goal_id: "fixture-goal", effective_action: "autonomous_replan_required",
+    agent_identity: {agent_id: "fixture-agent", registered: true},
+    replan_action_packet: {schema_version: "replan_action_packet_v0", decision: "replan_required", obligation_id: id},
+    heartbeat_receipt: {status: "committed", turn_instance_id: turn, event_id: "fixture-event",
+      semantic_replan_obligation_id: id, settlement_binding_owed: true}};
+  const request = {action: "select_replan", quota, goal_id: "fixture-goal", agent_id: "fixture-agent", turn_instance_id: turn};
+  const before = structuredClone(quota);
+  assert.deepEqual(await checkpointArtifacts(request), {
+    capture: true, obligation_id: id, execution_authority_granted: false,
+  });
+  assert.deepEqual(quota, before);
+  for (const receipt of [
+    {...quota.heartbeat_receipt, status: "pending"},
+    {...quota.heartbeat_receipt, settlement_binding_owed: false},
+    {...quota.heartbeat_receipt, semantic_replan_obligation_id: "replan-fedcba9876543210"},
+    {...quota.heartbeat_receipt, turn_instance_id: "another-turn"},
+    {...quota.heartbeat_receipt, settlement_identity: null},
+  ]) await assert.rejects(checkpointArtifacts({...request, quota: {...quota, heartbeat_receipt: receipt}}));
+  await assert.rejects(checkpointArtifacts({...request, agent_id: "another-agent"}));
+  await assert.rejects(checkpointArtifacts({...request, quota: {...quota,
+    agent_identity: {...quota.agent_identity, registered: false}}}));
+});

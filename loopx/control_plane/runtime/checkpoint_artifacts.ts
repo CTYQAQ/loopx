@@ -181,13 +181,26 @@ export async function checkpointArtifacts(value: unknown): Promise<JsonObject> {
     const packet = requireJsonObject(quota.replan_action_packet, "checkpoint replan packet");
     const id = normalizeHeartbeatReplanObligationId(packet.obligation_id);
     const receipt = requireJsonObject(quota.heartbeat_receipt, "checkpoint heartbeat receipt");
+    if (packet.schema_version !== "replan_action_packet_v0" || packet.decision !== "replan_required" ||
+        !id || (receipt.status !== "committed" && receipt.status !== "replayed") || receipt.turn_instance_id !== turn) {
+      throw new Error("checkpoint replan does not match the current admitted identity");
+    }
+    const semanticReplan = normalizeHeartbeatReplanObligationId(receipt.semantic_replan_obligation_id);
+    if (receipt.settlement_identity === undefined && receipt.settlement_binding_owed === true) {
+      // The original guard owns the semantic node before the Agent chooses
+      // work. An inert pre-decision capture does not invent that later work's
+      // causal settlement identity or grant permission to execute it.
+      const actor = requireJsonObject(quota.agent_identity, "checkpoint source Agent");
+      requireNonEmptyString(receipt.event_id, "checkpoint committed guard event");
+      if (actor.agent_id !== agent || actor.registered !== true || semanticReplan !== id) {
+        throw new Error("checkpoint replan does not match the current admitted identity");
+      }
+      return {capture: true, obligation_id: id, execution_authority_granted: false};
+    }
     const identity = requireJsonObject(receipt.settlement_identity, "checkpoint settlement identity");
     const todo = normalizeHeartbeatTodoId(identity.todo_id);
     const boundReplan = normalizeHeartbeatReplanObligationId(identity.replan_obligation_id);
-    const semanticReplan = normalizeHeartbeatReplanObligationId(receipt.semantic_replan_obligation_id);
-    if (packet.schema_version !== "replan_action_packet_v0" || packet.decision !== "replan_required" ||
-        !id || (receipt.status !== "committed" && receipt.status !== "replayed") || receipt.turn_instance_id !== turn ||
-        identity.goal_id !== goal || identity.agent_id !== agent || identity.turn_instance_id !== turn ||
+    if (identity.goal_id !== goal || identity.agent_id !== agent || identity.turn_instance_id !== turn ||
         (todo ? boundReplan !== null || semanticReplan !== id : boundReplan !== id) ||
         identity.effect_id !== settlementIdentity({goal_id: goal, agent_id: agent, todo_id: todo,
           replan_obligation_id: boundReplan, turn_instance_id: turn}).effect_id) {

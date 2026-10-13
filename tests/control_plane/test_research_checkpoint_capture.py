@@ -381,7 +381,9 @@ def test_native_binding_participant_preserves_legal_caller_id(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("capture_fails", [False, True])
-def test_real_pre_replan_capture_is_before_decision_and_same_node_is_not_recaptured(tmp_path, monkeypatch, capture_fails):
+@pytest.mark.parametrize("selection_pending", [False, True])
+def test_real_pre_replan_capture_is_before_decision_and_same_node_is_not_recaptured(
+        tmp_path, monkeypatch, capture_fails, selection_pending):
     import os
     import sys
 
@@ -407,6 +409,14 @@ def test_real_pre_replan_capture_is_before_decision_and_same_node_is_not_recaptu
     index = runtime / "goals" / cli.GOAL_ID / "runs/index.jsonl"
     original_settlement = index.read_bytes()
     cli._configure_autonomous_replan_fixture(project, runtime, registry)
+    if selection_pending:
+        # Keep executable work, as a continuing research worker does. The
+        # original guard commits the semantic replan before choosing its Todo;
+        # no settlement identity exists for the new Turn yet.
+        state_path = project / f".codex/goals/{cli.GOAL_ID}/ACTIVE_GOAL_STATE.md"
+        state_path.write_text(state_path.read_text().replace("## Agent Todo\n\n",
+            "## Agent Todo\n\n- [ ] [P1] Continue the retained experiment.\n"
+            f"  <!-- loopx:todo todo_id={cli.TODO_ID} status=open claimed_by={cli.AGENT_ID} -->\n"))
     # This helper supplies synthetic repeated observations; retain the real
     # source settlement history instead of replacing its authoritative readback.
     index.write_bytes(original_settlement + index.read_bytes())
@@ -437,6 +447,11 @@ def test_real_pre_replan_capture_is_before_decision_and_same_node_is_not_recaptu
             return effect_runtime_result(method, params, **kwargs)
         monkeypatch.setattr("benchmark.runtime.checkpoint.effect_runtime_result", fail_probe)
     body = capture_before_replan(env, receipt, "original instructions")
+    guard = json.loads((wakes / receipt["turn_id"] / "checkpoint-start-guard.json").read_text())
+    if selection_pending:
+        assert guard["heartbeat_receipt"]["settlement_binding_owed"] is True
+        assert "settlement_identity" not in guard["heartbeat_receipt"]
+        assert guard["interaction_contract"]["agent_channel"]["delivery_allowed"] is False
     if capture_fails:
         assert receipt["checkpoint"]["reason"] == "capture_failed", receipt
         solution.write_text("later_decision = 11\n")

@@ -758,6 +758,13 @@ phase 文件参与者还将声明的 Host deadline 与 native 捕获时间绑定
 历史拒绝。此项关闭测试 profile 的机械联合接续缺口；安装版本与实验输入准入、
 packaged 恢复体验、模型判断及 stride 收益仍需各自验证。
 
+completed cursor 路径也经真实 worker、native Host、SQLite inventory 与 Docker
+controller 验证，捕获发生在模型看见 fresh replan 之前。已提交 guard 尚待选择
+工作时，惰性捕获保留选择前交付禁令，不伪造因果 settlement binding。隔离目标
+在新权限下接续保留代码/上下文；若封存冷却长于本次工作窗口，本地候选工作可
+推进，原生提交仍返回 429，不消耗轮次也不调用 grader。另一已 eligible 的 cursor
+用例取得下一次评分。这两种合法状态须保持区分；恢复研究点不让下一次提交立即 eligible。
+
 
 inert verification unit 不授予执行权。目标侧使用新的实验/Host 身份，通过既有
 Goal/session/state admission 进入。历史租约、quota、timer、pending effect 和

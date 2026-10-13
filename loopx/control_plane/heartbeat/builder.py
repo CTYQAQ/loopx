@@ -375,13 +375,8 @@ def build_heartbeat_prompt(
         thin=thin, full=full, compact=compact, brief=brief,
         native_goal_host=native_goal_host,
         turn_instance_id=normalized_turn_instance_id,
+        decision_handoff_socket=decision_handoff_socket,
     )
-    if decision_handoff_socket is not None:
-        from ..turn_driver.decision_capture import validate_handoff_socket
-
-        if decision_output_root is None:
-            raise ValueError("decision handoff requires an explicit decision capture root")
-        validate_handoff_socket(decision_handoff_socket)
     explicit_agent_scopes = normalize_agent_scopes(agent_scopes)
     if explicit_agent_scopes:
         normalized_agent_scopes = explicit_agent_scopes

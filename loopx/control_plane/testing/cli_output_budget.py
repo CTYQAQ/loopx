@@ -177,18 +177,18 @@ CLI_OUTPUT_BUDGET_SPECS: tuple[CliOutputBudgetSpec, ...] = (
         markdown_anchor="# LoopX Turn Plan",
         max_chars={
             "small": {"json": 14_000, "markdown": 600},
-            # Pinned main/head costs match on each platform. Windows emits
-            # 13,467 / 335 small, 14,982 / 375 multi-Agent and 17,371 / 444
-            # crowded with vision. Keep the full schema, routed commands,
-            # temporal/evidence obligations and independent growth guards.
-            "crowded": {"json": 18_000, "markdown": 600},
+            # Pinned formatter base/head both emit 21,238 chars / 477 lines
+            # with complete vision authoring on the unchanged 36-Todo fixture.
+            # Keep executable evidence/continuation rules; 1,262 chars of
+            # headroom covers presentation variation, not extra Todo growth.
+            "crowded": {"json": 22_500, "markdown": 600},
             "multi_agent": {"json": 15_500, "markdown": 600},
         },
         max_lines={
             "small": {"json": 350, "markdown": 12},
-            # Windows complete Agent vision state renders in 444 lines.
-            # Characters and per-Todo growth remain independent cost guards.
-            "crowded": {"json": 460, "markdown": 12},
+            # Complete current vision schema renders in 477 lines; retain 23
+            # lines of headroom and the independent character/growth guards.
+            "crowded": {"json": 500, "markdown": 12},
             "multi_agent": {"json": 390, "markdown": 12},
         },
         scale_axis="todo_count",

@@ -169,8 +169,12 @@ and evaluator cooldown/opportunity inheritance must pass before matched continua
 For pre-decision capture at a **fresh replan projected at the start of a heartbeat
 wake**, add `"trigger": "fresh_replan"` and set `destination` to the trial's
 `checkpoints` directory itself. The Host preloads that wake's original quota guard
-once, the typed owner validates its replan/settlement binding, and the adapter
+once, the typed owner validates its committed semantic replan identity, and the adapter
 captures from the latest successful, settled work wake before invoking the model.
+Work selection may still be owed on this new guard: the exact registered Agent,
+Goal, Turn and semantic obligation must match, but inert capture does not invent
+a causal settlement identity or authorize delivery before selection. An already
+selected guard retains its existing settlement-identity checks.
 The model reads the complete preloaded guard and follows its existing selection,
 required-read, recovery and settlement contract. Each obligation has one immutable
 destination; a repeated read verifies that point instead of replacing it with later
@@ -702,6 +706,11 @@ runtime receipt 绑定摘要；programmatic adapter 也可指定已放入 guest 
 注册状态、项目研究状态、runtime journal 和 registry；File/SQLite authority
 物化后仍是惰性历史。缺少来源、共享注册表、路径别名或重叠声明会拒绝，捕获
 不授予新的租约、配额、效果或执行权，不能替代完整接续验收。
+
+Host 预检已提交 fresh replan，但尚待 Agent 选择工作时，仍可在模型决策前捕获。
+类型化 owner 核对原 Goal、已注册 Agent、Turn 和语义义务；不会伪造尚未形成的
+settlement identity，也不授予选择前的交付权限。源边界仍须来自上轮已结算的成功工作；
+已选 guard 的原结算身份检查保持。
 
 运行中出现的 fresh replan 可通过显式交接捕获。完整捕获需同时声明
 `controller_handoff`、`native_session`、`loopx_state`、`evaluation_opportunity`

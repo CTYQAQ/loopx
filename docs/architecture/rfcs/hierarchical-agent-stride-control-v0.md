@@ -921,6 +921,16 @@ wrong source/digest and advanced history reject. This closes the joined mechanic
 continuation gap for the tested profile, not installed campaign admission, packaged
 recovery UX, autonomous research quality or a stride-effect claim.
 
+The completed-cursor path is also exercised through the real worker, native Host,
+SQLite inventory and Docker controller before the model sees a fresh replan.
+Its committed guard may still owe work selection: inert capture preserves that
+prohibition instead of fabricating a causal settlement binding. An isolated
+receiver resumes the retained code/context under fresh authority. When the sealed
+cooldown outlasts its work window, local candidate work succeeds while native
+submission returns 429 without consuming a round or invoking a grader. The
+separate eligible-cursor fixture receives its next grade. These two lawful states
+must remain distinct; restoring a point does not make its next submission eligible.
+
 Committed native session admission now retains the captured artifact digest in
 the original atomic session binding. Exact controller retries after a lost binding
 reply verify that receipt, current Goal/Agent/profile and unchanged complete

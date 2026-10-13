@@ -1170,7 +1170,7 @@ def test_malformed_todo_state_fails_closed_without_dropping_bounded_detail(
         assert default_payload.get(key) == detail_payload.get(key)
 
 
-def test_quota_cli_keeps_required_authoring_inline_and_diagnostic_audit_cold(
+def test_quota_cli_keeps_complete_vision_rules_with_reachable_duplicate_refs(
     tmp_path: Path,
 ) -> None:
     with _stable_budget_fixture_root(tmp_path / "quota-vision-detail") as stable_root:
@@ -1199,11 +1199,10 @@ def test_quota_cli_keeps_required_authoring_inline_and_diagnostic_audit_cold(
 
     assert default_exit_code == 0, default_text
     assert detail_exit_code == 0, detail_text
-    # Same stable 36-Todo / 12-run command: 44,894 -> 45,249 chars. The added
-    # automation-cadence readback exposes the owning eligibility condition;
-    # retain it and inline authoring with 751 chars of measured headroom. This
-    # fixed 46,000-char allowance does not relax other lane/scale budgets.
-    assert len(default_text) <= 46_000
+    # Same 36-Todo / 12-run workload: 45,313 lossy -> 48,418 complete chars.
+    # Retain the required clauses; the qualified 50k ceiling leaves 1,582 chars.
+    # The separate 40k compactor fixture and collection-growth guards stay fixed.
+    assert len(default_text) <= 50_000
     default_payload = json.loads(default_text)
     detail_payload = json.loads(detail_text)
     compact_audit = default_payload["vision_continuation_audit"]
@@ -1213,8 +1212,27 @@ def test_quota_cli_keeps_required_authoring_inline_and_diagnostic_audit_cold(
     assert compact_audit["payload_compaction"]["full_detail_cold_path"] == (
         "quota should-run --include-detail vision"
     )
-    assert "registry_read_instruction" not in compact_audit["vision_gap_judge"]
-    assert "registry_read_instruction" in detailed_audit["vision_gap_judge"]
+    assert compact_audit["vision_gap_judge"]["registry_read_instruction"]
+    assert {k: v for k, v in compact_audit.items() if k != "payload_compaction"} == (
+        detailed_audit
+    )
+    for compact_container, detailed_container in (
+        (default_payload["goal_frontier_projection"], detail_payload["goal_frontier_projection"]),
+        (default_payload["interaction_contract"]["agent_channel"], detail_payload["interaction_contract"]["agent_channel"]),
+        (default_payload["interaction_contract"]["cli_channel"], detail_payload["interaction_contract"]["cli_channel"]),
+    ):
+        if "vision_continuation_audit" not in detailed_container:
+            continue
+        audit = dict(compact_container["vision_continuation_audit"])
+        if "projection_ref" in audit:
+            assert audit["projection_ref"] == "$.vision_continuation_audit"
+            audit = {k: v for k, v in compact_audit.items() if k != "payload_compaction"}
+        elif "projection_ref" in audit.get("vision_gap_judge", {}):
+            assert audit["vision_gap_judge"]["projection_ref"] == (
+                "$.vision_continuation_audit.vision_gap_judge"
+            )
+            audit["vision_gap_judge"] = compact_audit["vision_gap_judge"]
+        assert audit == detailed_container["vision_continuation_audit"]
     compact_replan = default_payload["replan_action_packet"]
     detailed_replan = detail_payload["replan_action_packet"]
     assert compact_replan["writeback_contract"] == detailed_replan["writeback_contract"]

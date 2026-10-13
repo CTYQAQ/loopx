@@ -203,7 +203,7 @@ def _run_cli(
         [
             sys.executable,
             "-m",
-            "loopx.cli",
+            "loopx.entrypoint",
             "--registry",
             str(registry_path),
             "--runtime-root",
@@ -234,7 +234,7 @@ def _run_generated_cli(
     if "--registry" not in argv:
         argv[1:1] = ["--registry", str(registry_path)]
     result = subprocess.run(
-        [sys.executable, "-m", "loopx.cli", *argv[1:]],
+        [sys.executable, "-m", "loopx.entrypoint", *argv[1:]],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -2859,11 +2859,14 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
         GOAL_ID,
         "--agent-id",
         AGENT_ID,
+        "--turn-instance-id",
+        "turn-settlement-cli-successor",
         "--scan-path",
         str(project),
     )
     assert fresh_guard_rc == 0, fresh_guard
     assert fresh_guard["selected_todo"]["todo_id"] == successor_id
+    assert fresh_guard["heartbeat_receipt"]["turn_instance_id"] == "turn-settlement-cli-successor"
 
     spend_args = (
         "quota",
@@ -2953,45 +2956,9 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     ) is None
     assert _spend_run_count(runtime) == 1
 
-    fresh_turn_rc, fresh_turn = _run_cli(
-        registry_path,
-        runtime,
-        "quota",
-        "should-run",
-        "--codex-app",
-        "--goal-id",
-        GOAL_ID,
-        "--agent-id",
-        AGENT_ID,
-        "--turn-instance-id",
-        "turn-settlement-cli-2",
-        "--scan-path",
-        str(project),
-    )
-    assert fresh_turn_rc == 0, fresh_turn
-    assert fresh_turn["selected_todo"]["todo_id"] == successor_id
-
-    ack_rc, ack = _run_cli(
-        registry_path,
-        runtime,
-        *original_ack_hint["cli_args"],
-    )
-    # The newer receipt-bound fresh_turn superseded this Turn for host writeback,
-    # even though its original delivery settlement still replays correctly.
-    assert ack_rc == 1, ack
-    assert ack["error_code"] == "SCHEDULER_FOLLOWUP_HEARTBEAT_RECEIPT_STALE"
-    assert ack["scheduler_state_mutated"] is False
-    assert ack["write_performed"] is False
-    assert ack["appended"] is False
-    assert load_scheduler_state(
-        runtime,
-        goal_id=GOAL_ID,
-        agent_id=AGENT_ID,
-        state_key=APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY,
-    ) is None
-    assert _spend_run_count(runtime) == 1
-
-    fresh_ack_args = fresh_turn["scheduler_hint"]["app_automation"]["ack_hint"]["cli_args"]
+    # Use the admitted successor Turn's hint. Another new Turn would compete
+    # with its outstanding claim instead of testing receipt freshness.
+    fresh_ack_args = fresh_guard["scheduler_hint"]["app_automation"]["ack_hint"]["cli_args"]
     # Remove only the isolated observation to exercise missing Host refusal.
     (scheduler_host_home / "automations" / "scheduler-fixture" / "automation.toml").unlink()
     _prepare_scheduler_host_readback(registry_path, runtime, scheduler_host_home, fresh_ack_args)
@@ -6804,23 +6771,6 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     monkeypatch: pytest.MonkeyPatch,
     provider: str,
 ) -> None:
-    # The two legal completion phases may commit within one clock tick. Keep
-    # the real CLI, authority and hook journal; freeze only their commit clock.
-    run = subprocess.run
-
-    def frozen_completion_clock(argv, *args, **kwargs):
-        if isinstance(argv, list) and argv[1:3] == ["-m", "loopx.cli"]:
-            program = (
-                "import loopx.control_plane.todos.legacy_mutation as legacy; "
-                "import loopx.control_plane.todos.provider_terminal_lifecycle as native; "
-                "clock=lambda:'2026-09-02T12:00:00+00:00'; "
-                "legacy.now_local=clock; native.now_local=clock; "
-                "from loopx.cli import main; raise SystemExit(main())"
-            )
-            argv = [argv[0], "-c", program, *argv[3:]]
-        return run(argv, *args, **kwargs)
-
-    monkeypatch.setattr(subprocess, "run", frozen_completion_clock)
     project, runtime, registry_path = _write_fixture(tmp_path)
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     registry["goals"][0]["control_plane"] = {
@@ -6982,6 +6932,12 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert ordinary["completion_continuation"] == "active_goal"
     assert ordinary["completion_recovery"] is None
     assert ordinary["post_writeback_hooks"]["intent_count"] == 0
+    ordinary_todo = next(
+        item for item in parse_active_state_todos(
+            state_path.read_text(encoding="utf-8"), item_limit=None,
+        )["agent_todos"]["items"] if item["todo_id"] == TODO_ID
+    )
+    assert ordinary_todo["completed_at"]
 
     spend_args = (
         "quota",
@@ -7028,7 +6984,21 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert complete["changed"] is True
     assert complete["completion_continuation"] == "no_followup"
     assert complete["completion_recovery"] == "same_turn_terminal_closeout"
-    assert ordinary["updated_at"] == complete["updated_at"]
+    # Closeout changes continuation metadata, so its update may be later.
+    # The first completion time must survive, independently of receipt identity.
+    assert datetime.fromisoformat(ordinary["updated_at"]) <= datetime.fromisoformat(
+        complete["updated_at"]
+    )
+    terminal_state = state_path.read_text(encoding="utf-8")
+    terminal_todo = next(
+        item for item in parse_active_state_todos(
+            terminal_state, item_limit=None,
+        )["agent_todos"]["items"] if item["todo_id"] == TODO_ID
+    )
+    assert terminal_todo["completed_at"] == ordinary_todo["completed_at"]
+    assert datetime.fromisoformat(ordinary_todo["updated_at"]) <= datetime.fromisoformat(
+        terminal_todo["updated_at"]
+    )
     assert ordinary["completion_receipt_id"] != complete["completion_receipt_id"]
     assert complete["post_writeback_hooks"]["intent_count"] == 1
     trigger_intent = complete["post_writeback_hooks"]["intents"][0]
@@ -7064,6 +7034,7 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     assert recovered["post_writeback_hooks"]["invoked_count"] == 1
     assert recovered["post_writeback_hooks"]["intents"] == [trigger_intent]
     assert _spend_run_count(runtime) == 1
+    assert state_path.read_text(encoding="utf-8") == terminal_state
 
     event_log = runtime / "goals" / GOAL_ID / "rollout-event-log.jsonl"
     completion_events = [
@@ -7106,6 +7077,7 @@ def test_read_only_settlement_omits_non_causal_delivery_workspace(
     )
     assert ordinary_replay_rc == 0, ordinary_replay
     assert ordinary_replay["idempotent_replay"] is True
+    assert state_path.read_text(encoding="utf-8") == terminal_state
     replayed_completion_events = [
         event
         for line in event_log.read_text(encoding="utf-8").splitlines()

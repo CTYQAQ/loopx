@@ -343,6 +343,122 @@ def test_checkpoint_interrupt_timeout_reaps_without_qualifying_capture(tmp_path)
         assert process.poll() is not None
 
 
+@pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN") or
+                   os.environ.get("LOOPX_CHECKPOINT_EXTERNAL_CONTROLLER") != "1",
+                   reason="Requires the real native CLI and explicitly attached checkpoint supervisor")
+def test_actual_worker_captures_pending_replan_before_native_model(tmp_path):
+    """Completed native source + canonical state + controller, before selection.
+
+    Synthetic observations trigger review; the real guard, worker, native
+    history, SQLite and Host barrier must compose without inventing authority.
+    """
+    import sys
+    import tomllib
+    from pathlib import Path
+    from benchmark.runtime.worker import run_once
+    from tests.control_plane import test_quota_settlement_cli as cli
+    from tests.control_plane.canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+
+    project, runtime, registry = cli._write_fixture(tmp_path / "authority")
+    logs = Path("/logs/agent/wakes")
+    candidate = project / "candidate.txt"
+    candidate.write_text("original candidate")
+    executable = tmp_path / "loopx-cli"
+    executable.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' -m loopx.cli "$@"\n')
+    executable.chmod(0o700)
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    requests, guards = [], []
+
+    def response(payload, index, message):
+        requests.append(payload)
+        if index == 3:
+            # These files can exist only after the actual Host capture reply;
+            # no model call is permitted while capture is still pending.
+            replies = list((logs.parent / "checkpoint-controller").glob("*.json"))
+            reply = next(json.loads(path.read_text()) for path in replies
+                         if path.name != "ready.json")
+            assert reply["ok"] and len(reply["capture"]["sha256"]) == 64
+            paths = list(logs.glob("*/checkpoint-start-guard.json"))
+            assert len(paths) == 1
+            guard = json.loads(paths[0].read_text())
+            guards.append(guard)
+            assert guard["heartbeat_receipt"]["settlement_binding_owed"]
+            assert "settlement_identity" not in guard["heartbeat_receipt"]
+            assert not guard["interaction_contract"]["agent_channel"]["delivery_allowed"]
+            # Read the original packet only: selection and research work are
+            # still owed. No guard invocation or historical effect is replayed.
+            return {"type": "function_call", "id": "fc_packet", "call_id": "call_packet",
+                    "name": "exec_command", "arguments": json.dumps({
+                        "cmd": "cat " + shlex.quote(str(paths[0])), "max_output_tokens": 30000})}
+        message["content"][0]["text"] = "Completed source research." if index <= 2 else "Original packet read."
+        return message
+
+    def run(*args):
+        code, result = cli._run_cli(registry, runtime, *args, cwd=project)
+        assert code == 0, result
+        return result
+
+    with real_native_source(tmp_path / "provider", os.environ["LOOPX_NATIVE_CHECKPOINT_BIN"],
+            project, close_source=True, response_builder=response,
+            sandbox="danger-full-access") as (env, _, _, calls):
+        base = tomllib.loads((Path(env["CODEX_HOME"]) / "config.toml").read_text())
+        env.update(LOOPX_CLI=str(executable), LOOPX_REGISTRY=str(registry),
+            LOOPX_RUNTIME_ROOT=str(runtime), LOOPX_GOAL_ID=cli.GOAL_ID, LOOPX_AGENT_ID=cli.AGENT_ID,
+            LOOPX_WAKE_LOG_DIR=str(logs), LOOPX_CODEX_HOME=str(tmp_path / "worker-home"),
+            LOOPX_ITERATION_CONTEXT="resume", LOOPX_SHARED_SKILLS=str(skills), MODEL_NAME="fixture",
+            REASONING_EFFORT="high", OPENAI_BASE_URL=base["model_providers"]["fixture"]["base_url"],
+            OPENAI_API_KEY="synthetic-local-only", LOOPX_CODEX_TURN_TIMEOUT_SEC="60")
+        prior = run_once(env)
+        assert prior["ok"] and len(calls) == 2
+        binding = ("--goal-id", cli.GOAL_ID, "--agent-id", cli.AGENT_ID,
+                   "--todo-id", cli.TODO_ID, "--turn-instance-id", prior["turn_id"])
+        run("quota", "should-run", "--runtime-profile", "generic_cli", *binding)
+        vision = tmp_path / "vision.json"
+        vision.write_text(json.dumps({"schema_version": "goal_vision_replan_contract_v0",
+            "state": "vision_patch_proposed", "vision_patch": {
+                "acceptance_summary": "Continue synthetic research; complete checkpoint qualification remains."},
+            "path_delta": {"outcome": "continue", "prior_assumption": "Source fixture is available.",
+                "observed_reality": "Actual native source and CLI boundary checked.",
+                "retained": ["Complete checkpoint qualification"],
+                "evidence_refs": ["evidence:completed-source-fixture"]}}))
+        run("refresh-state", *binding, "--classification", "source_fixture_verified",
+            "--delivery-batch-scale", "implementation", "--delivery-outcome", "outcome_progress",
+            "--delivery-boundary", "in_flight_continuation", "--agent-vision-json", str(vision))
+        run("quota", "spend-slot", *binding, "--source", "heartbeat", "--execute")
+        index_path = runtime / "goals" / cli.GOAL_ID / "runs/index.jsonl"
+        original_runs = index_path.read_bytes()
+        cli._configure_autonomous_replan_fixture(project, runtime, registry)
+        state_path = project / f".codex/goals/{cli.GOAL_ID}/ACTIVE_GOAL_STATE.md"
+        state_path.write_text(state_path.read_text().replace("## Agent Todo\n\n",
+            "## Agent Todo\n\n- [ ] [P1] Continue the retained experiment.\n"
+            f"  <!-- loopx:todo todo_id={cli.TODO_ID} status=open claimed_by={cli.AGENT_ID} -->\n"))
+        # Preserve the real source settlement; synthetic trigger rows are
+        # fixture inputs, never claims of actual research progress.
+        index_path.write_bytes(original_runs + index_path.read_bytes())
+        listed = run("todo", "list", "--goal-id", cli.GOAL_ID)
+        initialize_canonical_authority(runtime, cli.GOAL_ID,
+            build_todo_runtime_shadow_projection(goal_id=cli.GOAL_ID, todos=listed["todos"],
+                                                handoff_mode="hard_lease", leases=[]),
+            state_path=state_path, provider="sqlite")
+        request = tmp_path / "request.json"
+        request.write_text(json.dumps({"destination": str(logs.parent / "checkpoints"),
+            "components": [{"id": "code", "source_path": str(candidate)}], "point_metadata": {},
+            "trigger": "fresh_replan", "native_session": True, "loopx_state": True,
+            "evaluation_opportunity": True, "controller_handoff": True}))
+        result = run_once({**env, "LOOPX_CHECKPOINT_REQUEST": str(request)})
+        assert result["ok"] and result["checkpoint"]["captured"], result
+        assert result["checkpoint"]["phase"] == "before_replan"
+        assert result["checkpoint"]["source_turn_id"] == prior["turn_id"]
+        assert result["session"]["session_id"] == prior["session"]["session_id"]
+        assert not result.get("checkpoint_handoffs") and len(calls) == 4
+        assert cli._heartbeat_receipt_count(runtime, result["turn_id"]) == 1
+        assert "settlement_binding_owed" in json.dumps(requests[3])
+        assert candidate.read_text() == "original candidate" and len(guards) == 1
+        (tmp_path / "controller-result.json").write_text(json.dumps(result["checkpoint"]))
+
+
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN") or os.name != "posix",
                    reason="Requires the real native CLI and private Unix transport")
 @pytest.mark.parametrize("capture", ["files", "native", "full", "off", "controller"])
