@@ -809,7 +809,7 @@ def test_machine_editor_is_machine_only_and_configuration_rejects_activation():
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_historical_target_is_used_by_reviewed_promotion(environment, provider):
     from tests.control_plane.shadow_e2e_fixture import workspace, seed_legacy_todo_capture
-    from loopx.capabilities.machine_configuration.goal_storage import initialize_goal_storage_target
+    from loopx.control_plane.coordination.new_goal_storage_transport import initialize_goal_storage_target
     _, _, _, project, _ = environment
     ws = workspace(project, bootstrap=False)
     data = json.loads(ws.registry.read_text())

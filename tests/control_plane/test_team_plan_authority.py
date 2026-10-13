@@ -502,12 +502,11 @@ def test_capture_free_chat_preserves_pre_promotion_receipt(tmp_path, monkeypatch
     try:
         with monkeypatch.context() as race:
             race.setattr(team_plan_adapter, "read_canonical_todos_if_promoted", promotion_race)
-            saved = service.store.load(preview["proposal_id"])
             with pytest.raises(LocalCoordinationAuthorityUnavailable):
                 team_plan_adapter.settle_team_plan(
                     registry_path=registry, goal_id="goal-a", agent_id=None,
-                    proposal={**saved["normalized_parameters"]["plan"], "proposal_id": preview["proposal_id"]},
-                    expected_state_fingerprint=saved["expected_state_fingerprint"], basis_agent_id="alpha")
+                    proposal=history["plan"],
+                    expected_state_fingerprint=history["basis"], basis_agent_id="alpha")
             assert len(observed) == 2
         assert state.read_bytes() == display and not backend.exists()
     finally:
@@ -519,6 +518,7 @@ def test_capture_free_chat_preserves_pre_promotion_receipt(tmp_path, monkeypatch
 def test_legacy_chat_replay_survives_interrupted_shadow_bootstrap(tmp_path, monkeypatch):
     """A stopped writer must not strand an already-published plan receipt."""
     import select
+    from loopx.control_plane.effect_runtime import EffectRuntimeRejected
     from loopx.control_plane.work_items import team_plan_adapter
     from loopx.control_plane.coordination.runtime_shadow import build_runtime_shadow_source_snapshot
     from loopx.control_plane.coordination.shadow_management import read_shadow_management_state
@@ -537,15 +537,34 @@ def test_legacy_chat_replay_survives_interrupted_shadow_bootstrap(tmp_path, monk
     preview = service.preview({"action_kind": "team.plan", "summary": "Assign work", "context": {},
         "normalized_parameters": {"goal_id": "goal-a", "plan": _agent_plan()},
         "idempotency_key": "lost-original-response"})
-    write = team_plan_adapter.write_captured_todo_state
-
-    def lose_response(*args, **kwargs):
-        write(*args, **kwargs)
-        raise OSError("response lost after publication")
-
-    with monkeypatch.context() as failed_response:
-        failed_response.setattr(team_plan_adapter, "write_captured_todo_state", lose_response)
-        assert service.apply(preview["proposal_id"])["proposal"]["status"] == "failed"
+    # Only the immutable original producer has the retired capture seam.
+    # Current Chat recovery below runs with that module physically absent.
+    from loopx.control_plane.testing.authority_e2e_fixtures import original_1x_source
+    original_source = original_1x_source(tmp_path / "original-1x")
+    producer = r"""
+import json, sys
+from pathlib import Path
+import loopx
+from loopx.chat_actions import ChatActionService
+from loopx.chat_action_store import ChatActionStore
+from loopx.control_plane.work_items import team_plan_adapter
+source, runtime, registry, proposal = sys.argv[1:]
+assert Path(loopx.__file__).resolve() == Path(source) / 'loopx/__init__.py'
+service = ChatActionService(store=ChatActionStore(Path(runtime) / 'chat/actions'),
+                          registry_path=Path(registry))
+write = team_plan_adapter.write_captured_todo_state
+def lose_response(*args, **kwargs):
+    write(*args, **kwargs)
+    raise OSError('response lost after publication')
+team_plan_adapter.write_captured_todo_state = lose_response
+print(json.dumps(service.apply(proposal)))
+"""
+    produced = subprocess.run([sys.executable, "-c", producer, str(original_source),
+        str(runtime), str(registry), preview["proposal_id"]], cwd=original_source,
+        env={**os.environ, "PYTHONPATH": str(original_source)},
+        capture_output=True, text=True, timeout=45)
+    assert produced.returncode == 0, produced.stdout + produced.stderr
+    assert json.loads(produced.stdout)["proposal"]["status"] == "failed"
     assert state.read_text().count("loopx:team-plan:") == 1
     state.write_text(state.read_text() + "\nLater owner data must survive.\n")
     original = state.read_bytes()
@@ -586,7 +605,7 @@ def test_legacy_chat_replay_survives_interrupted_shadow_bootstrap(tmp_path, monk
         {"agent_id": "alpha"},
         {"expected_state_fingerprint": "different-basis"},
     ):
-        with pytest.raises(team_plan_adapter.EffectRuntimeRejected, match="identity mismatch"):
+        with pytest.raises(EffectRuntimeRejected, match="identity mismatch"):
             team_plan_adapter.settle_team_plan(**{
                 "registry_path": registry, "goal_id": "goal-a", "agent_id": None,
                 "proposal": original_plan, "expected_state_fingerprint": saved["expected_state_fingerprint"],
