@@ -34,17 +34,16 @@ TODO_LIFECYCLE_AUTHORITY_ACTIONS = frozenset(
 
 def todo_lifecycle_facts(
     registry_path: Path, goal_id: str,
-) -> tuple[list[str], list[dict[str, Any]]]:
+) -> tuple[list[str], Any]:
     """Project the existing registry owner for all canonical Todo mutations."""
     goal = load_goal_from_registry(registry_path, goal_id)
     registered = registered_agent_ids_for_goal(goal)
     coordination = goal.get("coordination") if isinstance(goal, Mapping) else None
-    grants = normalize_todo_lifecycle_authority(
-        coordination.get("todo_lifecycle_authority")
-        if isinstance(coordination, Mapping) else None,
-        registered_agents=registered,
-    )
-    return registered, grants
+    # Forward registry facts. The TypeScript owner validates grants only when
+    # resolving an otherwise-denied owner transition, after ordinary authority.
+    grants = (coordination.get("todo_lifecycle_authority")
+              if isinstance(coordination, Mapping) else None)
+    return registered, [] if grants is None else grants
 
 
 def normalize_todo_lifecycle_authority(

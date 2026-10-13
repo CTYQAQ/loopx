@@ -171,11 +171,13 @@ export async function executeCoordinationTodoUpdate(
   // registered-actor requirement for multi-agent or explicitly-owned work.
   if (input.actor_agent_id === null) {
     if (input.registered_agents.length > 1) {
-      return failure("actor_not_registered", "Todo update requires a registered actor");
+      return {...failure("actor_not_registered", "Todo update requires a registered actor"),
+        failure_kind: "decision_rejection"};
     }
   } else if (input.registered_agents.length === 0 ||
       !input.registered_agents.includes(input.actor_agent_id)) {
-    return failure("actor_not_registered", "Todo update requires a registered actor");
+    return {...failure("actor_not_registered", "Todo update requires a registered actor"),
+        failure_kind: "decision_rejection"};
   }
   const observation = await receipt.observe(store);
   if (observation.kind === "receipt") return observation.result;
@@ -192,6 +194,7 @@ export async function executeCoordinationTodoUpdate(
   if (isFailure(target)) return target;
   const rejected = todoUpdateAdmissionRejection(head.head, target.todo, target.leases, input);
   if (rejected !== null) return {...failure(rejected.code, rejected.reason),
+    failure_kind: "decision_rejection",
     ...(rejected.handoff_mode === undefined ? {} : {handoff_mode: rejected.handoff_mode}),
     ...(rejected.recovery === undefined ? {} : {recovery: rejected.recovery})};
   let prepared: ReturnType<typeof prepareUpdatedTodo>;

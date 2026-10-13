@@ -15,6 +15,7 @@ from ...state_refresh import now_local
 from ..coordination.local_authority import (
     LOCAL_AUTHORITY_SOURCES,
     LocalCoordinationAuthorityUnavailable,
+    LocalCoordinationAuthorityRejection,
     local_authority_is_promoted,
     read_canonical_todos_if_promoted,
 )
@@ -177,6 +178,80 @@ def _publish_completion_validation_revision(
         )
 
 
+def _require_canonical_update_result(
+    result: Any, *, planning_intent: dict[str, Any] | None,
+    runtime_root: Path, goal_id: str, completion_validation_executed: bool,
+) -> dict[str, Any]:
+    """Adapt typed owner failures to the established public exception contract."""
+    # Keep the public lookup-error contract, without a second pre-transaction read.
+    if isinstance(result, dict) and result.get("status") == "failed":
+        if result.get("reason_code") == "todo_not_found":
+            raise ValueError("Todo is missing from canonical authority")
+        if result.get("reason_code") == "todo_role_mismatch":
+            raise ValueError("Todo does not have the requested role")
+        # The TypeScript planner owns the rule and its typed diagnostic. Keep
+        # the public CLI repair projection without revalidating the transition.
+        code = result.get("reason_code")
+        if isinstance(code, str) and code.startswith("external_wait_"):
+            context = result.get("external_wait_authoring_context")
+            if not isinstance(context, dict):
+                context = planning_intent or {}
+            resume_when = context.get("resume_when")
+            monitor_id = (
+                resume_when.split(":", 1)[1]
+                if isinstance(resume_when, str) and resume_when.startswith("monitor_changed:")
+                else None
+            )
+            raise TodoExternalWaitAuthoringError(
+                str(result.get("reason") or "invalid external-wait transition"),
+                code=code,
+                monitor_todo_id=monitor_id,
+                successor_todo_ids=context.get("successor_todo_ids"),
+            )
+    if isinstance(result, dict) and (
+        result.get("status") == "missing"
+        and result.get("source_authority") in LOCAL_AUTHORITY_SOURCES
+        and result.get("decision_read_from_provider") is True
+        and result.get("legacy_fallback_used") is False
+    ):
+        payload = dict(result)
+        payload["recovery"] = {
+            "action": "restore_canonical_authority",
+            "runtime_root": str(runtime_root.expanduser().resolve(strict=False)),
+            "goal_id": goal_id,
+            "legacy_markdown_fallback_allowed": False,
+            "retry_after": "canonical_provider_readback_loaded",
+        }
+        raise LocalCoordinationAuthorityUnavailable(
+            "canonical Todo authority is unavailable",
+            code="local_authority_todo_list_unavailable",
+            payload=payload,
+        )
+    if isinstance(result, dict) and result.get("status") == "failed" and (
+        result.get("failure_kind") == "decision_rejection"
+    ):
+        raise LocalCoordinationAuthorityRejection(
+            str(result.get("reason") or "canonical Todo update was rejected"),
+            code=str(result.get("reason_code") or "todo_update_rejected"),
+            payload=result,
+        )
+    if not isinstance(result, dict) or result.get("status") not in {
+        "applied", "recovered", "replayed", "no_change", "planned",
+    } or result.get("source_authority") not in LOCAL_AUTHORITY_SOURCES or (
+        result.get("decision_read_from_provider") is not True
+        or result.get("legacy_fallback_used") is not False
+    ):
+        payload = dict(result) if isinstance(result, dict) else {}
+        if completion_validation_executed:
+            payload["completion_validation_executed"] = True
+        raise LocalCoordinationAuthorityUnavailable(
+            str(payload.get("reason") or "canonical Todo update failed; reread before retry"),
+            code=str(payload.get("reason_code") or payload.get("conflict_kind")
+                     or "local_authority_todo_update_failed"), payload=payload,
+        )
+    return result
+
+
 def update_canonical_todo_if_promoted(
     *, registry_path: Path, runtime_root: Path, goal_id: str, todo_id: str,
     actor_agent_id: str | None, role: str | None, text: str | None,
@@ -275,64 +350,10 @@ def update_canonical_todo_if_promoted(
         failure = completion_validation_failure(result, goal_id=goal_id, todo_id=todo_id, dry_run=dry_run)
         if failure is not None:
             return failure
-    # Keep the public lookup-error contract, without a second pre-transaction read.
-    if isinstance(result, dict) and result.get("status") == "failed":
-        if result.get("reason_code") == "todo_not_found":
-            raise ValueError("Todo is missing from canonical authority")
-        if result.get("reason_code") == "todo_role_mismatch":
-            raise ValueError("Todo does not have the requested role")
-        # The TypeScript planner owns the rule and its typed diagnostic. Keep
-        # the public CLI repair projection without revalidating the transition.
-        code = result.get("reason_code")
-        if isinstance(code, str) and code.startswith("external_wait_"):
-            context = result.get("external_wait_authoring_context")
-            if not isinstance(context, dict):
-                context = planning_intent or {}
-            resume_when = context.get("resume_when")
-            monitor_id = (
-                resume_when.split(":", 1)[1]
-                if isinstance(resume_when, str) and resume_when.startswith("monitor_changed:")
-                else None
-            )
-            raise TodoExternalWaitAuthoringError(
-                str(result.get("reason") or "invalid external-wait transition"),
-                code=code,
-                monitor_todo_id=monitor_id,
-                successor_todo_ids=context.get("successor_todo_ids"),
-            )
-    if isinstance(result, dict) and (
-        result.get("status") == "missing"
-        and result.get("source_authority") in LOCAL_AUTHORITY_SOURCES
-        and result.get("decision_read_from_provider") is True
-        and result.get("legacy_fallback_used") is False
-    ):
-        payload = dict(result)
-        payload["recovery"] = {
-            "action": "restore_canonical_authority",
-            "runtime_root": str(runtime_root.expanduser().resolve(strict=False)),
-            "goal_id": goal_id,
-            "legacy_markdown_fallback_allowed": False,
-            "retry_after": "canonical_provider_readback_loaded",
-        }
-        raise LocalCoordinationAuthorityUnavailable(
-            "canonical Todo authority is unavailable",
-            code="local_authority_todo_list_unavailable",
-            payload=payload,
-        )
-    if not isinstance(result, dict) or result.get("status") not in {
-        "applied", "recovered", "replayed", "no_change", "planned",
-    } or result.get("source_authority") not in LOCAL_AUTHORITY_SOURCES or (
-        result.get("decision_read_from_provider") is not True
-        or result.get("legacy_fallback_used") is not False
-    ):
-        payload = dict(result) if isinstance(result, dict) else {}
-        if completion_validation_executed:
-            payload["completion_validation_executed"] = True
-        raise LocalCoordinationAuthorityUnavailable(
-            str(payload.get("reason") or "canonical Todo update failed; reread before retry"),
-            code=str(payload.get("reason_code") or payload.get("conflict_kind")
-                     or "local_authority_todo_update_failed"), payload=payload,
-        )
+    result = _require_canonical_update_result(
+        result, planning_intent=planning_intent, runtime_root=runtime_root,
+        goal_id=goal_id, completion_validation_executed=completion_validation_executed,
+    )
     if validation_revision is not None and not dry_run:
         declaration = dict(validation_revision["declaration"])
         _publish_completion_validation_revision(

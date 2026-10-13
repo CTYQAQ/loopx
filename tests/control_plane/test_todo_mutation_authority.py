@@ -6,6 +6,9 @@ from pathlib import Path
 import pytest
 
 from loopx.cli import main as cli_main
+from loopx.control_plane.coordination.local_authority import (
+    LocalCoordinationAuthorityRejection, LocalCoordinationAuthorityUnavailable,
+)
 from loopx.control_plane.scheduler.monitor_poll_writeback import (
     write_monitor_poll_todo_state,
 )
@@ -18,6 +21,7 @@ from loopx.control_plane.work_items.task_lease import (
 )
 from loopx.status import parse_active_state_todos
 from loopx.todos import (
+    list_goal_todos,
     add_goal_todo,
     complete_goal_todo,
     supersede_goal_todo,
@@ -87,6 +91,34 @@ def _write_fixture(
         encoding="utf-8",
     )
     return registry, state
+
+
+@pytest.fixture(params=["file", "sqlite"])
+def canonical_workspace(request, tmp_path, monkeypatch):
+    """Exercise actor policy through the real provider, not Markdown writes."""
+    from tests.control_plane.canonical_authority_fixture import (
+        initialize_canonical_registry_fixture, isolate_sqlite_runtime,
+    )
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+
+    def create(root, **kwargs):
+        registry, state = _write_fixture(root, **kwargs)
+        initialize_canonical_registry_fixture(registry, provider=request.param)
+        readback = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)
+        assert readback["authority_read"]["source_authority"] == request.param + "_v0"
+        assert readback["authority_read"]["legacy_fallback_used"] is False
+        return registry, state
+
+    return create
+
+
+def _canonical_todo(registry: Path, todo_id: str) -> dict:
+    return list_goal_todos(registry_path=registry, goal_id=GOAL_ID, todo_id=todo_id)["todo"]
+
+
+def _canonical_snapshot(registry: Path, state: Path) -> tuple:
+    result = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)
+    return result["authority_read"]["provider_revision"], result["todos"], state.read_bytes()
 
 
 def _lease_path(tmp_path: Path, todo_id: str) -> Path:
@@ -196,46 +228,47 @@ def test_continuous_monitor_accepts_resume_condition_bound(tmp_path: Path) -> No
     assert item["resume_when"] == "pr_merged:#3083"
 
 
-def test_multi_agent_update_requires_actor_and_is_atomic(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_multi_agent_update_requires_actor_and_is_atomic(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(registry)
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="requires --agent-id"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         update_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
             note="This must not be written without an attributed actor.",
         )
+    assert rejected.value.code == "actor_not_registered"
 
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
 
-def test_registered_actor_can_correct_unclaimed_todo_without_claim(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_registered_actor_can_correct_unclaimed_todo_without_claim(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(registry, claimed_by=None)
     result = update_goal_todo(
         registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
         agent_id=AUTHOR_AGENT, text="Correct unclaimed copy", note="Correct note",
     )
-    assert result["mutation_authority"]["mode"] == "registered_peer_actor"
-    corrected = _agent_todo(state, todo["todo_id"])
+    assert result["provider_status"] == "applied"
+    corrected = _canonical_todo(registry, todo["todo_id"])
     assert corrected["text"] == "Correct unclaimed copy"
     assert corrected["note"] == "Correct note"
     assert not corrected.get("claimed_by")
 
 
-def test_excluded_actor_cannot_mutate_unclaimed_todo(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_excluded_actor_cannot_mutate_unclaimed_todo(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(
         registry,
         claimed_by=None,
         excluded_agents=[AUTHOR_AGENT],
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="is excluded from mutating"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         update_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -243,8 +276,9 @@ def test_excluded_actor_cannot_mutate_unclaimed_todo(tmp_path: Path) -> None:
             agent_id=AUTHOR_AGENT,
             note="An excluded author cannot rewrite review work.",
         )
+    assert rejected.value.code == "actor_excluded"
 
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
 
 def test_idempotent_add_preserves_existing_executor_exclusions(
@@ -316,14 +350,14 @@ def test_unresolved_decision_scope_is_not_a_local_claim_gate(tmp_path: Path) -> 
 
 @pytest.mark.parametrize("command", ["update", "complete", "supersede"])
 def test_non_owner_cannot_mutate_claimed_todo(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
     command: str,
 ) -> None:
-    registry, state = _write_fixture(tmp_path)
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(registry, claimed_by=REVIEW_AGENT)
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="claimed_by='codex-review'"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         if command == "update":
             update_goal_todo(
                 registry_path=registry,
@@ -348,8 +382,9 @@ def test_non_owner_cannot_mutate_claimed_todo(
                 agent_id=AUTHOR_AGENT,
                 reason="unauthorized",
             )
+    assert rejected.value.code == ("update_owner_mismatch" if command == "update" else "claim_owner_mismatch")
 
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
 
 def test_completion_policy_unicode_parity_through_public_facade(
@@ -459,8 +494,8 @@ def test_completion_policy_errors_do_not_preempt_actor_or_lease_fences(
     assert state.read_text(encoding="utf-8") == before
 
 
-def test_owner_actor_update_returns_typed_receipt(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_owner_actor_update_returns_typed_receipt(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(registry)
 
     result = update_goal_todo(
@@ -471,16 +506,12 @@ def test_owner_actor_update_returns_typed_receipt(tmp_path: Path) -> None:
         note="owner-attributed update",
     )
 
-    assert result["mutation_authority"] == {
-        "schema_version": "todo_mutation_authority_v0",
-        "command": "update",
-        "mode": "registered_peer_actor",
-        "actor_agent_id": AUTHOR_AGENT,
-        "todo_id": todo["todo_id"],
-        "claim_owner": AUTHOR_AGENT,
-        "registered_agent_count": 3,
-    }
-    assert _agent_todo(state, todo["todo_id"])["note"] == "owner-attributed update"
+    assert result["schema_version"] == "loopx_coordination_todo_update_result_v0"
+    assert result["provider_status"] == "applied"
+    assert result["todo_update"]["todo"]["last_actor_agent_id"] == AUTHOR_AGENT
+    assert result["todo_update"]["todo"]["claimed_by"] == AUTHOR_AGENT
+
+    assert _canonical_todo(registry, todo["todo_id"])["note"] == "owner-attributed update"
 
 
 @pytest.mark.parametrize("status", ["deferred", "blocked", "done"])
@@ -1081,8 +1112,6 @@ def test_terminal_upgrade_rejects_untyped_legacy_completion_until_repaired(
     assert upgraded["completion_recovery"] == "same_turn_terminal_closeout"
 
 
-
-
 def test_unfenced_completion_leaves_no_lease_artifacts(tmp_path: Path) -> None:
     registry, _state = _write_fixture(tmp_path, multi_agent=False)
     todo = _add_agent_todo(registry)
@@ -1415,12 +1444,6 @@ def test_exception_after_verified_fence_leaves_lease_intact(
     assert state.read_text(encoding="utf-8") == state_before
 
 
-
-
-
-
-
-
 def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -> None:
     registry, state = _write_fixture(tmp_path)
     add_goal_todo(
@@ -1444,16 +1467,6 @@ def test_capability_binding_cannot_be_rebound_by_duplicate_add(tmp_path: Path) -
         )
 
     assert state.read_text(encoding="utf-8") == before
-
-
-
-
-
-
-
-
-
-
 
 
 def test_duplicate_todo_add_rejects_invalid_task_domain_atomically(
@@ -1527,12 +1540,12 @@ def test_monitor_schedule_fields_remain_monitor_only(tmp_path: Path) -> None:
         )
 
 
-def test_claim_actor_must_match_requested_owner(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_claim_actor_must_match_requested_owner(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(registry, claimed_by=None)
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="requires --claimed-by to match"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         update_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -1541,7 +1554,8 @@ def test_claim_actor_must_match_requested_owner(tmp_path: Path) -> None:
             agent_id=REVIEW_AGENT,
             claim_only=True,
         )
-    assert state.read_text(encoding="utf-8") == before
+    assert rejected.value.code == "claim_actor_mismatch"
+    assert _canonical_snapshot(registry, state) == before
 
     result = update_goal_todo(
         registry_path=registry,
@@ -1551,8 +1565,8 @@ def test_claim_actor_must_match_requested_owner(tmp_path: Path) -> None:
         agent_id=AUTHOR_AGENT,
         claim_only=True,
     )
-    assert result["mutation_authority"]["command"] == "claim"
-    assert _agent_todo(state, todo["todo_id"])["claimed_by"] == AUTHOR_AGENT
+    assert result["claimed_by"] == AUTHOR_AGENT
+    assert _canonical_todo(registry, todo["todo_id"])["claimed_by"] == AUTHOR_AGENT
 
 
 def test_monitor_writeback_propagates_multi_agent_actor(tmp_path: Path) -> None:
@@ -1649,9 +1663,9 @@ def test_monitor_successor_replay_preserves_independent_reviewer_exclusion(
 
 
 def test_exact_user_gate_decision_scope_uses_controller_override(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, _state = _write_fixture(tmp_path)
+    registry, _state = canonical_workspace(tmp_path)
     target = add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -1682,16 +1696,18 @@ def test_exact_user_gate_decision_scope_uses_controller_override(
     )
 
     authority = result["mutation_authority"]
-    assert authority["mode"] == "exact_user_gate_decision_scope_override"
-    assert authority["actor_agent_id"] is None
-    assert authority["target_todo_id"] == target["todo_id"]
-    assert authority["decision_scope"]["scope_key"] == "publish_release"
+    assert authority["authority_mode"] == "exact_user_gate_decision_scope_override"
+    gate_readback = _canonical_todo(registry, gate["todo_id"])
+    assert gate_readback["status"] == "done"
+    assert gate_readback["unblocks_todo_id"] == target["todo_id"]
+    assert gate_readback["decision_scope"]["scope_key"] == "publish_release"
+    assert gate_readback["decision_outcome"] == "approve"
 
 
 def test_exact_user_gate_ignores_unrelated_malformed_lifecycle_grant(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, _state = _write_fixture(
+    registry, _state = canonical_workspace(
         tmp_path,
         lifecycle_authority=[
             {
@@ -1729,13 +1745,13 @@ def test_exact_user_gate_ignores_unrelated_malformed_lifecycle_grant(
         evidence="owner approved the exact decision scope",
     )
 
-    assert result["mutation_authority"]["mode"] == (
+    assert result["mutation_authority"]["authority_mode"] == (
         "exact_user_gate_decision_scope_override"
     )
 
 
-def test_non_exact_user_gate_cannot_bypass_actor_attribution(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path)
+def test_non_exact_user_gate_cannot_bypass_actor_attribution(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
     target = add_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
@@ -1755,9 +1771,9 @@ def test_non_exact_user_gate_cannot_bypass_actor_attribution(tmp_path: Path) -> 
         decision_scope=DECISION_SCOPE,
         unblocks_todo_id=target["todo_id"],
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="requires --agent-id"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -1766,29 +1782,30 @@ def test_non_exact_user_gate_cannot_bypass_actor_attribution(tmp_path: Path) -> 
             decision_outcome="approve",
             evidence="scope mismatch",
         )
+    assert rejected.value.code == "actor_required"
 
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
 
-def test_single_agent_goal_keeps_lifecycle_compatibility(tmp_path: Path) -> None:
-    registry, state = _write_fixture(tmp_path, multi_agent=False)
-    todo = _add_agent_todo(registry)
+def test_unowned_single_agent_goal_keeps_lifecycle_compatibility(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False)
+    todo = _add_agent_todo(registry, claimed_by=None)
 
     result = update_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
-        note="legacy single-agent update",
+        note="unowned single-agent update",
     )
 
-    assert result["mutation_authority"]["mode"] == "single_agent_compatibility"
-    assert _agent_todo(state, todo["todo_id"])["note"] == "legacy single-agent update"
+    assert result["provider_status"] == "applied"
+    assert _canonical_todo(registry, todo["todo_id"])["note"] == "unowned single-agent update"
 
 
 def test_single_agent_ignores_unrelated_malformed_lifecycle_grant(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(
+    registry, state = canonical_workspace(
         tmp_path,
         multi_agent=False,
         lifecycle_authority=[
@@ -1798,23 +1815,23 @@ def test_single_agent_ignores_unrelated_malformed_lifecycle_grant(
             }
         ],
     )
-    todo = _add_agent_todo(registry)
+    todo = _add_agent_todo(registry, claimed_by=None)
 
     result = update_goal_todo(
         registry_path=registry,
         goal_id=GOAL_ID,
         todo_id=todo["todo_id"],
-        note="legacy single-agent update",
+        note="unowned single-agent update",
     )
 
-    assert result["mutation_authority"]["mode"] == "single_agent_compatibility"
-    assert _agent_todo(state, todo["todo_id"])["note"] == "legacy single-agent update"
+    assert result["provider_status"] == "applied"
+    assert _canonical_todo(registry, todo["todo_id"])["note"] == "unowned single-agent update"
 
 
 def test_current_owner_ignores_unrelated_malformed_lifecycle_grant(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(
+    registry, state = canonical_workspace(
         tmp_path,
         lifecycle_authority=[
             {
@@ -1833,24 +1850,24 @@ def test_current_owner_ignores_unrelated_malformed_lifecycle_grant(
         note="owner-attributed update",
     )
 
-    assert result["mutation_authority"]["mode"] == "registered_peer_actor"
-    assert _agent_todo(state, todo["todo_id"])["note"] == "owner-attributed update"
+    assert result["provider_status"] == "applied"
+    assert _canonical_todo(registry, todo["todo_id"])["note"] == "owner-attributed update"
 
 
 @pytest.mark.parametrize("command", ["complete", "supersede"])
 def test_author_cannot_replace_explicit_independent_review(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
     command: str,
 ) -> None:
-    registry, state = _write_fixture(tmp_path)
+    registry, state = canonical_workspace(tmp_path)
     todo = _add_agent_todo(
         registry,
         claimed_by=REVIEW_AGENT,
         excluded_agents=[AUTHOR_AGENT],
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="is excluded from mutating"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         if command == "complete":
             complete_goal_todo(
                 registry_path=registry,
@@ -1867,14 +1884,15 @@ def test_author_cannot_replace_explicit_independent_review(
                 agent_id=AUTHOR_AGENT,
                 reason="author cannot replace review",
             )
+    assert rejected.value.code == "actor_excluded"
 
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
 
 def test_delegated_orchestrator_can_complete_claimed_todo_with_reason(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(
+    registry, state = canonical_workspace(
         tmp_path,
         lifecycle_authority=[
             {
@@ -1895,26 +1913,18 @@ def test_delegated_orchestrator_can_complete_claimed_todo_with_reason(
         evidence="validation://orchestrator-closeout",
     )
 
-    assert result["mutation_authority"] == {
-        "schema_version": "todo_mutation_authority_v0",
-        "command": "complete",
-        "mode": "delegated_orchestration_override",
-        "actor_agent_id": ORCHESTRATION_AGENT,
-        "todo_id": todo["todo_id"],
-        "claim_owner": REVIEW_AGENT,
-        "authority_action": "complete",
-        "authority_source": "coordination.todo_lifecycle_authority",
-        "authority_reason": "Verified the worker result and closed the stalled lane.",
-        "requires_reason": True,
-        "registered_agent_count": 3,
-    }
-    assert _agent_todo(state, todo["todo_id"])["status"] == "done"
+    assert result["mutation_authority"]["authority_mode"] == "delegated_orchestration_override"
+    assert result["mutation_authority"]["outcome"] == "apply"
+    assert result["mutation_authority"]["lease_fence"] == "not_required"
+    assert _canonical_todo(registry, todo["todo_id"])["last_actor_agent_id"] == ORCHESTRATION_AGENT
+
+    assert _canonical_todo(registry, todo["todo_id"])["status"] == "done"
 
 
 def test_delegated_orchestrator_requires_reason_before_state_write(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(
+    registry, state = canonical_workspace(
         tmp_path,
         lifecycle_authority=[
             {
@@ -1925,9 +1935,9 @@ def test_delegated_orchestrator_requires_reason_before_state_write(
         ],
     )
     todo = _add_agent_todo(registry, claimed_by=REVIEW_AGENT)
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="requires --authority-reason"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -1935,14 +1945,15 @@ def test_delegated_orchestrator_requires_reason_before_state_write(
             agent_id=ORCHESTRATION_AGENT,
             evidence="must remain atomic",
         )
+    assert rejected.value.code == "delegation_reason_required"
 
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
 
 
 def test_delegated_orchestration_authority_is_action_scoped(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(
+    registry, state = canonical_workspace(
         tmp_path,
         lifecycle_authority=[
             {
@@ -1953,9 +1964,9 @@ def test_delegated_orchestration_authority_is_action_scoped(
         ],
     )
     todo = _add_agent_todo(registry, claimed_by=REVIEW_AGENT)
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="does not grant action='complete'"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -1964,19 +1975,21 @@ def test_delegated_orchestration_authority_is_action_scoped(
             authority_reason="This grant only permits reassignment.",
             evidence="unauthorized-action",
         )
-    assert state.read_text(encoding="utf-8") == before
+    assert rejected.value.code == "delegation_action_not_granted"
+    assert _canonical_snapshot(registry, state) == before
 
-    with pytest.raises(ValueError, match="does not grant action='update'"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         update_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=todo["todo_id"],
             agent_id=ORCHESTRATION_AGENT,
             claimed_by=AUTHOR_AGENT,
-            status="done",
+            note="A reassign grant cannot edit copy.",
             authority_reason="A reassign grant cannot carry another mutation.",
         )
-    assert state.read_text(encoding="utf-8") == before
+    assert rejected.value.code == "delegation_action_not_granted"
+    assert _canonical_snapshot(registry, state) == before
 
     result = update_goal_todo(
         registry_path=registry,
@@ -1987,14 +2000,14 @@ def test_delegated_orchestration_authority_is_action_scoped(
         authority_reason="Move the stalled work to an available peer.",
     )
 
-    assert result["mutation_authority"]["authority_action"] == "reassign"
-    assert _agent_todo(state, todo["todo_id"])["claimed_by"] == AUTHOR_AGENT
+    assert result["claimed_by"] == AUTHOR_AGENT
+    assert _canonical_todo(registry, todo["todo_id"])["claimed_by"] == AUTHOR_AGENT
 
 
 def test_delegated_override_never_bypasses_explicit_exclusion(
-    tmp_path: Path,
+    tmp_path: Path, canonical_workspace,
 ) -> None:
-    registry, state = _write_fixture(
+    registry, state = canonical_workspace(
         tmp_path,
         lifecycle_authority=[
             {
@@ -2009,9 +2022,9 @@ def test_delegated_override_never_bypasses_explicit_exclusion(
         claimed_by=REVIEW_AGENT,
         excluded_agents=[ORCHESTRATION_AGENT],
     )
-    before = state.read_text(encoding="utf-8")
+    before = _canonical_snapshot(registry, state)
 
-    with pytest.raises(ValueError, match="is excluded from mutating"):
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
         complete_goal_todo(
             registry_path=registry,
             goal_id=GOAL_ID,
@@ -2020,5 +2033,41 @@ def test_delegated_override_never_bypasses_explicit_exclusion(
             authority_reason="An explicit exclusion remains authoritative.",
             evidence="must-not-write",
         )
+    assert rejected.value.code == "actor_excluded"
 
-    assert state.read_text(encoding="utf-8") == before
+    assert _canonical_snapshot(registry, state) == before
+
+
+@pytest.mark.parametrize("command", ["update", "complete"])
+def test_canonical_single_agent_owned_todo_requires_explicit_actor(
+    tmp_path: Path, canonical_workspace, command: str,
+) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False)
+    todo = _add_agent_todo(registry)
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
+        if command == "update":
+            update_goal_todo(registry_path=registry, goal_id=GOAL_ID,
+                todo_id=todo["todo_id"], note="Actorless owned mutation is forbidden")
+        else:
+            complete_goal_todo(registry_path=registry, goal_id=GOAL_ID,
+                todo_id=todo["todo_id"], evidence="Actorless owned mutation is forbidden")
+    assert rejected.value.code == "actor_required"
+    assert _canonical_snapshot(registry, state) == before
+
+
+def test_canonical_update_revision_conflict_is_not_actor_rejection(
+    tmp_path: Path, canonical_workspace,
+) -> None:
+    registry, state = canonical_workspace(tmp_path)
+    todo = _add_agent_todo(registry)
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityUnavailable) as rejected:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+            agent_id=AUTHOR_AGENT, note="A stale writer cannot commit",
+            update_expected_provider_revision="stale-revision",
+        )
+    assert rejected.value.code == "provider_revision_mismatch"
+    assert not isinstance(rejected.value, ValueError)
+    assert _canonical_snapshot(registry, state) == before
