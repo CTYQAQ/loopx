@@ -91,6 +91,21 @@ def test_public_mutation_has_no_second_snapshot_mirror(historical_workspace, tmp
     assert page["transactions"][1]["receipts"][0]["write_class"] == "todo_add"
 
 
+def test_current_canonical_mutation_does_not_mirror_retained_shadow(historical_workspace, tmp_path):
+    from canonical_authority_fixture import initialize_canonical_authority
+    w = historical_workspace(tmp_path)
+    w.original_add("Historical operation remains retained")
+    w.drain()
+    retained = history(w)
+    initialize_canonical_authority(w.runtime, w.goal, retained["head"], state_path=w.state)
+    added = w.add("Current canonical operation has one authority")
+    assert added["added"] is True, added
+    assert w.cli("todo", "list", "--todo-id", added["todo_id"])["todo"]["text"] == "Current canonical operation has one authority"
+    observed = history(w)
+    assert observed.get("proof", {}).get("transactions") == retained["proof"]["transactions"], observed
+    assert "Current canonical operation has one authority" in w.state.read_text()
+
+
 @pytest.mark.parametrize(
     "attack",
     [

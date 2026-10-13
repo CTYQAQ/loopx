@@ -608,3 +608,89 @@ def test_public_refresh_step_does_not_write_owned_paragraph(tmp_path: Path) -> N
     assert state.read_bytes() == before
     assert "Compare the current evidence." not in state.read_text()
     assert not (root / "authority-shadow").exists()
+
+
+def test_retained_transaction_rechecks_fence_after_lock_acquisition(tmp_path, monkeypatch):
+    """Bootstrap/registration still use this transaction; normal Todo writing is retired."""
+    from contextlib import contextmanager
+    from loopx.control_plane.coordination import legacy_writer_fence as owner
+    from test_shadow_writer_variant_e2e import fence_command
+    from shadow_e2e_fixture import ShadowWorkspace
+
+    registry, state, runtime = fixture(tmp_path)
+    ws = ShadowWorkspace(registry, runtime, state, goal=GOAL)
+    result = subprocess.run(fence_command(ws), cwd=REPO, capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout)["status"] == "applied"
+    fence = owner.legacy_coordination_writer_fence_path(runtime_root=runtime, goal_id=GOAL)
+    fence_bytes = fence.read_bytes()
+    fence.unlink()
+    lock = owner.exclusive_cross_runtime_file_lock
+    acquired = []
+
+    @contextmanager
+    def raced_lock(path, *args, **kwargs):
+        # Scheduling seam only: another holder published a real fence before S.
+        if path == state:
+            fence.write_bytes(fence_bytes)
+        with lock(path, *args, **kwargs) as held:
+            acquired.append(path)
+            yield held
+
+    monkeypatch.setattr(owner, "exclusive_cross_runtime_file_lock", raced_lock)
+    before = state.read_bytes()
+    with pytest.raises(owner.LegacyCoordinationWriterFenced) as error:
+        with owner.legacy_todo_write_transaction(registry, GOAL, state, None, "retained-recovery", False):
+            pass  # The owning guard must raise before the transaction body.
+    assert error.value.code == "legacy_coordination_writer_fenced"
+    assert acquired[-1] == state
+    assert state.read_bytes() == before
+
+
+def test_retained_transaction_rechecks_source_binding_after_lock_acquisition(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from loopx.control_plane.coordination import legacy_writer_fence as owner
+    from loopx.control_plane.coordination.shadow_management import ShadowManagementError
+    from shadow_e2e_fixture import workspace
+
+    ws = workspace(tmp_path)
+    # Bootstrap owns this real source path; remove frontmatter to test registry ownership.
+    ws.state.write_text(ws.state.read_text().replace(f"goal_id: {ws.goal}\n", ""))
+    registry = json.loads(ws.registry.read_text())
+    protected = registry["goals"][0]["state_file"]
+    registry["goals"][0]["state_file"] = "elsewhere.md"
+    ws.registry.write_text(json.dumps(registry))
+    lock = owner.exclusive_cross_runtime_file_lock
+    acquired = []
+
+    @contextmanager
+    def raced_lock(path, *args, **kwargs):
+        if path == ws.state:
+            registry["goals"][0]["state_file"] = protected
+            ws.registry.write_text(json.dumps(registry))
+        with lock(path, *args, **kwargs) as held:
+            acquired.append(path)
+            yield held
+
+    monkeypatch.setattr(owner, "exclusive_cross_runtime_file_lock", raced_lock)
+    before = ws.state.read_bytes()
+    with pytest.raises(ShadowManagementError) as error:
+        with owner.legacy_todo_write_transaction(ws.registry, "other-goal", ws.state, None, "retained-recovery", False):
+            pass  # The owning guard must raise before the transaction body.
+    assert error.value.code == "shadow_source_goal_mismatch"
+    assert acquired[-1] == ws.state
+    assert ws.state.read_bytes() == before
+
+
+def test_retained_transaction_rejects_an_unbound_state_path(tmp_path):
+    from loopx.control_plane.coordination.shadow_management import ShadowManagementError
+    from shadow_e2e_fixture import workspace
+
+    ws = workspace(tmp_path)
+    alternate = tmp_path / "alternate.md"
+    original = ws.state.read_bytes()
+    alternate.write_bytes(original)
+    with pytest.raises(ShadowManagementError) as error:
+        with legacy_todo_write_transaction(ws.registry, ws.goal, alternate, None, "retained-recovery", False):
+            pass
+    assert error.value.code == "shadow_source_state_path_mismatch"
+    assert ws.state.read_bytes() == alternate.read_bytes() == original

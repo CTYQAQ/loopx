@@ -316,6 +316,26 @@ inside their isolated source copy: parallel edits to that copy would invalidate
 the control/mutant comparison. Single-row fence probes initialize only the
 workspace they use, without removing any baseline or mutant assertion.
 
+For the 2.0 cutoff candidate, mutation edits must reach the current owner.
+Immutable 1.x producers still supply the original crash and receipt fixtures;
+changing an unused current capture writer cannot qualify their recovery.
+`prepared_receiver_early_commit` replaces the retired `early_committed` producer
+probe and changes the current receiver's abandoned-versus-committed decision.
+The original three crash-window assertions remain. `duplicate_mirror` now adds
+through current canonical authority and requires the retained shadow history to
+remain valid and unchanged. The original 1.x one-write/one-receipt test remains. Cursor regression uses the
+existing missing-cursor reconstruction test so the current planner executes.
+
+The fence removal, fence lock-placement, source lock-placement and cross-Goal
+and bound-state-path mutants exercise the retained bootstrap/registration
+transaction guard. Its
+scheduling-only probes publish real fence bytes or change the registry binding
+before state-lock acquisition, then run the real guard and TypeScript check.
+These are retained transaction-boundary proofs, not proof that retired ordinary
+Markdown Todo writes work. A green locator check only proves that an edit still
+applies; each selected control must pass and each mutation must fail a semantic
+assertion. An exception caused by a missing field or import does not qualify.
+
 The full TS suite's PostgreSQL conformance requires `LOOPX_TEST_POSTGRES_URL`
 pointing to a disposable test database. Source smoke success does not replace
 installed-package evidence: the package runner creates an empty environment,

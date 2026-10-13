@@ -143,10 +143,6 @@ CASES = [
          "tests/control_plane_ts/shadow_management.test.ts", 'rollback refuses a different valid candidate lineage'),
 ]
 
-PREPARED_WRITE = '''            durable_write_json(
-                self._directory / entry_file_name(seq, entry_id, "prepared"),
-                record,
-            )'''
 CASES.extend([
     Case("receipt_bytes", ((COORDINATION + "shadow_drain_plan.ts", replacement(
         "entry[key] === null || entry[key] === rc[key]",
@@ -155,14 +151,12 @@ CASES.extend([
     Case("cursor_regression", ((COORDINATION + "shadow_drain_plan.ts", replacement(
         "{last_seq: history.size, last_entry_id: last.operation_id",
         "{last_seq: 1, last_entry_id: last.operation_id")),),
-        "tests/control_plane/test_shadow_drain_e2e.py::test_public_primary_maps_one_to_one_to_receipts_and_replays_idempotently"),
-    Case("early_committed", ((COORDINATION + "local_authority_shadow_outbox.py", replacement(
-        PREPARED_WRITE, PREPARED_WRITE + '''
-            durable_write_json(
-                self._directory / entry_file_name(seq, entry_id, "committed"),
-                {"schema_version": OUTBOX_COMMIT_SCHEMA, "entry_id": entry_id,
-                 "capture_lineage_id": self._lineage_id, "committed_at": utc_now_text()},
-            )''')),),
+        "tests/control_plane/test_shadow_drain_e2e.py::test_missing_cursor_recovers_only_from_complete_verified_history"),
+    # The 1.x producer is immutable. Mutate the current receiver's decision,
+    # not an unused present-day copy of the retired capture writer.
+    Case("prepared_receiver_early_commit", ((COORDINATION + "shadow_entry_evidence.ts", replacement(
+        '        entry.resolution = "abandoned";',
+        '        entry.resolution = "committed_proven_by_readback";')),),
         "tests/control_plane/test_shadow_drain_e2e.py::test_primary_sigkill_preserves_complete_bytes_and_proves_before_marker[before_replace]"),
 ])
 
@@ -223,7 +217,7 @@ def move_guard_outside_lock(name: str) -> Callable[[str], str]:
     def apply(source: str) -> str:
         function = next(node for node in ast.parse(source).body
                         if isinstance(node, ast.FunctionDef)
-                        and node.name == "legacy_todo_write_transaction")
+                        and node.name == "require_legacy_todo_write_allowed")
         calls = [node for node in ast.walk(function) if isinstance(node, ast.Expr)
                  and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
                  and node.value.func.id == name]
@@ -236,13 +230,14 @@ def move_guard_outside_lock(name: str) -> Callable[[str], str]:
         start = text.index("    with exclusive_cross_runtime_file_lock(\n",
                            text.index("def legacy_todo_write_transaction("))
         # Preserve the exact arguments while moving only the actual guard.
-        unindented = "".join(line[4:] for line in segment.splitlines(keepends=True))
-        return text[:start] + "    if not dry_run:\n" + unindented + text[start:]
+        lifted = "".join("    " + line for line in segment.splitlines(keepends=True))
+        lifted = lifted.replace("runtime_root=runtime_root", "runtime_root=resolved_runtime_root")
+        return text[:start] + "    if not dry_run:\n" + lifted + text[start:]
     return apply
 
 
 WRITER_TEST = "tests/control_plane/test_shadow_writer_boundaries.py::"
-FENCE_TEST = WRITER_TEST + "test_cli_waiting_for_todo_mutex_rechecks_fence_after_engagement"
+FENCE_TEST = WRITER_TEST + "test_retained_transaction_rechecks_fence_after_lock_acquisition"
 CASES.extend([
     Case("management_result_binding", ((COORDINATION + "shadow_management.ts", replacement(
         "  await validateReplayResult(request, manifest, prior.result, state);",
@@ -251,7 +246,7 @@ CASES.extend([
     Case("cross_goal_source_guard", ((COORDINATION + "legacy_writer_fence.py", replacement(
         "    resolved_source = state_file.resolve(strict=False)",
         "    return  # DELIBERATE MUTANT: allow another goal to bypass source authority.\n    resolved_source = state_file.resolve(strict=False)")),),
-         "tests/control_plane/test_shadow_writer_variant_e2e.py::test_other_goal_cannot_write_a_protected_goal_source_via_state_override[active_capture]"),
+         WRITER_TEST + "test_retained_transaction_rechecks_source_binding_after_lock_acquisition"),
     Case("cleanup_hides_verified_commit", ((COORDINATION + "shadow_drain.ts", replacement(
         "      if (plan.view !== null && typeof plan.view === \"object\") observe(plan.view as JsonObject);\n",
         "")),),
@@ -268,7 +263,7 @@ CASES.extend([
          move_guard_outside_lock("require_legacy_coordination_write_allowed")),), FENCE_TEST),
     Case("source_binding_outside_lock", ((COORDINATION + "legacy_writer_fence.py",
          move_guard_outside_lock("require_registry_source_write_allowed")),),
-         WRITER_TEST + "test_waiting_override_writer_rechecks_registry_binding_inside_shared_state_lock"),
+         WRITER_TEST + "test_retained_transaction_rechecks_source_binding_after_lock_acquisition"),
     Case("remove_refresh_source_recheck", (("loopx/state_refresh.py", replacement(
         "            if normalized_next_action:",
         "            if False and normalized_next_action:  # DELIBERATE MUTANT: bypass source recheck.")),),
@@ -285,7 +280,7 @@ CASES.extend([
     Case("remove_bound_state_path", ((COORDINATION + "legacy_writer_fence.py", replacement(
         "if bound_source.resolve(strict=False) != state_file.resolve(strict=False):",
         "if False:")),),
-         "tests/control_plane/test_shadow_drain_adversarial.py::test_state_file_override_cannot_attribute_an_unbound_source_to_active_lineage"),
+         WRITER_TEST + "test_retained_transaction_rejects_an_unbound_state_path"),
     Case("bootstrap_unregistered_root", ((COORDINATION + "runtime_shadow.ts", replacement(
         "if (!await sameSourceRuntimeRoot(registeredRoot, request.runtime_root))",
         "if (false)")),),
@@ -331,7 +326,7 @@ CASES.append(Case("duplicate_mirror", (
         '''  return { schema_version: COORDINATION_RUNTIME_SHADOW_RESULT_SCHEMA, status: "failed",
     reason_code: "legacy_lineage_read_only", primary_writeback_preserved: true, decision_read_from_shadow: false };''',
         MIRROR_COMMIT)),
-), "tests/control_plane/test_shadow_drain_e2e.py::test_public_mutation_has_no_second_snapshot_mirror"))
+), "tests/control_plane/test_shadow_drain_e2e.py::test_current_canonical_mutation_does_not_mirror_retained_shadow"))
 
 # Fenced sibling-caller parity: each mutant is caught by exactly one parity row.
 # Promoted CLI acquisition now succeeds through canonical authority. Probe the
