@@ -497,7 +497,7 @@ slice. Scientific usefulness follows the independent qualification in
 
 ### 7.6 Research scope and evidence-conditioned control
 
-Research stride has three independently chosen coordinates. The first two are
+Work and research stride have three independently chosen coordinates. The first two are
 the main controls; the third bounds the evidence and cost needed to act:
 
 - **Work-slice size:** the coherent outcome, scope and cost admitted before the
@@ -565,11 +565,11 @@ No new scheduler, selection rule, quota debit or per-result settlement is added.
 
 #### An iterative strategy and engineering boundary
 
-The first strategy is **model-guided, evidence-conditioned experiment planning**.
+The first strategy is **model-guided, evidence-conditioned work planning**.
 It explicitly chooses `grow` (expand a supported route), `switch` (test a
 different mechanism) or `verify` (resolve a specific grow-or-switch question),
 then describes a concrete plan and reason for each coordinate and a falsifiable
-next experiment. It does not optimize a universal novelty score:
+next work slice. It does not optimize a universal novelty score:
 mechanism distance is relative to a declared reference method and goal, while
 slice size is relative to the next useful postcondition and decision risk.
 
@@ -609,7 +609,23 @@ or idle `hold` decision option. A route switch names the reference method and ch
 more tuning cannot establish that change. Basis records the Agent's interpretation,
 not a command to resize work. Verification must resolve a named next decision;
 repeating unchanged checks is not a default policy. The next probe declares
-minimum evidence for a complete, interpretable experiment, its prediction, adoption criterion and full cost.
+minimum evidence for a coherent accepted deliverable or interpretable experiment, its prediction, adoption criterion and full cost.
+
+Ordinary engineering, organizing and maintenance use the same strategy and
+existing Todo/Next Action. `grow` may complete related implementation,
+integration, validation and readback as one useful delivery slice, reducing
+repeated planning, source reads and control overhead. Size means accepted scope,
+not Todo prose, file count or tool calls. Do not bundle independent commitments,
+ignore a dependency, widen authority or defer a required settlement merely to
+make work larger. Missing evidence can justify a complete verification; it does
+not mechanically require finer tasks. Stop or split at real risk, dependency
+and authority boundaries through their existing owners.
+
+Qualify ordinary-work adoption with an admitted delivery and subsequent review
+of actual artifact, quality and complete marginal cost. Synthetic CLI journeys
+prove transport and settlement, not model choice or efficiency improvement.
+Measure comparable completed work and repeated control/read overhead before
+claiming a gain; keep unavailable measurements unknown.
 
 The existing replan context returns the prior accepted decision and later work.
 A fresh proposal explicitly reviews actual adoption, new information and goal

@@ -502,7 +502,7 @@ before calling this strategy beneficial.
 分别填写具体 `plan` 与 `reason`，移除 `shrink` 和含糊的 `hold` 选项。grow 扩大有
 支持的路线；switch 尝试不同机制；verify 解决决定扩大或切换的具体不确定性。
 切换需说明参照方法与
-机制变化，不能把调参重命名成新路线。工作单位是能产生可解释结论的完整实验，
+机制变化，不能把调参重命名成新路线。工作单位是连贯的可验收交付或能产生可解释结论的完整实验，
 有支持时扩大工作；新路线可能需要更大实现，不稳定证据可能需要更多验证。
 最小示例仅演示格式，不是当前证据的行动推荐。下一实验须说明最低证据、预测、
 采用条件与完整成本。上轮复盘分别判断实际采用、新信息与目标收益，缺证据保持未知；
@@ -512,6 +512,17 @@ revision 与具体 finding，说明采用、暂缓、无适用证据或读取不
 按原 Turn 身份重新审视；不开额外执行权或配额。机器校验提案结构与引用，不能证明
 模型判断正确或已提升收益。两种历史 v1 决策保留原义读取兼容，但不能完成新的
 启用策略复盘；数据格式更新不增加可选策略版本。
+
+The same opt-in strategy covers ordinary engineering, organizing and maintenance.
+`grow` expands a coherent accepted deliverable, including related integration,
+validation and readback; it does not enlarge authority, postpone settlement or
+bundle independent commitments. Compare complete marginal cost and quality in
+the next review. A synthetic admitted-work journey proves protocol adoption,
+not improved model decisions or net efficiency.
+
+同一可选策略也覆盖普通工程、整理和维护：grow 扩大连贯的可验收交付，包含相关
+集成、验证和回读，不扩大权限、延迟结算或捆绑独立承诺。下次复盘核查质量与完整
+边际成本；合成准入链路只能证明协议采用，不能证明模型决策或净效率改善。
 
 ### Path Delta
 
