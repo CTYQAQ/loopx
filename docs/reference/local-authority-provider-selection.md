@@ -296,8 +296,8 @@ capture adapter and shared outbox recovery remain live. File/SQLite source CLI,
 canonical Chat, original team-plan replay and interrupted outbox readback have
 focused tests. The normal-wheel import/consumer matrix, packaged Settings journey,
 real PostgreSQL conformance and risk canary pass their focused checks. Historical
-native source-lease fixtures and the backend configuration description still need
-integration; exact-head review remains open. These checks
+native source-lease recovery now uses frozen 1.x artifacts, and the backend
+configuration catalog describes the same cutoff; exact-head review remains open. These checks
 do not certify natural multi-developer adoption, sustained D2 or a public release.
 
 2.0 alpha 候选把正常写入统一收口到 canonical authority，明确与兼容的 1.x 线区分。
