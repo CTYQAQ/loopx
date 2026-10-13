@@ -728,6 +728,20 @@ insufficient. Compare the reconstructed prefixes and excluded later history,
 not just returned session identifiers. Keep provider-specific migration and
 storage handling outside the generic consistency decision.
 
+Live native forks need a different qualification from completed-cursor forks.
+The real Codex `0.162.0-alpha.2` characterization in
+`benchmark/tests/test_native_checkpoint_handoff.py` rejects an explicit
+`lastTurnId` while that turn is active. Omitting it can retain the current prefix
+as an interrupted branch while the source tool keeps running. Resuming that
+branch exposes an aborted tool result; it does not replay the tool automatically.
+This avoids requiring a source interruption merely to investigate a fork, but
+neither the returned branch nor its history proves source quiescence. The next
+joint handoff must bind the withheld original guard and pending tool identity,
+reconcile any admitted effects, and verify frozen participant bytes before
+qualifying that cursor. Keep the completed-final-cursor production check until
+this separate path is implemented and qualified; do not silently drop the active
+turn or classify every interrupted session as resumable research state.
+
 The Host profile must also declare path portability. A native index can retain
 absolute guest paths: qualification must either preserve those paths inside a
 fresh isolated environment or use the Host's supported import/rebinding API.

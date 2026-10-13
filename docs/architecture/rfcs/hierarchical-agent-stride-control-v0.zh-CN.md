@@ -611,6 +611,16 @@ Host adapter 须在固定版本验证原生历史重建，包括 compaction 和�
 任意文件路径或日志解析成功并不充分。比较重建的历史前缀及被排除的后续历史，
 不只检查返回了 session id。Provider 特有迁移与存储处理不进入通用一致性决策。
 
+运行中会话的原生 fork 须与已完成 cursor 分别资格化。
+`benchmark/tests/test_native_checkpoint_handoff.py` 在真实 Codex
+`0.162.0-alpha.2` 上确认：显式 `lastTurnId` 不能指向 active turn；省略后可保留
+当前前缀为 interrupted 分支，而来源工具仍运行。接续分支会看到 aborted 工具
+结果，不会自动重放工具。因此研究 fork 路径不必先中断来源，但返回分支或历史
+都不能证明来源已静止。下一步联合 handoff 须绑定尚未返回的原 guard 与 pending
+工具身份、核回已受理效果，并验证冻结的参与者字节，再资格化该 cursor。
+在该独立路径实现并验证前保留生产代码的 completed-final-cursor 检查；不能
+静默丢弃 active turn，也不能把所有 interrupted 会话视为可接续研究状态。
+
 Host profile 还须声明路径可移植性。原生索引可能保留绝对 guest 路径：资格化
 须在新隔离环境保留这些路径，或使用 Host 支持的 import/rebinding API；手改
 原生数据库行不能资格化导入。有效 Host 配置及已安装工具/skill 版本须与凭证
