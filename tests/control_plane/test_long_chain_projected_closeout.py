@@ -67,12 +67,36 @@ def test_managed_turn_counts_advancement_without_monitor_backlog(
         assert _spend_run_count(runtime) == 0
 
 
-def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path) -> None:
+@pytest.mark.parametrize("explore_enabled", [False, True])
+def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path, explore_enabled: bool) -> None:
     project, runtime, registry = _write_fixture(tmp_path)
     _configure_selected_todo_replan_fixture(project, registry)
+    # This independently declared journey needs review → work → review: three
+    # admitted Turns. The shared two-Turn fixture remains unchanged elsewhere.
+    registered = json.loads(registry.read_text())
+    next(row for row in registered["goals"] if row["id"] == GOAL_ID)["quota"]["allowed_slots"] = 3
+    registry.write_text(json.dumps(registered))
     state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     # Complete material source, independently authored before admission.
     source = state.read_text().replace(" -->", " updated_at=2026-08-01T00%3A00%3A00Z -->")
+    if explore_enabled:
+        registered = json.loads(registry.read_text())
+        goal = next(row for row in registered["goals"] if row["id"] == GOAL_ID)
+        goal["explore_graph"] = {"enabled": True}
+        goal["spawn_policy"] = {"allowed": False, "explore_harness": {"enabled": True}}
+        registry.write_text(json.dumps(registered))
+        from loopx.capabilities.explore.result_log import (
+            append_explore_result_event, build_explore_node_event, build_explore_finding_event,
+            explore_result_log_path,
+        )
+        log = explore_result_log_path(runtime, GOAL_ID)
+        append_explore_result_event(log, build_explore_node_event(
+            goal_id=GOAL_ID, agent_id=AGENT_ID, node_id="route-counterexample",
+            title="Alternative route", status="open"))
+        append_explore_result_event(log, build_explore_finding_event(
+            goal_id=GOAL_ID, agent_id=AGENT_ID, node_id="route-counterexample",
+            finding_id="finding-negative", title="Scoped counterexample", status="refuted",
+            summary="This negative result applies to the prior inputs only."))
     # Fourteen commitments plus a shared candidate is not this lane's long chain.
     last_id = "todo_chain_000000000014"
     source = source.replace(
@@ -119,6 +143,9 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
         "settlement_bound": False, "discharge": "todo_bound_writeback",
     }
     control = before["replan_action_packet"]["stride_control"]
+    assert control["schema_version"] == "stride_decision_v2"
+    assert control["actions"] == ["grow", "switch", "verify"]
+    assert "adjustments" not in control
     from loopx.control_plane.quota.turn_envelope import build_turn_envelope
     from loopx.control_plane.quota.cli_projection import compact_quota_should_run_cli_payload
     for transport in (build_turn_envelope(before), compact_quota_should_run_cli_payload(before)):
@@ -143,13 +170,20 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
             "advancement_policy": "as_needed",
         },
         "stride_decision": {
-            "schema_version": "stride_decision_v1",
+            "schema_version": "stride_decision_v2",
             "strategy_version": "evidence_conditioned_v1",
             "reference_context_id": before["replan_action_packet"]["stride_control"]["reference_context_id"],
             "reference_obligation_id": before["replan_action_packet"]["stride_control"]["reference_obligation_id"],
             "basis": "unexplained_gap",
+            "action": "switch",
+            "axes": {
+                "work_slice": {"plan": "Build and compare the complete alternative.", "reason": "A partial component cannot decide the gap."},
+                "route_distance": {"plan": "Replace greedy selection with joint search.", "reason": "Test interactions the incumbent ignores."},
+                "validation_scope": {"plan": "Pair both engines on held-out inputs.", "reason": "Retain comparable independent coverage."},
+            },
             "next_probe": {
-                "scope": "Execute one alternative mechanism probe.",
+                "scope": "Execute one complete alternative mechanism experiment.",
+                "minimum_evidence": "A complete alternative artifact and a controlled attributable result.",
                 "prediction": "The alternative distinguishes the remaining explanation.",
                 "adoption_criterion": "Retain only a validated improvement on accepted requirements.",
                 "cost_bound": "One isolated probe before another scope decision.",
@@ -167,8 +201,30 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     refresh = refresh.replace("<path-to-evidence-linked-goal-vision-replan-contract-v0.json>", str(decision))
     # Opt-in control is a real validation rule, not only extra prompt text.
     valid_packet = json.loads(decision.read_text())
+    if explore_enabled:
+        basis = control["explore_basis"]
+        assert basis["harness_enabled"] and basis["graph_enabled"]
+        assert any(row["finding_id"] == "finding-negative" for row in basis["finding_refs"])
+        valid_packet["stride_decision"]["explore_review"] = {
+            "revision": basis["revision"], "disposition": "deferred",
+            "considered_refs": ["finding-negative"],
+            "reason": "Counterexample applies to prior inputs; compare the changed route.",
+        }
+        decision.write_text(json.dumps(valid_packet))
     legacy_packet = {key: value for key, value in valid_packet.items() if key != "stride_decision"}
     decision.write_text(json.dumps(legacy_packet))
+    rc, refused = _run_cli(registry, runtime,
+        *_projected_cli_args(refresh, turn_instance_id=TURN_ID), cwd=project)
+    assert rc == 1
+    assert "requires agent_vision.stride_decision" in refused["error"]
+    assert _spend_run_count(runtime) == 0
+    old_packet = json.loads(json.dumps(valid_packet))
+    old_decision = old_packet["stride_decision"]
+    old_decision["schema_version"] = "stride_decision_v1"
+    old_decision.pop("action")
+    old_decision["axis_reasons"] = {key: axis["reason"] for key, axis in old_decision["axes"].items()}
+    old_decision["axes"] = {"work_slice": "shrink", "route_distance": "grow", "validation_scope": "hold"}
+    decision.write_text(json.dumps(old_packet))
     rc, refused = _run_cli(registry, runtime,
         *_projected_cli_args(refresh, turn_instance_id=TURN_ID), cwd=project)
     assert rc == 1
@@ -186,8 +242,8 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     assert identity["turn_instance_id"] == TURN_ID
     persisted = json.loads(Path(refreshed["json_path"]).read_text())
     assert persisted["autonomous_replan_ack"] == ack
-    assert persisted["agent_vision"]["stride_decision"]["axes"] == {
-        "work_slice": "shrink", "route_distance": "grow", "validation_scope": "shrink"}
+    assert persisted["agent_vision"]["stride_decision"]["action"] == "switch"
+    assert persisted["agent_vision"]["stride_decision"]["axes"]["route_distance"]["plan"] == "Replace greedy selection with joint search."
     from loopx.control_plane.goals.goal_vision import compact_goal_vision_packet
     assert compact_goal_vision_packet(persisted["agent_vision"])["stride_decision"] == persisted["agent_vision"]["stride_decision"]
     assert _spend_run_count(runtime) == 0
@@ -238,3 +294,45 @@ def test_projected_vision_replan_settles_without_a_meta_successor(tmp_path: Path
     assert resolved["evidence"]["path_delta"] == follow["previous_decision"]["path_delta"]
     assert "_source_facts" not in resolved["evidence"]
     assert _spend_run_count(runtime) == 2
+    # The following review must reconcile the real admitted probe, rather than
+    # merely carry another proposal. Missing/foreign reviews cannot settle it.
+    next_turn = "turn-review-executed-probe"
+    initial_next = guard(next_turn)
+    assert initial_next["interaction_contract"]["cli_channel"]["selection_required"] is True
+    next_guard = _bind_selected_replan_guard(registry, runtime, project, next_turn)
+    next_control = next_guard["replan_action_packet"]["stride_control"]
+    second = json.loads(json.dumps(valid_packet))
+    second["stride_decision"].update(
+        reference_context_id=next_control["reference_context_id"],
+        reference_obligation_id=next_control["reference_obligation_id"],
+    )
+    second["path_delta"]["observed_reality"] = "The admitted alternative produced an artifact and new scoped evidence; goal gain is unknown."
+    second["path_delta"]["evidence_refs"] = ["evidence:executed-alternative-probe"]
+    if explore_enabled:
+        second["stride_decision"]["explore_review"]["revision"] = next_control["explore_basis"]["revision"]
+    second_path = tmp_path / "second-decision.json"
+    second_path.write_text(json.dumps(second))
+    next_refresh, next_spend = next_guard["interaction_contract"]["cli_channel"]["next_cli_actions"]
+    next_refresh = next_refresh.replace("<path-to-evidence-linked-goal-vision-replan-contract-v0.json>", str(second_path))
+    rc, rejected = _run_cli(registry, runtime, *_projected_cli_args(
+        next_refresh, turn_instance_id=next_turn), cwd=project)
+    assert rc != 0 and "previous decision" in rejected["error"]
+    assert _spend_run_count(runtime) == 2
+    second["stride_decision"]["previous_review"] = {
+        "reference_decision_ref": next_control["previous_decision_ref"],
+        "adoption": "executed", "information_gain": "new_evidence", "goal_gain": "unknown",
+        "evidence_refs": ["evidence:executed-alternative-probe"],
+        "lesson": "The prior experiment ran; distinguish its target value before another route change.",
+    }
+    second_path.write_text(json.dumps(second))
+    reviewed = call(*_projected_cli_args(next_refresh, turn_instance_id=next_turn))
+    assert reviewed["autonomous_replan_ack"]["semantic_delta"]["accepted"] is True
+    second_run = json.loads(Path(reviewed["json_path"]).read_text())
+    assert second_run["agent_vision"]["stride_decision"]["previous_review"]["goal_gain"] == "unknown"
+    assert reviewed["settlement_identity"]["turn_instance_id"] == next_turn
+    spend_args = _projected_cli_args(next_spend, turn_instance_id=next_turn)
+    rc, spent = _run_cli(registry, runtime, *spend_args, cwd=project)
+    assert rc == 0, {"args": spend_args, "reason": spent.get("reason"), "failure": spent.get("settlement_result", {}).get("failure")}
+    assert _spend_run_count(runtime) == 3
+    call(*spend_args)
+    assert _spend_run_count(runtime) == 3  # Exact replay never buys another opportunity.
