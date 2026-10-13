@@ -860,9 +860,15 @@ timestamp. Restore recomputes the remaining duration and anchors a new Host phas
 file at activation, charging transport rather than offline time or a fresh trial.
 The existing work reserve and native opportunity owner remain unchanged. An
 uncertain response leaves an unusable phase reservation, not a fresh-budget
-fallback. Full Host provenance/clock alignment, joint research/effect adoption
-and original-operation recovery still need their profile's qualification; this
-participant transport cannot certify them.
+fallback. Explicit controller recovery now reads the original native activation
+and retains the destination deadline durably bound before the first admission.
+Lost replies and partial phase writes recover without a new registration,
+round, cooldown or budget reset; exhausted or mismatched attempts refuse.
+An isolated real native HTTP/Docker journey verifies recovery, the ordinary
+Linux phase-entry shell, candidate production and the next accepted grade.
+Model inference is excluded. Full Host provenance/clock alignment and joint
+session/research/effect recovery still need their profile's qualification;
+this participant transport cannot certify them.
 
 The composed local continuation qualification now carries the evaluator capsule
 inside the verified conversation/code/context artifact. The actual resumed Codex
@@ -892,7 +898,8 @@ IDs because the interactive listing hides unused forks; native APIs verify their
 meaning, and no native rows are rewritten. Tests inject pre- and post-binding
 reply loss, recover through the CLI and continue real native governed work with
 a deterministic local provider; absent/multiple outcomes and foreign destination
-attempts reject. Joint evaluator/Host activation recovery remains unqualified.
+attempts reject. The controller participant recovery above does not yet qualify
+automatic joint session/research/evaluator/Host activation recovery.
 
 An inert verification unit grants no execution authority. The destination uses
 fresh experiment/Host identities and the existing Goal/session/state admission
