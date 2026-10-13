@@ -20,6 +20,8 @@ from .completion_state import (
     normalize_todo_completion_continuation, normalize_todo_completion_recovery,
 )
 
+from .succession_warning import build_open_parent_successor_advisory
+
 def serialize_added_todo_payload(
     *, add_result: Mapping[str, Any], goal_id: str, role: str, todo_text: str,
     agent_id: str | None, state_file: Path, project: Path | None,
@@ -176,3 +178,30 @@ def serialize_todo_update_result(
             "material_change_generation"
         ),
     }
+
+
+def serialize_canonical_todo_update_result(
+    result: Mapping[str, Any], *, todo_id: str, dry_run: bool,
+) -> dict[str, Any]:
+    """Project original transaction facts without rereading current authority."""
+    # Older receipts remain replayable without invented historical fields.
+    # New transactions carry their original row/deltas, including dry runs.
+    public: dict[str, Any] = {}
+    facts = result.get("todo_update")
+    if isinstance(facts, dict):
+        todo = facts["todo"]
+        public = serialize_todo_update_result(
+            role=todo["role"], section=todo.get("source_section") or (
+                "Agent Todo" if todo["role"] == "agent" else "User Todo / Owner Review Reading Queue"),
+            todo=todo.get("text"), todo_id=todo_id, status=todo["status"],
+            priority=todo.get("priority"), metadata=todo,
+            status_changed=facts["status_changed"], text_changed=facts["text_changed"],
+            metadata_updated=facts["metadata_updated"],
+        )
+        advisory = build_open_parent_successor_advisory(
+            todo_id=todo_id, status=todo["status"], successor_todo_ids=todo.get("successor_todo_ids"))
+        if advisory:
+            public["parent_successor_advisory"] = advisory
+        public["changed"] = result["changed"] and not dry_run
+        public["provider_status"] = result["status"]
+    return public

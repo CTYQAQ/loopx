@@ -23,8 +23,7 @@ from ..effect_runtime import (
     EffectRuntimeResponseAmbiguous,
     effect_runtime_result,
 )
-from .mutation_response import serialize_todo_update_result
-from .succession_warning import build_open_parent_successor_advisory
+from .mutation_response import serialize_canonical_todo_update_result
 from .contract import compact_todo_text
 from .provider_projection import settle_canonical_todo_projection
 from .text import normalize_new_todo
@@ -344,26 +343,7 @@ def update_canonical_todo_if_promoted(
             declaration=declaration,
             result=result,
         )
-    # Older receipts remain replayable without invented historical fields.
-    # New transactions carry their original row/deltas, including dry runs.
-    public = {}
-    facts = result.get("todo_update")
-    if isinstance(facts, dict):
-        todo = facts["todo"]
-        public = serialize_todo_update_result(
-            role=todo["role"], section=todo.get("source_section") or (
-                "Agent Todo" if todo["role"] == "agent" else "User Todo / Owner Review Reading Queue"),
-            todo=todo.get("text"), todo_id=todo_id, status=todo["status"],
-            priority=todo.get("priority"), metadata=todo,
-            status_changed=facts["status_changed"], text_changed=facts["text_changed"],
-            metadata_updated=facts["metadata_updated"],
-        )
-        advisory = build_open_parent_successor_advisory(
-            todo_id=todo_id, status=todo["status"], successor_todo_ids=todo.get("successor_todo_ids"))
-        if advisory:
-            public["parent_successor_advisory"] = advisory
-        public["changed"] = result["changed"] and not dry_run
-        public["provider_status"] = result["status"]
+    public = serialize_canonical_todo_update_result(result, todo_id=todo_id, dry_run=dry_run)
     return settle_canonical_todo_projection(
         {"ok": True, "goal_id": goal_id, "todo_id": todo_id,
          "role": role, "dry_run": dry_run, **result, **public},
