@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 import pytest
 
-from historical_shadow_fixture import original_1x_source  # noqa: F401
+from tests.control_plane.historical_shadow_fixture import original_1x_source  # noqa: F401
 
 from loopx.bootstrap_command_pack import build_start_goal_guided_packet
 from loopx.control_plane.work_items.delivery_outcome import (
