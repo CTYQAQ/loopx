@@ -24,6 +24,8 @@ from loopx.chat_server import ChatHTTPServer, ChatRequestHandler  # noqa: E402
 from loopx.chat_store import ChatSessionStore  # noqa: E402
 from loopx.history import collect_history  # noqa: E402
 
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
+
 
 def preview_request(
     *,
@@ -195,8 +197,9 @@ def write_registry_fixture(root: Path) -> tuple[Path, Path]:
     return registry, state
 
 
-def assert_http_action_api(root: Path) -> None:
+def assert_http_action_api(root: Path, *, provider: str = "file") -> None:
     registry_path, state_path = write_registry_fixture(root)
+    initialize_canonical_registry_fixture(registry_path, provider=provider)
     runtime_root = root / "runtime"
     action_store = ChatActionStore(runtime_root / "chat" / "actions")
     chat_store = ChatSessionStore(runtime_root)
@@ -963,6 +966,8 @@ def assert_http_action_api(root: Path) -> None:
 
         # A decision outcome is only valid on a User gate; the canonical owner
         # rejects it before any proposal is stored.
+        before_invalid_decision = state_path.read_bytes()
+        proposals_before_invalid_decision = action_store.path.read_bytes()
         code, misdirected_decision = request_json(
             f"{base_url}/api/actions/preview",
             method="POST",
@@ -975,7 +980,10 @@ def assert_http_action_api(root: Path) -> None:
             },
         )
         assert code == 400, misdirected_decision
-        assert "decision_outcome is only valid" in misdirected_decision["error"], misdirected_decision
+        assert misdirected_decision["error_code"] == "invalid_action_preview", misdirected_decision
+        assert "requested role" in misdirected_decision["error"], misdirected_decision
+        assert state_path.read_bytes() == before_invalid_decision
+        assert action_store.path.read_bytes() == proposals_before_invalid_decision
 
         for index, (action_kind, params, gate_kind) in enumerate(
             [
@@ -1010,7 +1018,7 @@ def assert_http_action_api(root: Path) -> None:
 
         persisted_payload = action_store.path.read_text(encoding="utf-8")
         assert str(root) not in persisted_payload, persisted_payload
-        assert str(project := registry_path.parent.parent) not in persisted_payload, persisted_payload
+        assert str(registry_path.parent.parent) not in persisted_payload, persisted_payload
 
         cancellable_code, cancellable = request_json(
             f"{base_url}/api/actions/preview",
@@ -1128,7 +1136,7 @@ def assert_zero_goal_workspace_selection(root: Path) -> None:
         raise AssertionError("multiple workspaces must require a public-safe selection")
 
 
-def main() -> None:
+def main(*, provider: str = "file") -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-chat-actions-") as raw_tmp:
         root = Path(raw_tmp) / "runtime" / "actions"
         store = ChatActionStore(root)
@@ -1265,7 +1273,7 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="loopx-chat-action-http-") as raw_tmp:
         root = Path(raw_tmp)
-        assert_http_action_api(root)
+        assert_http_action_api(root, provider=provider)
         assert_zero_goal_workspace_selection(root)
 
     print("loopx-chat-actions-smoke: ok")

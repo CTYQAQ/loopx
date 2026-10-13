@@ -118,3 +118,25 @@ def promoted_create_fixture(tmp_path: Path, *, provider: str = "file") -> tuple[
         runtime_root, "goal-a", projection, state_path=state_file, provider=provider
     )
     return registry_path, runtime_root, state_file
+
+
+def initialize_canonical_registry_fixture(registry_path: Path, *, provider: str = "file") -> None:
+    """Seed disposable consumer fixtures; this is not cold-source import evidence.
+
+    Fixture prose supplies synthetic records only. Normal writes and subsequent
+    reads must use the real canonical provider and its explicit ownership policy.
+    """
+    from loopx.control_plane.coordination.authority_source_capture import build_todo_runtime_shadow_projection
+    from loopx.control_plane.todos.goal_todo_projection import project_goal_todo_items
+
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    runtime = Path(registry["common_runtime_root"])
+    for goal in registry["goals"]:
+        state = Path(goal["repo"]) / goal["state_file"]
+        todos = project_goal_todo_items(
+            goal, state_text=state.read_text(encoding="utf-8"), state_path=state, rollout_events=[]
+        )
+        projection = build_todo_runtime_shadow_projection(
+            goal_id=goal["id"], todos=todos, handoff_mode="soft_claim"
+        )
+        initialize_canonical_authority(runtime, goal["id"], projection, state_path=state, provider=provider)

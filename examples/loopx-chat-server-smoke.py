@@ -18,6 +18,10 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
+
 GOAL_ID = "loopx-chat-server-smoke"
 SECOND_GOAL_ID = "loopx-chat-server-second-goal"
 TODO_TEXT = "[P0] Implement the approved Goal Studio review card."
@@ -206,8 +210,7 @@ def wait_for_json(url: str) -> dict:
     raise RuntimeError(f"timed out waiting for LoopX Chat: {last_error}")
 
 
-def main() -> None:
-    sys.path.insert(0, str(REPO_ROOT))
+def main(*, provider: str = "file") -> None:
     from loopx.chat_server import (
         ChatHTTPServer,
         ChatRequestHandler,
@@ -226,6 +229,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-chat-server-") as raw_tmp:
         root = Path(raw_tmp)
         registry, state_file = write_fixture(root)
+        initialize_canonical_registry_fixture(registry, provider=provider)
         bounded_status = build_bounded_chat_status_projection(
             registry=json.loads(registry.read_text(encoding="utf-8")),
             selected_goal_id=GOAL_ID,

@@ -21,6 +21,8 @@ from loopx.chat import (  # noqa: E402
 )
 
 
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
+
 GOAL_ID = "loopx-chat-contract-smoke"
 TODO_TEXT = "[P0] Add a reviewable Goal Studio interaction."
 
@@ -39,7 +41,9 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         "## Objective\n\n"
         "Keep LoopX Chat reviewable.\n\n"
         "## Next Action\n\n"
-        "- Review the next bounded proposal.\n",
+        "- Review the next bounded proposal.\n\n"
+        "## User Todo / Owner Review Reading Queue\n\n"
+        "## Agent Todo\n",
         encoding="utf-8",
     )
     registry_path = project / ".loopx" / "registry.json"
@@ -72,10 +76,11 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
     return registry_path, state_file, project
 
 
-def main() -> None:
+def main(*, provider: str = "file") -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-chat-contract-") as raw_tmp:
         root = Path(raw_tmp)
         registry_path, state_file, project = write_fixture(root)
+        initialize_canonical_registry_fixture(registry_path, provider=provider)
 
         raw_response = (
             "draft text that must not become authority\n"
