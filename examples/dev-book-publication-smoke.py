@@ -7,7 +7,6 @@ import argparse
 from html.parser import HTMLParser
 from pathlib import Path
 import re
-import tomllib
 from urllib.parse import unquote
 
 
@@ -442,8 +441,9 @@ def main() -> int:
     assert "/loopx/docs/book/en/" in read(BOOK / "index.md")
     assert "/loopx/docs/book/" in read(BOOK / "en" / "index.md")
 
-    project_version = tomllib.loads(read(REPO_ROOT / "pyproject.toml"))["project"]["version"]
-    release_tag = f"v{project_version}"
+    # This independently reviewed book baseline advances with publication,
+    # not when pyproject moves ahead to an unreleased candidate version.
+    release_tag = "v1.4.0"
     # Historical migration milestones must not move with the package version.
     migration_baseline_tag = "v0.5.4"
     release_markers = {
