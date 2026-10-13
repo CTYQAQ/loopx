@@ -9,7 +9,9 @@ import sys
 
 import pytest
 
-from shadow_e2e_fixture import REPO, ShadowWorkspace, workspace
+from tests.control_plane.historical_shadow_fixture import historical_workspace_factory, original_1x_source  # noqa: F401
+
+from shadow_e2e_fixture import REPO, ShadowWorkspace
 from loopx.control_plane.coordination import local_authority_shadow_adapter as adapter
 from loopx.control_plane.coordination import local_authority_shadow_outbox as outbox
 
@@ -28,7 +30,7 @@ def history(w: ShadowWorkspace) -> dict:
 
 
 def pending(w: ShadowWorkspace, text: str = "One primary mutation") -> dict:
-    return w.crash("before_commit", "todo", "add", "--role", "agent", "--text", text)
+    return w.original_crash("before_commit", "todo", "add", "--role", "agent", "--text", text)
 
 
 def snapshot(path: Path) -> dict[str, bytes]:
@@ -39,11 +41,11 @@ def snapshot(path: Path) -> dict[str, bytes]:
     }
 
 
-def test_public_primary_maps_one_to_one_to_receipts_and_replays_idempotently(
+def test_public_primary_maps_one_to_one_to_receipts_and_replays_idempotently(historical_workspace,
     tmp_path: Path,
 ) -> None:
-    w = workspace(tmp_path)
-    ids = [w.add(f"Public fact {index}")["todo_id"] for index in range(3)]
+    w = historical_workspace(tmp_path)
+    ids = [w.original_add(f"Public fact {index}")["todo_id"] for index in range(3)]
     w.drain()
     view = history(w)
     transactions = view["proof"]["transactions"]
@@ -67,9 +69,9 @@ def test_public_primary_maps_one_to_one_to_receipts_and_replays_idempotently(
         assert "minimum_primary_mutations: `3`" in result.stdout
 
 
-def test_public_mutation_has_no_second_snapshot_mirror(tmp_path: Path) -> None:
-    w = workspace(tmp_path)
-    assert w.add("Exactly one durable primary mutation")["added"] is True
+def test_public_mutation_has_no_second_snapshot_mirror(historical_workspace, tmp_path: Path) -> None:
+    w = historical_workspace(tmp_path)
+    assert w.original_add("Exactly one durable primary mutation")["added"] is True
     module = REPO / "loopx/control_plane/coordination/file_authority_store.ts"
     script = (
         f"import {{FileAuthorityStore}} from {json.dumps(module.as_uri())};"
@@ -101,11 +103,11 @@ def test_public_mutation_has_no_second_snapshot_mirror(tmp_path: Path) -> None:
         "wrong_lineage",
     ],
 )
-def test_cursor_cannot_authorize_deletion_or_hide_mutations(
+def test_cursor_cannot_authorize_deletion_or_hide_mutations(historical_workspace,
     tmp_path: Path, attack: str
 ) -> None:
-    w = workspace(tmp_path)
-    w.add("First captured mutation")
+    w = historical_workspace(tmp_path)
+    w.original_add("First captured mutation")
     pending(w, "Second real mutation")
     d = directory(w)
     cursor_path = d / "drain-cursor.json"
@@ -144,11 +146,11 @@ def test_cursor_cannot_authorize_deletion_or_hide_mutations(
 
 
 @pytest.mark.parametrize("window", ["after_commit", "after_cursor", "between_unlinks"])
-def test_real_sigkill_drain_windows_recover_from_exact_receipts(
+def test_real_sigkill_drain_windows_recover_from_exact_receipts(historical_workspace,
     tmp_path: Path, window: str
 ) -> None:
-    w = workspace(tmp_path)
-    w.crash(
+    w = historical_workspace(tmp_path)
+    w.original_crash(
         window,
         "todo",
         "add",
@@ -168,28 +170,28 @@ def test_real_sigkill_drain_windows_recover_from_exact_receipts(
     assert [p.name for p in directory(w).iterdir()] == ["drain-cursor.json"]
 
 
-def test_missing_cursor_recovers_only_from_complete_verified_history(
+def test_missing_cursor_recovers_only_from_complete_verified_history(historical_workspace,
     tmp_path: Path,
 ) -> None:
-    w = workspace(tmp_path)
-    w.add("First")
-    w.add("Second")
+    w = historical_workspace(tmp_path)
+    w.original_add("First")
+    w.original_add("Second")
     before = history(w)["proof"]["transactions"]
     (directory(w) / "drain-cursor.json").unlink()
     assert w.drain()["ok"] is True
     assert outbox.read_cursor(directory(w))["last_seq"] == 2
-    w.add("Third")
+    w.original_add("Third")
     assert history(w)["proof"]["transactions"][:3] == before
     assert outbox.read_cursor(directory(w))["last_seq"] == 3
 
 
 @pytest.mark.parametrize("window", ["before_replace", "after_replace", "before_marker"])
-def test_primary_sigkill_preserves_complete_bytes_and_proves_before_marker(
+def test_primary_sigkill_preserves_complete_bytes_and_proves_before_marker(historical_workspace,
     tmp_path: Path, window: str
 ) -> None:
-    w = workspace(tmp_path)
+    w = historical_workspace(tmp_path)
     old = w.state.read_bytes()
-    w.crash(
+    w.original_crash(
         window, "todo", "add", "--role", "agent", "--text", "Atomic primary sentence"
     )
     current = w.state.read_bytes()
@@ -206,11 +208,11 @@ def test_primary_sigkill_preserves_complete_bytes_and_proves_before_marker(
     assert receipt["no_op"] is (window == "before_replace")
 
 
-def test_prepared_a_b_a_never_infers_first_write_was_abandoned(tmp_path: Path) -> None:
-    w = workspace(tmp_path)
-    w.crash("before_marker", "handoff-mode", "set", "--mode", "soft_claim")
+def test_prepared_a_b_a_never_infers_first_write_was_abandoned(historical_workspace, tmp_path: Path) -> None:
+    w = historical_workspace(tmp_path)
+    w.original_crash("before_marker", "handoff-mode", "set", "--mode", "soft_claim")
     # A later real writer returns the canonical primary to its initial A.
-    w.cli("handoff-mode", "set", "--mode", "hard_lease")
+    w.original_cli("handoff-mode", "set", "--mode", "hard_lease")
     assert w.cli("handoff-mode", "show")["handoff_mode"] == "hard_lease"
     before = snapshot(directory(w))
     result = w.drain()
@@ -223,10 +225,10 @@ def test_prepared_a_b_a_never_infers_first_write_was_abandoned(tmp_path: Path) -
     assert qualify["ok"] is False
 
 
-def test_concurrent_real_drainers_commit_once_without_cursor_regression(
+def test_concurrent_real_drainers_commit_once_without_cursor_regression(historical_workspace,
     tmp_path: Path,
 ) -> None:
-    w = workspace(tmp_path)
+    w = historical_workspace(tmp_path)
     for index in range(3):
         pending(w, f"Concurrent {index}")
     argv = [
@@ -255,8 +257,8 @@ def test_concurrent_real_drainers_commit_once_without_cursor_regression(
     assert outbox.read_cursor(directory(w))["last_seq"] == 3
 
 
-def test_bounded_drain_preserves_unprocessed_entries(tmp_path: Path) -> None:
-    w = workspace(tmp_path)
+def test_bounded_drain_preserves_unprocessed_entries(historical_workspace, tmp_path: Path) -> None:
+    w = historical_workspace(tmp_path)
     for index in range(3):
         pending(w, f"Bounded {index}")
     result = w.drain(max_entries="1")

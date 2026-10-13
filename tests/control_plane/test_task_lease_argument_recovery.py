@@ -1,4 +1,8 @@
-"""Execute CLI grammar repairs against disposable real lease authorities."""
+"""Execute current grant grammar repairs against File/SQLite authorities.
+
+Original 1.x lease release/recovery is covered by frozen-history lifecycle tests;
+2.0 does not authorize new source grants, renewals or transfers.
+"""
 from __future__ import annotations
 
 import json
@@ -15,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 GOAL, TODO = "lease-recovery", "todo_lease_recovery"
 
 
-@pytest.fixture(params=["legacy", "file", "sqlite"])
+@pytest.fixture(params=["file", "sqlite"])
 def lease_cli(tmp_path, monkeypatch, request):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     project, runtime = tmp_path / "project with spaces", tmp_path / "runtime"
@@ -27,15 +31,14 @@ def lease_cli(tmp_path, monkeypatch, request):
         "id": GOAL, "repo": str(project), "state_file": state.name,
         "coordination": {"registered_agents": ["peer-a", "peer-b"]},
     }]}))
-    if request.param != "legacy":
-        initialize_canonical_authority(runtime, GOAL, build_todo_runtime_shadow_projection(
-            goal_id=GOAL, handoff_mode="hard_lease", leases=[], todos=[{
-                "schema_version": "todo_item_v0", "todo_id": TODO, "role": "agent",
-                "status": "open", "done": False, "text": "Verify a source artifact.",
-                "archive_state": "active", "source_section": "Agent Todo", "index": 1,
-                "task_class": "advancement_task", "claimed_by": "peer-a", "required_write_scopes": ["src/**"],
-            }]), state_path=state, provider=request.param)
-        state.unlink()
+    initialize_canonical_authority(runtime, GOAL, build_todo_runtime_shadow_projection(
+        goal_id=GOAL, handoff_mode="hard_lease", leases=[], todos=[{
+            "schema_version": "todo_item_v0", "todo_id": TODO, "role": "agent",
+            "status": "open", "done": False, "text": "Verify a source artifact.",
+            "archive_state": "active", "source_section": "Agent Todo", "index": 1,
+            "task_class": "advancement_task", "claimed_by": "peer-a", "required_write_scopes": ["src/**"],
+        }]), state_path=state, provider=request.param)
+    state.unlink()
     prefix = ["--registry", str(registry), "--runtime-root", str(runtime), "--format", "json"]
 
     def run(args, code=0):

@@ -9,7 +9,9 @@ import subprocess
 
 import pytest
 
-from shadow_e2e_fixture import REPO, ShadowWorkspace, workspace
+from tests.control_plane.historical_shadow_fixture import historical_workspace_factory, original_1x_source  # noqa: F401
+
+from shadow_e2e_fixture import REPO, ShadowWorkspace
 from loopx.control_plane.coordination import local_authority_shadow_adapter as adapter
 from loopx.control_plane.coordination import local_authority_shadow_outbox as outbox
 from loopx.control_plane.coordination.coordination_state_contract_generated import TASK_LEASE_ACQUIRE_REQUEST_SCHEMA
@@ -49,7 +51,7 @@ def acquire(w: ShadowWorkspace, todo: str, *, crash: bool = False) -> None:
     }
     args = ['node', '--no-warnings', '--experimental-strip-types', '--input-type=module', '-e',
             LEASE_WORKER, json.dumps({'request': request, 'stop_before': str(lease) if crash else None,
-            'module': (REPO / 'loopx/control_plane/work_items/task_lease_acquire.ts').as_uri()})]
+            'module': (w.original_source / 'loopx/control_plane/work_items/task_lease_acquire.ts').as_uri()})]
     if not crash:
         result = subprocess.run(args, cwd=REPO, capture_output=True, text=True, timeout=30, check=True)
         assert json.loads(result.stdout)['acquired'] is True, result.stdout
@@ -73,17 +75,17 @@ def acquire(w: ShadowWorkspace, todo: str, *, crash: bool = False) -> None:
 @pytest.mark.parametrize('partition', ['todos', 'leases'])
 @pytest.mark.parametrize('prior_mutations', [0, 1])
 @pytest.mark.parametrize('abandoned', [1, 2])
-def test_abandoned_cursor_survives_all_consumers(
+def test_abandoned_cursor_survives_all_consumers(historical_workspace,
     tmp_path: Path, partition: str, prior_mutations: int, abandoned: int,
 ) -> None:
-    w = workspace(tmp_path, bootstrap=False)
+    w = historical_workspace(tmp_path, bootstrap=False)
     # A nonempty baseline must still have no applied-mutation digest.
-    ids = [w.add(f'Baseline task {index}')['todo_id'] for index in range(3)]
-    assert w.cli('coordination-shadow', 'bootstrap', '--execute')['bootstrap']['status'] == 'applied'
+    ids = [w.original_add(f'Baseline task {index}')['todo_id'] for index in range(3)]
+    assert w.original_cli('coordination-shadow', 'bootstrap', '--execute')['bootstrap']['status'] == 'applied'
 
     def mutate(index: int) -> None:
         if partition == 'todos':
-            ids.append(w.add(f'Applied task {index}')['todo_id'])
+            ids.append(w.original_add(f'Applied task {index}')['todo_id'])
         else:
             acquire(w, ids[index])
         assert w.drain()['ok'] is True
@@ -93,7 +95,7 @@ def test_abandoned_cursor_survives_all_consumers(
     before = w.state.read_bytes()
     for index in range(abandoned):
         if partition == 'todos':
-            w.crash('before_replace', 'todo', 'add', '--role', 'agent', '--text', f'Never applied {index}')
+            w.original_crash('before_replace', 'todo', 'add', '--role', 'agent', '--text', f'Never applied {index}')
         else:
             acquire(w, ids[prior_mutations], crash=True)
         assert w.state.read_bytes() == before
@@ -138,21 +140,21 @@ def test_abandoned_cursor_survives_all_consumers(
 
 @pytest.mark.parametrize('partition', ['todos', 'leases'])
 @pytest.mark.parametrize('applied', [False, True])
-def test_forged_applied_digest_holds_every_consumer_without_rewriting_bytes(
+def test_forged_applied_digest_holds_every_consumer_without_rewriting_bytes(historical_workspace,
     tmp_path: Path, partition: str, applied: bool,
 ) -> None:
     import hashlib
 
-    w = workspace(tmp_path, bootstrap=False)
-    todo = w.add('Baseline is not mutation coverage')['todo_id']
-    w.cli('coordination-shadow', 'bootstrap', '--execute')
+    w = historical_workspace(tmp_path, bootstrap=False)
+    todo = w.original_add('Baseline is not mutation coverage')['todo_id']
+    w.original_cli('coordination-shadow', 'bootstrap', '--execute')
     if applied:
         if partition == 'todos':
-            w.add('Real mutation with an applied digest')
+            w.original_add('Real mutation with an applied digest')
         else:
             acquire(w, todo)
     elif partition == 'todos':
-        w.crash('before_replace', 'todo', 'add', '--role', 'agent', '--text', 'Abandoned')
+        w.original_crash('before_replace', 'todo', 'add', '--role', 'agent', '--text', 'Abandoned')
     else:
         acquire(w, todo, crash=True)
     assert w.drain()['ok'] is True

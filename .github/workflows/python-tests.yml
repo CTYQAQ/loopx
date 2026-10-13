@@ -677,6 +677,9 @@ jobs:
           - {suite: installed, shard: 0}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Cross-version recovery generates originals with a pinned public 1.x source.
+          fetch-depth: 0
       - uses: actions/download-artifact@v7
         with:
           name: chat-bundle-${{ github.sha }}

@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.control_plane.historical_shadow_fixture import historical_workspace_factory, original_1x_source  # noqa: F401
+
 from loopx.control_plane.effect_runtime import EffectRuntimeRejected
 
-
-from shadow_e2e_fixture import workspace
 from loopx.control_plane.coordination import local_authority_shadow_adapter as adapter
 from loopx.control_plane.coordination import local_authority_shadow_outbox as outbox
 
@@ -18,12 +18,12 @@ pytestmark = pytest.mark.stage2c_e2e
 
 
 @pytest.mark.parametrize("window", ["before_commit", "after_commit", "after_cursor"])
-def test_cleanup_permission_failure_reports_verified_commit_and_recovers(
+def test_cleanup_permission_failure_reports_verified_commit_and_recovers(historical_workspace,
     tmp_path: Path, window: str,
 ) -> None:
     """A failed local checkpoint cannot hide a proven candidate transaction."""
-    w = workspace(tmp_path)
-    w.crash(window, "todo", "add", "--role", "agent", "--text", "Durable despite cleanup failure")
+    w = historical_workspace(tmp_path)
+    w.original_crash(window, "todo", "add", "--role", "agent", "--text", "Durable despite cleanup failure")
     directory = outbox.partition_directory(w.runtime, w.goal, "todos")
     before = {path.name: path.read_bytes() for path in directory.iterdir()}
     mode = directory.stat().st_mode & 0o777
@@ -51,14 +51,14 @@ def test_cleanup_permission_failure_reports_verified_commit_and_recovers(
     )["proof"]["transactions"] == view["proof"]["transactions"]
 
 
-def test_missing_cursor_cannot_reuse_a_sequence_when_the_next_writer_arrives_first(tmp_path: Path) -> None:
-    w = workspace(tmp_path)
-    w.add("First complete transaction")
-    w.add("Second complete transaction")
+def test_missing_cursor_cannot_reuse_a_sequence_when_the_next_writer_arrives_first(historical_workspace, tmp_path: Path) -> None:
+    w = historical_workspace(tmp_path)
+    w.original_add("First complete transaction")
+    w.original_add("Second complete transaction")
     directory = outbox.partition_directory(w.runtime, w.goal, "todos")
     (directory / "drain-cursor.json").unlink()
     # No operator drain runs between evidence loss and the next public writer.
-    result = w.add("Writer arrives before cursor recovery")
+    result = w.original_add("Writer arrives before cursor recovery")
     assert result["ok"] is True
     recovered = w.drain()
     assert recovered["ok"] is True, recovered
@@ -68,12 +68,12 @@ def test_missing_cursor_cannot_reuse_a_sequence_when_the_next_writer_arrives_fir
     assert outbox.read_cursor(directory)["last_seq"] == 3
 
 
-def test_small_recovery_budget_makes_progress_through_verified_residue(tmp_path: Path) -> None:
-    w = workspace(tmp_path)
+def test_small_recovery_budget_makes_progress_through_verified_residue(historical_workspace, tmp_path: Path) -> None:
+    w = historical_workspace(tmp_path)
     directory = outbox.partition_directory(w.runtime, w.goal, "todos")
     residue: dict[str, bytes] = {}
     for index in range(3):
-        w.crash("after_commit", "todo", "add", "--role", "agent", "--text", f"Acknowledged transaction {index}")
+        w.original_crash("after_commit", "todo", "add", "--role", "agent", "--text", f"Acknowledged transaction {index}")
         residue.update({path.name: path.read_bytes() for path in directory.glob("*.json") if path.name != "drain-cursor.json"})
         assert w.drain()["ok"] is True
     for name, data in residue.items():
@@ -88,12 +88,12 @@ def test_small_recovery_budget_makes_progress_through_verified_residue(tmp_path:
     assert after["proof"]["transactions"] == before["proof"]["transactions"]
 
 
-def test_raw_residue_mismatch_preserves_every_file_before_any_cleanup(tmp_path: Path) -> None:
-    w = workspace(tmp_path)
+def test_raw_residue_mismatch_preserves_every_file_before_any_cleanup(historical_workspace, tmp_path: Path) -> None:
+    w = historical_workspace(tmp_path)
     directory = outbox.partition_directory(w.runtime, w.goal, "todos")
     residue: dict[str, bytes] = {}
     for index in range(2):
-        w.crash("after_commit", "todo", "add", "--role", "agent", "--text", f"Exact receipt {index}")
+        w.original_crash("after_commit", "todo", "add", "--role", "agent", "--text", f"Exact receipt {index}")
         residue.update({path.name: path.read_bytes() for path in directory.glob("*.json") if path.name != "drain-cursor.json"})
         assert w.drain()["ok"] is True
     for name, data in residue.items():
@@ -108,17 +108,17 @@ def test_raw_residue_mismatch_preserves_every_file_before_any_cleanup(tmp_path: 
     assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
 
 
-def test_real_prepare_io_failure_holds_public_primary_before_replace(tmp_path: Path) -> None:
-    w = workspace(tmp_path)
+def test_real_prepare_io_failure_holds_public_primary_before_replace(historical_workspace, tmp_path: Path) -> None:
+    w = historical_workspace(tmp_path)
     directory = outbox.partition_directory(w.runtime, w.goal, "todos")
     directory.write_text("A real filesystem obstruction, not a directory")
     before = w.state.read_bytes()
-    rejected = w.cli("handoff-mode", "set", "--mode", "soft_claim", success=False)
+    rejected = w.original_cli("handoff-mode", "set", "--mode", "soft_claim", success=False)
     assert rejected["ok"] is False, rejected
     assert w.state.read_bytes() == before
     assert directory.read_text() == "A real filesystem obstruction, not a directory"
     directory.unlink()
-    w.cli("handoff-mode", "set", "--mode", "soft_claim")
+    w.original_cli("handoff-mode", "set", "--mode", "soft_claim")
     assert w.drain()["ok"] is True
     view = adapter.read_local_authority_shadow(runtime_root=w.runtime, goal_id=w.goal, scan_limit=20)
     assert view["head"]["handoff_mode"] == "soft_claim"
@@ -130,11 +130,11 @@ def test_real_prepare_io_failure_holds_public_primary_before_replace(tmp_path: P
     ("window", "claimed_resolution"),
     [("before_replace", "committed_proven_by_readback"), ("before_marker", "abandoned")],
 )
-def test_native_markerless_resolution_requires_source_evidence(
+def test_native_markerless_resolution_requires_source_evidence(historical_workspace,
     tmp_path: Path, window: str, claimed_resolution: str,
 ) -> None:
-    w = workspace(tmp_path)
-    w.crash(window, "todo", "add", "--role", "agent", "--text", "Source proof is not a caller flag")
+    w = historical_workspace(tmp_path)
+    w.original_crash(window, "todo", "add", "--role", "agent", "--text", "Source proof is not a caller flag")
     directory = outbox.partition_directory(w.runtime, w.goal, "todos")
     [entry] = outbox.list_entries(directory)
     request = {"schema_version": "loopx_shadow_entry_delivery_request_v0", "runtime_root": str(w.runtime),
@@ -160,15 +160,15 @@ def test_native_markerless_resolution_requires_source_evidence(
     assert delivered["no_op"] is (window == "before_replace")
 
 
-def test_registry_runtime_override_cannot_bypass_an_active_source_binding(tmp_path: Path) -> None:
+def test_registry_runtime_override_cannot_bypass_an_active_source_binding(historical_workspace, tmp_path: Path) -> None:
     import json
     import subprocess
     import sys
     from shadow_e2e_fixture import REPO
 
-    w = workspace(tmp_path)
+    w = historical_workspace(tmp_path)
     for index in range(3):
-        w.add(f"Qualification evidence {index}")
+        w.original_add(f"Qualification evidence {index}")
     before = w.state.read_bytes()
     other_root = tmp_path / "other-runtime"
     results = []
@@ -189,11 +189,11 @@ def test_registry_runtime_override_cannot_bypass_an_active_source_binding(tmp_pa
 
 
 @pytest.mark.parametrize("missing", ["identity", "candidate"])
-def test_missing_cursor_source_allocation_never_recreates_missing_store_files(
+def test_missing_cursor_source_allocation_never_recreates_missing_store_files(historical_workspace,
     tmp_path: Path, missing: str,
 ) -> None:
-    w = workspace(tmp_path)
-    w.add("Existing generation")
+    w = historical_workspace(tmp_path)
+    w.original_add("Existing generation")
     directory = outbox.partition_directory(w.runtime, w.goal, "todos")
     (directory / "drain-cursor.json").unlink()
     store = w.runtime / "authority-shadow" / "file-v0"
@@ -202,21 +202,21 @@ def test_missing_cursor_source_allocation_never_recreates_missing_store_files(
     shadow = w.runtime / "authority-shadow"
     before = {str(item.relative_to(shadow)): item.read_bytes() for item in shadow.rglob("*") if item.is_file()}
     primary = w.state.read_bytes()
-    result = w.cli("todo", "add", "--role", "agent", "--text", "Read-only recovery cannot bootstrap", success=False)
+    result = w.original_cli("todo", "add", "--role", "agent", "--text", "Read-only recovery cannot bootstrap", success=False)
     assert result["ok"] is False, result
     assert w.state.read_bytes() == primary
     assert not path.exists()
     assert {str(item.relative_to(shadow)): item.read_bytes() for item in shadow.rglob("*") if item.is_file()} == before
 
 
-def test_state_file_override_cannot_attribute_an_unbound_source_to_active_lineage(tmp_path: Path) -> None:
-    w = workspace(tmp_path)
+def test_state_file_override_cannot_attribute_an_unbound_source_to_active_lineage(historical_workspace, tmp_path: Path) -> None:
+    w = historical_workspace(tmp_path)
     other = tmp_path / "OTHER_ACTIVE_STATE.md"
     other.write_bytes(w.state.read_bytes())
     original = w.state.read_bytes()
     outcomes = []
     for mode in ("soft_claim", "hard_lease", "soft_claim", "hard_lease"):
-        outcomes.append(w.cli("handoff-mode", "set", "--mode", mode, "--state-file", str(other), success=False))
+        outcomes.append(w.original_cli("handoff-mode", "set", "--mode", mode, "--state-file", str(other), success=False))
     qualification = w.cli("coordination-shadow", "qualify", success=False)
     assert not any(result.get("ok") and result.get("changed") for result in outcomes), {
         "override_results": outcomes, "qualification_for_bound_source": qualification,

@@ -113,6 +113,14 @@ native source-lease regression matrix now restores independently frozen 1.x
 artifacts instead of recreating retired writers. It covers interrupted fence
 recovery, lock-token renewal, stale generation rejection and later-write
 protection; acquired intent alone cannot mint a new legacy execution grant.
+Retained Monitor and outbox recovery tests now generate originals with a pinned
+public 1.x Git source and execute inspection, drain and receipt settlement with
+the current receiver. A source intent stopped before its business commit is
+retained for import/reconciliation; it cannot authorize a new 2.0 source write.
+Current consumer fixtures use canonical authority, while registered-peer legacy
+assignment and original result shapes are checked only as historical receipts.
+This repairs the executable recovery boundary; it does not qualify every old
+shadow-writer ladder or replace the independent installed/natural-trial gates.
 The backend configuration catalog now describes the same 2.0 creation boundary.
 Exact-head review, core-developer trial and release authorization remain open. Retained outbox recovery and source
 lease release are concrete remaining callers, not grounds for keeping normal

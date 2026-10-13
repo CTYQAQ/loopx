@@ -1,4 +1,4 @@
-"""Legacy Monitor poll recovery at the public CLI boundary."""
+"""Current Monitor consumers and frozen 1.x receipts at the public CLI boundary."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
+
+from tests.control_plane.historical_shadow_fixture import original_1x_source  # noqa: F401
 
 from loopx.control_plane.testing.canary_harness import (
     read_run_index,
@@ -78,7 +80,7 @@ runpy.run_module('loopx.cli', run_name='__main__')
 
 
 def _cli(
-    registry: Path, runtime: Path, *args: str, fault: str | None = None,
+    registry: Path, runtime: Path, *args: str, fault: str | None = None, source: Path = REPO,
 ) -> tuple[int, dict | None]:
     if fault == "quota_commit":
         launcher = [sys.executable, "-c", _QUOTA_COMMIT_FAULT_WRAPPER]
@@ -89,7 +91,7 @@ def _cli(
     result = subprocess.run(
         [*launcher, "--registry", str(registry), "--format", "json",
          "--runtime-root", str(runtime), *args],
-        cwd=REPO,
+        cwd=source,
         env={**os.environ, "LOOPX_USAGE_PING": "0",
              "MONITOR_FAULT_PHASE": fault or ""},
         capture_output=True, text=True, check=False, timeout=60,
@@ -97,14 +99,14 @@ def _cli(
     return result.returncode, json.loads(result.stdout) if result.stdout.strip() else None
 
 
-def _ok(registry: Path, runtime: Path, *args: str) -> dict:
-    code, result = _cli(registry, runtime, *args)
+def _ok(registry: Path, runtime: Path, *args: str, source: Path = REPO) -> dict:
+    code, result = _cli(registry, runtime, *args, source=source)
     assert code == 0, result
     assert isinstance(result, dict)
     return result
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, str, tuple[str, ...]]:
+def _fixture(tmp_path: Path, source: Path | None = None) -> tuple[Path, Path, Path, str, tuple[str, ...]]:
     project, runtime = tmp_path / "project", tmp_path / "runtime"
     state = project / ".codex" / "goals" / GOAL / "ACTIVE_GOAL_STATE.md"
     registry = project / ".loopx" / "registry.json"
@@ -117,14 +119,15 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, str, tuple[str, ...]]:
         adapter_kind="harness_self_improvement", registered_agents=[AGENT],
         quota_allowed_slots=None,
     )
-    monitor = add_goal_todo(
-        registry_path=registry, goal_id=GOAL, role="agent",
-        text="Observe public synthetic target", task_class="continuous_monitor",
-        claimed_by=AGENT,
-        monitor_metadata={"target_key": MONITOR_TARGET, "cadence": "1h",
-                          "next_due_at": "2000-01-01T00:00:00+00:00",
-                          "watch_only": "true"},
-    )
+    if source is None:
+        initialize_canonical_authority(runtime, GOAL, build_todo_runtime_shadow_projection(
+            goal_id=GOAL, handoff_mode="soft_claim", todos=[]), state_path=state)
+    monitor = _ok(registry, runtime, "todo", "add", "--goal-id", GOAL,
+        "--role", "agent", "--text", "Observe public synthetic target",
+        "--task-class", "continuous_monitor", "--claimed-by", AGENT,
+        "--target-key", MONITOR_TARGET, "--cadence", "1h",
+        "--next-due-at", "2000-01-01T00:00:00+00:00", "--watch-only",
+        source=source or REPO)
     turn = "synthetic-monitor-turn-1"
     _ok(registry, runtime, "quota", "should-run", "--goal-id", GOAL,
         "--agent-id", AGENT, "--runtime-profile", "generic_cli",
@@ -178,11 +181,12 @@ def _engage_fence(runtime: Path) -> None:
     }), encoding="utf-8")
 
 
+@pytest.mark.parametrize("historical", [False, True], ids=["canonical", "original-receipt"])
 @pytest.mark.parametrize("owner", [AGENT, "registered-builder", "unknown-builder"])
 def test_public_monitor_successor_claim_checks_registered_peer_before_writing(
-    tmp_path: Path, owner: str,
+    original_source, tmp_path: Path, owner: str, historical: bool,
 ) -> None:
-    registry, runtime, state, _, poll = _fixture(tmp_path)
+    registry, runtime, state, _, poll = _fixture(tmp_path, original_source if historical else None)
     data = json.loads(registry.read_text(encoding="utf-8"))
     data["goals"][0]["coordination"]["registered_agents"].append("registered-builder")
     registry.write_text(json.dumps(data), encoding="utf-8")
@@ -190,7 +194,7 @@ def test_public_monitor_successor_claim_checks_registered_peer_before_writing(
     before_index = read_run_index(runtime, GOAL)
     transaction_dir = runtime / "goals" / GOAL / "runs" / ".transactions" / "quota-monitor-poll"
     before_receipts = {path.name: path.read_bytes() for path in transaction_dir.glob("*.json")}
-    code, response = _cli(registry, runtime, *poll[:-1], "--next-claimed-by", owner, "--execute")
+    code, response = _cli(registry, runtime, *poll[:-1], "--next-claimed-by", owner, "--execute", source=original_source if historical else REPO)
     assert response is not None
     if owner == "unknown-builder":
         assert code != 0
@@ -199,6 +203,11 @@ def test_public_monitor_successor_claim_checks_registered_peer_before_writing(
         assert state.read_bytes() == before_state
         assert read_run_index(runtime, GOAL) == before_index
         assert {path.name: path.read_bytes() for path in transaction_dir.glob("*.json")} == before_receipts
+        assert _poll_events(runtime) == []
+    elif owner != AGENT and not historical:
+        assert code != 0 and "actor to match owner" in response["reason"]
+        assert state.read_bytes() == before_state
+        assert _successors(registry, runtime) == {}
         assert _poll_events(runtime) == []
     else:
         assert code == 0, json.dumps(response, indent=2)
@@ -239,13 +248,13 @@ def test_monitor_batch_handler_classifies_expected_input_errors() -> None:
 
 
 @pytest.mark.parametrize("fault", ["before", "after"])
-def test_interrupted_legacy_poll_retries_one_complete_batch(
+def test_original_monitor_effect_recovers_but_uncommitted_intent_cannot_write(original_source,
     tmp_path: Path, fault: str,
 ) -> None:
-    registry, runtime, state, monitor_id, poll = _fixture(tmp_path)
+    registry, runtime, state, monitor_id, poll = _fixture(tmp_path, original_source)
     before = state.read_bytes()
 
-    code, result = _cli(registry, runtime, *poll, fault=fault)
+    code, result = _cli(registry, runtime, *poll, fault=fault, source=original_source)
     assert (code, result) == (83, None)
     if fault == "before":
         assert state.read_bytes() == before
@@ -254,6 +263,14 @@ def test_interrupted_legacy_poll_retries_one_complete_batch(
         assert set(_successors(registry, runtime)) == {AGENT_TASK, USER_TASK}
     assert _poll_events(runtime) == []
 
+    if fault == "before":
+        code, refusal = _cli(registry, runtime, *poll)
+        assert code != 0 and "canonical" in refusal["reason"].lower()
+        assert state.read_bytes() == before
+        assert _successors(registry, runtime) == {}
+        assert _poll_events(runtime) == []
+        assert _quota_receipt(runtime).exists()
+        return
     recovered = _ok(registry, runtime, *poll)
     successors = _successors(registry, runtime)
     assert set(successors) == {AGENT_TASK, USER_TASK}
@@ -270,10 +287,10 @@ def test_interrupted_legacy_poll_retries_one_complete_batch(
     assert read_run_index(runtime, GOAL) == index_after
 
 
-def test_identity_less_legacy_pending_cannot_guess_successors(tmp_path: Path) -> None:
-    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path)
+def test_identity_less_legacy_pending_cannot_guess_successors(original_source, tmp_path: Path) -> None:
+    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path, original_source)
     before = state.read_bytes()
-    code, result = _cli(registry, runtime, *poll, fault="before")
+    code, result = _cli(registry, runtime, *poll, fault="before", source=original_source)
     assert (code, result) == (83, None)
     pending_path = _quota_receipt(runtime)
     pending = json.loads(pending_path.read_text(encoding="utf-8"))
@@ -286,16 +303,16 @@ def test_identity_less_legacy_pending_cannot_guess_successors(tmp_path: Path) ->
 
     code, rejected = _cli(registry, runtime, *poll)
     assert code != 0, rejected
-    assert "reconciliation" in str(rejected.get("reason")), rejected
+    assert "canonical authority" in str(rejected.get("reason")), rejected
     assert state.read_bytes() == before
     assert _successors(registry, runtime) == {}
     assert _poll_events(runtime) == []
     assert _quota_receipt(runtime).exists()
 
 
-def test_malformed_business_receipt_is_not_treated_as_absent(tmp_path: Path) -> None:
-    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path)
-    assert _cli(registry, runtime, *poll, fault="after") == (83, None)
+def test_malformed_business_receipt_is_not_treated_as_absent(original_source, tmp_path: Path) -> None:
+    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path, original_source)
+    assert _cli(registry, runtime, *poll, fault="after", source=original_source) == (83, None)
     # A present JSON null receipt is corrupt history, not an unstarted effect.
     text = re.sub(r"(<!-- loopx:monitor-batch:[a-f0-9]+ )[^ ]+ -->",
                   r"\g<1>bnVsbA== -->", state.read_text(encoding="utf-8"))
@@ -307,10 +324,10 @@ def test_malformed_business_receipt_is_not_treated_as_absent(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize("held_drain_lock", [False, True], ids=["uncontended", "deferred"])
-def test_enabled_shadow_business_replay_then_bounded_drain_recovers_batch(
+def test_enabled_shadow_business_replay_then_bounded_drain_recovers_batch(original_source,
     tmp_path: Path, held_drain_lock: bool,
 ) -> None:
-    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path)
+    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path, original_source)
     config = json.loads(registry.read_text(encoding="utf-8"))
     config["goals"][0]["coordination"]["runtime_shadow"] = {
         "enabled": True,
@@ -319,9 +336,9 @@ def test_enabled_shadow_business_replay_then_bounded_drain_recovers_batch(
     }
     registry.write_text(json.dumps(config), encoding="utf-8")
     _ok(registry, runtime, "coordination-shadow", "bootstrap", "--goal-id", GOAL,
-        "--execute")
+        "--execute", source=original_source)
 
-    assert _cli(registry, runtime, *poll, fault="after") == (83, None)
+    assert _cli(registry, runtime, *poll, fault="after", source=original_source) == (83, None)
     outbox = runtime / "authority-shadow" / "outbox" / GOAL / "todos"
     (prepared,) = outbox.glob("*.prepared.json")
     prepared_bytes = prepared.read_bytes()
@@ -384,9 +401,9 @@ def test_enabled_shadow_business_replay_then_bounded_drain_recovers_batch(
     )["proof"]["transactions"] == view["proof"]["transactions"]
 
 
-def test_committed_receipt_without_batch_version_still_replays(tmp_path: Path) -> None:
-    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path)
-    committed = _ok(registry, runtime, *poll)
+def test_committed_receipt_without_batch_version_still_replays(original_source, tmp_path: Path) -> None:
+    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path, original_source)
+    committed = _ok(registry, runtime, *poll, source=original_source)
     receipt = json.loads(_quota_receipt(runtime).read_text(encoding="utf-8"))
     assert receipt["status"] != "provider_pending"
     assert "legacy_batch_version" not in receipt
@@ -414,16 +431,25 @@ def test_committed_receipt_without_batch_version_still_replays(tmp_path: Path) -
 
 @pytest.mark.parametrize("dry_run", [True, False])
 @pytest.mark.parametrize("user_class", ["user_action", "user_gate"])
-def test_public_monitor_writeback_retains_todo_result_contract(
+def test_original_monitor_writeback_contract_replays_and_preview_grants_no_write(original_source,
     tmp_path: Path, dry_run: bool, user_class: str,
 ) -> None:
-    registry, runtime, state, monitor_id, poll = _fixture(tmp_path)
+    registry, runtime, state, monitor_id, poll = _fixture(tmp_path, original_source)
     before = state.read_bytes()
     args = list(poll)
     args[args.index("user_action")] = user_class
     if dry_run:
         args.remove("--execute")
-    writeback = _ok(registry, runtime, *args)["todo_writeback"]
+    if dry_run:
+        writeback = _ok(registry, runtime, *args, source=original_source)["todo_writeback"]
+        code, refusal = _cli(registry, runtime, *poll)
+        assert code != 0 and "canonical authority" in refusal["reason"]
+        assert _poll_events(runtime) == []
+    else:
+        # Interrupt after the business effect, before quota settlement.
+        assert _cli(registry, runtime, *args, fault="after", source=original_source) == (83, None)
+        # The current receiver must expose the original complete result contract.
+        writeback = _ok(registry, runtime, *args)["todo_writeback"]
     update = writeback["todo_update"]
     assert update["dry_run"] is dry_run
     assert update["changed"] is True
@@ -452,7 +478,12 @@ def test_public_monitor_writeback_retains_todo_result_contract(
         assert item["state_file"] == str(state)
         assert item["project"] == str(state.parents[3])
         assert item["handoff_mode"] == "legacy"
-        assert item["coordination_runtime_shadow"] == update["coordination_runtime_shadow"]
+        if dry_run:
+            assert item["coordination_runtime_shadow"] == update["coordination_runtime_shadow"]
+        else:
+            # Post-commit drain diagnostics were never part of the atomic receipt.
+            assert "coordination_runtime_shadow" not in item
+            assert "coordination_runtime_shadow" not in update
     assert agent["unblocks_todo_id"] == monitor_id
     assert agent["agent_id"] is None
     assert user["agent_id"] == AGENT
@@ -501,14 +532,14 @@ def test_existing_successor_semantics_are_checked_before_batch_write(
         writeback = _ok(registry, runtime, *poll)["todo_writeback"]
         agent = writeback["next_todos"][0]
         assert agent["todo_id"] == existing["todo_id"]
-        assert agent["added"] is False and agent["already_exists"] is True
-        assert agent["metadata_updated"] is False
+        assert [todo["todo_id"] for todo in _successors(registry, runtime).values()
+                if todo["role"] == "agent"] == [existing["todo_id"]]
         assert len(_poll_events(runtime)) == 1
 
 
-def test_pending_legacy_receipt_replays_after_canonical_cutover(tmp_path: Path) -> None:
-    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path)
-    code, result = _cli(registry, runtime, *poll, fault="after")
+def test_pending_legacy_receipt_replays_after_canonical_cutover(original_source, tmp_path: Path) -> None:
+    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path, original_source)
+    code, result = _cli(registry, runtime, *poll, fault="after", source=original_source)
     assert (code, result) == (83, None)
     original_ids = {todo["todo_id"] for todo in _successors(registry, runtime).values()}
     state_after = state.read_bytes()
@@ -539,10 +570,10 @@ def test_pending_legacy_receipt_replays_after_canonical_cutover(tmp_path: Path) 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_historical_canonical_pending_plan_settles_existing_business_receipt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
+    original_source, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
 ) -> None:
     isolate_sqlite_runtime(tmp_path, monkeypatch)
-    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path)
+    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path, original_source)
     items = list_goal_todos(registry_path=registry, goal_id=GOAL)["todos"]
     projection = build_todo_runtime_shadow_projection(
         goal_id=GOAL, todos=items, handoff_mode="soft_claim")
@@ -579,8 +610,8 @@ def test_historical_canonical_pending_plan_settles_existing_business_receipt(
     assert read_run_index(runtime, GOAL) == index_after
 
 
-def test_legacy_writer_fence_rejects_full_monitor_batch(tmp_path: Path) -> None:
-    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path)
+def test_legacy_writer_fence_rejects_full_monitor_batch(original_source, tmp_path: Path) -> None:
+    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path, original_source)
     before = state.read_bytes()
     _engage_fence(runtime)
 
@@ -590,18 +621,18 @@ def test_legacy_writer_fence_rejects_full_monitor_batch(tmp_path: Path) -> None:
     assert _poll_events(runtime) == []
 
 
-def test_atomic_successor_reconciles_existing_typed_next_action(tmp_path: Path) -> None:
-    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path)
+def test_atomic_successor_reconciles_existing_typed_next_action(original_source, tmp_path: Path) -> None:
+    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path, original_source)
     lower = _ok(registry, runtime, "todo", "add", "--goal-id", GOAL,
         "--role", "agent", "--text", "[P1] Existing lower priority task",
-        "--task-class", "advancement_task", "--action-kind", "validate")
+        "--task-class", "advancement_task", "--action-kind", "validate", source=original_source)
     with state.open("a", encoding="utf-8") as handle:
         handle.write("\n## Next Action\n\n- [P1] Existing lower priority task\n"
             "<!-- loopx:next-action schema=loopx_next_action_binding_v0 "
             f"todo_id={lower['todo_id']} -->\n")
     command = list(poll)
     command[command.index(AGENT_TASK)] = "[P0] Validate urgent observed result"
-    code, result = _cli(registry, runtime, *command, fault="after")
+    code, result = _cli(registry, runtime, *command, fault="after", source=original_source)
     assert (code, result) == (83, None)
     successor = next(todo for todo in _ok(registry, runtime, "todo", "list",
         "--goal-id", GOAL)["todos"] if todo.get("unblocks_todo_id") == _monitor_id)
@@ -615,11 +646,11 @@ def test_atomic_successor_reconciles_existing_typed_next_action(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("change", ["rename", "complete", "archive"])
-def test_pending_retry_keeps_original_successor_identity_after_public_edit(
+def test_pending_retry_keeps_original_successor_identity_after_public_edit(original_source,
     tmp_path: Path, change: str,
 ) -> None:
-    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path)
-    code, result = _cli(registry, runtime, *poll, fault="after")
+    registry, runtime, state, _monitor_id, poll = _fixture(tmp_path, original_source)
+    code, result = _cli(registry, runtime, *poll, fault="after", source=original_source)
     assert (code, result) == (83, None)
     first = _successors(registry, runtime)
     assert set(first) == {AGENT_TASK, USER_TASK}
@@ -629,14 +660,14 @@ def test_pending_retry_keeps_original_successor_identity_after_public_edit(
     if change == "rename":
         _ok(registry, runtime, "todo", "update", "--goal-id", GOAL,
             "--todo-id", agent_id, "--role", "agent", "--agent-id", AGENT,
-            "--text", "Validate observed synthetic head with revised scope")
+            "--text", "Validate observed synthetic head with revised scope", source=original_source)
     else:
         _ok(registry, runtime, "todo", "complete", "--goal-id", GOAL,
             "--todo-id", agent_id, "--role", "agent", "--agent-id", AGENT,
-            "--no-follow-up", "--evidence", "Synthetic validation complete")
+            "--no-follow-up", "--evidence", "Synthetic validation complete", source=original_source)
         if change == "archive":
             _ok(registry, runtime, "todo", "archive-completed", "--goal-id", GOAL,
-                "--role", "agent", "--max-active-done", "0", "--execute")
+                "--role", "agent", "--max-active-done", "0", "--execute", source=original_source)
             archived = _ok(registry, runtime, "todo", "list", "--goal-id", GOAL,
                            "--role", "agent", "--todo-id", agent_id)
             assert archived["todo"]["archive_state"] == "archive"

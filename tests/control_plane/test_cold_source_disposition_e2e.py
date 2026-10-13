@@ -20,7 +20,7 @@ import pytest
 from loopx.control_plane.coordination.coordination_state_contract_generated import (
     LOCAL_AUTHORITY_SHADOW_READ_REQUEST_SCHEMA,
 )
-from tests.control_plane.shadow_e2e_fixture import workspace
+from tests.control_plane.historical_shadow_fixture import historical_workspace_factory, original_1x_source  # noqa: F401
 from tests.control_plane.canonical_authority_fixture import isolate_sqlite_runtime
 
 
@@ -85,8 +85,8 @@ def originals(path):
             if p.is_file() and not p.name.endswith(".lock")}
 
 
-def cold_workspace(path):
-    fixture = workspace(path, bootstrap=False)
+def cold_workspace(path, historical_workspace):
+    fixture = historical_workspace(path, bootstrap=False)
     registry = fixture.state.parent / ".loopx/registry.json"
     registry.parent.mkdir()
     fixture.registry.rename(registry)
@@ -141,11 +141,11 @@ def provider_todos(receiver, fixture):
     ("before_commit", "committed", False),
     ("after_commit", "committed", False),
 ])
-def test_stopped_original_todo_recovers_once_without_python_producer(
+def test_stopped_original_todo_recovers_once_without_python_producer(historical_workspace,
     tmp_path, receiver, window, resolution, no_op,
 ):
-    fixture = workspace(tmp_path)
-    fixture.crash(window, "todo", "add", "--role", "agent", "--text", "Interrupted original")
+    fixture = historical_workspace(tmp_path)
+    fixture.original_crash(window, "todo", "add", "--role", "agent", "--text", "Interrupted original")
     source = fixture.state.read_bytes()
     before = inspect(fixture)
     partition = fixture.runtime / "authority-shadow/outbox" / fixture.goal / "todos"
@@ -182,13 +182,13 @@ def test_stopped_original_todo_recovers_once_without_python_producer(
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 @pytest.mark.parametrize("window", ["before_commit", "after_commit"])
-def test_original_lease_disposition_requires_release_before_cold_import(
+def test_original_lease_disposition_requires_release_before_cold_import(historical_workspace,
     tmp_path, monkeypatch, receiver, receiver_package, provider, window,
 ):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
-    fixture = cold_workspace(tmp_path / "project")
-    todo = fixture.add("Original leased task")["todo_id"]
-    fixture.crash(window, "task-lease", "acquire", "--todo-id", todo, "--owner", "agent-a",
+    fixture = cold_workspace(tmp_path / "project", historical_workspace)
+    todo = fixture.original_add("Original leased task")["todo_id"]
+    fixture.original_crash(window, "task-lease", "acquire", "--todo-id", todo, "--owner", "agent-a",
                   "--idempotency-key", "original", "--ttl-seconds", "120")
     path = fixture.runtime / "goals" / fixture.goal / "task-leases" / (todo + ".json")
     lease = path.read_bytes()
@@ -254,14 +254,14 @@ def test_original_lease_disposition_requires_release_before_cold_import(
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_unproved_original_archival_then_cold_import_keeps_history_inert(
+def test_unproved_original_archival_then_cold_import_keeps_history_inert(historical_workspace,
     tmp_path, monkeypatch, receiver, receiver_package, provider,
 ):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
-    fixture = cold_workspace(tmp_path / "project")
-    fixture.crash("before_marker", "handoff-mode", "set", "--mode", "soft_claim")
-    fixture.cli("handoff-mode", "set", "--mode", "hard_lease")
-    source_todo = fixture.add("Later source requirement")["todo_id"]
+    fixture = cold_workspace(tmp_path / "project", historical_workspace)
+    fixture.original_crash("before_marker", "handoff-mode", "set", "--mode", "soft_claim")
+    fixture.original_cli("handoff-mode", "set", "--mode", "hard_lease")
+    source_todo = fixture.original_add("Later source requirement")["todo_id"]
     pending_backup = backup(fixture, "ambiguous-original")
     before = originals(fixture.runtime)
     result = drain(receiver, fixture)
@@ -335,7 +335,7 @@ def test_unproved_original_archival_then_cold_import_keeps_history_inert(
     ("before_replace", False), ("before_marker", True),
     ("before_commit", True), ("after_commit", True),
 ])
-def test_original_outbox_disposition_then_cold_import_preserves_receipts_and_later_writes(
+def test_original_outbox_disposition_then_cold_import_preserves_receipts_and_later_writes(historical_workspace,
     tmp_path, monkeypatch, receiver, receiver_package, provider, window, committed,
 ):
     """Join original effect recovery to cold import, without replaying history.
@@ -345,8 +345,8 @@ def test_original_outbox_disposition_then_cold_import_preserves_receipts_and_lat
     settled source, including when the originating interpreter is a wheel.
     """
     isolate_sqlite_runtime(tmp_path, monkeypatch)
-    fixture = cold_workspace(tmp_path / "project")
-    fixture.crash(window, "todo", "add", "--role", "agent", "--text", "Interrupted original")
+    fixture = cold_workspace(tmp_path / "project", historical_workspace)
+    fixture.original_crash(window, "todo", "add", "--role", "agent", "--text", "Interrupted original")
     source = fixture.state.read_bytes()
     partition = fixture.runtime / "authority-shadow/outbox" / fixture.goal / "todos"
     prepared_path = next(partition.glob("*.prepared.json"))

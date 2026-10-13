@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+from tests.control_plane.historical_shadow_fixture import historical_workspace_factory, original_1x_source  # noqa: F401
 from tests.control_plane.shadow_e2e_fixture import workspace
 
 
@@ -17,9 +18,9 @@ def capture_bytes(fixture):
             for p in root.rglob("*") if p.is_file() and not p.name.endswith(".lock")}
 
 
-def test_capture_inventory_keeps_original_history_and_outbox_bytes(tmp_path):
-    fixture = workspace(tmp_path)
-    fixture.add("Original captured operation")
+def test_capture_inventory_keeps_original_history_and_outbox_bytes(historical_workspace, tmp_path):
+    fixture = historical_workspace(tmp_path)
+    fixture.original_add("Original captured operation")
     outbox = fixture.runtime / "authority-shadow" / "outbox" / fixture.goal / "todos"
     outbox.mkdir(exist_ok=True)
     residue = outbox / "unrecognized-original-receipt.json"
@@ -47,9 +48,9 @@ def test_capture_inventory_keeps_original_history_and_outbox_bytes(tmp_path):
     assert not (fixture.runtime / "authority").exists()
 
 
-def test_capture_inventory_keeps_rolled_back_operation_archives(tmp_path):
-    fixture = workspace(tmp_path)
-    fixture.add("Original operation before rollback")
+def test_capture_inventory_keeps_rolled_back_operation_archives(historical_workspace, tmp_path):
+    fixture = historical_workspace(tmp_path)
+    fixture.original_add("Original operation before rollback")
     revision = fixture.cli("coordination-shadow", "inspect")["inspection"]["provider_revision"]
     rollback = fixture.cli("coordination-shadow", "rollback", "--provider-revision", revision, "--execute")
     assert rollback["rollback"]["status"] == "applied"
@@ -67,10 +68,10 @@ def test_capture_inventory_keeps_rolled_back_operation_archives(tmp_path):
 
 
 @pytest.mark.parametrize("window", ["before_commit", "after_commit"])
-def test_original_lease_outbox_uses_its_own_partition_without_renewal_or_cleanup(tmp_path, window):
-    fixture = workspace(tmp_path)
-    todo_id = fixture.add("Original leased task")["todo_id"]
-    fixture.crash(window, "task-lease", "acquire", "--todo-id", todo_id,
+def test_original_lease_outbox_uses_its_own_partition_without_renewal_or_cleanup(historical_workspace, tmp_path, window):
+    fixture = historical_workspace(tmp_path)
+    todo_id = fixture.original_add("Original leased task")["todo_id"]
+    fixture.original_crash(window, "task-lease", "acquire", "--todo-id", todo_id,
                   "--owner", "agent-a", "--idempotency-key", "original-lease", "--ttl-seconds", "120")
     before = capture_bytes(fixture)
     lease_path = fixture.runtime / "goals" / fixture.goal / "task-leases" / (todo_id + ".json")
@@ -87,8 +88,8 @@ def test_original_lease_outbox_uses_its_own_partition_without_renewal_or_cleanup
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
-def test_capture_inventory_reads_original_observation_through_existing_store(tmp_path, corrupt):
-    fixture = workspace(tmp_path)
+def test_capture_inventory_reads_original_observation_through_existing_store(historical_workspace, tmp_path, corrupt):
+    fixture = historical_workspace(tmp_path)
     source = fixture.runtime / "authority-shadow" / "file-v0"
     retained = fixture.runtime / "authority-shadow" / "file" / fixture.goal
     retained.mkdir(parents=True)
@@ -112,8 +113,8 @@ def test_capture_inventory_reads_original_observation_through_existing_store(tmp
 
 
 @pytest.mark.parametrize("unsafe", ["corrupt_history", "symlink_outbox", "symlink_shadow_root", "invalid_original_result"])
-def test_capture_inventory_refuses_unreadable_or_unsafe_original_history(tmp_path, unsafe):
-    fixture = workspace(tmp_path)
+def test_capture_inventory_refuses_unreadable_or_unsafe_original_history(historical_workspace, tmp_path, unsafe):
+    fixture = historical_workspace(tmp_path)
     if unsafe == "corrupt_history":
         store = next((fixture.runtime / "authority-shadow" / "file-v0").glob("authority-store-*.json"))
         store.write_text('{"invalid":true}')
@@ -139,9 +140,9 @@ def test_capture_inventory_refuses_unreadable_or_unsafe_original_history(tmp_pat
 
 
 @pytest.mark.parametrize("window", ["before_commit", "after_commit"])
-def test_capture_inventory_does_not_drain_crashed_original_outbox(tmp_path, window):
-    fixture = workspace(tmp_path)
-    fixture.crash(window, "todo", "add", "--role", "agent", "--text", "Retained original operation")
+def test_capture_inventory_does_not_drain_crashed_original_outbox(historical_workspace, tmp_path, window):
+    fixture = historical_workspace(tmp_path)
+    fixture.original_crash(window, "todo", "add", "--role", "agent", "--text", "Retained original operation")
     before = capture_bytes(fixture)
     result = fixture.cli("coordination-shadow", "inspect-source")["source_inventory"]
     entries = result["capture"]["artifacts"]["outbox"]["inventory"]["entries"]
@@ -160,10 +161,10 @@ def test_capture_inventory_does_not_drain_crashed_original_outbox(tmp_path, wind
 
 
 @pytest.mark.parametrize("defect", ["receipt_bytes", "orphan_marker", "foreign_lineage"])
-def test_outbox_review_refuses_unproved_disposition_but_retains_original_bytes(tmp_path, defect):
-    fixture = workspace(tmp_path)
+def test_outbox_review_refuses_unproved_disposition_but_retains_original_bytes(historical_workspace, tmp_path, defect):
+    fixture = historical_workspace(tmp_path)
     window = "after_commit" if defect == "receipt_bytes" else "before_commit"
-    fixture.crash(window, "todo", "add", "--role", "agent", "--text", "Original operation")
+    fixture.original_crash(window, "todo", "add", "--role", "agent", "--text", "Original operation")
     directory = fixture.runtime / "authority-shadow" / "outbox" / fixture.goal / "todos"
     prepared = next(directory.glob("*.prepared.json"))
     if defect == "orphan_marker":
@@ -186,8 +187,8 @@ def test_outbox_review_refuses_unproved_disposition_but_retains_original_bytes(t
 
 
 @pytest.mark.parametrize("archive", ["candidate", "outbox"])
-def test_capture_inventory_refuses_missing_terminal_rollback_archive(tmp_path, archive):
-    fixture = workspace(tmp_path)
+def test_capture_inventory_refuses_missing_terminal_rollback_archive(historical_workspace, tmp_path, archive):
+    fixture = historical_workspace(tmp_path)
     revision = fixture.cli("coordination-shadow", "inspect")["inspection"]["provider_revision"]
     result = fixture.cli("coordination-shadow", "rollback", "--provider-revision", revision, "--execute")
     if archive == "candidate":
