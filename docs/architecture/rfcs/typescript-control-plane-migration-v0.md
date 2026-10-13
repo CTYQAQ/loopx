@@ -140,6 +140,14 @@ current File/SQLite races independently prove quiescence and policy admission
 against one canonical head. Legacy-source overrides refuse before writing.
 These are executable recovery and current-consumer checks, not sustained
 operation or substitutes for the independent installed/natural-trial gates.
+The callerless Python lifecycle authorization chain and its facade exports are
+retired. Canonical File/SQLite entrypoints qualify claim eligibility, immutable
+rejection, actor/delegation and lease fences; configuration-time grant validation
+and registry fact transport retain their active callers. New delegated terminal
+receipts retain the accepted authority reason; original receipt recovery preserves
+historical results and rejects a changed reason under the same operation identity.
+This closes that private decision chain, not the remaining monitor/handoff caller
+families, installed import journey or sustained SQLite qualification.
 The backend configuration catalog now describes the same 2.0 creation boundary.
 Exact-head review, core-developer trial and release authorization remain open. Retained outbox recovery and source
 lease release are concrete remaining callers, not grounds for keeping normal
