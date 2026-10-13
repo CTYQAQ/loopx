@@ -621,6 +621,13 @@ Host adapter 须在固定版本验证原生历史重建，包括 compaction 和�
 在该独立路径实现并验证前保留生产代码的 completed-final-cursor 检查；不能
 静默丢弃 active turn，也不能把所有 interrupted 会话视为可接续研究状态。
 
+quota transport 已增加显式本地 pre-output rendezvous。真实原生 Host/CLI 验证
+绑定 pending command event 与保存的原 guard digest，在没有额外模型调用时
+fork，并释放同一响应，不新增 guard receipt。丢失确认或字节变化会失败，不另造
+捕获点。此处只补齐响应顺序：工具子进程 yield 仍可能让模型继续；来源 writer
+静止、effect 核回、worker/controller 自动衔接和隔离有效接续仍须完成。
+completed cursor 的验收检查保持不变。
+
 Host profile 还须声明路径可移植性。原生索引可能保留绝对 guest 路径：资格化
 须在新隔离环境保留这些路径，或使用 Host 支持的 import/rebinding API；手改
 原生数据库行不能资格化导入。有效 Host 配置及已安装工具/skill 版本须与凭证

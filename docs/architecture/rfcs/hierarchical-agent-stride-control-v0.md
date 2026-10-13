@@ -742,6 +742,16 @@ qualifying that cursor. Keep the completed-final-cursor production check until
 this separate path is implemented and qualified; do not silently drop the active
 turn or classify every interrupted session as resumable research state.
 
+The quota transport now has an explicit local pre-output rendezvous. Its real
+native/CLI qualification binds a pending command event and the saved original
+guard digest, forks without another model call, and releases that same response
+without another guard receipt. Lost acknowledgement and altered bytes fail
+without manufacturing another point. This closes the response-ordering gap only:
+work-subprocess yielding can still return control to the model, so source writer
+quiescence, effect reconciliation, automatic worker/controller connection and
+isolated useful continuation remain required. The completed-cursor acceptance
+check remains unchanged.
+
 The Host profile must also declare path portability. A native index can retain
 absolute guest paths: qualification must either preserve those paths inside a
 fresh isolated environment or use the Host's supported import/rebinding API.

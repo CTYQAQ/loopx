@@ -185,6 +185,36 @@ If that guard projects a fresh replan, the missed first attempt is retained even
 without readable declaration bytes, so repairing the file cannot capture later
 state under the same obligation. Subsequent distinct replans remain eligible.
 
+A Host can now explicitly hold a **mid-wake quota response** using
+`quota should-run ... --decision-output-root CAPTURE_ROOT
+--decision-handoff-socket SOCKET`. The socket must already be listening in a
+private physical directory owned by the same user (Unix only). After writing the
+complete original decision, the CLI sends one newline-delimited JSON object
+`{"path": ".../decision.json", "sha256": "..."}` and withholds successful output
+until it receives exactly `{"released": true, "sha256": "..."}` for those bytes.
+The existing selection command preserves both transport options. Ordinary CLI
+output and admission remain unchanged when the option is absent; this option
+does not enable TurnEnvelope.
+
+`benchmark.runtime.checkpoint.held_quota_decision` is the matching local Host
+context: it validates the declared capture root/digest and asks the existing
+TypeScript replan selector for capture intent, then releases the original
+response on normal context exit. A Host exception, disconnected/lost reply,
+changed capture or the 120-second transport deadline fails the call while
+retaining the original admission and captured decision. Recover that original
+identity; do not obtain a replacement guard to reconstruct a missed point.
+
+This transport is a prerequisite, **not automatic mid-wake checkpoint capture**.
+The actual native Host/CLI test binds the pending command event, forks while the
+real guard output is withheld, and verifies no duplicate guard receipt. It does
+not pause writers, reconcile branch effects or certify an interrupted cursor.
+Native tools can yield control before their subprocess exits; withholding stdout
+alone is not a model or writer barrier. The production worker still needs the
+Host rendezvous connected to its controller-owned writer barrier, canonical state
+adoption and isolated useful continuation before this profile can launch research
+runs. Omit the option to disable the transport; no socket, hold or extra read is
+then performed.
+
 Add `"native_session": true` to include Codex's completed native cursor, all
 retained history pages, rollout/compaction records and native index/history SQLite
 stores. The adapter verifies the native session's actual workspace, reads its full

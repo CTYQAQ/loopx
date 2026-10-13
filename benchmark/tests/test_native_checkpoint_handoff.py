@@ -112,3 +112,95 @@ print('WITHHELD_RESULT')
             assert (source_work / "source-result").read_text() == "one original execution"
             assert not (branch_work / "source-result").exists()
             assert len(calls) == 4 and "WITHHELD_RESULT" in json.dumps(requests[3])
+
+
+@pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN") or os.name != "posix",
+                   reason="Requires a real native Host and local Unix transport")
+def test_real_quota_output_is_held_across_native_fork(tmp_path):
+    """The real guard executes once; neither branch observes it before release."""
+    import hashlib
+    import socket
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    from benchmark.runtime.checkpoint import held_quota_decision
+    from tests.control_plane.test_quota_settlement_cli import (
+        AGENT_ID, GOAL_ID, TURN_ID, _write_fixture, _configure_autonomous_replan_fixture,
+        _heartbeat_receipt_count,
+    )
+
+    project, runtime, registry = _write_fixture(tmp_path / "authority")
+    _configure_autonomous_replan_fixture(project, runtime, registry)
+    capture_root = project / "captures"
+    capture_root.mkdir(mode=0o700)
+    requests = []
+    with tempfile.TemporaryDirectory(prefix="handoff-", dir="/tmp") as short:
+        socket_path = Path(short).resolve() / "host.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(socket_path))
+            listener.listen(1)
+            listener.settimeout(30)
+            argv = [sys.executable, "-m", "loopx.cli", "--format", "json", "--registry", str(registry),
+                    "--runtime-root", str(runtime), "quota", "should-run", "--goal-id", GOAL_ID,
+                    "--agent-id", AGENT_ID, "--turn-instance-id", TURN_ID,
+                    "--runtime-profile", "generic_cli", "--available-capability", "shell",
+                    "--available-capability", "filesystem_read", "--decision-output-root", str(capture_root),
+                    "--decision-handoff-socket", str(socket_path)]
+            command = "PYTHONPATH=" + shlex.quote(str(Path(__file__).resolve().parents[2])) + " " + shlex.join(argv)
+
+            def response(request, index, message):
+                requests.append(request)
+                if index == 2:
+                    return {"type": "function_call", "id": "fc_guard", "call_id": "call_guard",
+                            "name": "exec_command", "arguments": json.dumps({
+                                "cmd": command, "yield_time_ms": 10000, "max_output_tokens": 200})}
+                message["content"][0]["text"] = "RESEARCH_BEFORE_GUARD" if index == 1 else "Continued."
+                return message
+
+            binary = os.environ["LOOPX_NATIVE_CHECKPOINT_BIN"]
+            with real_native_source(tmp_path / "native", binary, project, close_source=True,
+                    response_builder=response, sandbox="danger-full-access") as (env, source, _, calls):
+                with StdioNativeGoalTransport.spawn([binary, "app-server", "--listen", "stdio://"],
+                        cwd=str(project), env=env, stderr=subprocess.DEVNULL, response_timeout_sec=30) as host:
+                    host.request("initialize", {"clientInfo": {"name": "quota_handoff_fixture", "version": "0.1"},
+                                                "capabilities": {"experimentalApi": True}})
+                    host.notify("initialized", {})
+                    host.request("thread/resume", {"threadId": source, "cwd": str(project),
+                        "sandbox": "danger-full-access", "approvalPolicy": "never", "persistExtendedHistory": True})
+                    turn = host.request("turn/start", {"threadId": source, "input": [
+                        {"type": "text", "text": "Execute the original synthetic guard."}]})["turn"]["id"]
+                    with held_quota_decision(listener, capture_root, goal_id=GOAL_ID,
+                            agent_id=AGENT_ID, turn_instance_id=TURN_ID) as held:
+                        assert held["quota"]["ok"] is True and len(calls) == 2
+                        assert held["intent"]["capture"] is True
+                        assert held["sha256"] == hashlib.sha256(held["path"].read_bytes()).hexdigest()
+                        receipts = _heartbeat_receipt_count(runtime, TURN_ID)
+                        assert receipts >= 1
+                        # Native events, rather than the incomplete history projection,
+                        # witness the actual in-flight tool and its exact command.
+                        pending = None
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline:
+                            event = host.next_event(timeout_sec=.1)
+                            if event and event.get("method") == "item/started":
+                                params = event["params"]
+                                item = params.get("item", {})
+                                if item.get("type") == "commandExecution":
+                                    pending = params
+                                    break
+                        assert pending and pending["threadId"] == source and pending["turnId"] == turn
+                        assert shlex.split(pending["item"]["command"])[-1] == command
+                        fork = host.request("thread/fork", {"threadId": source,
+                            "cwd": str(project), "persistExtendedHistory": True})["thread"]["id"]
+                        rows = host.request("thread/turns/list", {"threadId": fork,
+                            "sortDirection": "asc", "itemsView": "full", "limit": 100})["data"]
+                        assert rows[-1]["status"] == "interrupted" and rows[-1]["id"] == turn
+                        assert len(calls) == 2  # No post-guard inference while held.
+                        assert _heartbeat_receipt_count(runtime, TURN_ID) == receipts
+                    deadline = time.monotonic() + 10
+                    while len(calls) < 3 and time.monotonic() < deadline:
+                        time.sleep(.02)
+                    assert len(calls) == 3 and "heartbeat_receipt" in json.dumps(requests[2])
+                    assert _heartbeat_receipt_count(runtime, TURN_ID) == receipts
+                    assert held["path"].read_bytes()  # Original receipt stays recoverable.

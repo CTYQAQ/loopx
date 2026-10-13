@@ -12,6 +12,7 @@ import math
 import os
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -471,3 +472,43 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
         receipt["checkpoint"].update(reason="capture_failed", error_kind=type(error).__name__, error=str(error)[:500])
     finally:
         receipt["checkpoint"]["elapsed_seconds"] = time.monotonic() - started
+
+
+@contextmanager
+def held_quota_decision(listener, capture_root: Path, *, goal_id: str, agent_id: str,
+                        turn_instance_id: str):
+    """Host-side counterpart of the explicit quota pre-output transport.
+
+    The existing typed owner decides whether this exact packet admits a fresh
+    replan. The caller must capture while inside the context. Normal exit only
+    releases the original tool response; it certifies no research checkpoint.
+    Failure/disconnection never retries the guard or substitutes a new point.
+    The listener must already be bound by the Host in a private directory.
+    """
+    if not capture_root.is_absolute() or capture_root.resolve(strict=True) != capture_root:
+        raise ValueError("decision capture root must be a physical absolute directory")
+    channel, _ = listener.accept()
+    with channel:
+        channel.settimeout(120)
+        with channel.makefile("rb") as stream:
+            line = stream.readline(4097)
+        message = json.loads(line)
+        if (not isinstance(message, dict) or set(message) != {"path", "sha256"} or
+                not isinstance(message["path"], str) or not isinstance(message["sha256"], str)):
+            raise ValueError("invalid decision handoff request")
+        path = Path(message["path"])
+        if (path.name != "decision.json" or path.parent.parent != capture_root or
+                path.resolve(strict=True) != path):
+            raise ValueError("decision handoff must reference this Host's capture root")
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != message["sha256"]:
+            raise ValueError("decision handoff digest mismatch")
+        quota = json.loads(raw)
+        intent = effect_runtime_result("runtime.checkpoint_artifacts", {
+            "action": "select_replan", "quota": quota, "goal_id": goal_id,
+            "agent_id": agent_id, "turn_instance_id": turn_instance_id,
+        })
+        yield {"path": path, "sha256": message["sha256"], "quota": quota, "intent": intent}
+        if path.read_bytes() != raw:
+            raise ValueError("original decision changed while held")
+        channel.sendall(json.dumps({"released": True, "sha256": message["sha256"]}).encode() + b"\n")
