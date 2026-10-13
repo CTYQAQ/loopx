@@ -13,9 +13,9 @@ const REASON = "Waiting for the upstream dataset export to be published";
 const CHANGED_REASON = "The replacement export requires independent validation";
 const execute = promisify(execFile);
 
-// A disposable canonical File authority, real CLI add/update and real status
+// Disposable canonical File/SQLite authorities, real CLI add/update and real status
 // HTTP owner. No live Goal, Todo or lease is touched.
-async function startBlockedAuthority() {
+async function startBlockedAuthority(provider) {
   const root = await mkdtemp(resolve(tmpdir(), "loopx-blocked-reason-"));
   const child = spawn(resolveTestPython(), ["-u", "-c", `
 import json, os, runpy, signal, subprocess, sys
@@ -24,7 +24,7 @@ from loopx.chat_server import ChatHTTPServer, ChatRequestHandler
 from loopx.control_plane.effect_runtime import restart_effect_runtime
 root, reason = Path(sys.argv[1]), sys.argv[2]
 fixture = runpy.run_path('tests/control_plane/canonical_authority_fixture.py')
-registry, runtime, state = fixture['promoted_create_fixture'](root)
+registry, runtime, state = fixture['promoted_create_fixture'](root, provider=sys.argv[3])
 base = [sys.executable, '-c', 'from loopx.entrypoint import main; main()', '--format', 'json', '--registry', str(registry), '--runtime-root', str(runtime)]
 def cli(*args):
     result = subprocess.run(base + list(args), capture_output=True, text=True)
@@ -33,7 +33,7 @@ def cli(*args):
 def blocked(text, *extra):
     created = cli('todo', 'add', '--goal-id', 'goal-a', '--role', 'agent', '--text', text, '--priority', 'P2')
     assert created['ok'], created
-    todo_id = created['todo']['todo_id']
+    todo_id = created['todo_id']
     updated = cli('todo', 'update', '--goal-id', 'goal-a', '--role', 'agent', '--todo-id', todo_id, '--status', 'blocked', *extra)
     assert updated['ok'], updated
     return todo_id
@@ -41,7 +41,7 @@ try:
     with_reason = blocked('Synthetic blocked readback', '--reason', reason)
     without_reason = blocked('Synthetic unexplained blocker')
     def add_task(text):
-        return cli('todo', 'add', '--goal-id', 'goal-a', '--role', 'agent', '--text', text)['todo']['todo_id']
+        return cli('todo', 'add', '--goal-id', 'goal-a', '--role', 'agent', '--text', text)['todo_id']
     cyclic = add_task('Synthetic circular dependency')
     prerequisite = add_task('Synthetic cycle prerequisite')
     independent = add_task('Synthetic independent work')
@@ -57,7 +57,7 @@ try:
     server.serve_forever()
 finally:
     restart_effect_runtime()
-`, root, REASON], { cwd: repoRoot, env: { ...process.env, TMPDIR: root, TEMP: root, TMP: root, LOOPX_USAGE_PING: "0" }, stdio: ["ignore", "pipe", "pipe"] });
+`, root, REASON, provider], { cwd: repoRoot, env: { ...process.env, TMPDIR: root, TEMP: root, TMP: root, LOOPX_USAGE_PING: "0" }, stdio: ["ignore", "pipe", "pipe"] });
   let diagnostic = "";
   child.stderr.on("data", (chunk) => { diagnostic = (diagnostic + chunk).slice(-3000); });
   const lines = createInterface({ input: child.stdout });
@@ -89,10 +89,9 @@ finally:
   } catch (error) { await close(); throw error; }
 }
 
-export const blockedReasonReadbackScenario = {
-  id: "blocked-reason-readback",
-  async run({ browser, collectCoverage, url }) {
-    const authority = await startBlockedAuthority();
+const blockedReasonProviderScenario = {
+  async run({ browser, collectCoverage, url }, provider) {
+    const authority = await startBlockedAuthority(provider);
     const coverageEntries = [];
     const receipts = [];
     try {
@@ -140,7 +139,7 @@ export const blockedReasonReadbackScenario = {
             },
           });
           const { page, errors } = context;
-          const suffix = `${locale}-${mobile ? "mobile" : "desktop"}`;
+          const suffix = `${provider}-${locale}-${mobile ? "mobile" : "desktop"}`;
           try {
             const openTodo = async (text) => {
               const card = page.locator("button[aria-pressed]", { hasText: text });
@@ -245,11 +244,11 @@ export const blockedReasonReadbackScenario = {
               await drawer.locator(".personal-task-request [role]").waitFor({ state: "hidden" });
               assert.equal(await missing.count(), 0, "Archived completed history must not display blocked advice");
               assert.equal(await field(drawer, "Status"), "Completed");
-              await drawer.screenshot({ path: resolve(outputDir, "blocked-reason-archived-history.png") });
+              await drawer.screenshot({ path: resolve(outputDir, `blocked-reason-archived-history-${provider}.png`) });
             }
             assert.equal(writes, 0, "Reading a blocked Todo emitted a write");
             assert.deepEqual(errors, []);
-            receipts.push({ locale, mobile, todo_id: authority.with_reason, reason_rendered: true,
+            receipts.push({ provider, locale, mobile, todo_id: authority.with_reason, reason_rendered: true,
               dynamic_refresh: !mobile, missing_optional_reason_transport: !mobile,
               archived_history_readback: locale === "en" && mobile, missing_reason_todo_id: authority.without_reason, writes });
           } finally {
@@ -258,8 +257,22 @@ export const blockedReasonReadbackScenario = {
           }
         }
       }
-      await writeFile(resolve(outputDir, "blocked-reason-receipts.json"), JSON.stringify({ synthetic: true, real_cli_http_owner: true, receipts }, null, 2));
-      return { coverageEntries, note: "Canonical CLI→HTTP→packaged drawer; desktop/mobile Chinese/English, same open desktop inspector follows changed cause, injected missing optional reason and real blocked→open. Real completion/archive becomes unavailable in the active view and reopens through retained history, zero UI writes." };
+      return { coverageEntries, receipts };
     } finally { await authority.close(); }
+  },
+};
+
+export const blockedReasonReadbackScenario = {
+  id: "blocked-reason-readback",
+  async run(context) {
+    const coverageEntries = [];
+    const receipts = [];
+    for (const provider of ["file", "sqlite"]) {
+      const result = await blockedReasonProviderScenario.run(context, provider);
+      coverageEntries.push(...result.coverageEntries);
+      receipts.push(...result.receipts);
+    }
+    await writeFile(resolve(outputDir, "blocked-reason-receipts.json"), JSON.stringify({ synthetic: true, real_cli_http_owner: true, receipts }, null, 2));
+    return { coverageEntries, note: "Canonical File/SQLite CLI→HTTP→packaged drawer; desktop/mobile Chinese/English, same open desktop inspector follows changed cause, injected missing optional reason and real blocked→open. Real completion/archive becomes unavailable in the active view and reopens through retained history, zero UI writes." };
   },
 };
