@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
 from loopx.control_plane.testing.canary_harness import (  # noqa: E402
     run_json_cli,
     run_json_cli_result,
@@ -27,7 +28,7 @@ PROPOSER_TODO = "todo_auto_research_propose"
 EXECUTOR_TODO = "todo_auto_research_execute"
 
 
-def write_fixture(root: Path, *, auto_research: bool) -> tuple[Path, Path, Path]:
+def write_fixture(root: Path, *, auto_research: bool, provider: str) -> tuple[Path, Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     registry_path = project / ".loopx" / "registry.json"
@@ -71,6 +72,7 @@ def write_fixture(root: Path, *, auto_research: bool) -> tuple[Path, Path, Path]
         registered_agents=[CURATOR, PROPOSER, EXECUTOR],
         peer_independent_worktree_required=False,
     )
+    initialize_canonical_registry_fixture(registry_path, provider=provider)
     return project, runtime, registry_path
 
 
@@ -110,11 +112,34 @@ def complete_proposer(
     )
 
 
-def assert_actor_attribution_fails_closed() -> None:
+def read_todos(registry_path: Path, runtime: Path, *, provider: str) -> dict:
+    result = run_json_cli(
+        "todo", "list", "--goal-id", GOAL_ID, "--role", "agent",
+        registry_path=registry_path, runtime_root=runtime, cwd=REPO_ROOT,
+    )
+    authority = result["authority_read"]
+    assert authority["source_authority"] == f"{provider}_v0", result
+    assert authority["decision_read_from_provider"] is True, result
+    assert authority["legacy_fallback_used"] is False, result
+    return {"revision": authority["provider_revision"], "todos": result["todos"]}
+
+
+def assert_completed_successor(registry_path: Path, runtime: Path, *, provider: str) -> None:
+    durable = read_todos(registry_path, runtime, provider=provider)
+    by_id = {todo["todo_id"]: todo for todo in durable["todos"]}
+    assert len(by_id) == 2, durable
+    assert by_id[PROPOSER_TODO]["status"] == "done", durable
+    assert by_id[PROPOSER_TODO]["successor_todo_ids"] == [EXECUTOR_TODO], durable
+    assert by_id[EXECUTOR_TODO]["status"] == "open", durable
+    assert by_id[EXECUTOR_TODO]["claimed_by"] == EXECUTOR, durable
+
+
+def assert_actor_attribution_fails_closed(provider: str) -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-role-successor-actor-") as tmp:
-        project, runtime, registry_path = write_fixture(Path(tmp), auto_research=True)
+        project, runtime, registry_path = write_fixture(Path(tmp), auto_research=True, provider=provider)
         state_path = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
         before = state_path.read_text(encoding="utf-8")
+        canonical_before = read_todos(registry_path, runtime, provider=provider)
 
         missing_code, missing = complete_proposer(
             registry_path,
@@ -122,8 +147,9 @@ def assert_actor_attribution_fails_closed() -> None:
             actor_agent_id=None,
         )
         assert missing_code == 1, missing
-        assert "requires --agent-id" in missing["error"], missing
+        assert missing["error_code"] == "actor_required", missing
         assert state_path.read_text(encoding="utf-8") == before
+        assert read_todos(registry_path, runtime, provider=provider) == canonical_before
 
         wrong_code, wrong = complete_proposer(
             registry_path,
@@ -131,18 +157,23 @@ def assert_actor_attribution_fails_closed() -> None:
             actor_agent_id=CURATOR,
         )
         assert wrong_code == 1, wrong
-        assert f"claimed_by={PROPOSER!r}" in wrong["error"], wrong
+        assert wrong["error_code"] == "claim_owner_mismatch", wrong
         assert state_path.read_text(encoding="utf-8") == before
+        assert read_todos(registry_path, runtime, provider=provider) == canonical_before
+
+        recovered_code, recovered = complete_proposer(registry_path, runtime)
+        assert recovered_code == 0 and recovered["ok"] is True, recovered
+        assert_completed_successor(registry_path, runtime, provider=provider)
 
 
-def assert_auto_research_role_successor_allowed() -> None:
+def assert_auto_research_role_successor_allowed(provider: str) -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-auto-research-role-successor-") as tmp:
-        _project, runtime, registry_path = write_fixture(Path(tmp), auto_research=True)
+        _project, runtime, registry_path = write_fixture(Path(tmp), auto_research=True, provider=provider)
         returncode, completed = complete_proposer(registry_path, runtime)
         assert returncode == 0, completed
         assert completed["ok"] is True, completed
+        assert_completed_successor(registry_path, runtime, provider=provider)
         assert completed["status"] == "done", completed
-        assert completed["linked_successor_id"] == EXECUTOR_TODO, completed
         assert completed["successor_todo_ids"] == [EXECUTOR_TODO], completed
         assert completed["next_todos"] == [], completed
 
@@ -162,21 +193,22 @@ def assert_auto_research_role_successor_allowed() -> None:
         assert successor_lookup["todo"]["claimed_by"] == EXECUTOR, successor_lookup
 
 
-def assert_generic_peer_route_links_existing_successor() -> None:
+def assert_generic_peer_route_links_existing_successor(provider: str) -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-generic-peer-successor-") as tmp:
-        _project, runtime, registry_path = write_fixture(Path(tmp), auto_research=False)
+        _project, runtime, registry_path = write_fixture(Path(tmp), auto_research=False, provider=provider)
         returncode, completed = complete_proposer(registry_path, runtime)
         assert returncode == 0, completed
         assert completed["ok"] is True, completed
-        assert completed["linked_successor_id"] == EXECUTOR_TODO, completed
+        assert_completed_successor(registry_path, runtime, provider=provider)
         assert completed["successor_todo_ids"] == [EXECUTOR_TODO], completed
 
 
 def main() -> None:
-    assert_actor_attribution_fails_closed()
-    assert_auto_research_role_successor_allowed()
-    assert_generic_peer_route_links_existing_successor()
-    print("auto-research-role-successor-completion-smoke ok")
+    for provider in ("file", "sqlite"):
+        assert_actor_attribution_fails_closed(provider)
+        assert_auto_research_role_successor_allowed(provider)
+        assert_generic_peer_route_links_existing_successor(provider)
+    print("auto-research-role-successor-completion-smoke ok: File and SQLite")
 
 
 if __name__ == "__main__":
