@@ -109,9 +109,12 @@ drain. This candidate changes v0/disabled creation admission and fresh legacy
 ownership grants intentionally; it does not change the compatible 1.x line.
 The normal-wheel import/consumer matrix, packaged Settings enable/refusal/readback,
 real PostgreSQL conformance and risk canary have focused passing evidence. The
-native source-lease regression fixtures still need to preserve historical recovery
-without recreating retired writers; the backend configuration catalog description
-also needs alignment. Author integration and exact-head review remain open. Retained outbox recovery and source
+native source-lease regression matrix now restores independently frozen 1.x
+artifacts instead of recreating retired writers. It covers interrupted fence
+recovery, lock-token renewal, stale generation rejection and later-write
+protection; acquired intent alone cannot mint a new legacy execution grant.
+The backend configuration catalog now describes the same 2.0 creation boundary.
+Exact-head review, core-developer trial and release authorization remain open. Retained outbox recovery and source
 lease release are concrete remaining callers, not grounds for keeping normal
 Todo producers. The existing delivery Todos should carry these concrete exits:
 
