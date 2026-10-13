@@ -240,8 +240,12 @@ def test_same_asset_name_different_bytes_cannot_overwrite_current(source, tmp_pa
 
 
 @pytest.mark.parametrize("checksum_valid", [True, False])
+@pytest.mark.parametrize(
+    ("target", "predecessor"),
+    [("v1.1.0", "v1.0.5"), ("v2.0.0a1", "v1.2.0")],
+)
 def test_release_predecessor_is_stable_older_and_checksum_verified(
-    tmp_path, monkeypatch, checksum_valid
+    tmp_path, monkeypatch, checksum_valid, target, predecessor
 ):
     def release(tag, *, draft=False, prerelease=False):
         return {
@@ -257,6 +261,7 @@ def test_release_predecessor_is_stable_older_and_checksum_verified(
             release("v1.0.5"),
             release("v1.1.0"),
             release("v1.2.0"),
+            release("v2.0.0"),
             release("v1.0.9", draft=True),
             release("v1.0.8", prerelease=True),
             release("desktop-main-123"),
@@ -290,13 +295,13 @@ def test_release_predecessor_is_stable_older_and_checksum_verified(
         ),
     )
     if checksum_valid:
-        builder.release_build("v1.1.0", "fixture/repository")
+        builder.release_build(target, "fixture/repository")
         assert builds == ["old code"]
     else:
         with pytest.raises(RuntimeError, match="checksum mismatch"):
-            builder.release_build("v1.1.0", "fixture/repository")
+            builder.release_build(target, "fixture/repository")
         assert builds == []
-    assert downloads == ["v1.0.5"]
+    assert downloads == [predecessor]
 
 
 def test_windows_drive_paths_are_not_portable_bundle_names():

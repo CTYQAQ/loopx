@@ -238,8 +238,14 @@ def release_build(tag: str, repository: str) -> None:
         and re.fullmatch(r"v\d+\.\d+\.\d+", r["tag_name"])
     ]
 
-    def number(value: str) -> tuple[int, ...]:
-        return tuple(map(int, value.removeprefix("v").split(".")))
+    def number(value: str) -> tuple[int, int, int]:
+        # Only stable releases can supply retained assets. A prerelease target
+        # still follows the latest stable release with a *lower* core version;
+        # a future stable release with the same core is not its predecessor.
+        match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)(?:(?:a|b|rc)\d+)?", value)
+        if match is None:
+            raise ValueError(f"unsupported LoopX release tag: {value}")
+        return tuple(map(int, match.groups()))
 
     predecessors = [r for r in versions if number(r["tag_name"]) < number(tag)]
     if not predecessors:
