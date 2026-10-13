@@ -38,7 +38,11 @@ export const goalWorkspaceCreateScenario = {
       await now.getByRole('button',{name:'添加任务',exact:true}).click();
       const task=now.getByRole('textbox',{name:'任务内容',exact:true});
       const text='Verify the packaged workspace task creation result';
-      await task.fill(text);await now.getByRole('button',{name:'检查任务',exact:true}).click();
+      await task.fill(text);
+      const previewResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/actions/preview');
+      await now.getByRole('button',{name:'检查任务',exact:true}).click();
+      const preview=await previewResponse;
+      assert.equal(preview.status(),201,`Task preview failed: ${await preview.text()}`);
       const drawer=page.locator('.personal-context-drawer');await drawer.waitFor();
       assert.equal(requests.length,1);assert.equal(requests[0].normalized_parameters.text,text);
       await drawer.locator('.personal-primary-action').click();
