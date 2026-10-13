@@ -18,12 +18,14 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.control_plane.runtime.status_projection_cache import write_status_projection_cache  # noqa: E402
 
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
+
 GOAL_ID = "status-projection-cache-fixture"
 AGENT_ID = "codex-main-control"
 PRIVATE_DOC_MARKER = "https://" + "la" + "rk" + "office.example/doc"
 
 
-def write_fixture(root: Path) -> tuple[Path, Path, Path]:
+def write_fixture(root: Path, *, provider: str = "file") -> tuple[Path, Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     state_rel = f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
@@ -40,6 +42,8 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         "# Status Projection Cache Fixture\n\n"
         "## Objective\n\n"
         "Validate opt-in status projection cache behavior.\n\n"
+        "## User Todo / Owner Review Reading Queue\n\n"
+        "## Agent Todo\n\n"
         "## Next Action\n\n"
         "- Exercise the status/quota projection cache.\n",
         encoding="utf-8",
@@ -81,6 +85,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         + "\n",
         encoding="utf-8",
     )
+    initialize_canonical_registry_fixture(registry_path, provider=provider)
     return registry_path, runtime, public_doc
 
 
@@ -163,9 +168,9 @@ def assert_next_action(payload: dict[str, Any], expected_todo_id: str) -> None:
     assert next_action.get("todo_id") == expected_todo_id, payload
 
 
-def main() -> int:
+def main(*, provider: str = "file") -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-status-projection-cache-") as tmp:
-        registry_path, runtime, public_doc = write_fixture(Path(tmp))
+        registry_path, runtime, public_doc = write_fixture(Path(tmp), provider=provider)
 
         todo_payload = run_cli(
             registry_path,
@@ -258,7 +263,7 @@ def main() -> int:
             "agent",
             "--todo-id",
             initial_todo_id,
-            "--claimed-by",
+            "--agent-id",
             AGENT_ID,
             "--evidence",
             "fixture cache state transition",

@@ -13,20 +13,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from loopx.control_plane.quota.slot_accounting import (
+from loopx.control_plane.quota.slot_accounting import (  # noqa: E402
     build_quota_slot_preview_for_decision,
 )
-from loopx.control_plane.todos.active_state_todo_parser import (
-    parse_active_state_todos,
-)
-from loopx.state_refresh import refresh_state_run
-from loopx.todos import add_goal_todo, complete_goal_todo
+from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted  # noqa: E402
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
+from loopx.state_refresh import refresh_state_run  # noqa: E402
+from loopx.todos import add_goal_todo, complete_goal_todo  # noqa: E402
 
 GOAL_ID = "completion-validation-accountability"
 AGENT_ID = "codex-author"
 
 
-def write_fixture(root: Path) -> tuple[Path, Path, Path]:
+def write_fixture(root: Path, *, provider: str = "file") -> tuple[Path, Path, Path]:
     project = root / "project"
     project.mkdir()
     state = project / "ACTIVE_GOAL_STATE.md"
@@ -38,6 +37,8 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
                 "status: active",
                 "updated_at: 2026-08-15T00:00:00+00:00",
                 "---",
+                "",
+                "## User Todo / Owner Review Reading Queue",
                 "",
                 "## Agent Todo",
                 "",
@@ -71,14 +72,14 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path]:
         ),
         encoding="utf-8",
     )
+    initialize_canonical_registry_fixture(registry, provider=provider)
     return registry, runtime, state
 
 
-def agent_summary(state: Path) -> dict:
-    return parse_active_state_todos(
-        state.read_text(encoding="utf-8"),
-        item_limit=None,
-    )["agent_todos"]
+def agent_summary(runtime: Path) -> dict:
+    source = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL_ID)
+    assert source is not None and source["decision_read_from_provider"] is True
+    return {"items": [item for item in source["todos"] if item["role"] == "agent"]}
 
 
 def quota_preview(
@@ -127,12 +128,12 @@ def quota_preview(
     )
 
 
-def main() -> None:
+def main(*, provider: str = "file") -> None:
     with tempfile.TemporaryDirectory(
         prefix="loopx-completion-validation-accountability-"
     ) as tmp:
         root = Path(tmp)
-        registry, runtime, state = write_fixture(root)
+        registry, runtime, state = write_fixture(root, provider=provider)
         independent_result = root / "controller-result.complete"
         validation_command = (
             f"{shlex.quote(sys.executable)} -c "
@@ -154,7 +155,7 @@ def main() -> None:
         )
         todo_id = str(added["todo_id"])
 
-        open_summary = agent_summary(state)
+        open_summary = agent_summary(runtime)
         projected = next(
             item for item in open_summary["items"] if item["todo_id"] == todo_id
         )
@@ -202,6 +203,9 @@ def main() -> None:
             evidence="provisional agent-side verifier result",
         )
         assert blocked_completion["validation_blocked_completion"] is True
+        still_open = next(item for item in agent_summary(runtime)["items"] if item["todo_id"] == todo_id)
+        assert still_open["status"] == "open" and still_open["done"] is False
+        assert not (runtime / "goals" / GOAL_ID / "runs" / "index.jsonl").exists()
 
         independent_result.write_text("complete\n", encoding="utf-8")
         completed = complete_goal_todo(
@@ -215,7 +219,7 @@ def main() -> None:
         assert completed["ok"] is True, completed
         assert completed["changed"] is True, completed
 
-        done_summary = agent_summary(state)
+        done_summary = agent_summary(runtime)
         durable = next(
             item for item in done_summary["items"] if item["todo_id"] == todo_id
         )

@@ -198,3 +198,12 @@ def test_canonical_write_correctness_journey(tmp_path, monkeypatch, provider):
     root = Path(__file__).resolve().parents[2]
     preview = runpy.run_path(str(root / "examples/control_plane/todo-write-correctness-smoke.py"))
     assert preview["main"](provider=provider) == 0
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("script", ["completion-validation-accountability", "quota-no-git-status", "status-projection-cache"])
+def test_canonical_validation_and_scheduling_journey(tmp_path, monkeypatch, provider, script):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = Path(__file__).resolve().parents[2]
+    journey = runpy.run_path(str(root / f"examples/control_plane/{script}-smoke.py"))
+    assert journey["main"](provider=provider) in (None, 0)

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,11 +13,16 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_registry_fixture  # noqa: E402
+
 GOAL_ID = "no-git-quota-fixture"
 AGENT_ID = "codex-benchmark-agent"
 
 
-def write_fixture(root: Path) -> Path:
+def write_fixture(root: Path, *, provider: str = "file") -> Path:
     project = root / "project"
     runtime = root / "runtime"
     state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -29,6 +35,8 @@ def write_fixture(root: Path) -> Path:
         "# Active Goal State\n\n"
         "## Objective\n\n"
         "Solve this no-git fixture.\n\n"
+        "## User Todo / Owner Review Reading Queue\n\n"
+        "## Agent Todo\n\n"
         "## Next Action\n\n"
         "- Pick the seeded todo.\n",
         encoding="utf-8",
@@ -60,6 +68,7 @@ def write_fixture(root: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
+    initialize_canonical_registry_fixture(registry_path, provider=provider)
     return registry_path
 
 
@@ -84,10 +93,10 @@ def run_cli(registry_path: Path, *args: str, env: dict[str, str] | None = None) 
     return json.loads(result.stdout)
 
 
-def main() -> int:
+def main(*, provider: str = "file") -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-no-git-quota-") as tmp:
         root = Path(tmp)
-        registry_path = write_fixture(root)
+        registry_path = write_fixture(root, provider=provider)
         todo = run_cli(
             registry_path,
             "todo",
@@ -100,12 +109,23 @@ def main() -> int:
             "Solve the no-git quota fixture.",
         )
         assert todo["ok"] is True, todo
+        assert todo["source_authority"] == f"{provider}_v0", todo
+        assert todo["legacy_fallback_used"] is False, todo
 
         no_git_bin = root / "no-git-bin"
         no_git_bin.mkdir()
+        # Canonical decisions require Node, but Git remains unavailable.
+        node = shutil.which("node")
+        assert node is not None, "Node is required for the canonical authority"
+        executable = no_git_bin / ("node.exe" if os.name == "nt" else "node")
+        try:
+            executable.symlink_to(Path(node).resolve())
+        except OSError:
+            shutil.copy2(node, executable)
         env = os.environ.copy()
         env["PATH"] = str(no_git_bin)
         env["PYTHONPATH"] = str(REPO_ROOT)
+        assert shutil.which("git", path=env["PATH"]) is None
         quota = run_cli(
             registry_path,
             "quota",
