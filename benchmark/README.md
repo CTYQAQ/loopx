@@ -526,9 +526,14 @@ capture behavior; there is no automatic activation or retention policy.
 The container must initially be running and unpaused. Cancellation, failed file
 reads, rejected native capture and a lost pause response attempt to release only
 this operation's barrier. Failure to resume the worker is reported and publishes
-no outer artifact. An existing pause is never released. The first attempt owns
-the capture identity; a failure cannot silently pair later files with an older
-native point. Missing paths, archive links, traversal and special members reject.
+no outer artifact. An initially observed pause or a definite Docker conflict
+rejects without unpausing. Controlled captures on the same host/user share a
+daemon-ID/container-ID lock under `~/.cache/loopx/checkpoint-workers`, across
+controller banks and Docker endpoint aliases. External actors do not participate
+in this lock: an uncertain transport outcome retains the original attempt and
+cleanup obligation, not proof of exclusive ownership against arbitrary actors.
+The first attempt owns the capture identity; a failure cannot silently pair
+later files with an older native point. Missing paths, archive links, traversal and special members reject.
 Declare only the intended private code/state stores: a whole home can contain
 credentials, and neither archive filtering nor a freeze is privacy certification.
 

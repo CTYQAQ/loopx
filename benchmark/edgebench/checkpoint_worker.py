@@ -6,8 +6,10 @@ It does not capture process memory or qualify a native conversation cursor.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 import re
 import tarfile
 import tempfile
@@ -81,6 +83,22 @@ def _archive(container, remote: str, destination: Path) -> Path:
     return _physical(destination / root)
 
 
+def _worker_lock(client, container_id: str) -> Path:
+    # Controller banks and endpoint aliases may differ for the same daemon.
+    # Coordinate captures by this user on this host, not by artifact location.
+    daemon_id = client.info().get("ID")
+    if not isinstance(daemon_id, str) or not daemon_id:
+        raise ValueError("Docker daemon identity is required for worker capture")
+    root = Path.home() / ".cache" / "loopx" / "checkpoint-workers"
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _physical(root)
+    info = root.stat()
+    if info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("Worker capture lock directory must be private and owned by the current user")
+    daemon_key = hashlib.sha256(daemon_id.encode()).hexdigest()
+    return root / f"{daemon_key}-{container_id}"
+
+
 def capture_worker(controller_file: Path, *, token: str, capture_id: str,
                    destination: Path, request_file: Path, timeout: float = 30) -> dict:
     """Freeze one explicitly owned worker and seal its files with native state.
@@ -108,7 +126,7 @@ def capture_worker(controller_file: Path, *, token: str, capture_id: str,
     (attempts / capture_id).mkdir(mode=0o700)  # First attempt, including failures, wins.
     client = docker.from_env(timeout=timeout)
     try:
-        with exclusive_file_lock(attempts / request["container_id"], timeout_seconds=timeout,
+        with exclusive_file_lock(_worker_lock(client, request["container_id"]), timeout_seconds=timeout,
                                  operation="checkpoint_worker_capture"):
             container = client.containers.get(request["container_id"])
             container.reload()
@@ -119,9 +137,16 @@ def capture_worker(controller_file: Path, *, token: str, capture_id: str,
                 stage = Path(directory)
                 (stage / "workers").mkdir(mode=0o700)
                 components = []
+                pause_may_have_committed = True
                 try:
-                    # The cleanup also covers a lost reply after Docker committed pause.
-                    container.pause()
+                    try:
+                        container.pause()
+                    except docker.errors.APIError as exc:
+                        # Docker's conflict response rejects this pause. The
+                        # observed pause belongs to another actor; leave it alone.
+                        if exc.response is not None and exc.response.status_code == 409:
+                            pause_may_have_committed = False
+                        raise
                     container.reload()
                     if not container.attrs["State"]["Paused"]:
                         raise RuntimeError("Worker writer barrier was not established")
@@ -135,12 +160,15 @@ def capture_worker(controller_file: Path, *, token: str, capture_id: str,
                     if not container.attrs["State"]["Running"] or not container.attrs["State"]["Paused"]:
                         raise RuntimeError("Worker writer barrier changed during capture")
                 finally:
-                    container.reload()
-                    if container.attrs["State"]["Paused"]:
-                        container.unpause()
+                    # An uncertain/lost reply keeps this original attempt's
+                    # cleanup obligation. Its identity cannot be retried later.
+                    if pause_may_have_committed:
                         container.reload()
-                    if container.attrs["State"]["Paused"] or not container.attrs["State"]["Running"]:
-                        raise RuntimeError("Worker was not restored to running; inspect the original container before retry")
+                        if container.attrs["State"]["Paused"]:
+                            container.unpause()
+                            container.reload()
+                        if container.attrs["State"]["Paused"] or not container.attrs["State"]["Running"]:
+                            raise RuntimeError("Worker was not restored to running; inspect the original container before retry")
                 native_component = _participant_id(components, "native_capsule")
                 components.append({"id": native_component, "source_path": str(stage / "native")})
                 metadata = {"worker_file_snapshot": {

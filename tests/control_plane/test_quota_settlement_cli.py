@@ -1903,6 +1903,8 @@ def test_in_flight_progress_preserves_todo_across_heartbeat_settlements(
         "outcome_progress",
         "--delivery-boundary",
         "in_flight_continuation",
+        "--delivery-workspace-path",
+        str(project),
         "--agent-id",
         AGENT_ID,
         "--todo-id",
@@ -1980,6 +1982,8 @@ def test_in_flight_progress_preserves_todo_across_heartbeat_settlements(
         "outcome_progress",
         "--delivery-boundary",
         "in_flight_continuation",
+        "--delivery-workspace-path",
+        str(project),
         "--agent-id",
         AGENT_ID,
         "--todo-id",
@@ -2041,6 +2045,8 @@ def test_in_flight_progress_settles_while_completion_validation_todo_is_open(
         "outcome_progress",
         "--delivery-boundary",
         "in_flight_continuation",
+        "--delivery-workspace-path",
+        str(project),
         "--agent-id",
         AGENT_ID,
         "--todo-id",
@@ -2935,6 +2941,27 @@ def test_standard_codex_app_settlement_is_receipted_and_idempotent(
     )
     assert fresh_turn_rc == 0, fresh_turn
     assert fresh_turn["selected_todo"]["todo_id"] == successor_id
+
+    ack_rc, ack = _run_cli(
+        registry_path,
+        runtime,
+        *original_ack_hint["cli_args"],
+    )
+    # The newer receipt-bound fresh_turn superseded this Turn for host writeback,
+    # even though its original delivery settlement still replays correctly.
+    assert ack_rc == 1, ack
+    assert ack["error_code"] == "SCHEDULER_FOLLOWUP_HEARTBEAT_RECEIPT_STALE"
+    assert ack["scheduler_state_mutated"] is False
+    assert ack["write_performed"] is False
+    assert ack["appended"] is False
+    assert load_scheduler_state(
+        runtime,
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        state_key=APP_AUTOMATION_STATEFUL_BACKOFF_STATE_KEY,
+    ) is None
+    assert _spend_run_count(runtime) == 1
+
     fresh_ack_args = fresh_turn["scheduler_hint"]["app_automation"]["ack_hint"]["cli_args"]
     fresh_ack_rc, fresh_ack = _run_cli(registry_path, runtime, *fresh_ack_args)
     assert fresh_ack_rc == 0, fresh_ack
@@ -4110,6 +4137,7 @@ def test_host_owned_turn_executes_projected_selection_and_replays_identity(
         "--turn-instance-id", TURN_ID, "--classification", "validated_progress",
         "--delivery-batch-scale", "implementation", "--delivery-outcome", "outcome_progress",
         "--delivery-boundary", "in_flight_continuation",
+        "--delivery-workspace-path", str(project),
         "--no-global-sync", "--suppress-external-sinks",
     )
     assert refresh_rc == 0, refresh
@@ -7166,6 +7194,8 @@ def test_settled_turn_defers_prior_unsettled_history_to_fresh_turn(
         "single_surface",
         "--delivery-outcome",
         "outcome_progress",
+        "--delivery-workspace-path",
+        str(project),
         *binding,
         "--no-global-sync",
         "--suppress-external-sinks",

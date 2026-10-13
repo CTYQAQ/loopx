@@ -922,3 +922,31 @@ test("envelope never independently invents requirement reads from work or admiss
     assert.deepEqual(envelope.required_reads, []);
   }
 });
+
+
+test("native Turn capture binds the original observation without inventing admission", () => {
+  const decision = payload();
+  const envelope = buildTurnEnvelope({payload: decision, protocol_action_fields: protocolActionFields,
+    scheduler_execution_args: ""});
+  const request = {operation: "bind_capture", payload: decision, envelope,
+    turn_instance_id: "native-turn", turn_key: "sha256:" + "a".repeat(64),
+    captured_decision_path: "/tmp/native-turn/decision.json"};
+  const bound = evaluateTurnEnvelope(request);
+  assert.deepEqual(bound.action_signature, envelope.action_signature);
+  const capture = (bound.detail_ref as JsonObject).captured_decision as JsonObject;
+  assert.equal(capture.turn_instance_id, "native-turn");
+  assert.equal(capture.turn_key, request.turn_key);
+  assert.equal(decision.heartbeat_receipt, undefined);
+  assert.equal((bound.detail_ref as JsonObject).full_decision, "cat -- /tmp/native-turn/decision.json");
+  assert.deepEqual(evaluateTurnEnvelope({...request, envelope: bound}), bound);
+  for (const change of [{reason: "new source"}, {goal_id: "other"},
+    {agent_identity: {agent_id: "other"}}, {ok: false}]) {
+    assert.throws(() => evaluateTurnEnvelope({...request, payload: {...decision, ...change}}),
+      EffectRuntimeRequestError);
+  }
+  for (const change of [{turn_instance_id: "other-turn"}, {turn_key: "sha256:" + "b".repeat(64)},
+    {captured_decision_path: "/tmp/other.json"}]) {
+    assert.throws(() => evaluateTurnEnvelope({...request, envelope: bound, ...change}),
+      EffectRuntimeRequestError);
+  }
+});

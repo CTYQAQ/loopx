@@ -540,6 +540,18 @@ Remaining implementation Todos, in dependency order:
 | Adopt one typed projection in real host renderers | Heartbeat full/thin and Turn host consume the same execution facts and per-Turn capture/detail route. Keep host-specific notification and scheduler transport explicit. Real File/SQLite CLI plus packaged Codex App tests cover reentry, source loss, refusal before required reads, late results, backoff and exactly-once settlement; no second admission from a detail read. Retire the replaced projection only after its last caller moves. |
 | Qualify the context shape and migration default | Compare the same normal, replan, wait/recovery and optional-capability workloads against both current full and compact paths. Measure payload/model tokens, detail IO, latency, resource growth, omissions and decision/outcome quality. Keep data loss, duplicate effects, identity and settlement errors as hard constraints. Preserve supported saved prompts/receipts and reversible rollout; change budgets or defaults only with that evidence. |
 
+Native Turn detail adoption now persists the real `run-once` producer's full
+observation and binds the Host request to it through the existing TS envelope
+owner. Real File/SQLite CLI tests inspect actual subprocess input, change the
+canonical Todo source, and verify original detail, retry and no-effect replay.
+The model provider is a protocol fixture. Read-only planning and optional quota
+capture defaults remain unchanged; native executing Turns now retain private
+capture evidence. Missing or mismatched evidence refuses Host reinvocation;
+legacy cached-result recovery and terminal readback preserve original receipts.
+This closes the producer-to-detail transport gap only. Live models, packaged
+App/Lark, later authority checks and the remaining convergence matrix retain
+their independent acceptance; no Python projection is retired by this slice.
+
 The earlier cost slice reproduced a regression-budget gap, rather than a
 missing fixture alias or permission to remove required context. Comparing
 `aa87cc019` with `fc411c878` on the unchanged public CLI fixture, identical

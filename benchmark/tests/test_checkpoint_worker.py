@@ -168,14 +168,24 @@ def test_worker_capture_failure_releases_only_its_barrier(
     assert not (tmp_path / "later").exists()
 
 
+@pytest.mark.parametrize("separate_bank", [False, True])
 def test_concurrent_capture_does_not_release_another_operation_barrier(
-        controllers, writer, tmp_path, monkeypatch):
+        controllers, writer, tmp_path, monkeypatch, separate_bank):
     from concurrent.futures import ThreadPoolExecutor
     from loopx.file_lock import LockAcquireTimeoutError
 
     source, _, first, _, files, _ = controllers
     container, request = writer
     token = register(source, first)
+    other_controller = files[0]
+    if separate_bank:
+        bank = tmp_path / "other-bank"
+        bank.mkdir()
+        config = json.loads(files[0].read_bytes())
+        config["bank_root"] = str(bank)
+        other_controller = tmp_path / "other-controller.json"
+        other_controller.write_text(json.dumps(config))
+        other_controller.chmod(0o600)
     entered, release = threading.Event(), threading.Event()
     original = transport._post
     def held(*args, **kwargs):
@@ -190,7 +200,7 @@ def test_concurrent_capture_does_not_release_another_operation_barrier(
             assert entered.wait(15)
             frozen = counter(container)
             with pytest.raises(LockAcquireTimeoutError):
-                capture_worker(files[0], token=token, capture_id="2" * 32,
+                capture_worker(other_controller, token=token, capture_id="2" * 32,
                     destination=tmp_path / "second", request_file=request, timeout=.5)
             container.reload()
             assert container.attrs["State"]["Paused"] and counter(container) == frozen
@@ -200,3 +210,41 @@ def test_concurrent_capture_does_not_release_another_operation_barrier(
         assert pending.result(timeout=20)["research_point_qualified"] is False
     container.reload()
     assert not container.attrs["State"]["Paused"]
+
+
+@pytest.mark.parametrize("entrypoint", ["provider", "cli"])
+def test_rejected_pause_preserves_foreign_barrier(
+        controllers, writer, tmp_path, monkeypatch, entrypoint):
+    from docker.errors import APIError
+
+    source, _, first, _, files, _ = controllers
+    container, request = writer
+    token = register(source, first)
+    original = type(container).pause
+    def raced_pause(self):
+        # Another actor pauses after our initial state read; the second RPC
+        # reaches the real daemon and is determinately rejected.
+        original(container)
+        original(self)
+    monkeypatch.setattr(type(container), "pause", raced_pause)
+    def unexpected_native_call(*args, **kwargs):
+        pytest.fail("Rejected writer barrier must not capture evaluator state")
+    monkeypatch.setattr(transport, "_post", unexpected_native_call)
+    unit = tmp_path / "rejected"
+    with pytest.raises(APIError) as error:
+        if entrypoint == "provider":
+            capture_worker(files[0], token=token, capture_id="3" * 32,
+                destination=unit, request_file=request)
+        else:
+            token_file = tmp_path / "token"
+            token_file.write_text(token)
+            transport.main(["--controller-file", str(files[0]), "capture-worker",
+                "--token-file", str(token_file), "--capture-id", "3" * 32,
+                "--destination", str(unit), "--worker-request", str(request)])
+    assert error.value.response.status_code == 409
+    container.reload()
+    assert container.attrs["State"]["Paused"]
+    assert not unit.exists()
+    with pytest.raises(FileExistsError):
+        capture_worker(files[0], token=token, capture_id="3" * 32,
+            destination=tmp_path / "retry", request_file=request)
