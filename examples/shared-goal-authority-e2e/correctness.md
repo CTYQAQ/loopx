@@ -298,6 +298,15 @@ the checked-out source wheel, verifies its hash during installation, and removes
 its generated build tree before normal pytest discovery. The workflow records
 the complete installation sequence and retains normal source discovery.
 
+Installed qualification requires repository history for the immutable 1.x Git
+revision owned by `authority_e2e_fixtures.ORIGINAL_1X_REVISION`. That archived
+source creates original transactions only; every recovery, import, canonical
+write and readback uses the supplied installed artifact. It cannot restore a
+current Markdown writer to satisfy a historical test. Both fresh canonical
+providers and source-free import replay must preserve later data and receipts.
+The JSON report records artifact hashes and separate producer/receiver provenance;
+keep its raw paths and process logs private.
+
 E2E, deliberate mutants, and independently installed wheel/sdist qualification
 run in separate jobs; the stable `stage2c-correctness-e2e` check requires all three
 to succeed. No path-based skipping or reduced case selection is used. E2E uses

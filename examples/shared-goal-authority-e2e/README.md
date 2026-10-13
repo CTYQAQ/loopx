@@ -166,8 +166,12 @@ The independently runnable [correctness suite](correctness.md) covers the
 `file_outbox_v1` capture lineage, strict cursor recovery, mixed writers,
 source fences, and recoverable bootstrap/rollback. It uses real CLI and native
 processes, the production `FileAuthorityStore`, and process death at persistence
-boundaries. [Installed-package E2E](installed.py) repeats the public lifecycle
-outside the checkout for both wheel and sdist. [Negative controls](mutants.py)
+boundaries. [Installed-package E2E](installed.py) qualifies both wheel and sdist in empty
+virtual environments outside the checkout. Immutable 1.x producers generate
+historical source transactions; the installed receiver proves cutoff rejection,
+receipt recovery, lease release, explicit backup/import, and preservation of later
+canonical writes on import replay. Fresh File and SQLite Goals separately prove
+canonical creation and preservation of later writes on creation replay. [Negative controls](mutants.py)
 deliberately remove correctness checks in disposable source copies.
 
 The ten `s2c2.*` ladder rows above exercise the same lifecycle through the
