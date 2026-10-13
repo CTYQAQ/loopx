@@ -217,7 +217,8 @@ def test_real_cli_settlement_capture_verification_and_inert_materialization(tmp_
                     reason="Requires an explicit real native Host binary; static local provider only")
 @pytest.mark.parametrize("source_moves", [False, True, "binding"])
 @pytest.mark.parametrize("mutation_stage", ["probe", "capture"])
-def test_real_native_cursor_must_match_sealed_store_basis(tmp_path, monkeypatch, source_moves, mutation_stage):
+def test_real_native_cursor_must_match_sealed_store_basis(tmp_path, monkeypatch, source_moves, mutation_stage,
+                                                       caller_id="code"):
     """Actual CLI settlement, native completed Turns and TS SQLite artifacts."""
     from benchmark.tests.test_native_checkpoint import real_native_source
     from benchmark.runtime.codex import Execution
@@ -249,7 +250,7 @@ def test_real_native_cursor_must_match_sealed_store_basis(tmp_path, monkeypatch,
     candidate.write_text("source_candidate = 7\n")
     request = tmp_path / "request.json"
     request.write_text(json.dumps({"destination": str(destination), "components": [
-        {"id": "code", "source_path": str(candidate)}], "native_session": True,
+        {"id": caller_id, "source_path": str(candidate)}], "native_session": True,
         "point_metadata": {"meaning": "Native/CLI/TS fixture, not research or model utility"}}))
     with real_native_source(tmp_path / "native", os.environ["LOOPX_NATIVE_CHECKPOINT_BIN"], project) as (env, source, complete, calls):
         env.update(LOOPX_CHECKPOINT_REQUEST=str(request), LOOPX_WAKE_LOG_DIR=str(logs / "wakes"),
@@ -287,7 +288,14 @@ def test_real_native_cursor_must_match_sealed_store_basis(tmp_path, monkeypatch,
             assert receipt["checkpoint"]["captured"], receipt
             manifest = json.loads((destination / "checkpoint.json").read_text())
             assert len(manifest["point_metadata"]["native_session"]["turn_ids"]) == 1
+            assert (destination / "components" / caller_id).read_bytes() == candidate.read_bytes()
             assert receipt["checkpoint"]["research_point_qualified"] is False
+
+
+@pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN"), reason="Requires a real native Host")
+def test_native_binding_participant_preserves_legal_caller_id(tmp_path, monkeypatch):
+    test_real_native_cursor_must_match_sealed_store_basis(tmp_path, monkeypatch, False, "probe",
+                                                        caller_id="source_session_binding")
 
 
 @pytest.mark.parametrize("capture_fails", [False, True])
@@ -380,7 +388,8 @@ def test_real_pre_replan_capture_is_before_decision_and_same_node_is_not_recaptu
     ("canonical_head", "capture"), ("exported_bytes", "capture"),
     ("research_log", "probe"), ("research_log", "capture"),
     ("vision_index", "probe"), ("vision_index", "capture")])
-def test_controller_participant_keeps_canonical_state_and_journals_inert(tmp_path, monkeypatch, provider, drift, mutation_stage):
+def test_controller_participant_keeps_canonical_state_and_journals_inert(tmp_path, monkeypatch, provider, drift,
+                                                                      mutation_stage, caller_ids=False):
     from canonical_authority_fixture import initialize_canonical_authority
     from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
     from loopx.control_plane.goals.first_party_host_admission import capture_first_party_host_goal_ref
@@ -448,8 +457,12 @@ def test_controller_participant_keeps_canonical_state_and_journals_inert(tmp_pat
     (project / 'solver.py').write_text('candidate = 7\n')
     target = logs / 'checkpoints/controller'
     request = tmp_path / 'request.json'
+    components = [{'id':'research_context' if caller_ids else 'code','source_path':str(project/'solver.py')}]
+    if caller_ids:
+        (project/'notes.txt').write_text('Retained caller-owned context.')
+        components.append({'id':'loopx_state_2','source_path':str(project/'notes.txt')})
     request.write_text(json.dumps({'destination':str(target), 'loopx_state':True,
-        'components':[{'id':'code','source_path':str(project/'solver.py')}], 'point_metadata':{}}))
+        'components':components, 'point_metadata':{}}))
     env = {'LOOPX_CHECKPOINT_REQUEST':str(request),'LOOPX_WAKE_LOG_DIR':str(wakes),
         'LOOPX_PROJECT':str(project),'LOOPX_RUNTIME_ROOT':str(runtime),'LOOPX_REGISTRY':str(registry),
         'LOOPX_GOAL_ID':cli.GOAL_ID,'LOOPX_AGENT_ID':cli.AGENT_ID}
@@ -480,6 +493,8 @@ def test_controller_participant_keeps_canonical_state_and_journals_inert(tmp_pat
         return
     assert receipt['checkpoint'].get('captured') is True, json.dumps(receipt['checkpoint'])
     manifest = json.loads((target/'checkpoint.json').read_text())
+    for component in components:
+        assert (target/'components'/component['id']).read_bytes() == Path(component['source_path']).read_bytes()
     declared_context = manifest['point_metadata']['research_context']
     context_root = target/'components'/declared_context['component_id']
     exported_context = context_root/declared_context['member_path'] if declared_context['member_path'] else context_root
@@ -514,6 +529,12 @@ def test_controller_participant_keeps_canonical_state_and_journals_inert(tmp_pat
     after = run('todo','list','--goal-id',cli.GOAL_ID,'--todo-id',cli.TODO_ID)
     assert after['todo'] == before['todo']
     assert after['authority_read']['provider_revision'] == before['authority_read']['provider_revision']
+
+
+@pytest.mark.parametrize('provider', ['file', 'sqlite'])
+def test_research_participants_preserve_legal_caller_ids(tmp_path, monkeypatch, provider):
+    test_controller_participant_keeps_canonical_state_and_journals_inert(
+        tmp_path, monkeypatch, provider, None, 'probe', caller_ids=True)
 
 
 @pytest.mark.parametrize('gap', ['shared_registry','wrong_actor','wrong_runtime','missing_state','symlink_state','overlap'])

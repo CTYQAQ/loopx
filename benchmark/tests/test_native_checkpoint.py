@@ -194,7 +194,8 @@ def test_real_native_workspace_readback_rejects_foreign_code_basis(tmp_path):
 
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN"),
                     reason="Requires an explicit real native Host binary; only a local static provider is used")
-@pytest.mark.parametrize("case", ["resume", "scope_change", "profile_change", "joint", "binding_reply_loss"])
+@pytest.mark.parametrize("case", ["resume", "scope_change", "profile_change", "joint", "binding_reply_loss",
+                                 "fork_reply_loss", "fork_missing", "fork_ambiguous"])
 def test_real_fork_admission_and_native_resume_use_retained_state(tmp_path, capsys, monkeypatch, case, request):
     """Real Host/CLI/Goal/session/artifact owners; deterministic synthetic work.
 
@@ -438,6 +439,45 @@ def test_real_fork_admission_and_native_resume_use_retained_state(tmp_path, caps
             assert len(calls) == 1
             assert retained_source() == before
             return
+        recovered_fork = None
+        if case in {"fork_reply_loss", "fork_missing", "fork_ambiguous"}:
+            from benchmark.runtime.native_checkpoint import StdioNativeGoalTransport
+            original_request = StdioNativeGoalTransport.request
+            forks = []
+            def lose_fork_reply(self, method, params):
+                if method != "thread/fork":
+                    return original_request(self, method, params)
+                if case != "fork_missing":
+                    forks.append(original_request(self, method, params)["thread"]["id"])
+                if case == "fork_ambiguous":
+                    forks.append(original_request(self, method, params)["thread"]["id"])
+                raise TimeoutError("synthetic loss before fork reply")
+            with monkeypatch.context() as lost:
+                lost.setattr(StdioNativeGoalTransport, "request", lose_fork_reply)
+                with pytest.raises(TimeoutError, match="loss before fork reply"):
+                    admit_native_checkpoint_session(env, unit, digest, config, execution=execution, timeout=30)
+            assert load_codex_cli_session(runtime, lineage={"goal_id": destination_goal,
+                "agent_id": destination_agent}, session_scope="agent") is None
+            assert len(calls) == 1 and retained_source() == before
+            if case != "fork_reply_loss":
+                def no_second_fork(self, method, params):
+                    assert method != "thread/fork", "uncertainty must not dispatch a second fork"
+                    return original_request(self, method, params)
+                with monkeypatch.context() as retry:
+                    retry.setattr(StdioNativeGoalTransport, "request", no_second_fork)
+                    with pytest.raises(ValueError, match="absent or ambiguous"):
+                        admit_native_checkpoint_session(env, unit, digest, config, execution=execution, timeout=30)
+                assert load_codex_cli_session(runtime, lineage={"goal_id": destination_goal,
+                    "agent_id": destination_agent}, session_scope="agent") is None
+                assert len(calls) == 1 and retained_source() == before
+                return
+            recovered_fork = forks[0]
+            # The isolated attempt is bound to this destination, not merely an
+            # equivalent visible history or another Goal's transport directory.
+            from benchmark.runtime.native_checkpoint import fork_native_checkpoint
+            with pytest.raises(ValueError, match="attempt differs"):
+                fork_native_checkpoint({**env, "LOOPX_AGENT_ID": "unrelated-destination"},
+                    unit, digest, config, timeout=30)
         if case == "binding_reply_loss":
             original_bind = BenchmarkSessionWake._bind_verified_fork
             def lose_binding_reply(self, *args):
@@ -458,6 +498,8 @@ def test_real_fork_admission_and_native_resume_use_retained_state(tmp_path, caps
         assert admitted["session_binding_admitted"] and admitted["history_verified"]
         assert admitted["model_calls"] == 0 and not admitted["continuation_qualified"]
         assert admitted["session_id"] != source_session and len(calls) == 1
+        if recovered_fork:
+            assert admitted["session_id"] == recovered_fork
         bound = load_codex_cli_session(runtime, lineage={"goal_id": destination_goal, "agent_id": destination_agent},
                                       session_scope="agent")
         assert bound["session_id"] == admitted["session_id"]

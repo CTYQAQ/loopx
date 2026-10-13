@@ -666,9 +666,15 @@ canonical graph/vision/effect 激活、完整 native/Host/evaluator 一致性、
 binding 已提交但控制器响应丢失时，重复原命令会核对原凭据、当前 Goal/Agent/profile
 及未推进的完整 native 历史，返回同一 session，不另起 fork 或模型调用。同一会话的
 后续正常观察保留来源，替换 session、profile 或 Goal lifetime 不继承来源。无来源
-标记、外来 binding 或已推进历史均拒绝旧点准入。真实 binding 后注入响应丢失，
-再经 CLI 恢复并继续实际 native governed 工作的确定性测试覆盖这一边界；fork 在
-binding 前的未知结果与 evaluator/Host 联合激活恢复仍未资格化。
+标记、外来 binding 或已推进历史均拒绝旧点准入。发送 native fork 前，控制器在
+既有进程锁内持久保存来源产物、目标身份与原 native identity 清单。binding 前
+响应丢失时，只恢复唯一新增且经原生 parent/workspace/完整历史核验的子会话，
+不再次发送 fork。结果缺失、多个结果或目标变化继续保持未决。固定版本的原生
+交互列表会隐藏尚无新用户事件的 fork，因此只读 native SQLite index 仅用于定位
+不透明 ID，再由 native API 验证语义；不改写数据库、不从 index 授予权限。
+真实 binding 前后注入响应丢失，再经 CLI 恢复并继续 native governed 工作的
+确定性测试覆盖这一边界，并验证缺失、多结果和外来目标拒绝；evaluator/Host
+联合激活恢复仍未资格化。
 
 原生新注册不等于恢复准入。真实原生 Docker 资格测试中，source 已消耗十二次
 中的一次，且冷却仍有效；同额度的新注册却立即受理 `agent-1`，保留十二次未用

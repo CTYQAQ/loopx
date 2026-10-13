@@ -140,6 +140,10 @@ artifacts and exclude credentials and hidden evaluation material:
 }
 ```
 
+Caller component IDs are preserved. Automatic LoopX-state, research-context and
+session-binding participants choose an unused local ID when their preferred
+name is already declared; source-path deduplication and byte witnesses still apply.
+
 The destination must be a new direct child of the trial log owner's
 `checkpoints` directory. Capture runs after a successful execute wake's original
 settlement, before the next wake. It uses the remaining phase budget with a
@@ -229,8 +233,19 @@ without another fork or model call. Changed or unmarked bindings reject; this
 cannot retrofit recovery onto older bindings. Once native work has advanced, use
 the existing continuation rather than retrying admission at the old cursor.
 Provenance survives ordinary observations of the same session, but does not follow
-a replacement session, profile or Goal lifetime. A fork whose reply was lost
-**before binding** remains unresolved and cannot be automatically repeated. Omit
+a replacement session, profile or Goal lifetime. Before dispatching the native
+fork, the controller durably records the artifact/destination basis and original
+native thread identities under the existing process lock. If the fork reply is
+lost **before binding**, retry the same command in the same isolated environment.
+It admits only one new native identity whose native parent, workspace and complete
+history match the captured source. It never dispatches another fork on recovery.
+Missing or multiple outcomes, changed destinations/configuration and advanced
+history remain unresolved and require reconciliation; do not erase the attempt.
+At the qualified Host version, the interactive `thread/list` omits a fresh fork
+until its first user event. Recovery therefore locates opaque IDs through a
+read-only native SQLite index, then verifies them through `thread/read` and
+`thread/turns/list`; it never edits native rows or treats the index as authority.
+Omit
 this command to leave the unit inert. Code/research authority, unresolved effects,
 native evaluator admission and remaining whole-trial budget still require their
 owners before executing a research continuation. This source-checkout controller

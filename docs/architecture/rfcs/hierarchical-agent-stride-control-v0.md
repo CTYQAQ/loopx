@@ -843,10 +843,17 @@ reply verify that receipt, current Goal/Agent/profile and unchanged complete
 native history, then return the same session without a fork or model call.
 Ordinary subsequent observations preserve provenance only for that conversation;
 replacement identity drops it. Unmarked/foreign bindings and advanced native
-history reject old-point admission. This closes post-binding reply loss, not an
-unknown fork before binding or joint evaluator/Host activation recovery. Tests
-inject reply loss after the actual binding, then recover through the CLI and
-continue real native governed work with a deterministic local provider.
+history reject old-point admission. Before native fork dispatch, a private
+transport attempt retains the source artifact/destination basis and native
+identity inventory under the existing process lock. A lost pre-binding reply can
+recover the unique new native child, after native parent/workspace and complete
+history verification, without dispatching another fork. Missing or ambiguous
+outcomes stay unresolved. The pinned native index supplies only opaque lookup
+IDs because the interactive listing hides unused forks; native APIs verify their
+meaning, and no native rows are rewritten. Tests inject pre- and post-binding
+reply loss, recover through the CLI and continue real native governed work with
+a deterministic local provider; absent/multiple outcomes and foreign destination
+attempts reject. Joint evaluator/Host activation recovery remains unqualified.
 
 An inert verification unit grants no execution authority. The destination uses
 fresh experiment/Host identities and the existing Goal/session/state admission

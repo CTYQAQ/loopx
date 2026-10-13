@@ -55,6 +55,16 @@ def parse_checkpoint_request(raw: bytes) -> dict[str, Any]:
     return request
 
 
+def _participant_id(components, preferred):
+    """Automatic participants cannot reserve an otherwise legal caller ID."""
+    occupied = {entry["id"] for entry in components}
+    candidate, suffix = preferred, 0
+    while candidate in occupied:
+        suffix += 1
+        candidate = f"{preferred}_{suffix}"
+    return candidate
+
+
 def _loopx_state_components(env, components, output_dir):
     """Adapt the existing backup owner's inventory for one isolated trial.
 
@@ -103,7 +113,7 @@ def _loopx_state_components(env, components, output_dir):
             continue
         if any(Path(entry["source_path"]).is_relative_to(path) for entry in entries):
             raise ValueError("LoopX state inventory overlaps a narrower declared component; declare its parent once")
-        entries.append({"id": f"loopx_state_{len(entries)}", "source_path": str(path)})
+        entries.append({"id": _participant_id(entries, f"loopx_state_{len(entries)}"), "source_path": str(path)})
     coverage = [{"key": target["key"], "source_path": target["source_path"],
                  "component_id": next(entry["id"] for entry in entries
                      if Path(target["source_path"]).is_relative_to(Path(entry["source_path"]))) }
@@ -348,7 +358,7 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
                     file.write(research_raw)
                 parent = next((entry for entry in components if evidence.is_relative_to(Path(entry["source_path"]))), None)
                 if parent is None:
-                    parent = {"id": "research_context", "source_path": str(evidence)}
+                    parent = {"id": _participant_id(components, "research_context"), "source_path": str(evidence)}
                     components = [*components, parent]
                 metadata["research_context"] = {"component_id": parent["id"],
                     "member_path": evidence.relative_to(Path(parent["source_path"])).as_posix() if evidence != Path(parent["source_path"]) else "",
@@ -384,7 +394,8 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
             from loopx.control_plane.turn_driver.codex_sessions import _session_path
             binding_path = _session_path(source_wake.root, source_wake.lineage, "agent")
             if not any(binding_path.is_relative_to(Path(entry["source_path"])) for entry in components):
-                components = [*components, {"id": "source_session_binding", "source_path": str(binding_path)}]
+                components = [*components, {"id": _participant_id(components, "source_session_binding"),
+                                           "source_path": str(binding_path)}]
             metadata["session"] = {**session, "session_profile_digest": source_wake.digest}
             native = native_session_checkpoint(env, session.get("session_id", ""),
                                                timeout=max(.1, deadline - time.time()))

@@ -9,8 +9,10 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import time
 import tomllib
@@ -101,8 +103,47 @@ def native_session_checkpoint(env: dict[str, str], session_id: str, *, timeout: 
     }}
 
 
+def _native_thread_ids(home: Path) -> set[str]:
+    """Read opaque identities omitted by the native interactive thread list.
+
+    At the qualified Host version, thread/list hides a fresh fork until its
+    first user event. The native index locates candidates only: thread/read
+    and complete native history still prove provenance and the captured cursor.
+    Never edit this provider-owned store or infer authority from an index row.
+    """
+    indexes = [path for path in home.iterdir() if re.fullmatch(r"state_[0-9]+\.sqlite", path.name)]
+    if len(indexes) != 1 or indexes[0].resolve(strict=True) != indexes[0] or not indexes[0].is_file():
+        raise ValueError("native fork recovery requires one qualified physical session index")
+    with sqlite3.connect(indexes[0].as_uri() + "?mode=ro", uri=True) as connection:
+        rows = connection.execute("SELECT id FROM threads").fetchall()
+    ids = [row[0] for row in rows]
+    if any(not isinstance(value, str) or not value for value in ids) or len(ids) != len(set(ids)):
+        raise ValueError("native fork recovery index has invalid or duplicate identities")
+    return set(ids)
+
+
 def fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: str,
                            config_path: Path, *, timeout: float) -> dict[str, Any]:
+    # The existing process lock serializes reconstruction in this isolated home.
+    # The private attempt below describes one opaque native RPC, not authority
+    # to admit a Goal, a work Turn, or a second fork after an uncertain response.
+    from loopx.file_lock import exclusive_file_lock
+
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("native checkpoint reconstruction timeout must be finite and positive")
+    deadline = time.monotonic() + timeout
+    home = Path(env["CODEX_HOME"])
+    if not home.is_absolute() or home != home.resolve():
+        raise ValueError("native checkpoint destination must be a physical absolute home")
+    with exclusive_file_lock(home, timeout_seconds=timeout, operation="checkpoint_native_fork"):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("native checkpoint reconstruction window closed")
+        return _fork_native_checkpoint(env, unit, expected_sha256, config_path, timeout=remaining)
+
+
+def _fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: str,
+                            config_path: Path, *, timeout: float) -> dict[str, Any]:
     """Reconstruct one native branch in a new, fixed-path isolated environment.
 
     No model starts and no LoopX binding is registered. Existing session/Goal
@@ -119,8 +160,10 @@ def fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: str
     home = Path(env["CODEX_HOME"])
     if str(home) != native["guest_home"] or env["LOOPX_PROJECT"] != native["guest_workspace"]:
         raise ValueError("native checkpoint requires its qualified fixed guest paths")
-    if home.exists() or home.is_symlink():
-        raise ValueError("native checkpoint destination home must be new")
+    attempt_path = home / ".loopx-checkpoint-fork.json"
+    recovering = home.exists()
+    if recovering and (not attempt_path.is_file() or attempt_path.resolve() != attempt_path):
+        raise ValueError("native checkpoint destination home must be new or retain its original fork attempt")
     config = config_path.read_bytes()
     if hashlib.sha256(config).hexdigest() != native["config_sha256"]:
         raise ValueError("native checkpoint effective configuration differs")
@@ -136,14 +179,30 @@ def fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: str
                      re.fullmatch(r"(?:state|thread_history)_[0-9]+\.sqlite", name))):
             raise ValueError("native checkpoint member inventory is invalid")
         names.add(name)
-    home.mkdir(parents=True, mode=0o700)
-    for member in native["store_members"]:
-        source, destination = unit / "components" / member["id"], home / member["name"]
-        if source.is_dir():
-            shutil.copytree(source, destination)
-        else:
-            shutil.copy2(source, destination)
-    (home / "config.toml").write_bytes(config)
+    basis = {"checkpoint_sha256": expected_sha256, "source_session_id": native["session_id"],
+        "completed_turn_id": native["completed_turn_id"], "config_sha256": native["config_sha256"],
+        "destination_goal_id": env.get("LOOPX_GOAL_ID"), "destination_agent_id": env.get("LOOPX_AGENT_ID"),
+        "guest_workspace": env["LOOPX_PROJECT"], "guest_home": str(home)}
+    attempt = None
+    if recovering:
+        attempt = json.loads(attempt_path.read_bytes())
+        if (not isinstance(attempt, dict) or set(attempt) != {"basis", "source_thread_ids"} or
+                attempt["basis"] != basis or not isinstance(attempt["source_thread_ids"], list) or
+                any(not isinstance(v, str) or not v for v in attempt["source_thread_ids"]) or
+                len(set(attempt["source_thread_ids"])) != len(attempt["source_thread_ids"]) or
+                native["session_id"] not in attempt["source_thread_ids"]):
+            raise ValueError("native fork attempt differs from the requested checkpoint or destination")
+        if (home / "config.toml").read_bytes() != config:
+            raise ValueError("native fork recovery effective configuration differs")
+    else:
+        home.mkdir(parents=True, mode=0o700)
+        for member in native["store_members"]:
+            source, destination = unit / "components" / member["id"], home / member["name"]
+            if source.is_dir():
+                shutil.copytree(source, destination)
+            else:
+                shutil.copy2(source, destination)
+        (home / "config.toml").write_bytes(config)
     with StdioNativeGoalTransport.spawn(
         [env["CODEX_BIN"], "-c", "features.goals=false", "app-server", "--listen", "stdio://"],
         cwd=env["LOOPX_PROJECT"], env=env, stderr=subprocess.DEVNULL,
@@ -158,13 +217,38 @@ def fork_native_checkpoint(env: dict[str, str], unit: Path, expected_sha256: str
         request("initialize", {"clientInfo": {"name": "loopx_checkpoint", "version": "0.1.0"},
                                "capabilities": {"experimentalApi": True}})
         transport.notify("initialized", {})
-        fork = request("thread/fork", {"threadId": native["session_id"],
-            "lastTurnId": native["completed_turn_id"], "cwd": env["LOOPX_PROJECT"],
-            "sandbox": "read-only", "approvalPolicy": "never", "deferGoalContinuation": True,
-            "excludeTurns": True})
-        session = fork.get("thread", {}).get("id")
+        inventory = _native_thread_ids(home)
+        if recovering:
+            added = set(inventory) - set(attempt["source_thread_ids"])
+            if len(added) != 1 or not set(attempt["source_thread_ids"]).issubset(inventory):
+                raise ValueError("native fork outcome remains absent or ambiguous; a second fork is prohibited")
+            session = added.pop()
+            fork = request("thread/read", {"threadId": session, "includeTurns": False})
+        else:
+            if native["session_id"] not in inventory:
+                raise ValueError("native checkpoint source is missing from the reconstructed store")
+            attempt = {"basis": basis, "source_thread_ids": sorted(inventory)}
+            # Persist before dispatch. Partial preparation is not a license to
+            # fork again; a missing outcome stays explicitly unresolved.
+            with os.fdopen(os.open(attempt_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as file:
+                json.dump(attempt, file, sort_keys=True)
+                file.flush()
+                os.fsync(file.fileno())
+            directory = os.open(home, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+            fork = request("thread/fork", {"threadId": native["session_id"],
+                "lastTurnId": native["completed_turn_id"], "cwd": env["LOOPX_PROJECT"],
+                "sandbox": "read-only", "approvalPolicy": "never", "deferGoalContinuation": True,
+                "excludeTurns": True})
+            session = fork.get("thread", {}).get("id")
         if not session or session == native["session_id"]:
             raise ValueError("native checkpoint did not create a distinct session")
+        if (fork.get("thread", {}).get("forkedFromId") != native["session_id"] or
+                fork["thread"].get("cwd") != env["LOOPX_PROJECT"]):
+            raise ValueError("native fork provenance differs from the original attempt")
         turns = _complete_history(request, session)
         encoded = json.dumps(turns, sort_keys=True, separators=(",", ":")).encode()
         if ([t["id"] for t in turns] != native["turn_ids"] or
