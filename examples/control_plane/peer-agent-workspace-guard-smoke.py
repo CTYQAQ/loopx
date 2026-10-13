@@ -12,6 +12,11 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+from tests.control_plane.canonical_authority_fixture import (  # noqa: E402
+    initialize_canonical_registry_fixture,
+)
+
 GOAL_ID = "workspace-guard-canary"
 PEER_ALPHA = "codex-alpha"
 PEER_BETA = "codex-beta"
@@ -47,15 +52,18 @@ def run_cli(cwd: Path, *args: str, registry_path: Path, runtime: Path) -> dict:
             *args,
         ],
         cwd=cwd,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         env=env,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
 
 
-def write_fixture(root: Path) -> tuple[Path, Path, Path, Path, Path, Path]:
+def write_fixture(
+    root: Path, *, provider: str, monitor: bool = False
+) -> tuple[Path, Path, Path, Path, Path, Path]:
     project = root / "project"
     independent = root / "peer-worktree"
     task_project = root / "task-project"
@@ -91,7 +99,13 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path, Path, Path]:
     task_project.mkdir(parents=True)
     (task_project / "README.md").write_text("# Task Repository\n", encoding="utf-8")
     run_git(task_project, "init", "--initial-branch", "main")
-    run_git(task_project, "remote", "add", "origin", "https://example.invalid/loopx/task-repo.git")
+    run_git(
+        task_project,
+        "remote",
+        "add",
+        "origin",
+        "https://example.invalid/loopx/task-repo.git",
+    )
     run_git(task_project, "add", "README.md")
     run_git(
         task_project,
@@ -103,7 +117,9 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path, Path, Path]:
         "-m",
         "initial task fixture",
     )
-    run_git(task_project, "worktree", "add", "-b", "task-peer-work", str(task_independent))
+    run_git(
+        task_project, "worktree", "add", "-b", "task-peer-work", str(task_independent)
+    )
 
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(
@@ -155,123 +171,7 @@ def write_fixture(root: Path) -> tuple[Path, Path, Path, Path, Path, Path]:
         + "\n",
         encoding="utf-8",
     )
-    return project, independent, task_project, task_independent, runtime, registry_path
-
-
-def set_task_repository(project: Path, runtime: Path, registry_path: Path) -> None:
-    updated = run_cli(
-        project,
-        "todo",
-        "update",
-        "--goal-id",
-        GOAL_ID,
-        "--role",
-        "agent",
-        "--todo-id",
-        "todo_workspace_guard",
-        "--agent-id",
-        PEER_ALPHA,
-        "--task-repository",
-        "https://example.invalid/loopx/task-repo.git",
-        registry_path=registry_path,
-        runtime=runtime,
-    )
-    assert updated["task_repository"] == TASK_REPOSITORY, updated
-
-
-def should_run(
-    cwd: Path,
-    project: Path,
-    runtime: Path,
-    registry_path: Path,
-) -> dict:
-    return run_cli(
-        cwd,
-        "quota",
-        "should-run",
-        "--goal-id",
-        GOAL_ID,
-        "--agent-id",
-        PEER_ALPHA,
-        "--scan-path",
-        str(project),
-        registry_path=registry_path,
-        runtime=runtime,
-    )
-
-
-def main() -> None:
-    with tempfile.TemporaryDirectory(prefix="loopx-peer-workspace-guard-") as tmp:
-        (
-            project,
-            independent,
-            task_project,
-            task_independent,
-            runtime,
-            registry_path,
-        ) = write_fixture(Path(tmp))
-
-        guarded = should_run(project, project, runtime, registry_path)
-        assert guarded["decision"] == "workspace_guard", guarded
-        assert guarded["effective_action"] == "agent_workspace_repair", guarded
-        assert guarded["normal_delivery_allowed"] is False, guarded
-        assert guarded["agent_identity"]["agent_model"] == "peer_v1", guarded
-        assert "role" not in guarded["agent_identity"], guarded
-        guard = guarded["workspace_guard"]
-        assert guard["schema_version"] == "agent_workspace_guard_v1", guard
-        assert guard["current_workspace"] == "canonical_checkout", guard
-        assert guard["agent_id"] == PEER_ALPHA, guard
-        assert "primary_agent" not in guard, guard
-
-        allowed = should_run(independent, project, runtime, registry_path)
-        assert allowed["decision"] == "run", allowed
-        assert allowed["effective_action"] == "normal_run", allowed
-        assert allowed["normal_delivery_allowed"] is True, allowed
-        assert "workspace_guard" not in allowed, allowed
-
-        foreign_without_route = should_run(
-            task_independent,
-            project,
-            runtime,
-            registry_path,
-        )
-        assert foreign_without_route["decision"] == "workspace_guard", foreign_without_route
-        assert foreign_without_route["workspace_guard"]["current_workspace"] == (
-            "foreign_git_worktree"
-        ), foreign_without_route
-        assert foreign_without_route["workspace_guard"]["repository_source"] == (
-            "goal.repo"
-        ), foreign_without_route
-
-        set_task_repository(project, runtime, registry_path)
-
-        task_allowed = should_run(task_independent, project, runtime, registry_path)
-        assert task_allowed["decision"] == "run", task_allowed
-        assert task_allowed["effective_action"] == "normal_run", task_allowed
-        assert "workspace_guard" not in task_allowed, task_allowed
-        assert task_allowed["selected_todo"]["task_repository"] == TASK_REPOSITORY, task_allowed
-
-        task_primary_guarded = should_run(
-            task_project,
-            project,
-            runtime,
-            registry_path,
-        )
-        task_primary_guard = task_primary_guarded["workspace_guard"]
-        assert task_primary_guard["current_workspace"] == "canonical_checkout", task_primary_guard
-        assert task_primary_guard["repository_source"] == (
-            "selected_todo.task_repository"
-        ), task_primary_guard
-        assert task_primary_guard["task_repository"] == TASK_REPOSITORY, task_primary_guard
-
-        goal_worktree_guarded = should_run(independent, project, runtime, registry_path)
-        assert goal_worktree_guarded["workspace_guard"]["current_workspace"] == (
-            "foreign_git_worktree"
-        ), goal_worktree_guarded
-        assert goal_worktree_guarded["workspace_guard"]["task_repository"] == (
-            TASK_REPOSITORY
-        ), goal_worktree_guarded
-
+    if monitor:
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
         registry["goals"][0].pop("workspace_guard_policy", None)
         registry_path.write_text(
@@ -298,17 +198,165 @@ def main() -> None:
             f"claimed_by={PEER_ALPHA} -->\n",
             encoding="utf-8",
         )
+    initialize_canonical_registry_fixture(registry_path, provider=provider)
+    return project, independent, task_project, task_independent, runtime, registry_path
+
+
+def should_run(
+    cwd: Path,
+    project: Path,
+    runtime: Path,
+    registry_path: Path,
+) -> dict:
+    return run_cli(
+        cwd,
+        "quota",
+        "should-run",
+        "--goal-id",
+        GOAL_ID,
+        "--agent-id",
+        PEER_ALPHA,
+        "--scan-path",
+        str(project),
+        registry_path=registry_path,
+        runtime=runtime,
+    )
+
+
+def run_provider(provider: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-peer-workspace-guard-") as tmp:
+        (
+            project,
+            independent,
+            task_project,
+            task_independent,
+            runtime,
+            registry_path,
+        ) = write_fixture(Path(tmp) / "goal-route", provider=provider)
+
+        guarded = should_run(project, project, runtime, registry_path)
+        assert guarded["decision"] == "workspace_guard", guarded
+        assert guarded["effective_action"] == "agent_workspace_repair", guarded
+        assert guarded["normal_delivery_allowed"] is False, guarded
+        assert guarded["agent_identity"]["agent_model"] == "peer_v1", guarded
+        assert "role" not in guarded["agent_identity"], guarded
+        guard = guarded["workspace_guard"]
+        assert guard["schema_version"] == "agent_workspace_guard_v1", guard
+        assert guard["current_workspace"] == "canonical_checkout", guard
+        assert guard["agent_id"] == PEER_ALPHA, guard
+        assert "primary_agent" not in guard, guard
+
+        allowed = should_run(independent, project, runtime, registry_path)
+        assert allowed["decision"] == "run", allowed
+        assert allowed["effective_action"] == "normal_run", allowed
+        assert allowed["normal_delivery_allowed"] is True, allowed
+        assert "workspace_guard" not in allowed, allowed
+
+        foreign_without_route = should_run(
+            task_independent,
+            project,
+            runtime,
+            registry_path,
+        )
+        assert foreign_without_route["decision"] == "workspace_guard", (
+            foreign_without_route
+        )
+        assert foreign_without_route["workspace_guard"]["current_workspace"] == (
+            "foreign_git_worktree"
+        ), foreign_without_route
+        assert foreign_without_route["workspace_guard"]["repository_source"] == (
+            "goal.repo"
+        ), foreign_without_route
+
+        # This unleased soft-claim Todo may update its canonical work declaration.
+        updated = run_cli(
+            project,
+            "todo",
+            "update",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            "todo_workspace_guard",
+            "--agent-id",
+            PEER_ALPHA,
+            "--task-repository",
+            TASK_REPOSITORY,
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert updated["task_repository"] == TASK_REPOSITORY, updated
+        readback = run_cli(
+            project,
+            "todo",
+            "list",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            "todo_workspace_guard",
+            registry_path=registry_path,
+            runtime=runtime,
+        )
+        assert readback["todo"]["task_repository"] == TASK_REPOSITORY, readback
+        assert readback["authority_read"]["source_authority"] == provider + "_v0", (
+            readback
+        )
+
+        task_allowed = should_run(task_independent, project, runtime, registry_path)
+        assert task_allowed["decision"] == "run", task_allowed
+        assert task_allowed["effective_action"] == "normal_run", task_allowed
+        assert "workspace_guard" not in task_allowed, task_allowed
+        assert task_allowed["selected_todo"]["task_repository"] == TASK_REPOSITORY, (
+            task_allowed
+        )
+
+        task_primary_guarded = should_run(
+            task_project,
+            project,
+            runtime,
+            registry_path,
+        )
+        task_primary_guard = task_primary_guarded["workspace_guard"]
+        assert task_primary_guard["current_workspace"] == "canonical_checkout", (
+            task_primary_guard
+        )
+        assert task_primary_guard["repository_source"] == (
+            "selected_todo.task_repository"
+        ), task_primary_guard
+        assert task_primary_guard["task_repository"] == TASK_REPOSITORY, (
+            task_primary_guard
+        )
+
+        goal_worktree_guarded = should_run(independent, project, runtime, registry_path)
+        assert goal_worktree_guarded["workspace_guard"]["current_workspace"] == (
+            "foreign_git_worktree"
+        ), goal_worktree_guarded
+        assert goal_worktree_guarded["workspace_guard"]["task_repository"] == (
+            TASK_REPOSITORY
+        ), goal_worktree_guarded
+
+        project, _, _, _, runtime, registry_path = write_fixture(
+            Path(tmp) / "monitor", provider=provider, monitor=True
+        )
 
         monitor_selected = should_run(project, project, runtime, registry_path)
         assert monitor_selected["decision"] == "run", monitor_selected
         assert "workspace_guard" not in monitor_selected, monitor_selected
         assert "boundary_projection_gap" not in monitor_selected, monitor_selected
-        assert monitor_selected["selected_todo"]["todo_id"] == (
-            "todo_due_monitor"
-        ), monitor_selected
+        assert monitor_selected["selected_todo"]["todo_id"] == ("todo_due_monitor"), (
+            monitor_selected
+        )
         assert monitor_selected["selected_todo"]["task_repository"] == (
             PROJECT_REPOSITORY
         ), monitor_selected
+
+
+def main() -> None:
+    os.environ["NODE_OPTIONS"] = (
+        os.environ.get("NODE_OPTIONS", "") + " --experimental-sqlite"
+    )
+    for provider in ("file", "sqlite"):
+        run_provider(provider)
+    print("peer-agent-workspace-guard-smoke ok: File and SQLite")
 
 
 if __name__ == "__main__":

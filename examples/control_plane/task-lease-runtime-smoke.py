@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import json
-import re
+import os
 import subprocess
 import sys
 import tempfile
@@ -15,13 +15,21 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from loopx.control_plane.coordination.runtime_shadow import (  # noqa: E402
+    build_todo_runtime_shadow_projection,
+)
+from loopx.control_plane.todos.goal_todo_projection import project_goal_todo_items  # noqa: E402
+from tests.control_plane.canonical_authority_fixture import (  # noqa: E402
+    initialize_canonical_authority,
+)
+
 GOAL_ID = "task-lease-runtime-goal"
 TODO_A = "todo_taskleasea"
 TODO_B = "todo_taskleaseb"
 TODO_C = "todo_taskleasec"
 
 
-def write_fixture(root: Path) -> tuple[Path, Path]:
+def write_fixture(root: Path, *, provider: str) -> tuple[Path, Path]:
     project = root / "project"
     runtime = root / "runtime"
     registry_path = project / ".loopx" / "registry.json"
@@ -35,7 +43,7 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
         "# Active Goal State\n\n"
         "## Agent Todo\n\n"
         f"- [ ] First independently claimable todo.\n"
-        f"  <!-- loopx: todo_id={TODO_A} status=open -->\n"
+        f"  <!-- loopx: todo_id={TODO_A} status=open claimed_by=codex-main-control -->\n"
         f"- [ ] Second independently claimable todo.\n"
         f"  <!-- loopx: todo_id={TODO_B} status=open -->\n"
         f"- [ ] Conflicting write-scope todo.\n"
@@ -76,21 +84,21 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
         + "\n",
         encoding="utf-8",
     )
+    goal = json.loads(registry_path.read_text())["goals"][0]
+    projection = build_todo_runtime_shadow_projection(
+        goal_id=GOAL_ID,
+        handoff_mode="hard_lease",
+        todos=project_goal_todo_items(
+            goal,
+            state_text=state_file.read_text(),
+            state_path=state_file,
+            rollout_events=[],
+        ),
+    )
+    initialize_canonical_authority(
+        runtime, GOAL_ID, projection, state_path=state_file, provider=provider
+    )
     return registry_path, state_file
-
-
-def set_claimed_by(state_file: Path, *, todo_id: str, owner: str | None) -> None:
-    lines = state_file.read_text(encoding="utf-8").splitlines()
-    for index, line in enumerate(lines):
-        if f"todo_id={todo_id}" not in line:
-            continue
-        line = re.sub(r"\s+claimed_by=[^\s<>]+", "", line)
-        if owner:
-            line = line.replace(" -->", f" claimed_by={owner} -->")
-        lines[index] = line
-        state_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return
-    raise AssertionError(f"todo metadata not found: {todo_id}")
 
 
 def command(
@@ -98,7 +106,7 @@ def command(
     *args: str,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -110,10 +118,14 @@ def command(
             *args,
         ],
         cwd=REPO_ROOT,
-        check=check,
+        check=False,
         text=True,
         capture_output=True,
     )
+
+    if check:
+        assert result.returncode == 0, result.stdout + result.stderr
+    return result
 
 
 def cli(
@@ -158,15 +170,9 @@ def inspected_lease(registry_path: Path, todo_id: str) -> dict[str, Any]:
     )
 
 
-def main() -> int:
+def run_provider(provider: str) -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-task-lease-smoke-") as tmp:
-        registry_path, state_file = write_fixture(Path(tmp))
-
-        set_claimed_by(
-            state_file,
-            todo_id=TODO_A,
-            owner="codex-main-control",
-        )
+        registry_path, _ = write_fixture(Path(tmp), provider=provider)
         first = payload(
             cli(
                 registry_path,
@@ -186,6 +192,8 @@ def main() -> int:
             )
         )
         assert first["ok"] is True and first["acquired"] is True, first
+        assert first["source_authority"] == provider + "_v0", first
+        assert first["legacy_fallback_used"] is False, first
         assert first["lease"]["schema_version"] == "task_lease_v0", first
         assert first["lease"]["version"] == 1, first
         assert first["lease"]["lease_epoch"] == 1, first
@@ -296,11 +304,49 @@ def main() -> int:
         assert payload(claim_blocked_transfer)["error_code"] == (
             "owner_conflicts_with_claim"
         )
-        set_claimed_by(state_file, todo_id=TODO_A, owner=None)
+        before_handoff = payload(
+            command(
+                registry_path, "todo", "list", "--goal-id", GOAL_ID, "--todo-id", TODO_A
+            )
+        )
+        # A metadata edit cannot split an execution grant. Use atomic transfer.
+        cleared = command(
+            registry_path,
+            "todo",
+            "update",
+            "--goal-id",
+            GOAL_ID,
+            "--todo-id",
+            TODO_A,
+            "--agent-id",
+            "codex-main-control",
+            "--clear-claim",
+            "--task-lease-idempotency-key",
+            "turn-1",
+            "--task-lease-expected-version",
+            "2",
+            check=False,
+        )
+        assert cleared.returncode == 1, cleared.stdout
+        assert payload(cleared)["error_code"] == "handoff_mode_requires_lease", (
+            cleared.stdout
+        )
+        after_rejection = payload(
+            command(
+                registry_path, "todo", "list", "--goal-id", GOAL_ID, "--todo-id", TODO_A
+            )
+        )
+        assert (
+            after_rejection["authority_read"]["provider_revision"]
+            == before_handoff["authority_read"]["provider_revision"]
+        )
+        assert after_rejection["todo"] == before_handoff["todo"]
+        assert inspected_lease(registry_path, TODO_A)["lease"] == renewed["lease"]
         transferred = payload(
             cli(
                 registry_path,
                 "transfer",
+                "--transfer-claim",
                 "--goal-id",
                 GOAL_ID,
                 "--todo-id",
@@ -321,6 +367,12 @@ def main() -> int:
         assert transferred["lease"]["version"] == 3, transferred
         assert transferred["lease"]["lease_epoch"] == 2, transferred
 
+        after_handoff = payload(
+            command(
+                registry_path, "todo", "list", "--goal-id", GOAL_ID, "--todo-id", TODO_A
+            )
+        )
+        assert after_handoff["todo"]["claimed_by"] == transferred["lease"]["owner"]
         stale_owner = lifecycle_cli(
             registry_path,
             "renew",
@@ -330,7 +382,16 @@ def main() -> int:
             check=False,
         )
         assert stale_owner.returncode == 1, stale_owner.stdout
-        assert payload(stale_owner)["error_code"] == "lease_cas_mismatch"
+        assert payload(stale_owner)["error_code"] == "owner_conflicts_with_claim", (
+            stale_owner.stdout
+        )
+        stale_key = lifecycle_cli(
+            registry_path, "renew", "codex-side-bypass", "turn-1", 3, check=False
+        )
+        assert stale_key.returncode == 1, stale_key.stdout
+        assert payload(stale_key)["error_code"] == "lease_cas_mismatch", (
+            stale_key.stdout
+        )
         after_stale_owner = inspected_lease(registry_path, TODO_A)
         assert after_stale_owner["lease"] == transferred["lease"], after_stale_owner
 
@@ -457,7 +518,9 @@ def main() -> int:
             check=False,
         )
         assert stale_completion.returncode == 1, stale_completion.stdout
-        assert payload(stale_completion)["error_code"] == "lease_cas_mismatch"
+        assert payload(stale_completion)["error_code"] == "lease_cas_mismatch", (
+            stale_completion.stdout
+        )
 
         completed = payload(
             command(
@@ -480,9 +543,30 @@ def main() -> int:
             )
         )
         assert completed["ok"] is True, completed
-        assert completed["task_lease_fence"]["lease_epoch"] == 3, completed
+        assert completed["task_lease_fence"]["lease_fence"] == "required", completed
+        assert completed["task_lease_fence"]["next_lease"]["lease_epoch"] == 3, (
+            completed
+        )
+        final_lease = inspected_lease(registry_path, TODO_A)["lease"]
+        assert final_lease["status"] == "released", final_lease
+        assert final_lease["lease_epoch"] == 3 and final_lease["version"] == 5, (
+            final_lease
+        )
+        final_todos = payload(
+            command(
+                registry_path, "todo", "list", "--goal-id", GOAL_ID, "--todo-id", TODO_A
+            )
+        )
+        assert final_todos["todo"]["status"] == "done", final_todos
 
-    print("task-lease-runtime-smoke ok")
+
+def main() -> int:
+    os.environ["NODE_OPTIONS"] = (
+        os.environ.get("NODE_OPTIONS", "") + " --experimental-sqlite"
+    )
+    for provider in ("file", "sqlite"):
+        run_provider(provider)
+    print("task-lease-runtime-smoke ok: File and SQLite")
     return 0
 
 
