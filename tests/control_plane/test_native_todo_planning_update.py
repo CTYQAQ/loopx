@@ -68,6 +68,56 @@ def records(registry: Path) -> dict[str, dict]:
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("command", ["complete", "supersede"])
+def test_cli_same_title_terminal_successor_preserves_peers_and_replay(tmp_path, monkeypatch, provider, command):
+    from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
+    from loopx.control_plane.testing.canary_harness import run_json_cli, run_json_cli_result
+
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    registry, state = fixture(tmp_path, provider)
+    runtime = tmp_path / "runtime"
+    before = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
+    prefix = ("todo", command, "--goal-id", "goal-a", "--todo-id", "todo_target")
+    flags = ("--evidence", "Synthetic accepted result", "--self-merged") if command == "complete" else (
+        "--reason", "Synthetic replacement of the accepted work")
+    for actor, title, code in (("agent-b", "Synthetic task", "claim_owner_mismatch"),
+                              ("agent-a", "Independent task", "todo_semantic_duplicate_conflict")):
+        result_code, rejected = run_json_cli_result(
+            *prefix, "--agent-id", actor, *flags, "--next-agent-todo", title,
+            "--next-claimed-by", "agent-a", registry_path=registry)
+        assert result_code == 1 and rejected["error_code"] == code, rejected
+        assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == before
+        assert not state.exists()
+    terminal = (*prefix, "--agent-id", "agent-a", *flags,
+                "--next-agent-todo", "Synthetic task", "--next-claimed-by", "agent-a")
+    preview = run_json_cli(*terminal, "--dry-run", registry_path=registry)
+    assert preview["dry_run"] is True, preview
+    assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == before
+    assert not state.exists()
+    applied = run_json_cli(*terminal, registry_path=registry)
+    assert applied["changed"] is True and applied["projection_delivery"] != "pending", applied
+    current = records(registry)
+    origin = current["todo_target"]
+    successor_id = origin["successor_todo_ids"][0]
+    assert successor_id not in {"todo_target", "todo_other"}
+    assert origin["status"] == "done"
+    assert current[successor_id]["text"] == "Synthetic task"
+    assert current[successor_id]["status"] == "open"
+    assert current["todo_other"]["status"] == "open"
+    if command == "complete":
+        assert current[successor_id]["unblocks_todo_id"] == "todo_target"
+    else:
+        assert origin["superseded_by"] == successor_id
+    run_json_cli("todo", "add", "--goal-id", "goal-a", "--role", "agent",
+                 "--text", "A later independently admitted Todo", registry_path=registry)
+    later = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
+    replay = run_json_cli(*terminal, registry_path=registry)
+    assert replay["changed"] is False, replay
+    after = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
+    assert after["todos"] == later["todos"] and after["provider_revision"] == later["provider_revision"]
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 @pytest.mark.parametrize("edit,expected_actor", [
     (["--evidence", "Synthetic planning validation"], "agent-a"),
     (["--priority", "P2"], "agent-a"),

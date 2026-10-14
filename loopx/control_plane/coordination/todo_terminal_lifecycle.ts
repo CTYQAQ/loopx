@@ -1023,12 +1023,16 @@ function terminalTarget(
 }
 
 function semanticDuplicate(
-  todos: ReadonlyMap<string, JsonObject>,
+  todos: Iterable<JsonObject>,
   successor: JsonObject,
+  retiringTodoId: string | null = null,
 ): JsonObject | undefined {
-  return [...todos.values()].find((todo) =>
-    todo.role === successor.role && todo.archive_state === "active" &&
-    todo.status !== "done" && todo.status !== "deferred" && todo.text === successor.text);
+  for (const todo of todos) {
+    if (todo.todo_id !== retiringTodoId && todo.role === successor.role &&
+        todo.archive_state === "active" && todo.status !== "done" &&
+        todo.status !== "deferred" && todo.text === successor.text) return todo;
+  }
+  return undefined;
 }
 
 /**
@@ -1636,7 +1640,10 @@ export async function executeCoordinationTodoTerminalLifecycle(
         todo_id: successorId,
       });
     }
-    const duplicate = semanticDuplicate(projection.todos, successor);
+    // This CAS retires the source and creates the successors together. Only
+    // that source stops competing for its title. Peers still participate in
+    // the unchanged rule; successor admission already permits one per role.
+    const duplicate = semanticDuplicate(projection.todos.values(), successor, input.todo_id);
     if (duplicate !== undefined) {
       return terminalFailure(
         "todo_semantic_duplicate_conflict",
