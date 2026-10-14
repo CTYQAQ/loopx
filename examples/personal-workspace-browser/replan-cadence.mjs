@@ -21,6 +21,15 @@ export const replanCadenceScenario = {
     const legacy = { namespace: "todo_replan_cadence", namespace_configuration: {
       schema_version: "todo_replan_cadence_machine_defaults_v0", completed_todos: 2,
     } };
+    let nextGoalReadGate = null;
+    function gateNextGoalRead() {
+      let markStarted;
+      let release;
+      const started = new Promise((resolveStarted) => { markStarted = resolveStarted; });
+      const blocked = new Promise((resolveBlocked) => { release = resolveBlocked; });
+      nextGoalReadGate = { blocked, markStarted };
+      return { release, started };
+    }
     let context;
     try {
       context = await openWorkspacePage(browser, url, { collectCoverage,
@@ -28,6 +37,12 @@ export const replanCadenceScenario = {
           for (const endpoint of ["machine-configuration", "goal-configuration"]) {
             await page.route(`**/api/chat/${endpoint}**`, async (route) => {
               const parsed = new URL(route.request().url());
+              if (endpoint === "goal-configuration" && route.request().method() === "GET" && nextGoalReadGate) {
+                const gate = nextGoalReadGate;
+                nextGoalReadGate = null;
+                gate.markStarted();
+                await gate.blocked;
+              }
               await route.fulfill({ response: await route.fetch({ url: authority.url + parsed.pathname + parsed.search }) });
             });
           }
@@ -156,7 +171,16 @@ export const replanCadenceScenario = {
       await waitForInputValue(count, "3");
       await strategy.selectOption("off");
       await page.getByRole("button", { name: "预览变更", exact: true }).click();
+      const revisionBeforeApply = await page.locator(".personal-capability-settings.is-goal-scoped").getAttribute("data-revision");
+      const goalReadGate = gateNextGoalRead();
       await applyGoalPreview();
+      await goalReadGate.started;
+      const editableBeforeReadback = await count.isEnabled();
+      goalReadGate.release();
+      await page.waitForFunction((revision) => (
+        document.querySelector(".personal-capability-settings.is-goal-scoped")?.getAttribute("data-revision") !== revision
+      ), revisionBeforeApply);
+      if (editableBeforeReadback) throw new Error("Goal editor accepted a new draft before applied configuration readback");
       let goalCadence = await readGoalCadence();
       if (JSON.stringify(goalCadence.current) !== JSON.stringify({ stride_strategy: "off" })
         || goalCadence.effective_configuration.configuration.count !== 3) {
