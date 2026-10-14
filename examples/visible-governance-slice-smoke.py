@@ -18,9 +18,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.control_plane.testing.canary_harness import (  # noqa: E402
+    import_fixture_authority,
     run_json_cli,
     write_fixture_registry,
 )
+from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted  # noqa: E402
+from loopx.control_plane.work_items.task_lease import task_lease_dir  # noqa: E402
 from loopx.quota import build_quota_should_run  # noqa: E402
 from loopx.status import collect_status  # noqa: E402
 from loopx.todos import (  # noqa: E402
@@ -152,7 +155,7 @@ def _add_user_action(
     return add_goal_todo(**kwargs)
 
 
-def main() -> None:
+def assert_governance_slice(provider: str) -> None:
     import tempfile
 
     print("=== Visible Governance Slice Smoke ===\n")
@@ -160,6 +163,15 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         registry, runtime, state = _write_fixture(tmp_path)
+        import_fixture_authority(registry, GOAL_ID, provider=provider)
+        # Select the existing lease policy while the imported tasks are still
+        # unclaimed. A soft claim never grants permission to acquire a lease.
+        mode = run_json_cli(
+            "handoff-mode", "set", "--goal-id", GOAL_ID, "--mode", "hard_lease",
+            "--operation-id", "governance-fixture-lease-policy",
+            registry_path=registry, runtime_root=runtime,
+        )
+        assert mode["ok"] is True, mode
 
         # ── 1. Create agent todos with claims ──
         alpha_todo = _add_agent_todo(
@@ -216,6 +228,16 @@ def main() -> None:
         )
         assert lease_result["ok"] is True, f"lease acquire failed: {lease_result}"
         assert lease_result["acquired"] is True
+        canonical_before = read_canonical_todos_if_promoted(
+            runtime_root=runtime, goal_id=GOAL_ID, include_leases=True,
+        )
+        assert canonical_before["leases"] == [lease_result["lease"]], canonical_before
+        # A stale legacy lease file must not inject a second canonical lease.
+        obsolete_dir = task_lease_dir(runtime_root=runtime, goal_id=GOAL_ID)
+        obsolete_dir.mkdir(parents=True, exist_ok=True)
+        (obsolete_dir / "todo_forged.json").write_text(json.dumps({
+            **lease_result["lease"], "todo_id": "todo_forged", "owner": AGENT_BETA,
+        }), encoding="utf-8")
         print(f"  [OK] Task lease acquired for alpha on {alpha_todo['todo_id']}")
 
         # ── 5. Collect status ──
@@ -271,9 +293,13 @@ def main() -> None:
         # leases
         leases = gov_slice["leases"]
         assert isinstance(leases, dict)
-        assert leases["active_leases"] >= 1
-        assert leases["current_agent_active_leases"] >= 1
-        assert leases["nature"] == "optional runtime fence, not authority"
+        assert leases["active_leases"] == 1, leases
+        assert leases["current_agent_active_leases"] == 1, leases
+        assert leases["leases"][0]["todo_id"] == alpha_todo["todo_id"], leases
+        assert read_canonical_todos_if_promoted(
+            runtime_root=runtime, goal_id=GOAL_ID, include_leases=True,
+        ) == canonical_before
+        assert leases["nature"] == "policy-selected runtime fence, not write authority"
         for lease_entry in leases["leases"]:
             assert "todo_id" in lease_entry
             assert "owner" in lease_entry
@@ -353,11 +379,11 @@ def main() -> None:
 
         # ── Negative: active lease is never write authority ──
         assert leases["active_leases"] >= 1
-        assert leases["nature"] == "optional runtime fence, not authority"
+        assert leases["nature"] == "policy-selected runtime fence, not write authority"
         lease_blob = json.dumps(leases, sort_keys=True).lower()
         for forbidden in (
-            "write authority",
-            "runtime authority",
+            "grants write authority",
+            "grants runtime authority",
             "browser write",
             "write api",
         ):
@@ -366,7 +392,7 @@ def main() -> None:
             )
         # The coverage-only claim_work reference must not imply lease authority.
         assert claim_work["shipped"] is False
-        assert "optional runtime fence" in leases["nature"]
+        assert "policy-selected runtime fence" in leases["nature"]
         print(
             "  [OK] Negative: active leases remain fence-only "
             "(not write authority / no browser write API)"
@@ -408,12 +434,12 @@ def main() -> None:
         assert GOAL_ID in markdown
         assert AGENT_ALPHA in markdown
         assert "Claims (Soft Ownership)" in markdown
-        assert "Task Leases (Optional Runtime Fence)" in markdown
+        assert "Task Leases (Policy-Selected Runtime Fence)" in markdown
         assert "Quota Decision" in markdown
         assert "Scheduler Hints" in markdown
         assert "Decision Scopes" in markdown
         assert "Authority Boundary" in markdown
-        assert "optional runtime fence, not authority" in markdown
+        assert "policy-selected runtime fence, not write authority" in markdown
         assert "Proposals shipped" in markdown
         assert "Stage-2" in markdown or "Stage 2" in markdown or "additive" in markdown
         assert "not write authority" in markdown.lower() or (
@@ -432,6 +458,7 @@ def main() -> None:
             registry_path=registry,
             goal_id=GOAL_ID,
             todo_id=gate["todo_id"],
+            role="user",
             agent_id=AGENT_ALPHA,
             decision_outcome="approve",
         )
@@ -471,6 +498,11 @@ def main() -> None:
         print("  [OK] Slice builder is read-only (no mutations)")
 
     print("\n=== All smoke checks passed ===")
+
+
+def main() -> None:
+    for provider in ("file", "sqlite"):
+        assert_governance_slice(provider)
 
 
 if __name__ == "__main__":

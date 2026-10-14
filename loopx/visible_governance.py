@@ -23,7 +23,7 @@ from .control_plane.todos.contract import (
 
 # ── schema constants ────────────────────────────────────────────────────────
 GOVERNANCE_SLICE_SCHEMA = "visible_governance_slice_v0"
-LEASE_NATURE = "optional runtime fence, not authority"
+LEASE_NATURE = "policy-selected runtime fence, not write authority"
 
 
 # ── authority-boundary static table ─────────────────────────────────────────
@@ -41,7 +41,8 @@ def _build_authority_boundary_table() -> list[dict[str, Any]]:
             "shipped": True,
             "shipped_equivalent": (
                 "Promoted Goals use native TS commands and AuthorityStore transactions. "
-                "Unpromoted Goals retain the Markdown/lease adapters."
+                "Unpromoted sources remain readable for inspection and import; "
+                "normal mutations require canonical authority."
             ),
             "gap": "Implementation availability does not select the default provider or migrate this Goal.",
         },
@@ -205,6 +206,7 @@ def _build_leases_projection(
         read_lease,
         task_lease_dir,
     )
+    from .control_plane.coordination.local_authority import read_canonical_todos_if_promoted
 
     runtime_root_raw = status_payload.get("runtime_root")
     if not runtime_root_raw:
@@ -212,16 +214,18 @@ def _build_leases_projection(
 
     from pathlib import Path
 
-    lease_dir = task_lease_dir(
-        runtime_root=Path(str(runtime_root_raw)),
-        goal_id=goal_id,
+    runtime_root = Path(str(runtime_root_raw))
+    canonical = read_canonical_todos_if_promoted(
+        runtime_root=runtime_root, goal_id=goal_id, include_leases=True,
     )
-    if not lease_dir.exists():
-        return {"active_leases": 0, "leases": [], "nature": LEASE_NATURE}
+    if canonical is not None:
+        leases = canonical["leases"]
+    else:
+        lease_dir = task_lease_dir(runtime_root=runtime_root, goal_id=goal_id)
+        leases = [read_lease(path) for path in sorted(lease_dir.glob("todo_*.json"))]
 
     active_leases: list[dict[str, Any]] = []
-    for path in sorted(lease_dir.glob("todo_*.json")):
-        lease = read_lease(path)
+    for lease in leases:
         if not lease_is_active(lease):
             continue
         active_leases.append(
@@ -478,7 +482,7 @@ def render_visible_governance_markdown(slice_payload: dict[str, Any]) -> str:
     # ── Leases ──
     leases = slice_payload.get("leases")
     if isinstance(leases, dict):
-        lines.append("## Task Leases (Optional Runtime Fence)")
+        lines.append("## Task Leases (Policy-Selected Runtime Fence)")
         lines.append("")
         lines.append(f"- Nature: *{leases.get('nature', LEASE_NATURE)}*")
         lines.append(
@@ -600,11 +604,11 @@ def render_visible_governance_markdown(slice_payload: dict[str, Any]) -> str:
         f"{len(boundary) if boundary else 0}"
     )
     lines.append(
-        "- **Key takeaway**: Stage-2 ships an additive coordination head, "
-        "file provider, and claim_work executor plus handoff_mode; default "
-        "runtime still uses Markdown soft claims, file-backed task leases "
-        "(optional fence, not write authority), and turn-scoped settlement. "
-        "Shared-mode promotion remains Stage 3."
+        "- **Key takeaway**: The original Stage-2 prototype is retired. "
+        "Canonical providers own normal Todo mutations and task leases. "
+        "soft_claim forbids lease acquisition; hard_lease enforces the lease "
+        "fence. Neither policy grants general write authority. "
+        "Installed adoption and cross-host qualification remain separate."
     )
     lines.append("")
 
