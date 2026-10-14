@@ -1085,6 +1085,12 @@ boundary. The later properly bound replan remains eligible. The Unix transport
 and typed-owner regression cover this distinction; successful restoration alone
 still does not qualify an end-to-end research continuation.
 
+中文：重放的 guard 可能在当前 Turn 尚欠原 Todo 结算时展示下一次 replan。
+checkpoint 选择器须先验证原结算身份，再将响应交回写入器，不捕获也不中断；
+可见的后继义务不能充当本 Turn 已准入的捕获边界。后续正确绑定的 replan
+仍可捕获。Unix 运输与类型化 owner 的回归覆盖这一差别；恢复成功本身仍不
+构成端到端研究接续的验收。
+
 Completed pre-model points now retain the original pending guard as a sealed
 participant, as interrupted points already do. The pending packet is read as
 historical decision evidence under the destination's current guard; source
