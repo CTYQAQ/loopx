@@ -179,6 +179,13 @@ export function prepareUpdatedTodo(
   // Copy-only edits must honor the same imported-policy repair as field plans.
   // Receipt replay is handled before materialization by the transaction owner.
   validateLegacyContinuationPolicyRepair(todo, input.planning_intent ?? {}, input.todo_id);
+  const removedContinuationPolicy = removedTodoContinuationPolicy(todo.removed_continuation_policy);
+  if (removedContinuationPolicy !== null &&
+      (Object.keys(input.patch).length > 0 || input.clear_fields.length > 0)) {
+    throw new AuthorityStoreProtocolError(
+      "removed continuation policy repair must be submitted without copy edits",
+    );
+  }
   const next: JsonObject = {...todo, ...input.patch};
   for (const field of input.clear_fields) delete next[field];
   // Preserve the public planner's legacy metadata semantics. Raw copy edits
@@ -190,7 +197,7 @@ export function prepareUpdatedTodo(
   }
   next.updated_at = input.now.toISOString().replace(/\.\d{3}Z$/u, "Z");
   const clearFields = new Set(input.clear_fields);
-  if (removedTodoContinuationPolicy(todo.removed_continuation_policy) !== null) {
+  if (removedContinuationPolicy !== null) {
     delete next.removed_continuation_policy;
     clearFields.add("removed_continuation_policy");
   }

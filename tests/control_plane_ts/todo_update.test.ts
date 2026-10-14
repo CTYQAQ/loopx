@@ -271,6 +271,15 @@ test("imported removed policies reject copy edits and clear only after explicit 
     const repair = {...request, patch: {}, clear_fields: [], planning_intent: {
       continuation_policy: "independent_handoff", excluded_agents: ["agent-b"],
     }};
+    for (const edit of [{patch: {text: "Bundled replacement"}, clear_fields: []},
+      {patch: {note: "Bundled annotation"}, clear_fields: []},
+      {patch: {}, clear_fields: ["note"]}]) {
+      const rejected = await executeCoordinationTodoUpdate(store, {...repair, ...edit});
+      assert.equal(rejected.status, "failed", JSON.stringify(rejected));
+      assert.match(String(rejected.reason), /repair must be submitted without copy edits/);
+      assert.deepEqual(await store.loadAuthority(), before);
+      assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+    }
     assert.equal((await executeCoordinationTodoUpdate(store, {...repair, dry_run: true})).status, "planned");
     assert.deepEqual(await store.loadAuthority(), before);
     assert.equal((await executeCoordinationTodoUpdate(store, repair)).status, "applied");
