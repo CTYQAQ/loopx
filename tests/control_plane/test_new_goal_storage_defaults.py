@@ -650,7 +650,7 @@ def test_app_creation_selects_server_configured_non_git_workspace(environment, a
 @pytest.mark.parametrize("relative_runtime", [False, True])
 @pytest.mark.parametrize("mode", ["soft_claim", "hard_lease"])
 def test_app_creation_retries_storage_before_reporting_success(environment, app, monkeypatch, provider, relative_runtime, mode):
-    from loopx.control_plane.coordination import goal_storage_initialization
+    from loopx.control_plane.coordination import new_goal_storage_transport as goal_storage
     from loopx.todos import add_goal_todo
 
     configure, _, marker, project, runtime = environment
@@ -667,7 +667,7 @@ def test_app_creation_retries_storage_before_reporting_success(environment, app,
         registry.write_text(json.dumps(data))
     unavailable = True
     selections = []
-    effect = goal_storage_initialization.effect_runtime_result
+    effect = goal_storage.effect_runtime_result
 
     def storage_effect(method, payload):
         if payload.get("action") == "initialize":
@@ -679,7 +679,7 @@ def test_app_creation_retries_storage_before_reporting_success(environment, app,
         return effect(method, payload)
 
     monkeypatch.setattr(
-        goal_storage_initialization,
+        goal_storage,
         "effect_runtime_result",
         storage_effect,
     )
@@ -850,11 +850,9 @@ def test_created_target_is_canonical_and_rejects_legacy_bootstrap(environment, p
     assert reconnected["authority_initialized"] is True
     created = ws.add("Continue on selected provider")
     assert ws.cli("todo", "list", "--todo-id", created["todo_id"])["authority_read"]["source_authority"] == f"{provider}_v0"
-    # Reconnects preserve the creation-time authority instead of opening a
-    # second migration path for a Goal that was born canonical.
-    from loopx.control_plane.coordination.goal_storage_initialization import (
-        initialize_goal_storage_target,
-    )
+    # The initializer must not override a promoted selection. The separate legacy
+    # bootstrap command still rejects a fenced Goal before reaching this helper.
+    from loopx.control_plane.coordination.new_goal_storage_transport import initialize_goal_storage_target
     goal = json.loads(registry.read_text())["goals"][0]
     replayed = initialize_goal_storage_target(
         runtime,

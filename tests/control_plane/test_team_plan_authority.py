@@ -567,3 +567,30 @@ def test_capture_free_chat_preserves_pre_promotion_receipt(tmp_path, monkeypatch
     assert replay["lane_todo_ids"] == planned["result"]["lane_todo_ids"]
     assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == current
     assert state.read_bytes() == display
+
+    # A missing canonical observation fails before source locks or a fallback
+    # read. Historical receipts remain readable only through canonical state.
+    from loopx.control_plane.work_items import team_plan_adapter
+    observed = []
+
+    def promotion_race(**kwargs):
+        observed.append(True)
+        return None
+
+    backend = runtime / "authority" / current["source_authority"].replace("_", "-")
+    offline = backend.with_name(backend.name + "-offline")
+    backend.rename(offline)
+    try:
+        with monkeypatch.context() as race:
+            race.setattr(team_plan_adapter, "read_canonical_todos_if_promoted", promotion_race)
+            saved = service.store.load(preview["proposal_id"])
+            with pytest.raises(CanonicalAuthorityRequired):
+                team_plan_adapter.settle_team_plan(
+                    registry_path=registry, goal_id="goal-a", agent_id=None,
+                    proposal={**saved["normalized_parameters"]["plan"], "proposal_id": preview["proposal_id"]},
+                    expected_state_fingerprint=saved["expected_state_fingerprint"], basis_agent_id="alpha")
+            assert len(observed) == 1
+        assert state.read_bytes() == display and not backend.exists()
+    finally:
+        offline.rename(backend)
+    assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == current

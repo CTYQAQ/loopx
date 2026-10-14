@@ -563,6 +563,13 @@ export async function installApi(page, { goalSubagentConfigurationEnabled = true
       });
     }
     for (const fixtureGoal of fixture.run_history.goals) {
+      if (state.registeredAgentsByGoal?.[fixtureGoal.id]) {
+        fixtureGoal.coordination = {...fixtureGoal.coordination, registered_agents: state.registeredAgentsByGoal[fixtureGoal.id]};
+      }
+      // This is the backend's provider admission projection; browser fixtures never infer hosts from names.
+      if (state.zcodeEligibleAgentsByGoal?.[fixtureGoal.id]) {
+        fixtureGoal.zcode_goal_eligible_agent_ids = state.zcodeEligibleAgentsByGoal[fixtureGoal.id];
+      }
       if (state.goalSubagentConfigurationEnabled) {
         fixtureGoal.spawn_policy = projectedSubagentConfiguration(fixtureGoal.id, fixtureGoal.spawn_policy);
       } else {
@@ -1666,7 +1673,13 @@ export async function installApi(page, { goalSubagentConfigurationEnabled = true
         await route.fulfill({json: paused});
         return;
       }
-      if (body.operation === "read") {
+      if (body.operation === "adopt") {
+        if (body.operation_id !== "accepted-analysis" || body.consumer_operation_id !== "accepted-synthesis") {
+          return route.fulfill({status: 409, json: {error: "Fixture adoption target unavailable"}});
+        }
+        current.fixtureAdoptionState = "current";
+      }
+      if (body.operation === "read" || body.operation === "adopt") {
         if (current.fixtureTeamReadDelayMs) await new Promise(resolveWait => setTimeout(resolveWait, current.fixtureTeamReadDelayMs));
         if (current.fixtureCorrectionEpisode && body.operation_id === "original-analysis") {
           await route.fulfill({json: {ok: true, operation_id: body.operation_id, request_id: "request-original",
@@ -1701,7 +1714,7 @@ export async function installApi(page, { goalSubagentConfigurationEnabled = true
               consumer_request_id: "request-synthesis", consumer_agent_id: "synthesizer", consumer_todo_id: "todo_synthesis",
               source_artifacts: [{ref: "report.json", sha256: "d".repeat(64)}],
               consumer_artifacts: [{ref: "synthesis.json", sha256: "e".repeat(64)},
-                ...(current.fixturePlanTodoId ? [{ref: "report.md", sha256: "8".repeat(64)}] : [])], state: current.fixtureAdoptionState}]} : {}),
+                {ref: "report.md", sha256: "8".repeat(64)}], state: current.fixtureAdoptionState}]} : {}),
             artifacts: [{ref: "report.json", sha256: "d".repeat(64),
               text: '{"cash_flow":75,"note":"<script>window.artifactExecuted=true</script>"}'},
               {ref: "report.md", sha256: "9".repeat(64), text: "# Cash allocation\n\n| Measure | Value |\n|---|---:|\n| Free cash | 75 |\n\n[Source](https://example.org/report)\n<script>window.artifactExecuted=true</script>"}]}});
@@ -1907,10 +1920,10 @@ export async function installApi(page, { goalSubagentConfigurationEnabled = true
     if (apply) {
       state.actionApplies.push(apply[1]);
       if (actionKinds.get(apply[1]) === "heartbeat.bind" && !state.allowNextHeartbeatApply) {
-        const gate = {kind: "host_activation_required", summary: "需要 Codex App 宿主创建 Heartbeat 自动化。", next_action: "确认宿主自动化后重新验证。"};
-        // The real owner persists a discovered gate. A later list read must
-        // not resurrect preview_ready and erase the guarded apply result.
-        const proposal = {...actionProposals.get(apply[1]), status: "gated", gate};
+        const gate = { kind: "host_activation_required", summary: "需要 Codex App 宿主创建 Heartbeat 自动化。", next_action: "确认宿主自动化后重新验证。" };
+        // ChatRequestHandler persists mark_gated before returning 409. Keeping
+        // preview_ready here let canonical polling erase the host gate.
+        const proposal = { ...actionProposals.get(apply[1]), status: "gated", gate, failure: null, updated_at: "2026-08-13T01:00:01Z" };
         actionProposals.set(apply[1], proposal);
         await route.fulfill({ contentType: "application/json", json: { ok: false, schema_version: "loopx_chat_action_gate_v1", error: "Host activation required", error_code: "protected_action", gate, proposal, write_attempted: false }, status: 409 });
         return;

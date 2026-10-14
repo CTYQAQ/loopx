@@ -1,7 +1,7 @@
 import {useDeliveryReview} from "./delivery-review-state";
 import {useGoalWorkspaceDigest} from "./goal-masthead";
 import { goalCreateRequest } from "./goal-create-request";
-import { todoCompletionPreviewFeedback } from "./todo-completion-feedback";
+import { todoCompletionPreviewFeedback, todoCompletionProofRequired } from "./todo-completion-feedback";
 import { readSteeringRequest, retainSteeringRequest, retireSteeringRequest } from "./steering-recovery";
 import { useConversationInputState } from "./use-conversation-input-state";
 import type { ConversationHistoryStatus } from "../../data/use-conversation-history";
@@ -522,7 +522,14 @@ function proposalStatus(status: TypedActionProposal["status"]): WorkspaceActionP
   return status;
 }
 
-function proposalFields(parameters: Record<string, unknown>, t: WorkspaceTranslate) {
+function workspaceBindingText(binding: NonNullable<TypedActionProposal["workspace_binding"]>, t: WorkspaceTranslate) {
+  const named = t(binding.source === "goal_workspace" ? "proposal.workspace.goal" : "proposal.workspace.configured",
+    { workspace: binding.label });
+  return binding.selection === "default" ? t("proposal.workspace.default", { workspace: named }) : named;
+}
+
+function proposalFields(parameters: Record<string, unknown>, t: WorkspaceTranslate,
+  workspaceBinding?: TypedActionProposal["workspace_binding"]) {
   const fieldLabels: Record<string, string> = {
     agent_id: t("proposal.field.agentId"),
     cadence: t("proposal.field.cadence"),
@@ -553,7 +560,8 @@ function proposalFields(parameters: Record<string, unknown>, t: WorkspaceTransla
     key,
     label: fieldLabels[key] ?? key.replaceAll("_", " "),
     value: key === "workspace_ref"
-      ? value === "current"
+      ? workspaceBinding ? workspaceBindingText(workspaceBinding, t)
+      : value === "current"
         ? t("proposal.workspace.current")
         : t("proposal.workspace.named", { workspace: String(value ?? "current") })
       : Array.isArray(value) ? value.join(" · ") : typeof value === "object" && value !== null
@@ -682,7 +690,7 @@ function workspaceProposal(proposal: TypedActionProposal, t: WorkspaceTranslate)
       : proposal.action_kind === "team.plan"
       ? teamPlanFields(proposal.normalized_parameters, t)
       : decision ? []
-      : proposalFields(proposal.normalized_parameters, t).filter(field => !reviewPlan.creationProgress?.goalId
+      : proposalFields(proposal.normalized_parameters, t, proposal.workspace_binding).filter(field => !reviewPlan.creationProgress?.goalId
         || proposal.status === "applied"
         || ["objective", "completion_criteria", "execution_boundary", "permission", "workspace_ref"].includes(field.key)),
     goalId: typeof proposal.normalized_parameters.goal_id === "string" ? proposal.normalized_parameters.goal_id : undefined,
@@ -812,6 +820,7 @@ export function PersonalWorkspacePage({
   readOnly = false,
   typedActionsRevision = 0,
   selectedAgentId: controlledAgentId,
+  selectedAgentModelId,
   selectedGoalId: controlledGoalId,
   statusSourceControl,
   serviceNotice,
@@ -839,6 +848,7 @@ export function PersonalWorkspacePage({
   // re-reads the store instead of waiting for the next mount.
   typedActionsRevision?: number;
   selectedAgentId?: string;
+  selectedAgentModelId?: string;
   selectedGoalId?: string | null;
   statusSourceControl?: StatusSourceControl;
   serviceNotice?: ReactNode;
@@ -1348,7 +1358,7 @@ export function PersonalWorkspacePage({
         fields: workspaceCandidates.map((candidate) => ({
           key: `workspace_ref:${candidate.workspaceRef}`,
           label: candidate.label,
-          value: candidate.workspaceRef,
+          value: t("proposal.workspaceGate.candidateValue"),
         })),
         gate: {
           kind: gateKind,
@@ -1516,6 +1526,9 @@ export function PersonalWorkspacePage({
       });
       setActionFeedback(null);
     } catch (error) {
+      if (todoCompletionProofRequired(error)) {
+        setSelection({kind: "todo", item: todo});
+      }
       setActionFeedback(t("feedback.previewFailed", {
         error: error instanceof Error ? error.message : String(error),
       }));
@@ -1860,7 +1873,10 @@ export function PersonalWorkspacePage({
         return;
       }
       const request = retry ?? { sessionId: conversationSessionId, turnId: steeringTurnId!, text: message, id: crypto.randomUUID() };
-      retainSteeringRequest(composerDraftKey, request);
+      if (!retainSteeringRequest(composerDraftKey, request)) {
+        setActionFeedback(t("feedback.steeringStorageUnavailable"));
+        return;
+      }
       setSteering(true);
       setActionFeedback(null);
       setImageAttachmentError(null);
@@ -2140,6 +2156,7 @@ export function PersonalWorkspacePage({
               else setSelectedGoalTab(tab);
             }}
             onSelectAgent={selectAgent}
+            onSelectAgentModel={(modelId) => callbacks.onSelectAgentModel?.(selectedAgentId, modelId)}
             onReturnManagerHome={() => {
               if (selectedWorkspaceRef) workspaceConversations?.onSelect(null);
               setSelectedGoalTab("overview");
@@ -2147,6 +2164,7 @@ export function PersonalWorkspacePage({
               window.requestAnimationFrame(() => channelScrollRef.current?.scrollTo({ behavior: "smooth", top: 0 }));
             }}
             selectedAgentId={selectedAgentId}
+            selectedAgentModelId={selectedAgentModelId}
             refreshState={refreshState}
             readOnlySourceLabel={readOnly ? statusSourceControl?.activeSource.label : undefined}
             selectedGoal={selectedGoal}
@@ -2323,7 +2341,7 @@ export function PersonalWorkspacePage({
             {composerSuggestions}
             </div>
             {!composerCollapsed ? <>
-            {actionDraft ? <WorkspaceActionForm draft={actionDraft} workspaceGoals={workspaceGoals} onClose={() => setActionDraft(null)} onPreview={async (request) => {
+            {actionDraft ? <WorkspaceActionForm draft={actionDraft} workspaceGoals={workspaceGoals} workspaceProjects={workspaceConversations?.projects ?? []} onClose={() => setActionDraft(null)} onPreview={async (request) => {
               const proposal = await createPreview(request, { select: false });
               if (proposal.gate?.kind === "workspace_unavailable") {
                 throw new Error(proposal.gate.summary);

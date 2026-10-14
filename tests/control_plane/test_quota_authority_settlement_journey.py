@@ -91,6 +91,27 @@ def test_exact_selection_reaches_work_beyond_display_limits(tmp_path, provider):
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_canonical_todos_cannot_replace_missing_goal_intent(tmp_path, provider):
+    project, runtime, registry, path, _ = _source(tmp_path, provider=provider)
+    before = list_goal_todos(registry_path=registry, goal_id=cli.GOAL_ID,
+                            runtime_root_arg=str(runtime), todo_id=cli.TODO_ID)
+    path.unlink()
+    # A read-only canonical Todo lookup still works; it cannot authorize a
+    # delivery whose Goal objective and constraints are unavailable.
+    assert list_goal_todos(registry_path=registry, goal_id=cli.GOAL_ID,
+                           runtime_root_arg=str(runtime), todo_id=cli.TODO_ID) == before
+    code, guard = _guard(project, runtime, registry)
+    assert code == 1
+    assert guard["should_run"] is False
+    assert not guard.get("selected_todo")
+    assert cli._heartbeat_receipt_count(runtime, cli.TURN_ID) == 0
+    assert cli._spend_run_count(runtime) == 0
+    assert not path.exists()
+    assert list_goal_todos(registry_path=registry, goal_id=cli.GOAL_ID,
+                           runtime_root_arg=str(runtime), todo_id=cli.TODO_ID) == before
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 @pytest.mark.parametrize("conflicting_target", [False, True])
 def test_canonical_decision_gate_cannot_be_bypassed_by_exact_selection(
     tmp_path, provider, conflicting_target,
@@ -247,7 +268,7 @@ def test_semantic_progress_replay_keeps_original_turn_after_todo_wait(tmp_path, 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_migrated_hard_lease_can_write_settle_retry_and_continue(tmp_path, provider):
-    project, runtime, registry, path, _ = _source(
+    project, runtime, registry, path, prefix = _source(
         tmp_path, provider=provider, handoff_mode="legacy",
         extra=f"claimed_by={cli.AGENT_ID}",
     )

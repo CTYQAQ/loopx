@@ -5,9 +5,7 @@ from uuid import uuid4
 from pathlib import Path
 
 from .capabilities.machine_configuration.goal_storage import new_goal_storage_target
-from .control_plane.coordination.goal_storage_initialization import (
-    initialize_goal_storage_target,
-)
+from .control_plane.coordination.new_goal_storage_transport import initialize_goal_storage_target
 from .control_plane.projects.identity import (
     GoalCreationConflictError as GoalCreationConflictError,
     slugify_goal_id as slugify_goal_id,

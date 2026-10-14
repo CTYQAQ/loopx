@@ -111,6 +111,21 @@ cadence and expiry remain unchanged. It creates neither a retry clock nor an
 advancement wait, material successor, completion or delivery claim. Existing
 advancement retry/causal-wait semantics and genuine committed polls retain their
 behavior. A committed poll cannot be rewritten as an unavailable attempt.
+Conversely, a committed unavailable closeout rejects a later material or
+non-material poll on that same exact Turn binding before provider writeback,
+including dry-run provider plans. Use a freshly admitted Turn for a new
+observation; its poll cannot change the original frozen closeout. Genuine poll
+replay and independently admitted auxiliary Monitors remain valid.
+A stored poll transaction may already have committed its provider observation
+while its quota ledger is still pending. Unavailable closeout rejects that
+competing outcome until the exact poll is recovered or its owner proves no
+effect. Preserve the original transaction and business receipts; do not erase
+them or close the attempt by claiming that its observation was unavailable.
+New exact-source pending receipts retain their existing GoalRef. Foreign durable
+or scoped pending receipts do not prove a current instance's observation. A
+historical pending receipt lacking GoalRef in an exact-source context requires
+owner reconciliation; it remains preserved. Alias-scope recovery keeps its
+existing compatibility.
 
 Exact replay returns the frozen receipt, with no duplicate writeback or debit.
 After closing the original effect, reenter the current recovery host Turn to
@@ -207,6 +222,16 @@ excluded/bound 限制仍拒绝。恢复后，模式要求执行 fencing 时获�
 检查/到期时钟、hash、material generation、cadence 与 expiry 不变。不生成重试时钟、
 advancement 等待、material successor、完成或投递声明。旧 advancement 重试/因果等待
 与真实 poll 保持原行为；已提交 poll 不能改写为不可观察尝试。
+反向提交顺序也互斥：不可观察结算已提交后，同一精确 Turn 身份的 material 或
+non-material poll 在 provider 写回前拒绝，dry-run 也不返回可写入计划。
+新观察须使用重新准入的新 Turn；它的 poll 不改变原冻结结算。
+真实 poll 的幂等重放及独立准入的 auxiliary Monitor 仍可执行。
+持久 poll 事务的 provider 观察可能已经提交，而 quota ledger 仍处于 pending。
+不可观察结算须拒绝这一竞争结果，先恢复原精确 poll 或由其 owner 证明无 effect。
+保留原事务及业务回执；不能删除它们或声称观察不可取得以关闭该尝试。
+新 exact-source pending 回执保留既有 GoalRef；其他实例的 durable 或带作用域的
+pending 回执不证明当前实例的观察。exact-source 环境下，历史 pending 缺 GoalRef
+时须核对原 owner 并保留回执；alias 作用域沿用既有恢复兼容。
 
 精确重放返回冻结回执，不重复写回或扣额；原 effect 关闭后，重新进入当前 recovery
 host Turn 可选择独立合法任务，不新造第三身份或重绑旧 Turn。缺准入能力、缺证或错绑
@@ -242,6 +267,16 @@ prerequisite: packaged Dashboard and live Lark rendering/adoption are separate
 acceptance stages. No new timer, authority, setting, canonical Todo field,
 financial clock, or automatically executing display action is introduced.
 
+Status CLI and HTTP now consume the same per-agent retry projection before
+building their Todo index. The task inspector displays the recorded time,
+original retry-check deadline and original Turn. Its `resume_condition`
+contains the read-only `blocked_retry` provenance so existing structured readers
+can retain it. At the deadline, or after a superseding work Run, the projection
+disappears on the next status read; no Todo or receipt is rewritten. Canonical
+waits, foreign claims and unrelated work retain their existing behavior.
+This adds no execution button, permission, timer or debit. Lark transports can
+read the same status data; live Lark delivery remains separately qualified.
+
 原生 blocked/outcome_gap Run 可以拥有五分钟 retry，而 canonical Todo 仍为
 OPEN、没有 resume_when。临时选择投影只作用于同一 Goal/Agent/Todo，到原到期
 时点即消失；更新的工作 Run 会替代旧等待。blocked_retry 保留原 Turn、来源和
@@ -253,3 +288,10 @@ retry 暂时移除唯一可执行工作时，独立 user_action 仍是提醒，�
 既有角色间隔下限；真实用户门禁继续阻塞执行。唤醒只意味着重新读取 quota、
 claim/lease 与当前门禁，不授权执行，也不承诺精确时刻运行。到期不需修改原
 Todo 或回执。CLI/heartbeat 同源；打包 App、真实 Lark 展示与采用仍须分别验收。
+
+status CLI／HTTP 现在于构建 Todo 索引前消费同一角色 retry 投影。既有任务详情
+显示原记录时间、重试资格核验时点与原 Turn；`resume_condition.blocked_retry`
+保留只读来源，结构化读者可继续传递。到期或被新工作 Run 替代后，下次 status
+读取即移除投影，不改原 Todo／回执。canonical 等待、其他 claimant 及独立工作
+保持原行为；不增加执行按钮、权限、计时器或扣额。Lark 可复用同源 status 数据，
+真实送达仍需单独验收。

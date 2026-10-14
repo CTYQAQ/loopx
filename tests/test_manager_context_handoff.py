@@ -81,17 +81,27 @@ def test_guidance_upgrade_replays_original_request_without_rewriting_history(
 
     root, registry, session, turn, request = fixture
     if exact:
+        from loopx.control_plane.projects.registry_codec import source_session_registry_transaction
+
         data = json.loads(registry.read_text())
-        data["goals"][0]["goal_instance_id"] = "ginst_" + "a" * 32
-        registry.write_text(json.dumps(data))
+        for goal, letter in zip(data["goals"], "ab"):
+            goal["goal_instance_id"] = "ginst_" + letter * 32
+        data.update(profile_id="source_session_v1", session_bindings=[], session_receipts=[], lifetime_receipts=[])
+        registry = root / "exact-source" / "registry.json"
+        with source_session_registry_transaction(registry, operation="test_create_exact_source", create=lambda: data) as transaction:
+            transaction.commit(transaction.payload_copy())
     # Persist through the real delivery owner using an older generated guide.
     # Guidance is adapter metadata; the original user's content is unchanged.
     with monkeypatch.context() as old_version:
         old_version.setattr(context, "INSTRUCTION", "Earlier receiver guidance.")
         first = deliver(root, registry, session=session, turn=turn, request=request)
     rid = first["request_id"]
-    acknowledge(root, "research", "worker", rid, "adopt", "Original assessment")
-    report(root, "research", "worker", rid, "conclusion", "Original result")
+    if exact:
+        assert first["goal_ref"] == {"goal_id": "research", "goal_instance_id": "ginst_" + "a" * 32}
+    acknowledge(root, "research", "worker", rid, "adopt", "Original assessment", registry=registry,
+        caller_goal_ref=first.get("goal_ref"))
+    report(root, "research", "worker", rid, "conclusion", "Original result", registry=registry,
+        caller_goal_ref=first.get("goal_ref"))
     before = {p.relative_to(_root(root)): p.read_bytes()
               for p in _root(root).rglob("*.json")}
 
@@ -111,9 +121,15 @@ def test_guidance_upgrade_still_rejects_original_request_content_conflicts(
 
     root, registry, session, turn, request = fixture
     if exact:
+        from loopx.control_plane.projects.registry_codec import source_session_registry_transaction
+
         data = json.loads(registry.read_text())
-        data["goals"][0]["goal_instance_id"] = "ginst_" + "a" * 32
-        registry.write_text(json.dumps(data))
+        for goal, letter in zip(data["goals"], "ab"):
+            goal["goal_instance_id"] = "ginst_" + letter * 32
+        data.update(profile_id="source_session_v1", session_bindings=[], session_receipts=[], lifetime_receipts=[])
+        registry = root / "exact-source" / "registry.json"
+        with source_session_registry_transaction(registry, operation="test_create_exact_source", create=lambda: data) as transaction:
+            transaction.commit(transaction.payload_copy())
     with monkeypatch.context() as old_version:
         old_version.setattr(context, "INSTRUCTION", "Earlier receiver guidance.")
         first = deliver(root, registry, session=session, turn=turn, request=request)
@@ -228,8 +244,10 @@ def test_stopped_goal_is_not_a_context_recipient_and_revokes_replay(fixture):
     assert authority(root, registry, session, turn)["targets"] == [
         {"goal_id": "other", "agent_id": "peer"}
     ]
+    before = {path: path.read_bytes() for path in _root(root).rglob("*.json")}
     with pytest.raises(ValueError, match="stopped or archived"):
         deliver(root, registry, session=session, turn=turn, request=request)
+    assert before == {path: path.read_bytes() for path in _root(root).rglob("*.json")}
     assert len(pending(root, "research", "worker")["items"]) == 1
 
     data["goals"][0]["activation_state"] = "active"
@@ -250,8 +268,10 @@ def test_stopped_or_invalid_goal_is_excluded_from_lark_and_goal_chat(fixture, lo
 
     goal_session = {**session, "channel_id": "goal.research", "goal_id": "research"}
     assert authority(root, registry, goal_session, turn)["targets"] == []
+    before = {path: path.read_bytes() for path in _root(root).rglob("*.json")}
     with pytest.raises(ValueError, match="stopped or archived"):
         deliver(root, registry, session=goal_session, turn=turn, request=request)
+    assert before == {path: path.read_bytes() for path in _root(root).rglob("*.json")}
 
     lark_session = {**session, "channel_id": "manager.external.group"}
     lark_turn = {**turn, "origin": "lark"}
@@ -267,8 +287,10 @@ def test_stopped_or_invalid_goal_is_excluded_from_lark_and_goal_chat(fixture, lo
                      message=turn["message"], source_id="lark:original")
     expected = [] if local_scope == "selected" else [{"goal_id": "other", "agent_id": "peer"}]
     assert authority(root, registry, lark_session, lark_turn)["targets"] == expected
+    before = {path: path.read_bytes() for path in _root(root).rglob("*.json")}
     with pytest.raises(ValueError, match="stopped or archived"):
         deliver(root, registry, session=lark_session, turn=lark_turn, request=request)
+    assert before == {path: path.read_bytes() for path in _root(root).rglob("*.json")}
 
     data["goals"][0]["activation"]["state"] = "unreadable"
     registry.write_text(json.dumps(data))

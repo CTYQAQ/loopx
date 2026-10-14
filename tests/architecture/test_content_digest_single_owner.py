@@ -551,7 +551,7 @@ def _whole_value_shape(text: Any) -> str | None:
     return None
 
 
-def _owner_import_map(tree: ast.AST) -> dict[str, str | None]:
+def _owner_import_map(nodes: tuple[ast.AST, ...]) -> dict[str, str | None]:
     """local name -> canonical export name, over imports of the owner module only.
 
     `None` marks a binding this file cannot attribute: a wildcard import, the module object
@@ -559,7 +559,7 @@ def _owner_import_map(tree: ast.AST) -> dict[str, str | None]:
     """
 
     imported: dict[str, str | None] = {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if module != "content_digest" and not module.endswith(
@@ -578,7 +578,7 @@ def _owner_import_map(tree: ast.AST) -> dict[str, str | None]:
     return imported
 
 
-def _loaded_names(tree: ast.AST) -> set[str]:
+def _loaded_names(nodes: tuple[ast.AST, ...]) -> set[str]:
     """Names this module reads, with the import clauses themselves excluded.
 
     This is what catches a consumer that keeps `BARE_SHA256_PATTERN` imported while
@@ -587,7 +587,7 @@ def _loaded_names(tree: ast.AST) -> set[str]:
     """
 
     loaded: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
@@ -601,11 +601,11 @@ def _loaded_names(tree: ast.AST) -> set[str]:
     return loaded
 
 
-def _shape_statements(tree: ast.AST, root: _Scope) -> list[dict[str, Any]]:
+def _shape_statements(nodes: tuple[ast.AST, ...], root: _Scope) -> list[dict[str, Any]]:
     """Every whole-value digest shape this module states, by value, not by spelling."""
 
     found: dict[tuple[int, str], dict[str, Any]] = {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
             text = _fold_text(node, root)
             shape = _whole_value_shape(text)
@@ -630,12 +630,12 @@ def _shape_statements(tree: ast.AST, root: _Scope) -> list[dict[str, Any]]:
     return sorted(found.values(), key=lambda site: (site["line"], str(site["value"])))
 
 
-def _re_names_bound(tree: ast.AST) -> tuple[set[str], set[str]]:
+def _re_names_bound(nodes: tuple[ast.AST, ...]) -> tuple[set[str], set[str]]:
     """(names bound to the `re` module, names bound to one of its pattern functions)."""
 
     modules: set[str] = set()
     functions: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name == "re" or alias.name.endswith(".re"):
@@ -648,7 +648,9 @@ def _re_names_bound(tree: ast.AST) -> tuple[set[str], set[str]]:
     return modules, functions
 
 
-def _regex_constructions(tree: ast.AST, root: _Scope) -> list[dict[str, Any]]:
+def _regex_constructions(
+    nodes: tuple[ast.AST, ...], root: _Scope
+) -> list[dict[str, Any]]:
     """Every regex construction, and the value it is handed when that can be read.
 
     Constructions only: `re.<name>(...)`, a bare `<name>(...)` bound by `from re import
@@ -657,9 +659,9 @@ def _regex_constructions(tree: ast.AST, root: _Scope) -> list[dict[str, Any]]:
     those would sweep in every field read in the package.
     """
 
-    modules, functions = _re_names_bound(tree)
+    modules, functions = _re_names_bound(nodes)
     found: list[dict[str, Any]] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call) or not node.args:
             continue
         callable_node = node.func
@@ -701,12 +703,12 @@ def _regex_constructions(tree: ast.AST, root: _Scope) -> list[dict[str, Any]]:
     return found
 
 
-def _owner_text_reads(tree: ast.AST) -> list[int]:
+def _owner_text_reads(nodes: tuple[ast.AST, ...]) -> list[int]:
     """Lines reading `.pattern` / `.source` / `.flags` off a name bound to the owner."""
 
-    imported = _owner_import_map(tree)
+    imported = _owner_import_map(nodes)
     lines = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if (
             isinstance(node, ast.Attribute)
             and node.attr in {"pattern", "source", "flags"}
@@ -719,16 +721,26 @@ def _owner_text_reads(tree: ast.AST) -> list[int]:
 
 def _analyse(source: str, name: str = "<module>") -> dict[str, Any]:
     tree = ast.parse(source, filename=name)
+    # Reuse the same breadth-first order within this module only. Keep repeated
+    # node identities and release the snapshot with the temporary syntax tree.
+    nodes = tuple(ast.walk(tree))
     root = _collect_scopes(tree)
-    return {
-        "tree": tree,
-        "root": root,
-        "statements": _shape_statements(tree, root),
-        "constructions": _regex_constructions(tree, root),
-        "owner_imports": _owner_import_map(tree),
-        "owner_text_reads": _owner_text_reads(tree),
-        "loaded": _loaded_names(tree),
-    }
+    try:
+        return {
+            "statements": _shape_statements(nodes, root),
+            "constructions": _regex_constructions(nodes, root),
+            "owner_imports": _owner_import_map(nodes),
+            "owner_text_reads": _owner_text_reads(nodes),
+            "loaded": _loaded_names(nodes),
+        }
+    finally:
+        # Readers are finished. Break AST -> scope -> binding -> AST cycles;
+        # retaining them makes later collections traverse whole source trees.
+        for node in nodes:
+            scope = getattr(node, _SCOPE_ATTRIBUTE, None)
+            if scope is not None:
+                scope.names.clear()
+                delattr(node, _SCOPE_ATTRIBUTE)
 
 
 _REPO_SCAN: list[dict[str, Any]] | None = None
@@ -737,8 +749,8 @@ _REPO_SCAN: list[dict[str, Any]] | None = None
 def _repo_scan() -> list[dict[str, Any]]:
     """One pass over every module under `loopx/`, shared by all four layers.
 
-    1,167 modules parse and analyse in about four seconds, so this runs once per test
-    session rather than once per layer, and no layer is given a different view of the tree.
+    Cache the consumed read model once per session, not the temporary syntax trees,
+    scopes or raw source. Every layer still sees the same complete analysed snapshot.
     """
 
     global _REPO_SCAN
@@ -752,7 +764,6 @@ def _repo_scan() -> list[dict[str, Any]]:
             source = path.read_text(encoding="utf-8")
             entry = _analyse(source, str(path))
             entry["path"] = path
-            entry["source"] = source
             entry["relative"] = f"loopx/{path.relative_to(PACKAGE_ROOT).as_posix()}"
             parts = list(path.relative_to(PACKAGE_ROOT.parent).parts)
             parts[-1] = parts[-1][: -len(".py")]

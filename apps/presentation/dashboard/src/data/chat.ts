@@ -1,6 +1,6 @@
 import { HANDOFF_MODES, EXECUTION_HANDOFF_MODES } from "../../../../../loopx/control_plane/coordination/handoff_mode_vocabulary.js";
 import { normalizeGoalDraft } from "../../../../../loopx/control_plane/collaboration/goal_draft.js";
-import { parseTurnStep, type TurnStep } from "./turn-steps";
+import { parseTurnStep, type TurnStep } from "./turn-steps.js";
 import { z } from "zod";
 import { actionSourceBasisSchema } from "./action-source-basis.js";
 
@@ -468,6 +468,15 @@ export const typedActionProposalSchema = z.object({
   checkpoint: z.record(z.string(), z.unknown()).nullable().optional(),
   failure: z.record(z.string(), z.unknown()).nullable().optional(),
   canonical_update_basis: actionSourceBasisSchema.optional(),
+  // The workspace a Goal creation resolved to, named for the owner's review.
+  workspace_binding: z.object({
+    schema_version: z.literal("loopx_goal_workspace_binding_v0"),
+    workspace_ref: z.string().min(1),
+    label: z.string().min(1),
+    source: z.enum(["goal_workspace", "configured_workspace"]),
+    selection: z.enum(["default", "explicit"]),
+    goal_id: z.string().min(1).optional(),
+  }).optional(),
   regenerated_from: z.string().nullable().optional(),
   operation: typedOperationEnvelopeSchema.nullable().optional(),
   created_at: z.string(),
@@ -703,6 +712,7 @@ export async function createChatSession(
   agentId?: string,
   mode: "resume_latest" | "new" = "resume_latest",
   signal?: AbortSignal,
+  agentModelId?: string,
 ) {
   return requestJson<{
     agent_id: string;
@@ -718,8 +728,23 @@ export async function createChatSession(
     // silently re-point the steward channel away from its configured executor.
     // A project Session carries only the host-issued reference, never a Goal.
     body: JSON.stringify(context.kind === "project"
-      ? { context_kind: "project", project_ref: context.projectRef, agent_id: agentId, mode }
-      : { goal_id: context.kind === "goal" ? context.goalId : "", agent_id: agentId, mode, context_kind: context.kind }),
+      ? { context_kind: "project", project_ref: context.projectRef, agent_id: agentId, agent_model_id: agentModelId, mode }
+      : { goal_id: context.kind === "goal" ? context.goalId : "", agent_id: agentId, agent_model_id: agentModelId, mode, context_kind: context.kind }),
+  });
+}
+
+export type AgentModelOption = { value: string; label: string };
+export type AgentModelDiscovery = {
+  ok: true;
+  schema_version: "loopx_chat_agent_model_options_v1";
+  agent_id: string;
+  supported: boolean;
+  model: { id: string; label: string; selected: string; options: AgentModelOption[] } | null;
+};
+
+export function discoverAgentModelOptions(agentId: string, signal?: AbortSignal) {
+  return requestJson<AgentModelDiscovery>("/api/chat/agent-model-options", {
+    method: "POST", signal, body: JSON.stringify({agent_id: agentId}),
   });
 }
 
@@ -736,6 +761,7 @@ export type ChatSessionSummary = {
   goal_id: string | null;
   project_ref?: string | null;
   agent_id: string;
+  agent_model_id?: string | null;
   adapter_kind: string;
   channel_id?: string;
   status: string;
@@ -1159,6 +1185,12 @@ export type DelegationReadback = {
 export function readLoopXTeamWork(sessionId: string, operationId: string) {
   return requestJson<DelegationReadback>(`/api/chat/sessions/${sessionId}/loopx`, {
     method: "POST", body: JSON.stringify({operation: "read", operation_id: operationId}),
+  });
+}
+export function adoptLoopXTeamWork(sessionId: string, operationId: string, consumerOperationId: string) {
+  return requestJson<DelegationReadback>(`/api/chat/sessions/${sessionId}/loopx`, {
+    method: "POST", body: JSON.stringify({operation: "adopt", operation_id: operationId,
+      consumer_operation_id: consumerOperationId}),
   });
 }
 export function revalidateLoopXTeamWork(sessionId: string, operationId: string) {
@@ -2384,7 +2416,7 @@ export async function disconnectLarkGoalTopic(goalId: string, connectionId: stri
   );
 }
 
-export { CONTEXTS as usageContexts } from "../../../../../loopx/control_plane/runtime/usage_statistics_contract";
+export { CONTEXTS as usageContexts } from "../../../../../loopx/control_plane/runtime/usage_statistics_contract.js";
 const usageStatisticsSchema = z.object({
   consent: z.enum(["default", "enabled", "disabled"]),
   sending: z.boolean(), blocked_by: z.string().nullable(), endpoint: z.string().nullable(),
@@ -2494,6 +2526,7 @@ export async function changePrivateAgentTarget(bindingId: string, revision: numb
     method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({binding_id: bindingId, revision, ...target}),
   }));
 }
+
 
 // Display validation only; finding status semantics remain owned by Explore.
 const exploreResultPageSchema = z.object({

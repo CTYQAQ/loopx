@@ -481,7 +481,7 @@ def test_todo_succession_gap_cli_actions_do_not_require_semantic_refresh() -> No
     )
 
     assert "--todo-id todo_111111111111" in actions[0]
-    assert "--turn-instance-id turn-implement" in actions[0]
+    assert "--completion-identity-key turn-implement" in actions[0]
     assert "--todo-id todo_222222222222" in actions[1]
     assert "--turn-instance-id" not in actions[1]
     assert all("refresh-state" not in action for action in actions)
@@ -564,7 +564,7 @@ def test_todo_succession_gap_interaction_contract_is_model_actionable() -> None:
     assert "settlement_plan" not in contract["cli_channel"]
     actions = contract["cli_channel"]["next_cli_actions"]
     assert "--todo-id todo_111111111111" in actions[0]
-    assert "--turn-instance-id turn-implement" in actions[0]
+    assert "--completion-identity-key turn-implement" in actions[0]
     assert all("refresh-state" not in action for action in actions)
     assert all("spend-slot" not in action for action in actions)
 
@@ -660,6 +660,18 @@ def test_exact_replan_successor_uses_authoritative_todo_source() -> None:
         "action_kind": "validate",
         "target_key": "experiment:selected-bounded-slice",
     }
+    due = {"obligation_id": obligation_id, "triggers": [{"kind": "periodic_review_due"}]}
+    assert replan_successor_transition_ack(
+        None, agent_id="current-agent", replan_obligation=due,
+        agent_todo_items=[successor], stride_strategy="evidence_conditioned_v1",
+    ) is None
+    assert not autonomous_replan_ack_satisfies_obligation(
+        ack, replan_obligation=due, acceptance_gaps=None,
+        stride_strategy="evidence_conditioned_v1",
+    )
+    assert autonomous_replan_ack_satisfies_obligation(
+        ack, replan_obligation=due, acceptance_gaps=None, stride_strategy="off",
+    )
 
 
 def test_long_chain_successor_transition_is_bound_to_current_frontier() -> None:

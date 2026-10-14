@@ -766,6 +766,31 @@ of the new tool description, not injected into those older threads' shared promp
 `page_readback_complete` 只表示本页是否均成功读取；二者都不代表整个团队已完成。
 此入口不创建 Agent、不扩大授权，也不唤醒闲置的 Codex 对话。Goal Chat LoopX 模式的协调员由 Chat 服务在结果被接受后唤醒一次，且只回到「启动该操作的回合所属会话」——该绑定由受信任的 Chat 宿主写在操作记录旁，模型不提供路由；见 [Goal Chat 续跑](goal-chat-continuation.md)。
 
+### Prepare a code-edit worktree
+
+Use the existing `task-lease acquire --write-worktree "$PWD"` from the root of
+an independent Git worktree, with the Todo's full declared scopes and current
+lease version. Overlapping files in another verified checkout are integration
+advisories; the same physical checkout and shared-state leases retain their
+exclusion rules. This does not change task ownership, permissions or acceptance.
+
+Normal npm executable links are supported when they point directly to a regular
+file inside that physical checkout **and inside the declared scopes**. Targets
+must use the checkout's resolved path; directory aliases, chained or unresolved
+links, external targets and Git administration remain unsupported. Ignored
+dependencies are inspected too. A rejected link returns a path-free explanation;
+restore it and retry the original acquisition identity. A saved receipt cannot
+authorize a workspace that has since become redirected. No dependency deletion,
+scope reduction or configuration switch is needed for normal `.bin` links.
+
+中文：在独立 Git worktree 根目录按原 Todo 的完整范围与当前 lease 版本申请
+`--write-worktree "$PWD"`。不同工作树的文件重叠只提示集成风险，同一物理工作树
+和共享状态的排斥规则保持。正常 npm `.bin` 链接可直接指向同一物理工作树、
+已声明范围内的常规文件；目标使用工作树解析后的路径。目录别名、链式或无法解析
+的链接、外部目标及 Git 管理目录仍不支持，ignored 依赖也会检查。拒绝原因不泄露
+本机路径；恢复链接后复用原申请身份重试，历史回执不能授权已经跳转的工作树。
+无需删除正常依赖、缩小声明或新增开关，不改变任务归属、权限或验收。
+
 ### Check a binding before new work
 
 `delegate inspect --binding-id independent-review` uses the same task,
@@ -996,6 +1021,32 @@ The host now reads declared outputs before and after running the current checks.
 Validation stability is scoped to this task, its current claim/lifecycle, selected rules, file pins and verified workspace. The internal TS plan reuses the acceptance owner's work digest: unrelated Todo commits and observation-only note/evidence updates do not revoke otherwise identical checks. Task work changes, including unknown future work fields, claim/lifecycle changes and changed validators still reject the attempt. This changes the prior whole-Goal revision comparison; provider revisions remain authoritative for mutation CAS, not a reason to reject another task's stable read.
 
 A revision can have current task acceptance and valid requester adoption while independent-verifier evidence is missing. These are distinct facts. The correction path explicitly says **Independent verification · evidence not provided**; neither `responds_to`, a reviewer's name nor a successful validator is an exact-version independent-verifier receipt.
+
+In the original Goal conversation or Team execution report, expand **Confirm
+adoption into a downstream result**. Find an accepted result using the displayed
+version, read it, then explicitly confirm adoption. Discovery and reading never
+record the decision. The operation reuses `delegation adopt` with the configured
+coordinator's existing grants; it rechecks current task acceptance, receiver
+inputs and output versions. It starts no task, resumes no paused coordinator,
+and supplies no independent-verifier evidence. A lost acknowledgement triggers
+one readback; an unresolved response keeps the same source/consumer pair for an
+explicit retry. Reload reads the durable receipt. Changed input or revoked
+bindings withdraw current adoption or reject confirmation.
+
+中文：在原 Goal 对话或团队执行的报告详情展开「确认采用于后续结果」，查找使用
+当前版本的已验收结果，阅读后显式确认。查找、阅读、刷新均不自动采用；复用既有
+协调身份、grant 和 `delegation adopt`，重新核验输入与产物版本，不启动任务或恢复
+暂停的协调员。丢失回执先读回；仍未确认时仅重试同一版本与结果。输入变化或绑定
+撤销会使采用失效或拒绝确认，采用不补足独立验收。
+
+These packaged desktop and 390px views use synthetic workspace navigation with
+the real isolated SQLite/HTTP adoption owner. The same journey verifies lost
+acknowledgement recovery and withdrawal after a receiver input changes. It
+does not qualify live-model correction or the installed native App.
+
+![Confirmed requester adoption through the packaged report reader](../assets/personal-workspace/team-adoption-confirmed-desktop.png)
+
+![390px readback of the same confirmed adoption](../assets/personal-workspace/team-adoption-confirmed-mobile.png)
 
 The following packaged transport-fixture views show current check records and their withdrawal. A separate isolated production SQLite/HTTP/CLI journey exercises the same reader with actual host checks, missing output and explicit restoration. All data is synthetic; these checks do not qualify a live-model correction or the installed native App.
 
