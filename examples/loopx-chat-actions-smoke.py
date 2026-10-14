@@ -23,6 +23,8 @@ from loopx.chat_actions import ChatActionService  # noqa: E402
 from loopx.chat_server import ChatHTTPServer, ChatRequestHandler  # noqa: E402
 from loopx.chat_store import ChatSessionStore  # noqa: E402
 from loopx.history import collect_history  # noqa: E402
+from loopx.control_plane.testing.canary_harness import import_fixture_authority  # noqa: E402
+from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted  # noqa: E402
 
 
 def preview_request(
@@ -192,6 +194,7 @@ def write_registry_fixture(root: Path) -> tuple[Path, Path]:
         + "\n",
         encoding="utf-8",
     )
+    import_fixture_authority(registry, "goal-one")
     return registry, state
 
 
@@ -963,6 +966,8 @@ def assert_http_action_api(root: Path) -> None:
 
         # A decision outcome is only valid on a User gate; the canonical owner
         # rejects it before any proposal is stored.
+        before_wrong_role = read_canonical_todos_if_promoted(runtime_root=runtime_root, goal_id="goal-one")
+        before_wrong_role_display = state_path.read_bytes()
         code, misdirected_decision = request_json(
             f"{base_url}/api/actions/preview",
             method="POST",
@@ -975,7 +980,12 @@ def assert_http_action_api(root: Path) -> None:
             },
         )
         assert code == 400, misdirected_decision
-        assert "decision_outcome is only valid" in misdirected_decision["error"], misdirected_decision
+        assert misdirected_decision["error_code"] == "invalid_action_preview", misdirected_decision
+        assert misdirected_decision["error"] == "Todo does not have the requested role", misdirected_decision
+        assert not any(proposal.get("idempotency_key") == "http-misdirected-decision"
+                       for proposal in service.store.list())
+        assert state_path.read_bytes() == before_wrong_role_display
+        assert read_canonical_todos_if_promoted(runtime_root=runtime_root, goal_id="goal-one") == before_wrong_role
 
         for index, (action_kind, params, gate_kind) in enumerate(
             [
@@ -1010,7 +1020,7 @@ def assert_http_action_api(root: Path) -> None:
 
         persisted_payload = action_store.path.read_text(encoding="utf-8")
         assert str(root) not in persisted_payload, persisted_payload
-        assert str(project := registry_path.parent.parent) not in persisted_payload, persisted_payload
+        assert str(registry_path.parent.parent) not in persisted_payload, persisted_payload
 
         cancellable_code, cancellable = request_json(
             f"{base_url}/api/actions/preview",
