@@ -57,6 +57,10 @@ import {
 } from "../todos/completion_transaction.ts";
 import {evaluateTodoCompletionFence, TODO_COMPLETION_FENCE_REQUEST_SCHEMA} from "../todos/completion_fence.ts";
 import {
+  selectTodoCompletionState,
+  TODO_COMPLETION_STATE_REQUEST_SCHEMA,
+} from "../todos/completion_state.ts";
+import {
   TASK_LEASE_SCHEMA_VERSION,
   leaseEpoch,
   leaseInteger,
@@ -1022,6 +1026,69 @@ function terminalTarget(
   return {todo: next, clear_fields: clearFields};
 }
 
+interface UntypedCompletionRepairPlan {
+  readonly todo: JsonObject;
+  readonly successorTodoIds: readonly string[];
+}
+
+function planUntypedCompletionRepair(
+  todo: JsonObject,
+  input: ResolvedCoordinationTodoTerminalLifecycleInput,
+): UntypedCompletionRepairPlan | null {
+  if (input.command !== "complete" || input.requested_no_followup || todo.status !== "done") return null;
+  const fence = evaluateTodoCompletionFence({
+    schema_version: TODO_COMPLETION_FENCE_REQUEST_SCHEMA,
+    projection_source: "materialized",
+    goal_id: input.goal_id,
+    todo_id: input.todo_id,
+    todo,
+    requested_no_followup: false,
+    requested_completion_turn_key: input.requested_completion_turn_key,
+    requested_completion_identity_source: input.requested_completion_identity_source,
+  });
+  if (fence.outcome !== "continue" || fence.reason !== "untyped_completion_repair") return null;
+
+  const storedTurnKey = typeof todo.completion_turn_key === "string"
+    ? todo.completion_turn_key : null;
+  if (input.requested_completion_turn_key !== storedTurnKey) {
+    throw new AuthorityStoreProtocolError(
+      "imported completion repair must preserve the stored completion_turn_key",
+    );
+  }
+  if (input.user_update !== undefined || input.note !== null || input.evidence !== null ||
+      input.reason !== null || input.decision_outcome !== null || input.clear_claim ||
+      input.allow_user_gate_auto_acquire || input.linked_successor_todo_ids.length > 0 ||
+      input.successor_intents.length > 0 || input.completion_result != null ||
+      input.completion_policy_request !== null || input.validation_declaration !== null ||
+      input.validation_receipt !== null || input.validation_source_provider_revision != null ||
+      input.validation_declaration_sha256 != null || input.goal_acceptance_source_binding != null ||
+      input.goal_acceptance_validation_receipts != null) {
+    throw new AuthorityStoreProtocolError(
+      "imported completion repair must not carry fresh completion content, policy, validation, or ownership edits",
+    );
+  }
+  const successorTodoIds = Array.isArray(todo.successor_todo_ids)
+    ? todo.successor_todo_ids.map((value, index) =>
+      requireAuthorityStoreId(value, `todo.successor_todo_ids[${index}]`))
+    : [];
+  const completionState = selectTodoCompletionState({
+    schema_version: TODO_COMPLETION_STATE_REQUEST_SCHEMA,
+    todo,
+    requested_no_followup: false,
+    has_successor: successorTodoIds.length > 0,
+    completion_identity_source: input.requested_completion_identity_source,
+  });
+  const target: JsonObject = {
+    ...todo,
+    completion_continuation: completionState.continuation,
+    ...(completionState.recovery === null
+      ? {}
+      : {completion_recovery: completionState.recovery}),
+  };
+  canonicalTodoRecord(target, "imported completion repair");
+  return {todo: target, successorTodoIds};
+}
+
 function semanticDuplicate(
   todos: Iterable<JsonObject>,
   successor: JsonObject,
@@ -1256,6 +1323,36 @@ export async function executeCoordinationTodoTerminalLifecycle(
       completion_receipt_id: target.completion_receipt_id ?? null,
       completed_at: target.completed_at ?? null,
     }, closed === null ? [] : [{kind: "todo_upsert", todo: closed}], authoritySourcesCurrent);
+  }
+  let untypedCompletionRepair: UntypedCompletionRepairPlan | null;
+  try {
+    untypedCompletionRepair = planUntypedCompletionRepair(todo, input);
+  } catch (error) {
+    return terminalFailure(
+      "invalid_todo_completion_transaction",
+      error instanceof Error ? error.message : "Invalid imported completion repair",
+      {},
+      "decision_rejection",
+    );
+  }
+  if (untypedCompletionRepair !== null) {
+    const target = untypedCompletionRepair.todo;
+    return commitTerminalResult(store, input, requestSha, head, {
+      todo_id: input.todo_id,
+      command: input.command,
+      changed: true,
+      terminal_decision: authority,
+      successor_todo_ids: untypedCompletionRepair.successorTodoIds,
+      generated_successor_todo_ids: [],
+      validation_receipt: null,
+      completion_policy: null,
+      completion_identity_key: target.completion_turn_key ?? null,
+      completion_identity_source: input.requested_completion_identity_source,
+      completion_continuation: target.completion_continuation,
+      completion_recovery: target.completion_recovery ?? null,
+      completion_receipt_id: target.completion_receipt_id ?? null,
+      completed_at: target.completed_at ?? null,
+    }, [{kind: "todo_upsert", todo: target}], authoritySourcesCurrent);
   }
   // Supersede retires waiting work through its existing terminal owner; it is
   // not execution of the deferred Todo or proof that its prerequisite ran.
@@ -1510,12 +1607,6 @@ export async function executeCoordinationTodoTerminalLifecycle(
     );
   }
 
-  // Imported completed records can lack the continuation metadata owned by
-  // the completion fence. Honor its explicit repair without admitting fresh
-  // successor intent or changing ordinary terminal replay.
-  const untypedCompletionRepair = completion?.decision === "commit" &&
-    completion.fence.reason === "untyped_completion_repair";
-
   if (authority.outcome === "no_change" && (edit === null || !edit.changed) && terminalUpgradeReceipt === null) {
     const existingSuccessorIds = Array.isArray(todo.successor_todo_ids)
       ? todo.successor_todo_ids.map((value, index) =>
@@ -1530,7 +1621,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
         "decision_rejection",
       );
     }
-    if (!untypedCompletionRepair) return commitTerminalResult(store, input, requestSha, head, {
+    return commitTerminalResult(store, input, requestSha, head, {
       todo_id: input.todo_id,
       command: input.command,
       changed: false,
@@ -1676,7 +1767,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
   const dependent = followthrough && Object.keys(followthrough.updates).length
     ? projection.todos.get(String(todo.unblocks_todo_id)) : undefined;
   const changed = authority.outcome === "apply" || edit?.changed === true ||
-    terminalUpgradeReceipt !== null || untypedCompletionRepair;
+    terminalUpgradeReceipt !== null;
   const result: JsonObject = {
     todo_id: input.todo_id,
     command: input.command,
