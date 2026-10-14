@@ -225,7 +225,8 @@ export async function checkpointArtifacts(value: unknown): Promise<JsonObject> {
       throw new Error("checkpoint replan does not match the current admitted identity");
     }
     const semanticReplan = normalizeHeartbeatReplanObligationId(receipt.semantic_replan_obligation_id);
-    if (receipt.settlement_identity === undefined && receipt.settlement_binding_owed === true) {
+    const closeoutPending = receipt.closeout_required === true;
+    if (!closeoutPending && receipt.settlement_identity === undefined && receipt.settlement_binding_owed === true) {
       // The original guard owns the semantic node before the Agent chooses
       // work. An inert pre-decision capture does not invent that later work's
       // causal settlement identity or grant permission to execute it.
@@ -239,10 +240,17 @@ export async function checkpointArtifacts(value: unknown): Promise<JsonObject> {
     const identity = requireJsonObject(receipt.settlement_identity, "checkpoint settlement identity");
     const todo = normalizeHeartbeatTodoId(identity.todo_id);
     const boundReplan = normalizeHeartbeatReplanObligationId(identity.replan_obligation_id);
-    if (identity.goal_id !== goal || identity.agent_id !== agent || identity.turn_instance_id !== turn ||
-        (todo ? boundReplan !== null || semanticReplan !== id : boundReplan !== id) ||
+    if ((todo !== null && boundReplan !== null) ||
+        identity.goal_id !== goal || identity.agent_id !== agent || identity.turn_instance_id !== turn ||
         identity.effect_id !== settlementIdentity({goal_id: goal, agent_id: agent, todo_id: todo,
           replan_obligation_id: boundReplan, turn_instance_id: turn}).effect_id) {
+      throw new Error("checkpoint replan does not match the current admitted identity");
+    }
+    // A replay can expose the next obligation while this Turn still owes its
+    // original Todo settlement. Release that response to its writer; it is not
+    // a new capture boundary and must not interrupt the pending closeout.
+    if (closeoutPending) return {capture: false, reason: "turn_closeout_pending", execution_authority_granted: false};
+    if (todo ? boundReplan !== null || semanticReplan !== id : boundReplan !== id) {
       throw new Error("checkpoint replan does not match the current admitted identity");
     }
     return {capture: true, obligation_id: id, settlement_effect_id: identity.effect_id,

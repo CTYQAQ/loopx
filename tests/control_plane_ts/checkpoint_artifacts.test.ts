@@ -203,8 +203,11 @@ test("replan capture selection requires the original admitted identity and grant
   await assert.rejects(checkpointArtifacts({...request, agent_id: "another-agent"}), /admitted identity/);
   await assert.rejects(checkpointArtifacts({...request, quota: {...quota, replan_action_packet:
     {...quota.replan_action_packet, obligation_id: "replan-fedcba9876543210"}}}), /admitted identity/);
-  await assert.rejects(checkpointArtifacts({...request, quota: {...quota, heartbeat_receipt:
-    {...quota.heartbeat_receipt, settlement_identity: {...identity, todo_id: "todo_conflict"}}}}), /admitted identity/);
+  for (const closeout_required of [false, true]) {
+    await assert.rejects(checkpointArtifacts({...request, quota: {...quota, heartbeat_receipt:
+      {...quota.heartbeat_receipt, closeout_required,
+        settlement_identity: {...identity, todo_id: "todo_conflict"}}}}), /admitted identity/);
+  }
   await assert.rejects(checkpointArtifacts({...request, quota: {...quota, ok: false}}), /matching current/);
 });
 

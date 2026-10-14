@@ -1077,6 +1077,14 @@ captured. Retry, restart and a lost admission response preserve the original
 source-root/digest binding. This is a machine-enforced capture barrier, not
 additional execution or budget authority.
 
+A replayed guard can expose the next replan while the current Turn still owes
+its original Todo closeout. The checkpoint selector validates that original
+settlement identity and releases the response without capture or interruption;
+it must not treat the visible next obligation as this Turn's admitted capture
+boundary. The later properly bound replan remains eligible. The Unix transport
+and typed-owner regression cover this distinction; successful restoration alone
+still does not qualify an end-to-end research continuation.
+
 Completed pre-model points now retain the original pending guard as a sealed
 participant, as interrupted points already do. The pending packet is read as
 historical decision evidence under the destination's current guard; source
