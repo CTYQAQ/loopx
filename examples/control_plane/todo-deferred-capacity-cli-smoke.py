@@ -87,7 +87,7 @@ def assert_deferred_add_and_capacity_resume() -> None:
             "--resume-when",
             CAPACITY_RESUME,
         )
-        assert added["status"] == "deferred", added
+        assert added["todo"]["status"] == "deferred", added
         todo_id = added["todo_id"]
         item = next(item for item in parsed_items(state_file) if item["todo_id"] == todo_id)
         assert item["status"] == "deferred" and item["done"] is True, item
@@ -187,7 +187,7 @@ def assert_deferred_add_and_capacity_resume() -> None:
             "capacity condition was satisfied",
         )
         assert (
-            reopened["status"] == "open" and reopened["resume_when"] is None
+            reopened["status"] == "applied" and reopened["changed"] is True
         ), reopened
         item = next(item for item in parsed_items(state_file) if item["todo_id"] == todo_id)
         assert item["status"] == "open" and item.get("resume_when") is None, item
@@ -260,7 +260,7 @@ def assert_open_to_deferred_update() -> None:
             "--reason",
             "short worker capacity is not currently available",
         )
-        assert updated["status"] == "deferred" and updated["status_changed"] is True, updated
+        assert updated["status"] == "applied" and updated["changed"] is True, updated
         item = next(item for item in parsed_items(state_file) if item["todo_id"] == todo_id)
         assert item["status"] == "deferred" and item["resume_when"] == CAPACITY_RESUME, item
 
