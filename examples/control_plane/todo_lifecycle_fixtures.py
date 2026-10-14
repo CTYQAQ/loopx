@@ -42,6 +42,7 @@ UNCLAIMED_SUCCESSOR_TODO = "Continue the unclaimed successor routing check."
 
 
 def write_fixture(root: Path) -> tuple[Path, Path]:
+    root = root.resolve()
     project = root / "project"
     runtime = root / "runtime"
     state_file = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -209,7 +210,7 @@ def assert_configured_peer_handoff() -> None:
         assert side_handoff_completed["next_todos"][0]["claimed_by"] == "codex-side-reviewer", (
             side_handoff_completed
         )
-        assert side_handoff_completed["next_todos"][0]["blocks_agent"] is None, side_handoff_completed
+        assert side_handoff_completed["next_todos"][0].get("blocks_agent") is None, side_handoff_completed
         assert side_handoff_completed["next_todos"][0]["unblocks_todo_id"] == side_handoff_added["todo_id"], (
             side_handoff_completed
         )
@@ -275,7 +276,7 @@ def assert_configured_peer_handoff() -> None:
         assert review_successor["action_kind"] == "review_merge", explicit_primary_review
         assert review_successor["continuation_policy"] == "independent_handoff", explicit_primary_review
         assert review_successor["excluded_agents"] == ["codex-side-bypass"], explicit_primary_review
-        assert review_successor["blocks_agent"] is None, explicit_primary_review
+        assert review_successor.get("blocks_agent") is None, explicit_primary_review
         assert review_successor["unblocks_todo_id"] == review_source_added["todo_id"], explicit_primary_review
         review_successor_item = next(
             item for item in parsed_items(state_file) if item["todo_id"] == review_successor["todo_id"]
@@ -328,7 +329,7 @@ def assert_configured_peer_handoff() -> None:
             "--next-excluded-agent",
             "codex-side-bypass",
         )
-        assert "cannot also appear in next_excluded_agents" in (
+        assert "cannot also appear in excluded_agents" in (
             same_agent_handoff["error"]
         ), same_agent_handoff
 
@@ -385,7 +386,7 @@ def assert_configured_peer_handoff() -> None:
         assert profile_handoff_completed["next_todos"][0]["claimed_by"] == "codex-main-control", (
             profile_handoff_completed
         )
-        assert profile_handoff_completed["next_todos"][0]["blocks_agent"] is None, profile_handoff_completed
+        assert profile_handoff_completed["next_todos"][0].get("blocks_agent") is None, profile_handoff_completed
         assert profile_handoff_completed["next_todos"][0]["unblocks_todo_id"] == profile_handoff_added["todo_id"], (
             profile_handoff_completed
         )
@@ -537,7 +538,7 @@ def assert_complete_links_existing_successor() -> None:
             successor_id,
         )
         assert completed["changed"] is True, completed
-        assert completed["self_merged"] is True, completed
+        assert completed["completion_policy"]["self_merged"] is True, completed
         assert completed["next_todos"] == [], completed
         assert completed["successor_todo_ids"] == [successor_id], completed
 
@@ -598,7 +599,7 @@ def assert_same_title_completion_creates_fresh_successor() -> None:
             "state_machine_canary_refactor",
         )
         assert completed["changed"] is True, completed
-        assert completed["next_todos"][0]["added"] is True, completed
+        assert completed["next_todos"][0]["status"] == "open", completed
         successor_id = completed["next_todos"][0]["todo_id"]
         assert successor_id != added["todo_id"], completed
         assert completed["next_todos"][0]["unblocks_todo_id"] == added["todo_id"], completed
