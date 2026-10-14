@@ -55,12 +55,12 @@ import {
   reduceTodoCompletionTransaction,
   TODO_COMPLETION_TRANSACTION_REQUEST_SCHEMA,
 } from "../todos/completion_transaction.ts";
+import {resolveTodoCompletionPolicy} from "../todos/completion_policy.ts";
 import {evaluateTodoCompletionFence, TODO_COMPLETION_FENCE_REQUEST_SCHEMA} from "../todos/completion_fence.ts";
 import {
   selectTodoCompletionState,
   TODO_COMPLETION_STATE_REQUEST_SCHEMA,
 } from "../todos/completion_state.ts";
-import {resolveTodoCompletionPolicy} from "../todos/completion_policy.ts";
 import {
   TASK_LEASE_SCHEMA_VERSION,
   leaseEpoch,
@@ -1032,27 +1032,57 @@ interface UntypedCompletionRepairPlan {
   readonly successorTodoIds: readonly string[];
 }
 
-function completionPolicyFactsOnly(
-  todo: JsonObject, input: ResolvedCoordinationTodoTerminalLifecycleInput,
-): boolean {
-  const request = input.completion_policy_request;
-  if (request === null) return true;
-  // The ordinary CLI always supplies this existing source-fact envelope.
-  // Decode through its owner, but never apply a policy during imported repair.
+function validateUntypedCompletionRepairPolicy(
+  request: JsonObject,
+  input: ResolvedCoordinationTodoTerminalLifecycleInput,
+  todo: JsonObject,
+): void {
+  const allowedFields = new Set([
+    "schema_version",
+    "goal_id",
+    "agent_model",
+    "claimed_by",
+    "registered_agents",
+    "next_claimed_by",
+    "next_agent_todo",
+    "next_continuation_policy",
+    "next_excluded_agents",
+    "self_merged",
+    "evidence",
+    "linked_successors",
+  ]);
+  if (Object.keys(request).some((field) => !allowedFields.has(field))) {
+    throw new AuthorityStoreProtocolError(
+      "imported completion repair must not carry completion policy extensions",
+    );
+  }
   const policy = resolveTodoCompletionPolicy(request);
-  return request.goal_id === input.goal_id && request.next_agent_todo == null &&
-    request.next_action_kind == null && request.next_continuation_policy == null &&
-    request.evidence == null && !policy.self_merged &&
-    policy.effective_next_claimed_by === null && policy.effective_next_excluded_agents.length === 0 &&
-    Array.isArray(request.linked_successors) && request.linked_successors.length === 0 &&
-    (policy.effective_claimed_by === null || policy.effective_claimed_by === todo.claimed_by) &&
-    canonicalAuthoritySha256([...policy.registered_agents].sort()) ===
-      canonicalAuthoritySha256([...input.registered_agents].sort());
+  if (request.goal_id !== input.goal_id ||
+      canonicalAuthoritySha256(policy.registered_agents) !==
+        canonicalAuthoritySha256(input.registered_agents) ||
+      // An explicit repeat of the stored claim is a source fact, not an edit.
+      (policy.effective_claimed_by !== null &&
+        policy.effective_claimed_by !== (todo.claimed_by ?? null)) ||
+      policy.effective_next_claimed_by !== null ||
+      policy.effective_next_excluded_agents.length > 0 ||
+      policy.self_merged ||
+      policy.linked_successor_id !== null ||
+      (request.next_agent_todo != null && request.next_agent_todo !== "") ||
+      (request.next_continuation_policy != null &&
+        request.next_continuation_policy !== "") ||
+      (Array.isArray(request.linked_successors) &&
+        request.linked_successors.length > 0) ||
+      (request.evidence != null && request.evidence !== "")) {
+    throw new AuthorityStoreProtocolError(
+      "imported completion repair must not carry completion policy edits",
+    );
+  }
 }
 
 function planUntypedCompletionRepair(
   todo: JsonObject,
   input: ResolvedCoordinationTodoTerminalLifecycleInput,
+  authority: CoordinationTodoTerminalDecisionResult,
 ): UntypedCompletionRepairPlan | null {
   if (input.command !== "complete" || input.requested_no_followup || todo.status !== "done") return null;
   const fence = evaluateTodoCompletionFence({
@@ -1074,16 +1104,34 @@ function planUntypedCompletionRepair(
       "imported completion repair must preserve the stored completion_turn_key",
     );
   }
+  if (authority.outcome !== "no_change") {
+    throw new AuthorityStoreProtocolError(
+      "imported completion repair cannot apply a fresh authority transition",
+    );
+  }
   if (input.user_update !== undefined || input.note !== null || input.evidence !== null ||
       input.reason !== null || input.decision_outcome !== null || input.clear_claim ||
       input.linked_successor_todo_ids.length > 0 ||
       input.successor_intents.length > 0 || input.completion_result != null ||
-      !completionPolicyFactsOnly(todo, input) || input.validation_declaration !== null ||
+      input.validation_declaration !== null ||
       input.validation_receipt !== null || input.validation_source_provider_revision != null ||
-      input.validation_declaration_sha256 != null || input.goal_acceptance_source_binding != null ||
+      input.goal_acceptance_source_binding != null ||
       input.goal_acceptance_validation_receipts != null) {
     throw new AuthorityStoreProtocolError(
       "imported completion repair must not carry fresh completion content, policy, validation, or ownership edits",
+    );
+  }
+  if (input.completion_policy_request !== null) {
+    validateUntypedCompletionRepairPolicy(
+      input.completion_policy_request,
+      input,
+      todo,
+    );
+  }
+  if (input.validation_declaration_sha256 != null &&
+      input.validation_declaration_sha256 !== todo.completion_validation_sha256) {
+    throw new AuthorityStoreProtocolError(
+      "imported completion repair must preserve the stored validation commitment",
     );
   }
   const successorTodoIds = Array.isArray(todo.successor_todo_ids)
@@ -1345,7 +1393,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
   }
   let untypedCompletionRepair: UntypedCompletionRepairPlan | null;
   try {
-    untypedCompletionRepair = planUntypedCompletionRepair(todo, input);
+    untypedCompletionRepair = planUntypedCompletionRepair(todo, input, authority);
   } catch (error) {
     return terminalFailure(
       "invalid_todo_completion_transaction",
@@ -1356,8 +1404,6 @@ export async function executeCoordinationTodoTerminalLifecycle(
   }
   if (untypedCompletionRepair !== null) {
     const target = untypedCompletionRepair.todo;
-    // A public auto-acquire option is not an acquisition: this branch commits
-    // only the existing Todo's completion metadata and never mutates leases.
     return commitTerminalResult(store, input, requestSha, head, {
       todo_id: input.todo_id,
       command: input.command,
