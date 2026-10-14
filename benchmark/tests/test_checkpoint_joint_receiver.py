@@ -682,7 +682,11 @@ else:
             )
             # Interruption/lost delivery after the accepted writeback still
             # owes this original Turn's settlement, so recapture stays closed.
-            assert not restored_capture_gate(env)["capture_allowed"]
+            unconsumed = restored_capture_gate(env)
+            assert not unconsumed["capture_allowed"]
+            original_packet = unit / "components" / metadata["held_decision_component_id"]
+            assert str(original_packet) in unconsumed["instructions"]
+            assert str(wakes / review_turn / "checkpoint-start-guard.json") not in unconsumed["instructions"]
             cli(
                 "quota",
                 "spend-slot",

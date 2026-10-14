@@ -66,11 +66,11 @@ def restored_capture_gate(env, current_obligation_id=None):
     })
     # Existing saved preflights are discovery only. Each candidate is resolved
     # through the canonical current-Goal settlement owner, never copied logs.
-    for path in sorted(Path(env["LOOPX_WAKE_LOG_DIR"]).glob("*/checkpoint-start-guard.json"), reverse=True):
-        if path.resolve(strict=True) != path:
+    for guard_path in sorted(Path(env["LOOPX_WAKE_LOG_DIR"]).glob("*/checkpoint-start-guard.json"), reverse=True):
+        if guard_path.resolve(strict=True) != guard_path:
             raise ValueError("restored checkpoint guard must be a physical Host file")
         observed = read_heartbeat_settlement(root, **lineage, todo_id=None,
-            turn_instance_id=path.parent.name, resolve_original_binding=True,
+            turn_instance_id=guard_path.parent.name, resolve_original_binding=True,
             registry_path=Path(env["LOOPX_REGISTRY"]))
         if observed is None or observed.identity.value is None:
             continue
@@ -87,7 +87,7 @@ def restored_capture_gate(env, current_obligation_id=None):
             # current receipt alone cannot stand in for native continuation.
             native = metadata["native_session"]
             native_session_checkpoint(env, wake.session_id, timeout=30, retained_history=native)
-            result["review_turn_id"] = path.parent.name
+            result["review_turn_id"] = guard_path.parent.name
             break
     result["checkpoint_sha256"] = sha
     result["instructions"] = "" if result["capture_allowed"] else (
