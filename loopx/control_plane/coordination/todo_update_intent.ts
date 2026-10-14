@@ -11,6 +11,7 @@ import {planTodoAuthoringScope, TODO_AUTHORING_SCOPE_REQUEST_SCHEMA} from "../to
 import {shouldRecordTodoMutationActor} from "../todos/public_update.ts";
 import {normalizeNativePlanningIntent, planNativeTodoUpdate} from "../todos/native_update_plan.ts";
 import {decodeMonitorPollObservation, type MonitorPollObservation} from "../todos/monitor_metadata.ts";
+import {validateLegacyContinuationPolicyRepair, removedTodoContinuationPolicy} from "../todos/legacy_continuation_policy_migration.ts";
 import {
   decodeCompletionValidationRevision,
   type CompletionValidationRevision,
@@ -175,6 +176,9 @@ export function normalizeTodoUpdateInput(
 export function prepareUpdatedTodo(
   todo: JsonObject, input: NormalizedCoordinationTodoUpdateInput, head: JsonObject, kind: "planning" | "user_completion" = "planning",
 ): {next: JsonObject; changed: boolean; clearFields: string[]; monitorTransition?: JsonObject} {
+  // Copy-only edits must honor the same imported-policy repair as field plans.
+  // Receipt replay is handled before materialization by the transaction owner.
+  validateLegacyContinuationPolicyRepair(todo, input.planning_intent ?? {}, input.todo_id);
   const next: JsonObject = {...todo, ...input.patch};
   for (const field of input.clear_fields) delete next[field];
   // Preserve the public planner's legacy metadata semantics. Raw copy edits
@@ -186,6 +190,10 @@ export function prepareUpdatedTodo(
   }
   next.updated_at = input.now.toISOString().replace(/\.\d{3}Z$/u, "Z");
   const clearFields = new Set(input.clear_fields);
+  if (removedTodoContinuationPolicy(todo.removed_continuation_policy) !== null) {
+    delete next.removed_continuation_policy;
+    clearFields.add("removed_continuation_policy");
+  }
   let monitorTransition: JsonObject | undefined;
   if (Object.keys(input.planning_intent ?? {}).length || input.monitor_observation !== undefined) {
     const plan = planNativeTodoUpdate(todo, input.planning_intent ?? {}, head,

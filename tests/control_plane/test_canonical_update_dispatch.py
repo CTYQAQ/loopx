@@ -31,6 +31,58 @@ from loopx.todos import add_goal_todo, complete_goal_todo, update_goal_todo
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("policy", ["primary_review", "review_handoff"])
+def test_imported_policy_requires_repair_before_copy_edit(tmp_path, monkeypatch, provider, policy):
+    from loopx.control_plane.testing.canary_harness import run_json_cli_result
+
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    root = tmp_path.resolve()
+    runtime, state, registry = root / "runtime", root / "state.md", root / "registry.json"
+    goal, target = "policy-repair", "todo_imported"
+    state.write_text("# Goal\n\n## Agent Todo\n\n- [ ] Imported work.\n"
+                     f"  <!-- loopx:todo todo_id={target} status=open continuation_policy={policy} -->\n")
+    registry.write_text(json.dumps({"common_runtime_root": str(runtime), "goals": [{
+        "id": goal, "repo": str(root), "state_file": state.name,
+        "coordination": {"registered_agents": ["agent-a", "agent-b"]}}]}))
+    projection = build_todo_runtime_shadow_projection(goal_id=goal, handoff_mode="soft_claim", todos=[{
+        "schema_version": "todo_item_v0", "done": False,
+        "archive_state": "active", "source_section": "Agent Todo",
+        "todo_id": target, "text": "Imported work.", "role": "agent", "status": "open",
+        "task_class": "advancement_task", "removed_continuation_policy": policy,
+    }])
+    initialize_canonical_authority(runtime, goal, projection, state_path=state, provider=provider)
+    before = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal)
+    document = state.read_bytes()
+    prefix = ("todo", "update", "--goal-id", goal, "--todo-id", target, "--agent-id", "agent-a")
+    for edit in (("--text", "Unreviewed replacement."), ("--note", "Unreviewed annotation.")):
+        for preview in (("--dry-run",), ()):
+            code, rejected = run_json_cli_result(*prefix, *edit, *preview, registry_path=registry)
+            assert code == 1 and "repair it explicitly" in rejected["error"], rejected
+            assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal) == before
+            assert state.read_bytes() == document
+    code, repaired = run_json_cli_result(
+        *prefix, "--continuation-policy", "independent_handoff", "--excluded-agent", "agent-b",
+        "--update-operation-id", "explicit-repair", registry_path=registry)
+    assert code == 0 and repaired["status"] == "applied", repaired
+    readback = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal)
+    assert readback["source_authority"] == f"{provider}_v0"
+    todo = readback["todos"][0]
+    assert todo["continuation_policy"] == "independent_handoff"
+    assert todo["excluded_agents"] == ["agent-b"]
+    assert not todo.get("removed_continuation_policy")
+    assert f"continuation_policy={policy}" not in state.read_text()
+    assert repaired["projection_delivery"] != "pending", repaired
+    code, edited = run_json_cli_result(*prefix, "--note", "After repair.", registry_path=registry)
+    assert code == 0 and edited["status"] == "applied", edited
+    later = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal)
+    code, replay = run_json_cli_result(
+        *prefix, "--continuation-policy", "independent_handoff", "--excluded-agent", "agent-b",
+        "--update-operation-id", "explicit-repair", registry_path=registry)
+    assert code == 0 and replay["status"] == "replayed", replay
+    assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal)["todos"] == later["todos"]
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 @pytest.mark.parametrize("operation_id", [None, "caller-owned-update"], ids=["generated", "explicit"])
 @pytest.mark.parametrize("commit", [True, False], ids=["committed", "no-receipt"])
 def test_ambiguous_cli_update_recovers_exact_receipt_without_another_write(
