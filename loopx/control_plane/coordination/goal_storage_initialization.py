@@ -13,8 +13,7 @@ from .authority_source_capture import (
     authority_registry_source,
     build_runtime_shadow_source_snapshot,
 )
-
-NEW_GOAL_STORAGE_METHOD = "coordination.local_authority.new_goal_storage"
+from .new_goal_storage_transport import NEW_GOAL_STORAGE_METHOD
 
 
 def initialize_goal_storage_target(
