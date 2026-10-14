@@ -655,9 +655,11 @@ source-bound stride decision. Typed progress, successor and terminal results
 remain valid evidence/outcomes, while a bare Todo successor transition cannot
 stand in for the review. This closes the decision-recording gap; it does not
 establish that the proposed action was adopted or improved the Goal.
-Six effective work Turns remains the review cadence, not the size of a Todo,
+Six effective work Turns remains the default review cadence, not the size of a Todo,
 experiment or route change. Matched continuation must qualify actual adoption,
 target benefit and full cost before promotion or synergy claims.
+Enabling the stride strategy for one Goal inherits its live review cadence; only
+an explicit Goal cadence override pins a separate count or unit.
 
 Exploratory iteration may run only strategy-enabled test arms and reuse historical
 baselines as descriptive references. A fresh concurrent baseline is not required

@@ -1717,7 +1717,7 @@ export const capabilityConfigurationCatalogSchema = z.object({
     available_scopes: z.array(z.enum(["goal", "machine"])),
     machine_namespace: z.string().optional(),
     goal_feature_id: z.string().optional(),
-    effective_value_policy: z.literal("goal_override_over_live_machine_default").optional(),
+    effective_value_policy: z.enum(["goal_override_over_live_machine_default", "goal_stride_over_live_review_cadence"]).optional(),
     availability: z.string().optional(),
     default: z.record(z.string(), z.unknown()).optional(),
     current: z.record(z.string(), z.unknown()).optional(),
