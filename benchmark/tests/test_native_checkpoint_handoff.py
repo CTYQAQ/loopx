@@ -350,7 +350,9 @@ def test_checkpoint_interrupt_timeout_reaps_without_qualifying_capture(tmp_path)
 def test_midwake_native_profile_refusal_precedes_interruption(tmp_path, monkeypatch, platform, native, interrupt):
     from benchmark.runtime.checkpoint_wake import CheckpointWake
 
-    wake = CheckpointWake({"LOOPX_WAKE_LOG_DIR": str(tmp_path / "wakes")}, {"turn_id": "fixture-turn"})
+    wake = CheckpointWake({"LOOPX_WAKE_LOG_DIR": str(tmp_path / "wakes"),
+        "LOOPX_RUNTIME_ROOT": str(tmp_path / "runtime"), "LOOPX_GOAL_ID": "fixture",
+        "LOOPX_AGENT_ID": "researcher"}, {"turn_id": "fixture-turn"})
     wake.request, wake.raw = {"native_session": native}, b"fixture declaration"
     monkeypatch.setattr(sys, "platform", platform)
     intent = {"capture": True, "obligation_id": "replan-0123456789abcdef"}

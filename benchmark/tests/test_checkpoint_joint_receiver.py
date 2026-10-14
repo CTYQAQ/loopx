@@ -288,8 +288,8 @@ def test_captured_point_continues_with_fresh_authority(
         script.write_text(
             """import json,requests
 from pathlib import Path
-b=json.loads(Path('judge.json').read_text()); url,token=b['url'],b['token']
-h=requests.get(url+'/api/v1/history',params={'token':token},timeout=5).json()
+b=json.loads(Path('judge.json').read_text()); url,submission_token=b['url'],b['token']
+h=requests.get(url+'/api/v1/history',params={'token':submission_token},timeout=5).json()
 assert h['best_score']==7 and h['agent_submissions']==1
 assert Path('candidate.txt').read_text()==CAPTURED_CANDIDATE
 source=json.loads(Path(CONTEXT).read_text())
@@ -524,6 +524,35 @@ else:
             # An explicit one-Turn preparation cadence admits a fresh periodic
             # review. Keep the original source's six work settlements inert.
             review_turn = "joint-current-review"
+            from benchmark.runtime.checkpoint import capture_before_replan
+            from benchmark.runtime.checkpoint_continuation import restored_capture_gate
+            from benchmark.runtime.checkpoint_wake import CheckpointWake
+
+            wakes = tmp_path / "capture-logs" / "wakes"
+            (wakes / review_turn).mkdir(parents=True)
+            executable = tmp_path / "loopx-cli"
+            executable.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' -m loopx.cli "$@"\n')
+            executable.chmod(0o700)
+            declaration = tmp_path / "capture-request.json"
+            declaration.write_text(json.dumps({"trigger": "fresh_replan",
+                "destination": str(wakes.parent / "checkpoints"), "native_session": True,
+                "loopx_state": True, "components": [{"id": "code", "source_path": str(candidate)}],
+                "point_metadata": {}}))
+            env.update(LOOPX_CLI=str(executable), LOOPX_WAKE_LOG_DIR=str(wakes),
+                LOOPX_CHECKPOINT_REQUEST=str(declaration))
+            pending_receipt = {"mode": "heartbeat", "stage": "execute", "turn_id": review_turn}
+            pending_body = capture_before_replan(env, pending_receipt, "Current destination contract.")
+            assert pending_receipt["checkpoint"]["reason"] == "restored_replan_pending", pending_receipt
+            assert not pending_receipt["checkpoint"]["captured"]
+            assert "Original pending packet" in pending_body and "checkpoint:" + digest in pending_body
+            # Both stop locations share the same gate. Repeated/restarted
+            # capture attempts neither interrupt the fork nor publish a point.
+            for _ in range(2):
+                gate = restored_capture_gate(env)
+                assert not gate["capture_allowed"]
+                hook = CheckpointWake(env, dict(pending_receipt))
+                assert not hook._first_replan({"capture": True, "obligation_id": "replan-new-destination"})
+            assert not (wakes.parent / "checkpoints").exists()
             reviewed = cli(
                 "quota",
                 "should-run",
@@ -632,7 +661,7 @@ else:
                             "changed": [
                                 "Adopt a complete two-candidate work slice under current destination authority."
                             ],
-                            "evidence_refs": ["evidence:restoration-check"],
+                            "evidence_refs": ["evidence:restoration-check", "checkpoint:" + digest],
                         },
                         "stride_decision": decision,
                     }
@@ -651,6 +680,9 @@ else:
                 "--no-global-sync",
                 "--suppress-external-sinks",
             )
+            # Interruption/lost delivery after the accepted writeback still
+            # owes this original Turn's settlement, so recapture stays closed.
+            assert not restored_capture_gate(env)["capture_allowed"]
             cli(
                 "quota",
                 "spend-slot",
@@ -659,6 +691,10 @@ else:
                 "heartbeat",
                 "--execute",
             )
+            reopened = restored_capture_gate(env)
+            assert reopened["capture_allowed"], reopened
+            assert not reopened["instructions"]  # Do not repeat the historical packet after consumption.
+            assert not restored_capture_gate(env, obligation["obligation_id"])["capture_allowed"]
             configured = cli(
                 "configure-goal",
                 "--goal-id",
@@ -695,7 +731,7 @@ else:
                 "--task-lease-expected-version",
                 str(lease["lease"]["version"]),
             )
-            next_turn = "joint-larger-work"
+            next_turn = "wake-joint-larger-work"
             next_binding = [
                 "--goal-id",
                 goal,
@@ -727,14 +763,14 @@ else:
                 """import json,requests
 from pathlib import Path
 assert Path('candidate.txt').read_text()==CAPTURED_CANDIDATE
-b=json.loads(Path('judge.json').read_text()); url,token=b['url'],b['token']
+b=json.loads(Path('judge.json').read_text()); url,submission_token=b['url'],b['token']
 for value in (9,10):
  Path('candidate.txt').write_text(str(value))
  assert int(Path('candidate.txt').read_text())==value
  Path('candidate-evidence-'+str(value)+'.json').write_text(json.dumps({'value':value,'locally_validated':True}))
-r=requests.post(url+'/api/v1/submit',data={'token':token},files={'archive':('candidate.tar.gz',b'10')},timeout=5)
+r=requests.post(url+'/api/v1/submit',data={'token':submission_token},files={'archive':('candidate.tar.gz',b'10')},timeout=5)
 assert r.status_code==429
-h=requests.get(url+'/api/v1/history',params={'token':token},timeout=5).json()
+h=requests.get(url+'/api/v1/history',params={'token':submission_token},timeout=5).json()
 assert h['agent_submissions']==1 and h['best_score']==7
 print('Current grow adopted: two complete candidates 9 and 10 validated; original cooldown and incumbent preserved.')
     """.replace("CAPTURED_CANDIDATE", repr(captured_candidate))
@@ -800,6 +836,14 @@ print('Current grow adopted: two complete candidates 9 and 10 validated; origina
                 "implementation",
                 "--delivery-outcome",
                 "outcome_progress",
+                "--delivery-boundary",
+                "in_flight_continuation",
+                "--progress-result-class",
+                "advanced",
+                "--progress-surface-id",
+                "receiver:two-candidate-work",
+                "--progress-evidence-id",
+                "evidence:joint-larger-work",
                 "--agent-vision-json",
                 str(work_vision),
                 "--no-global-sync",
@@ -828,6 +872,31 @@ print('Current grow adopted: two complete candidates 9 and 10 validated; origina
                 "shell",
             )
             assert final["interaction_contract"]["mode"] == "bounded_delivery"
+            # The next genuinely new decision boundary can capture changed
+            # research/code/native history, after actual useful continuation.
+            # This partial point deliberately makes no evaluator qualification.
+            prior_wake = wakes / next_turn
+            prior_wake.mkdir()
+            (prior_wake / "receipt.json").write_text(json.dumps({"turn_id": next_turn,
+                "mode": "heartbeat", "stage": "execute", "ok": True,
+                "session": {"binding_scope": "agent", "action": "resume", "session_id": admitted["session_id"]}}))
+            cli("configure-goal", "--goal-id", goal, "--execution-replan-after-turns", "1", "--execute")
+            boundary_turn = "joint-next-capture"
+            (wakes / boundary_turn).mkdir()
+            boundary = {"turn_id": boundary_turn, "mode": "heartbeat", "stage": "execute", "ok": False}
+            capture_before_replan(env, boundary, "Current new decision contract.")
+            if boundary["checkpoint"].get("reason") == "no_fresh_replan":
+                # Capture eligibility does not manufacture a quota obligation.
+                # This source may not have another due review yet.
+                assert boundary["checkpoint_restore"]["capture_allowed"]
+            else:
+                assert boundary["checkpoint"]["captured"], json.dumps(boundary, indent=2)
+                recaptured = Path(boundary["checkpoint"]["destination"])
+                assert (recaptured / "components/code").read_text() == "10"
+                next_metadata = json.loads((recaptured / "checkpoint.json").read_text())["point_metadata"]
+                assert next_metadata["replan"]["obligation_id"] != obligation["obligation_id"]
+                assert next_metadata["held_decision_component_id"]
+                assert next_metadata["native_session"]["turn_ids"] == grown["turn_ids"]
         effect_runtime_result(
             "runtime.checkpoint_artifacts",
             {"action": "verify", "root": str(unit), "expected_sha256": digest},

@@ -295,6 +295,13 @@ def capture_before_replan(env: dict[str, str], receipt: dict[str, Any], body: st
             "action": "select_replan", "quota": guard, "goal_id": env["LOOPX_GOAL_ID"],
             "agent_id": env["LOOPX_AGENT_ID"], "turn_instance_id": receipt["turn_id"],
         })
+        from .checkpoint_continuation import restored_capture_gate
+        restore_gate = restored_capture_gate(env, intent.get("obligation_id"))
+        receipt["checkpoint_restore"] = {k: v for k, v in restore_gate.items() if k != "instructions"}
+        preloaded_body = restore_gate.get("instructions", "") + preloaded_body
+        if not restore_gate["capture_allowed"]:
+            receipt["checkpoint"]["reason"] = restore_gate["reason"]
+            return preloaded_body
         root = Path(env["LOOPX_WAKE_LOG_DIR"]).parent / "checkpoints"
         if declaration_error is not None:
             if intent["capture"]:
@@ -341,10 +348,11 @@ def capture_before_replan(env: dict[str, str], receipt: dict[str, Any], body: st
                     "point_metadata": {**request["point_metadata"], "replan": intent,
                                        "capture_order": "before_model_replan_decision"}}
                 effective_request.pop("trigger")
-                capture_after_wake(env, prior, supplied_request=(effective_request, raw))
+                capture_after_wake(env, prior, supplied_request=(effective_request, raw), pending_guard=guard_path)
                 receipt["checkpoint"].update(prior["checkpoint"], phase="before_replan")
                 receipt["checkpoint"]["source_turn_id"] = prior["turn_id"]
     except Exception as error:
+        receipt["checkpoint_restore"] = {"capture_allowed": False, "reason": "capture_basis_unavailable"}
         receipt["checkpoint"].update(reason="capture_failed", error_kind=type(error).__name__, error=str(error)[:500])
     finally:
         receipt["checkpoint"]["elapsed_seconds"] = time.monotonic() - started
@@ -354,7 +362,8 @@ def capture_before_replan(env: dict[str, str], receipt: dict[str, Any], body: st
 
 
 def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
-                       supplied_request: tuple[dict[str, Any], bytes] | None = None) -> None:
+                       supplied_request: tuple[dict[str, Any], bytes] | None = None,
+                       pending_guard: Path | None = None) -> None:
     request_path = env.get("LOOPX_CHECKPOINT_REQUEST")
     if not request_path:
         return  # Feature-off path performs no additional read or write.
@@ -381,6 +390,12 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
             request, raw = read_checkpoint_request(request_path)
         else:
             request, raw = supplied_request
+        if supplied_request is None:
+            from .checkpoint_continuation import restored_capture_gate
+            restore_gate = restored_capture_gate(env)
+            if not restore_gate["capture_allowed"]:
+                receipt["checkpoint"]["reason"] = restore_gate["reason"]
+                return
         if request.get("trigger") == "fresh_replan":
             receipt["checkpoint"]["reason"] = "pre_replan_hook_required"
             return
@@ -414,6 +429,12 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
             "request_sha256": hashlib.sha256(raw).hexdigest(),
         }
         components = request["components"]
+        if pending_guard is not None:
+            decision_id = _participant_id(components, "held_decision")
+            components = [*components, {"id": decision_id, "source_path": str(pending_guard)}]
+            metadata.update(held_decision_component_id=decision_id,
+                decision_sha256=hashlib.sha256(pending_guard.read_bytes()).hexdigest(),
+                replan=request["point_metadata"]["replan"], capture_order="before_model_replan_decision")
         if request.get("loopx_state"):
             evidence = Path(env["LOOPX_WAKE_LOG_DIR"]) / receipt["turn_id"] / "checkpoint-research-context.json"
             components, research = research_participants(env, components, metadata, destination, evidence, deadline)
