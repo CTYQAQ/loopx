@@ -1506,6 +1506,12 @@ export async function executeCoordinationTodoTerminalLifecycle(
     );
   }
 
+  // Imported completed records can lack the continuation metadata owned by
+  // the completion fence. Honor its explicit repair without admitting fresh
+  // successor intent or changing ordinary terminal replay.
+  const untypedCompletionRepair = completion?.decision === "commit" &&
+    completion.fence.reason === "untyped_completion_repair";
+
   if (authority.outcome === "no_change" && (edit === null || !edit.changed) && terminalUpgradeReceipt === null) {
     const existingSuccessorIds = Array.isArray(todo.successor_todo_ids)
       ? todo.successor_todo_ids.map((value, index) =>
@@ -1520,7 +1526,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
         "decision_rejection",
       );
     }
-    return commitTerminalResult(store, input, requestSha, head, {
+    if (!untypedCompletionRepair) return commitTerminalResult(store, input, requestSha, head, {
       todo_id: input.todo_id,
       command: input.command,
       changed: false,
@@ -1662,7 +1668,8 @@ export async function executeCoordinationTodoTerminalLifecycle(
     ? planUserCompletion(todo, [...projection.todos.values()], input.decision_outcome) : null;
   const dependent = followthrough && Object.keys(followthrough.updates).length
     ? projection.todos.get(String(todo.unblocks_todo_id)) : undefined;
-  const changed = authority.outcome === "apply" || edit?.changed === true || terminalUpgradeReceipt !== null;
+  const changed = authority.outcome === "apply" || edit?.changed === true ||
+    terminalUpgradeReceipt !== null || untypedCompletionRepair;
   const result: JsonObject = {
     todo_id: input.todo_id,
     command: input.command,

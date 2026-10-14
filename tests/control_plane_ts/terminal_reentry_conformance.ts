@@ -10,6 +10,57 @@ import type {AuthorityStoreConformanceFactory} from "./authority_store_conforman
 
 export function registerTerminalReentryConformance(provider: string, factory: AuthorityStoreConformanceFactory): void {
   for (const schema of ["legacy", "native"] as const) {
+    test(`${provider}: imported untyped completion repairs once before terminal closeout (${schema})`, async t => {
+      const {store, contender} = await factory(t);
+      const todo: JsonObject = {schema_version: schema === "native" ? "todo_domain_item_v0" : "todo_item_v0",
+        todo_id: "todo_untyped", role: "agent", status: "done", done: true, archive_state: "active",
+        text: "Repair imported terminal metadata", claimed_by: "agent-a", completion_turn_key: "original-turn",
+        completed_at: "2026-09-01T00:00:00Z", ...(schema === "legacy" ? {source_section: "Agent Todo"} : {})};
+      await store.commitAuthority({operation_id: "import-untyped", expected_provider_revision: null,
+        next_projection: authorityProjectionFixture("goal-a", [todo], [], schema, {handoff_mode: "soft_claim"}),
+        events: [], receipts: [{original_import: true}]});
+      const request: CoordinationTodoTerminalLifecycleInput = {
+        goal_id: "goal-a", todo_id: "todo_untyped", expected_role: "agent", command: "complete",
+        operation_identity: {kind: "completion_turn"},
+        actor_agent_id: "agent-a", registered_agents: ["agent-a", "agent-b"], lifecycle_grants: [],
+        authority_reason: null, decision_outcome: null, lease_idempotency_key: null, lease_expected_version: null,
+        allow_user_gate_auto_acquire: false, requested_no_followup: false,
+        requested_completion_turn_key: "original-turn", requested_completion_identity_source: "turn_settlement",
+        linked_successor_todo_ids: [], successor_intents: [], note: null, evidence: null, reason: null,
+        clear_claim: false, validation_declaration: null, validation_receipt: null,
+        completion_policy_request: null, dry_run: false, now: new Date("2026-09-07T07:00:00Z"),
+      };
+      const before = await store.loadAuthority(), importedReceipt = await store.readReceipt("import-untyped");
+      for (const change of [{requested_no_followup: true}, {actor_agent_id: "agent-b"},
+        {requested_completion_turn_key: "other-turn"},
+        {successor_intents: [{role: "agent", text: "Cannot add work during repair"}]}]) {
+        assert.equal((await execute(store, {...request, ...change})).status, "failed", JSON.stringify(change));
+        assert.deepEqual(await store.loadAuthority(), before);
+      }
+      const preview = await execute(store, {...request, dry_run: true});
+      assert.equal(preview.status, "planned", JSON.stringify(preview));
+      assert.equal(preview.changed, true);
+      assert.deepEqual(await store.loadAuthority(), before);
+      const repair = await execute(store, request);
+      assert.equal(repair.status, "applied", JSON.stringify(repair));
+      assert.equal(repair.changed, true);
+      assert.equal(repair.completion_continuation, "active_goal");
+      const repaired = await store.loadAuthority();
+      assert.equal(repaired.status, "loaded");
+      if (repaired.status !== "loaded") throw new Error("repair head missing");
+      const item = (repaired.head.todos as JsonObject[])[0];
+      assert.equal(item.completion_continuation, "active_goal");
+      assert.equal(item.completion_turn_key, "original-turn");
+      assert.equal(item.completed_at, todo.completed_at);
+      assert.deepEqual(await store.readReceipt("import-untyped"), importedReceipt);
+      assert.equal((await execute(contender, request)).status, "replayed");
+      assert.deepEqual(await store.loadAuthority(), repaired);
+      const closed = await execute(store, {...request, requested_no_followup: true,
+        operation_identity: {kind: "completion_turn"}});
+      assert.equal(closed.status, "applied", JSON.stringify(closed));
+      assert.equal(closed.completion_continuation, "no_followup");
+      assert.equal(closed.completion_recovery, "same_turn_terminal_closeout");
+    });
     for (const validationRequired of [false, true]) {
     test(`${provider}: migrated terminal reentry preserves completion and closes only continuation (${schema}, validation=${validationRequired})`, async t => {
       const {store, contender} = await factory(t);
