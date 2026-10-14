@@ -53,10 +53,10 @@ def fixture(tmp_path: Path, provider: str = "file") -> tuple[Path, Path]:
     return registry, state
 
 
-def update(registry: Path, *args: str, ok: bool = True) -> dict:
+def update(registry: Path, *args: str, ok: bool = True, actor: str = "agent-a") -> dict:
     process = subprocess.run([
         sys.executable, "-m", "loopx.cli", "--format", "json", "--registry", str(registry),
-        "todo", "update", "--goal-id", "goal-a", "--todo-id", "todo_target", "--agent-id", "agent-a", *args,
+        "todo", "update", "--goal-id", "goal-a", "--todo-id", "todo_target", "--agent-id", actor, *args,
     ], capture_output=True, text=True, timeout=45)
     result = json.loads(process.stdout)
     assert (process.returncode == 0) is ok, (result, process.stderr)
@@ -65,6 +65,53 @@ def update(registry: Path, *args: str, ok: bool = True) -> dict:
 
 def records(registry: Path) -> dict[str, dict]:
     return {item["todo_id"]: item for item in list_goal_todos(registry_path=registry, goal_id="goal-a")["todos"]}
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("edit,expected_actor", [
+    (["--evidence", "Synthetic planning validation"], "agent-a"),
+    (["--priority", "P2"], "agent-a"),
+    (["--clear-priority"], "agent-a"),
+    (["--note", "Owner context", "--clear-priority"], "agent-a"),
+    (["--note", "Peer correction", "--evidence", "Synthetic mixed validation"], "agent-b"),
+    (["--text", "Corrected task", "--evidence", "Synthetic mixed validation"], "agent-b"),
+])
+def test_delegated_cli_planning_preserves_actor_until_copy_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
+    edit: list[str], expected_actor: str,
+) -> None:
+    # Preserve the supported audit contract on the canonical path; the retired
+    # Markdown writer and its mutation-authority fixture are not dependencies.
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    registry, state = fixture(tmp_path, provider)
+    registration = json.loads(registry.read_text())
+    registration["goals"][0]["coordination"]["todo_lifecycle_authority"] = [{
+        "agent_id": "agent-b", "actions": ["update"], "requires_reason": True,
+    }]
+    registry.write_text(json.dumps(registration))
+    update(registry, "--note", "Owner context", "--priority", "P1",
+           "--update-operation-id", "owner-audit")
+    before = records(registry)
+    assert before["todo_target"]["last_actor_agent_id"] == "agent-a"
+    display = state.read_bytes()
+    attempt = [*edit, "--update-operation-id", "delegated-audit"]
+    rejected = update(registry, *attempt, actor="agent-b", ok=False)
+    assert rejected["error_code"] == "delegation_reason_required"
+    assert records(registry) == before
+    assert state.read_bytes() == display
+    attempt += ["--authority-reason", "Review the existing task"]
+    assert update(registry, *attempt, "--dry-run", actor="agent-b")["status"] == "planned"
+    assert records(registry) == before
+    assert state.read_bytes() == display
+    assert update(registry, *attempt, actor="agent-b")["status"] == "applied"
+    after = records(registry)
+    assert after["todo_target"]["last_actor_agent_id"] == expected_actor
+    assert after["todo_target"]["claimed_by"] == "agent-a"
+    assert after["todo_other"] == before["todo_other"]
+    display = state.read_bytes()
+    assert update(registry, *attempt, actor="agent-b")["status"] == "replayed"
+    assert records(registry) == after
+    assert state.read_bytes() == display
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
