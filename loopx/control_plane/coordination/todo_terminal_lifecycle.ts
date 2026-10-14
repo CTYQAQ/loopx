@@ -1023,12 +1023,16 @@ function terminalTarget(
 }
 
 function semanticDuplicate(
-  todos: ReadonlyMap<string, JsonObject>,
+  todos: Iterable<JsonObject>,
   successor: JsonObject,
+  retiringTodoId: string | null = null,
 ): JsonObject | undefined {
-  return [...todos.values()].find((todo) =>
-    todo.role === successor.role && todo.archive_state === "active" &&
-    todo.status !== "done" && todo.status !== "deferred" && todo.text === successor.text);
+  for (const todo of todos) {
+    if (todo.todo_id !== retiringTodoId && todo.role === successor.role &&
+        todo.archive_state === "active" && todo.status !== "done" &&
+        todo.status !== "deferred" && todo.text === successor.text) return todo;
+  }
+  return undefined;
 }
 
 /**
@@ -1506,6 +1510,12 @@ export async function executeCoordinationTodoTerminalLifecycle(
     );
   }
 
+  // Imported completed records can lack the continuation metadata owned by
+  // the completion fence. Honor its explicit repair without admitting fresh
+  // successor intent or changing ordinary terminal replay.
+  const untypedCompletionRepair = completion?.decision === "commit" &&
+    completion.fence.reason === "untyped_completion_repair";
+
   if (authority.outcome === "no_change" && (edit === null || !edit.changed) && terminalUpgradeReceipt === null) {
     const existingSuccessorIds = Array.isArray(todo.successor_todo_ids)
       ? todo.successor_todo_ids.map((value, index) =>
@@ -1520,7 +1530,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
         "decision_rejection",
       );
     }
-    return commitTerminalResult(store, input, requestSha, head, {
+    if (!untypedCompletionRepair) return commitTerminalResult(store, input, requestSha, head, {
       todo_id: input.todo_id,
       command: input.command,
       changed: false,
@@ -1630,7 +1640,10 @@ export async function executeCoordinationTodoTerminalLifecycle(
         todo_id: successorId,
       });
     }
-    const duplicate = semanticDuplicate(projection.todos, successor);
+    // This CAS retires the source and creates the successors together. Only
+    // that source stops competing for its title. Peers still participate in
+    // the unchanged rule; successor admission already permits one per role.
+    const duplicate = semanticDuplicate(projection.todos.values(), successor, input.todo_id);
     if (duplicate !== undefined) {
       return terminalFailure(
         "todo_semantic_duplicate_conflict",
@@ -1662,7 +1675,8 @@ export async function executeCoordinationTodoTerminalLifecycle(
     ? planUserCompletion(todo, [...projection.todos.values()], input.decision_outcome) : null;
   const dependent = followthrough && Object.keys(followthrough.updates).length
     ? projection.todos.get(String(todo.unblocks_todo_id)) : undefined;
-  const changed = authority.outcome === "apply" || edit?.changed === true || terminalUpgradeReceipt !== null;
+  const changed = authority.outcome === "apply" || edit?.changed === true ||
+    terminalUpgradeReceipt !== null || untypedCompletionRepair;
   const result: JsonObject = {
     todo_id: input.todo_id,
     command: input.command,

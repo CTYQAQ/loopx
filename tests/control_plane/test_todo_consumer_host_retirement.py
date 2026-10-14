@@ -28,6 +28,14 @@ def cold_api(tmp_path, monkeypatch, consumer_distribution):  # noqa: F811
 
     def isolated_workspace(*args):
         result = list(workspace(*args))
+        # The shared cold-import fixture retains history/drain adapters. This
+        # stronger isolation oracle removes them only from its disposable copy;
+        # keep the pre-start assertion so a borrowed source cannot pass unnoticed.
+        receiver = result[-2] / "loopx"
+        for name in ("control_plane/coordination/runtime_shadow.py",
+            "control_plane/coordination/local_authority_shadow_adapter.py",
+            "control_plane/coordination/local_authority_shadow_outbox.py"):
+            (receiver / name).unlink(missing_ok=True)
         # The copied receiver is first, with only the selected dependencies;
         # -S prevents an editable finder restoring the removed modules.
         env = result[-1]

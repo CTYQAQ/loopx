@@ -598,8 +598,12 @@ canonical 写入；provider 丢失时明确拒绝，不重建空库。
 
 Canonical team-plan preview, confirmed batch commit and original-operation
 replay use the TypeScript batch transaction and canonical projection outbox.
-An unpromoted request returns `canonical_authority_required`; it cannot load a
-capture producer or Markdown editor.
+An unpromoted fresh request returns `canonical_authority_required`; it cannot
+load a capture producer or Markdown editor. An exact pre-cutoff receipt may be
+read back before import through the same typed identity validator, without
+creating tasks, capture evidence or execution authority. The locked source
+binding is revalidated first; a selected but unavailable provider still fails
+rather than replaying from Markdown as fallback.
 
 The real File/SQLite Chat oracle physically removes the capture adapter from
 the package before preview and confirmation. It checks provider outage without
@@ -613,8 +617,10 @@ Projection IO and historical receipt readers remain necessary. Assignment still
 grants neither receiver adoption nor execution authority.
 
 canonical team-plan 的预览、确认后整批提交与原操作重放复用 TS batch 事务及
-canonical 投影 outbox。未迁移请求返回 `canonical_authority_required`，不能加载
-capture producer 或 Markdown editor。
+canonical 投影 outbox。未迁移的新请求返回 `canonical_authority_required`，不能加载
+capture producer 或 Markdown editor。原 pre-cutoff 回执在导入前也可通过同一 TS
+身份校验读回，不创建 Todo、capture 或执行授权。先在原锁内核验来源绑定；已选定
+provider 不可用时仍明确拒绝，不能将 Markdown 历史读取当作 fallback。
 真实 File/SQLite Chat 检查在预览及确认前物理移除该模块，验证 provider 失效无
 Markdown fallback、恢复、后续写入后的原操作重放、审核依据过期及提交后投影失败
 恢复；导入前的历史回执重放保留后来写入与当前 revision。正常 wheel 复用同一

@@ -176,9 +176,6 @@ def apply_team_plan(
             raise ValueError("duplicate team plan operation receipts")
         return json.loads(base64.b64decode(matches[0], validate=True)) if matches else None
 
-    canonical = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal_id)
-    if canonical is None:
-        require_canonical_authority(goal_id=goal_id, operation="team_plan")
     targets = (
         shadow_maintenance_lock_target(runtime, goal_id),
         legacy_coordination_todo_lock_path(runtime_root=runtime, goal_id=goal_id),
@@ -196,12 +193,16 @@ def apply_team_plan(
             raise TeamPlanCommitError("team_plan_commit_failed",
                 "team plan registry is busy; retry the original confirmation") from None
         read_source_request()
-        # Pre-promotion receipts remain historical facts, but only after the
-        # canonical route has been admitted and its provider is readable.
+        # Observe the selected provider under the transition/source locks:
+        # provider loss never authorizes a fallback to historical source.
+        canonical = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal_id)
+        # An exact pre-cutoff receipt is read-only recovery, not fresh work.
         previous = previous_receipt(state.read_text(encoding="utf-8"))
         if previous is not None:
             return dict(effect_runtime_result("work_items.team_plan.plan", {
                 **request, "previous_receipt": previous})["result"])
+        if canonical is None:
+            require_canonical_authority(goal_id=goal_id, operation="team_plan")
         response = effect_runtime_result("work_items.team_plan.commit", {
             **request, "runtime_root": str(runtime.resolve()),
             "expected_provider_revision": canonical["provider_revision"],

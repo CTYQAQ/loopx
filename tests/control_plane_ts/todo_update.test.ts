@@ -253,6 +253,41 @@ async function seeded(overrides: Record<string, unknown> = {}) {
   return {store, request};
 }
 
+test("imported removed policies reject copy edits and clear only after explicit repair", async () => {
+  for (const removed_continuation_policy of ["primary_review", "review_handoff"]) {
+    const {store, request} = await seeded({removed_continuation_policy});
+    const before = await store.loadAuthority();
+    for (const edit of [{patch: {text: "Unreviewed replacement"}, clear_fields: []},
+      {patch: {note: "Unreviewed annotation"}, clear_fields: []},
+      {patch: {}, clear_fields: ["note"]}]) {
+      for (const dry_run of [true, false]) {
+        const rejected = await executeCoordinationTodoUpdate(store, {...request, ...edit, dry_run});
+        assert.equal(rejected.status, "failed", JSON.stringify(rejected));
+        assert.match(String(rejected.reason), /repair it explicitly/);
+        assert.deepEqual(await store.loadAuthority(), before);
+        assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+      }
+    }
+    const repair = {...request, patch: {}, clear_fields: [], planning_intent: {
+      continuation_policy: "independent_handoff", excluded_agents: ["agent-b"],
+    }};
+    assert.equal((await executeCoordinationTodoUpdate(store, {...repair, dry_run: true})).status, "planned");
+    assert.deepEqual(await store.loadAuthority(), before);
+    assert.equal((await executeCoordinationTodoUpdate(store, repair)).status, "applied");
+    const repaired = await store.loadAuthority();
+    assert.equal(repaired.status, "loaded");
+    if (repaired.status !== "loaded") return;
+    const record = (repaired.head.todos as Record<string, unknown>[])[0]!;
+    assert.equal(record.removed_continuation_policy, undefined);
+    assert.equal(record.continuation_policy, "independent_handoff");
+    assert.deepEqual(record.excluded_agents, ["agent-b"]);
+    assert.equal((await executeCoordinationTodoUpdate(store, {...request, operation_id: "after-repair"})).status, "applied");
+    const later = await store.loadAuthority();
+    assert.equal((await executeCoordinationTodoUpdate(store, repair)).status, "replayed");
+    assert.deepEqual(await store.loadAuthority(), later);
+  }
+});
+
 test("provider-first update preserves typed external-wait rejection codes", async () => {
   const {store, request} = await seeded({
     todo_id: "todo_waiting",

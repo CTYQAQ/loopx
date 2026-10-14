@@ -481,6 +481,8 @@ def register_project_goal(
     resolve_new_goal_storage_target: Callable[[Path], dict[str, Any]],
     goal_instance_profile: str | None = None,
     operation_id: str | None = None,
+    registered_agents: list[str] | None = None,
+    canonical_storage: str | None = None,
 ) -> dict[str, Any]:
     normalized_goal_id = _identifier(goal_id, field="goal_id")
     expanded_registry = registry_path.expanduser()
@@ -526,6 +528,8 @@ def register_project_goal(
             resolve_new_goal_storage_target=resolve_new_goal_storage_target,
             goal_instance_profile=goal_instance_profile,
             operation_id=operation_id,
+            registered_agents=registered_agents,
+            canonical_storage=canonical_storage,
         )
 
 
