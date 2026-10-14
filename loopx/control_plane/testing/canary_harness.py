@@ -184,11 +184,11 @@ def read_run_index(runtime_root: Path, goal_id: str) -> list[dict[str, Any]]:
     ]
 
 
-def import_fixture_authority(registry_path: Path, goal_id: str) -> None:
+def import_fixture_authority(registry_path: Path, goal_id: str, *, provider: str = "file") -> None:
     """Import a disposable smoke's complete source through the real saved plan.
 
     Fixture writers have finished before this call. Historical metadata stays
-    intact; normal writes afterwards use the canonical File/soft-claim owner.
+    intact; normal writes afterwards use the selected canonical/soft-claim owner.
     Existing unpromoted/refusal fixtures opt in explicitly, never by default.
     """
     from ...state_backup import build_state_backup_plan, execute_state_backup_plan
@@ -200,6 +200,10 @@ def import_fixture_authority(registry_path: Path, goal_id: str) -> None:
     runtime = Path(registry["common_runtime_root"]).resolve()
     # Bind the physical source consistently on hosts whose temp path is a link.
     goal["repo"] = str(project)
+    state_file = Path(goal["state_file"]).expanduser()
+    if not state_file.is_absolute():
+        state_file = project / state_file
+    goal["state_file"] = str(state_file.resolve())
     registry_path.write_text(json.dumps(registry), encoding="utf-8")
     runtime.mkdir(parents=True, exist_ok=True)
     backup = execute_state_backup_plan(build_state_backup_plan(
@@ -214,7 +218,7 @@ def import_fixture_authority(registry_path: Path, goal_id: str) -> None:
     prepared = run_json_cli(
         *prefix, "prepare-import", *identity,
         "--backup-manifest", backup["manifest_path"],
-        "--provider", "file", "--target-handoff-mode", "soft_claim",
+        "--provider", provider, "--target-handoff-mode", "soft_claim",
         registry_path=registry_path, runtime_root=runtime,
     )["cold_import"]
     assert prepared["status"] == "prepared", prepared
@@ -231,6 +235,6 @@ def import_fixture_authority(registry_path: Path, goal_id: str) -> None:
         "todo", "list", "--goal-id", goal_id,
         registry_path=registry_path, runtime_root=runtime,
     )["authority_read"]
-    assert readback["source_authority"] == "file_v0", readback
+    assert readback["source_authority"] == f"{provider}_v0", readback
     assert readback["decision_read_from_provider"] is True, readback
     assert readback["legacy_fallback_used"] is False, readback
