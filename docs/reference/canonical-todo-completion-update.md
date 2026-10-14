@@ -530,6 +530,34 @@ Markdown 投影、备份读取及活跃 Host IO 保留。真实 File/SQLite CLI 
 wheel 路径验证完成与结算恢复；Markdown writer 和 shadow capture producer 已
 退役。代码回滚不需要转换数据或重写回执。
 
+### Repairing imported completion metadata / 修复导入的完成元数据
+
+An imported completed Todo may lack `completion_continuation`. Use its original
+Actor and completion identity to preview and apply the ordinary completion
+command without new note, evidence, successor, policy or validation intent.
+For a record without a stored Turn identity:
+
+```sh
+loopx todo complete --goal-id example --todo-id todo_imported --agent-id agent-a --dry-run
+loopx todo complete --goal-id example --todo-id todo_imported --agent-id agent-a
+loopx todo list --goal-id example --todo-id todo_imported
+```
+
+A stored identity requires the original Turn tuple and any required execution
+proof; do not replace it with a new identity. The TypeScript owner accepts the
+ordinary transport's read-only policy facts, but applies no policy and acquires
+no lease during this repair. It preserves identity, completion time, content,
+claim and original receipt. Preview/refusal has no effects; retrying the same
+operation preserves newer writes. Fresh edits require their own authorized
+operation after repair.
+
+导入的已完成 Todo 若缺少 `completion_continuation`，使用原 Actor、完成身份和所需
+执行证明，通过普通完成命令预览并修复；不夹带新的 note、evidence、successor、
+policy 或验证意图。上例适用于未存储 Turn 身份的记录；已有身份必须提供原 tuple，
+不能替换身份。TS owner 接受普通入口携带的只读 policy 事实，但修复不应用 policy、
+不领取租约，并保留原 ID、完成时间、内容、claim 与回执。预览和拒绝无副作用；
+原操作重试保留后写。后续编辑仍须单独通过原授权入口。
+
 ## 2.0 canonical mutation boundary
 
 Create, update, complete, supersede and archive share
