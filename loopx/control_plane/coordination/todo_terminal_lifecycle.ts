@@ -60,6 +60,7 @@ import {
   selectTodoCompletionState,
   TODO_COMPLETION_STATE_REQUEST_SCHEMA,
 } from "../todos/completion_state.ts";
+import {resolveTodoCompletionPolicy} from "../todos/completion_policy.ts";
 import {
   TASK_LEASE_SCHEMA_VERSION,
   leaseEpoch,
@@ -1031,6 +1032,24 @@ interface UntypedCompletionRepairPlan {
   readonly successorTodoIds: readonly string[];
 }
 
+function completionPolicyFactsOnly(
+  todo: JsonObject, input: ResolvedCoordinationTodoTerminalLifecycleInput,
+): boolean {
+  const request = input.completion_policy_request;
+  if (request === null) return true;
+  // The ordinary CLI always supplies this existing source-fact envelope.
+  // Decode through its owner, but never apply a policy during imported repair.
+  const policy = resolveTodoCompletionPolicy(request);
+  return request.goal_id === input.goal_id && request.next_agent_todo == null &&
+    request.next_action_kind == null && request.next_continuation_policy == null &&
+    request.evidence == null && !policy.self_merged &&
+    policy.effective_next_claimed_by === null && policy.effective_next_excluded_agents.length === 0 &&
+    Array.isArray(request.linked_successors) && request.linked_successors.length === 0 &&
+    (policy.effective_claimed_by === null || policy.effective_claimed_by === todo.claimed_by) &&
+    canonicalAuthoritySha256([...policy.registered_agents].sort()) ===
+      canonicalAuthoritySha256([...input.registered_agents].sort());
+}
+
 function planUntypedCompletionRepair(
   todo: JsonObject,
   input: ResolvedCoordinationTodoTerminalLifecycleInput,
@@ -1057,9 +1076,9 @@ function planUntypedCompletionRepair(
   }
   if (input.user_update !== undefined || input.note !== null || input.evidence !== null ||
       input.reason !== null || input.decision_outcome !== null || input.clear_claim ||
-      input.allow_user_gate_auto_acquire || input.linked_successor_todo_ids.length > 0 ||
+      input.linked_successor_todo_ids.length > 0 ||
       input.successor_intents.length > 0 || input.completion_result != null ||
-      input.completion_policy_request !== null || input.validation_declaration !== null ||
+      !completionPolicyFactsOnly(todo, input) || input.validation_declaration !== null ||
       input.validation_receipt !== null || input.validation_source_provider_revision != null ||
       input.validation_declaration_sha256 != null || input.goal_acceptance_source_binding != null ||
       input.goal_acceptance_validation_receipts != null) {
@@ -1337,6 +1356,8 @@ export async function executeCoordinationTodoTerminalLifecycle(
   }
   if (untypedCompletionRepair !== null) {
     const target = untypedCompletionRepair.todo;
+    // A public auto-acquire option is not an acquisition: this branch commits
+    // only the existing Todo's completion metadata and never mutates leases.
     return commitTerminalResult(store, input, requestSha, head, {
       todo_id: input.todo_id,
       command: input.command,

@@ -35,11 +35,15 @@ export function registerTerminalReentryConformance(provider: string, factory: Au
         operation_identity: {kind: "completion_turn"},
         actor_agent_id: "agent-a", registered_agents: ["agent-a", "agent-b"], lifecycle_grants: [],
         authority_reason: null, decision_outcome: null, lease_idempotency_key: null, lease_expected_version: null,
-        allow_user_gate_auto_acquire: false, requested_no_followup: false,
+        allow_user_gate_auto_acquire: true, requested_no_followup: false,
         requested_completion_turn_key: "original-turn", requested_completion_identity_source: "turn_settlement",
         linked_successor_todo_ids: [], successor_intents: [], note: null, evidence: null, reason: null,
         clear_claim: false, validation_declaration: null, validation_receipt: null,
-        completion_policy_request: null, dry_run: false, now: new Date("2026-09-07T07:00:00Z"),
+        completion_policy_request: {schema_version: "loopx_todo_completion_policy_request_v0",
+          goal_id: "goal-a", agent_model: "peer_v1", claimed_by: "agent-a",
+          registered_agents: ["agent-a", "agent-b"], next_claimed_by: null, next_agent_todo: null,
+          next_continuation_policy: null, next_excluded_agents: [], self_merged: false,
+          evidence: null, linked_successors: []}, dry_run: false, now: new Date("2026-09-07T07:00:00Z"),
       };
       const before = await store.loadAuthority(), importedReceipt = await store.readReceipt("import-untyped");
       const rejectedChanges = [{requested_no_followup: true}, {actor_agent_id: "agent-b"},
@@ -47,6 +51,11 @@ export function registerTerminalReentryConformance(provider: string, factory: Au
         {note: "Replace original note"}, {evidence: "Replace original evidence"},
         {reason: "Replace original reason"}, {clear_claim: true}, {decision_outcome: "approve"},
         {completion_policy_request: {claimed_by: "agent-a"}},
+        {completion_policy_request: {...request.completion_policy_request, claimed_by: "agent-b"}},
+        {completion_policy_request: {...request.completion_policy_request, goal_id: "other-goal"}},
+        {completion_policy_request: {...request.completion_policy_request, registered_agents: ["agent-a"]}},
+        {completion_policy_request: {...request.completion_policy_request, evidence: "Fresh policy evidence"}},
+        {completion_policy_request: {...request.completion_policy_request, next_agent_todo: "Fresh policy successor"}},
         {successor_intents: [{role: "agent", text: "Cannot add work during repair"}]}] satisfies
         readonly Partial<CoordinationTodoTerminalLifecycleInput>[];
       for (const change of rejectedChanges) {
@@ -67,6 +76,7 @@ export function registerTerminalReentryConformance(provider: string, factory: Au
       assert.equal(before.status, "loaded");
       if (before.status !== "loaded") throw new Error("imported head missing");
       const repairedRows = repaired.head.todos, importedRows = before.head.todos;
+      assert.deepEqual(repaired.head.leases, before.head.leases);
       if (!Array.isArray(repairedRows) || repairedRows.length !== 1 ||
           !Array.isArray(importedRows) || importedRows.length !== 1) {
         throw new Error("imported repair Todo missing");

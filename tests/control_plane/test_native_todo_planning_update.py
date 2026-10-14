@@ -68,6 +68,56 @@ def records(registry: Path) -> dict[str, dict]:
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("claim_flag", [False, True])
+def test_cli_imported_completion_repairs_only_metadata(tmp_path, monkeypatch, provider, claim_flag):
+    from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
+    from loopx.control_plane.testing.canary_harness import run_json_cli, run_json_cli_result
+
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    registry, state = source_fixture(tmp_path)
+    rows = list_goal_todos(registry_path=registry, goal_id="goal-a")["todos"]
+    imported = next(row for row in rows if row["todo_id"] == "todo_target")
+    imported.update(status="done", done=True, evidence="Original evidence", reason="Original reason",
+                    completed_at="2026-01-02T00:00:00Z", updated_at="2026-01-02T01:00:00Z",
+                    last_actor_agent_id="agent-b", completion_receipt_id="tcw_original")
+    projection = build_todo_runtime_shadow_projection(goal_id="goal-a", todos=rows, handoff_mode="soft_claim")
+    runtime = tmp_path / "runtime"
+    initialize_canonical_authority(runtime, "goal-a", projection, state_path=state, provider=provider)
+    before = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
+    source_before = state.read_bytes()
+    prefix = ("todo", "complete", "--goal-id", "goal-a", "--todo-id", "todo_target")
+    for actor, extra, code in [
+        ("agent-b", (), "claim_owner_mismatch"),
+        ("agent-a", ("--note", "A fresh annotation"), "invalid_todo_completion_transaction"),
+        ("agent-a", ("--evidence", "A fresh completion result"), "invalid_todo_completion_transaction"),
+        ("agent-a", ("--next-agent-todo", "Fresh successor work"), "invalid_todo_completion_transaction"),
+    ]:
+        returncode, rejected = run_json_cli_result(*prefix, "--agent-id", actor, *extra, registry_path=registry)
+        assert returncode == 1 and rejected["error_code"] == code, rejected
+        assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == before
+        assert state.read_bytes() == source_before
+    repair = (*prefix, "--agent-id", "agent-a", *(("--claimed-by", "agent-a") if claim_flag else ()))
+    preview = run_json_cli(*repair, "--dry-run", registry_path=registry)
+    assert preview["dry_run"] is True, preview
+    assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == before
+    assert state.read_bytes() == source_before
+    applied = run_json_cli(*repair, registry_path=registry)
+    assert applied["changed"] is True and applied["completion_policy"] is None, applied
+    original = next(row for row in before["todos"] if row["todo_id"] == "todo_target")
+    current = records(registry)["todo_target"]
+    assert {k: v for k, v in current.items() if k != "content_revision"} == {
+        **{k: v for k, v in original.items() if k != "content_revision"}, "completion_continuation": "active_goal",
+    }
+    run_json_cli("todo", "add", "--goal-id", "goal-a", "--role", "agent",
+                 "--text", "A later independent operation", registry_path=registry)
+    later = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
+    replay = run_json_cli(*repair, registry_path=registry)
+    assert replay["changed"] is False, replay
+    after = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
+    assert after["todos"] == later["todos"] and after["provider_revision"] == later["provider_revision"]
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 @pytest.mark.parametrize("command", ["complete", "supersede"])
 def test_cli_same_title_terminal_successor_preserves_peers_and_replay(tmp_path, monkeypatch, provider, command):
     from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
