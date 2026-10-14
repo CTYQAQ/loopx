@@ -30,23 +30,32 @@ export function registerTerminalReentryConformance(provider: string, factory: Au
       await store.commitAuthority({operation_id: "import-untyped", expected_provider_revision: null,
         next_projection: authorityProjectionFixture("goal-a", [todo], [], schema, {handoff_mode: "soft_claim"}),
         events: [], receipts: [{original_import: true}]});
+      const producerPolicy = {
+        schema_version: "loopx_todo_completion_policy_request_v0",
+        goal_id: "goal-a", agent_model: "peer_v1", claimed_by: null,
+        registered_agents: ["agent-a", "agent-b"], next_claimed_by: null,
+        next_agent_todo: null, next_continuation_policy: null,
+        next_excluded_agents: [], self_merged: false, evidence: null,
+        linked_successors: [],
+      };
       const request: CoordinationTodoTerminalLifecycleInput = {
         goal_id: "goal-a", todo_id: "todo_untyped", expected_role: "agent", command: "complete",
         operation_identity: {kind: "completion_turn"},
         actor_agent_id: "agent-a", registered_agents: ["agent-a", "agent-b"], lifecycle_grants: [],
         authority_reason: null, decision_outcome: null, lease_idempotency_key: null, lease_expected_version: null,
-        allow_user_gate_auto_acquire: false, requested_no_followup: false,
+        allow_user_gate_auto_acquire: true, requested_no_followup: false,
         requested_completion_turn_key: "original-turn", requested_completion_identity_source: "turn_settlement",
         linked_successor_todo_ids: [], successor_intents: [], note: null, evidence: null, reason: null,
         clear_claim: false, validation_declaration: null, validation_receipt: null,
-        completion_policy_request: null, dry_run: false, now: new Date("2026-09-07T07:00:00Z"),
+        completion_policy_request: producerPolicy,
+        dry_run: false, now: new Date("2026-09-07T07:00:00Z"),
       };
       const before = await store.loadAuthority(), importedReceipt = await store.readReceipt("import-untyped");
       const rejectedChanges = [{requested_no_followup: true}, {actor_agent_id: "agent-b"},
         {requested_completion_turn_key: "other-turn"},
         {note: "Replace original note"}, {evidence: "Replace original evidence"},
         {reason: "Replace original reason"}, {clear_claim: true}, {decision_outcome: "approve"},
-        {completion_policy_request: {claimed_by: "agent-a"}},
+        {completion_policy_request: {...producerPolicy, claimed_by: "agent-a"}},
         {successor_intents: [{role: "agent", text: "Cannot add work during repair"}]}] satisfies
         readonly Partial<CoordinationTodoTerminalLifecycleInput>[];
       for (const change of rejectedChanges) {
@@ -114,11 +123,19 @@ export function registerTerminalReentryConformance(provider: string, factory: Au
         goal_id: "goal-a", todo_id: "todo_untyped_validated", expected_role: "agent", command: "complete",
         operation_identity: {kind: "completion_turn"}, actor_agent_id: "agent-a",
         registered_agents: ["agent-a"], lifecycle_grants: [], authority_reason: null, decision_outcome: null,
-        lease_idempotency_key: null, lease_expected_version: null, allow_user_gate_auto_acquire: false,
+        lease_idempotency_key: null, lease_expected_version: null, allow_user_gate_auto_acquire: true,
         requested_no_followup: false, requested_completion_turn_key: "validated-turn",
         requested_completion_identity_source: "turn_settlement", linked_successor_todo_ids: [],
         successor_intents: [], note: null, evidence: null, reason: null, clear_claim: false,
-        validation_declaration: null, validation_receipt: null, completion_policy_request: null,
+        validation_declaration: null, validation_declaration_sha256: canonicalAuthoritySha256(declaration),
+        validation_receipt: null, completion_policy_request: {
+          schema_version: "loopx_todo_completion_policy_request_v0",
+          goal_id: "goal-a", agent_model: "peer_v1", claimed_by: null,
+          registered_agents: ["agent-a"], next_claimed_by: null,
+          next_agent_todo: null, next_continuation_policy: null,
+          next_excluded_agents: [], self_merged: false, evidence: null,
+          linked_successors: [],
+        },
         dry_run: false, now: new Date("2026-09-07T07:00:00Z"),
       };
       const repaired = await execute(store, request);
