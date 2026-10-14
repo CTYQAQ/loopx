@@ -817,6 +817,21 @@ pending command；延迟重读及仅向主进程发信号均未恢复。因此�
 前明确拒绝中途 native 捕获，继续原工具响应。Linux interrupted 与 completed-wake
 路径分别保留验收，不放宽历史、歧义、源或期限检查。
 
+目标侧显式恢复准备可复用既有 cadence owner 来安排首次复盘：配置
+`--execution-replan-after-turns 1`，完成并结算一次真实恢复检查，再准入新到期的
+periodic review。检查读取保留的研究/代码与公开评测机会，不改候选、不提交。
+复盘使用当前 Goal/Todo/lease 及新 context 身份；源工作结算仅作历史证据。
+复盘结算后，通过 `configure-goal` 恢复预注册的正常频率，再准入研究工作。
+隔离的 native receiver 验证已记录三个轴独立计划的 grow，实际采用一次包含
+两个候选的完整工作切片，并检查 deadline、未到期冷却、已用轮次和 incumbent
+不变；默认 receiver 路径单独验证。在另一个全新 guest 中设置
+`LOOPX_JOINT_RECEIVER_STRIDE=1`，运行
+`benchmark/tests/test_checkpoint_joint_receiver.py` 可验证 stride 变体。
+这是显式且经测试的组合，不是恢复时自动
+触发的 hook，也不改变默认行为。补后继 Todo 的生命周期修复本身不等于可记账的
+periodic 策略复盘。匹配分支须声明相同的准备/频率迁移，并计入完整成本。
+脚本式 native provider 验证传输与机械采用，不证明模型判断、源 Explore graph
+权限恢复或科研收益；中后期研究点选择与真实分支准入仍待完成。
 
 inert verification unit 不授予执行权。目标侧使用新的实验/Host 身份，通过既有
 Goal/session/state admission 进入。历史租约、quota、timer、pending effect 和

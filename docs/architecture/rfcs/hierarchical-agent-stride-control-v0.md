@@ -1008,6 +1008,26 @@ mid-wake native capture before signalling and releases the original tool respons
 Linux interrupted and completed-wake capture retain their separate qualification;
 strict history, ambiguity, source and deadline predicates remain unchanged.
 
+An explicit destination preparation can reuse the existing cadence owner for
+its first review: configure `--execution-replan-after-turns 1`, perform and settle
+one actual restoration check, then admit the newly due periodic review. That
+check reads retained research/code and public opportunity without changing the
+candidate or submitting it. The review uses current Goal/Todo/lease and fresh
+context identities; source settlements remain historical evidence. After the
+review settles, restore the preregistered normal cadence through
+`configure-goal` before admitting research work. The isolated native receiver
+qualification records independent grow axes, adopts one two-candidate complete
+slice and verifies unchanged deadline, pending cooldown, consumed rounds and
+incumbent. The default receiver path is exercised separately; run
+`benchmark/tests/test_checkpoint_joint_receiver.py` in another fresh guest with
+`LOOPX_JOINT_RECEIVER_STRIDE=1` for the stride variant. This is an
+explicit tested composition, not an automatic restore hook or a new default.
+A Todo-successor repair alone is not a spendable periodic strategy review.
+Matched branches must declare the same preparation/cadence transition and charge
+its full cost. Scripted native-provider execution qualifies transport and
+mechanical adoption, not model judgment, restored Explore graph authority or
+scientific benefit; later-point selection and real branch admission remain open.
+
 Committed native session admission now retains the captured artifact digest in
 the original atomic session binding. Exact controller retries after a lost binding
 reply verify that receipt, current Goal/Agent/profile and unchanged complete
