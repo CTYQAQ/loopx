@@ -20,6 +20,12 @@ def assert_absent(text: str, needle: str) -> None:
         raise AssertionError(f"workflow must not reference {needle!r}")
 
 
+def step_source(text: str, name: str) -> str:
+    marker = f"      - name: {name}\n"
+    assert text.count(marker) == 1, name
+    return text.split(marker, 1)[1].split("\n      - ", 1)[0]
+
+
 def _extract_paths_block(text: str, event: str) -> str:
     """Extract the paths list under a given event (pull_request or push)."""
     marker = f"\n  {event}:"
@@ -129,7 +135,6 @@ def main() -> int:
         ".codex/goals",
         ".goal-" + "harness/",
         "registry.global.json",
-        "GH_TOKEN: ${{ github.token }}",
         "enable-reward-write-api",
         "npm run dev",
         "npm run preview",
@@ -143,6 +148,24 @@ def main() -> int:
         "path: loopx/web/chat/",
     ]:
         assert_absent(text, forbidden)
+
+    # Release-asset resolution and complete stargazer history use distinct
+    # credentials. The ordinary token must never replace the stargazer PAT.
+    release_steps = (
+        "Validate public-safe frontstage bundle",
+        "Export Pages frontstage artifact",
+    )
+    for name in release_steps:
+        step = step_source(text, name)
+        assert_contains(step, "GH_TOKEN: ${{ github.token }}")
+        assert_contains(step, 'LOOPX_SITE_RESOLVE_DESKTOP_RELEASE: "1"')
+        assert_absent(step, "scripts/fetch-github-stargazers.sh")
+    assert text.count("GH_TOKEN: ${{ github.token }}") == len(release_steps)
+    stargazers = step_source(text, "Fetch complete GitHub stargazer history")
+    assert_contains(stargazers, "if: github.event_name != 'pull_request'")
+    assert_contains(stargazers, "GH_TOKEN: ${{ secrets.STAR_HISTORY_READ_TOKEN }}")
+    assert_contains(stargazers, "scripts/fetch-github-stargazers.sh")
+    assert_absent(stargazers, "GH_TOKEN: ${{ github.token }}")
 
     # Detaching a non-published product must preserve its own qualification lane.
     python_tests = (WORKFLOW.parent / "python-tests.yml").read_text(encoding="utf-8")
