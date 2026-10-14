@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import time
 
 import pytest
@@ -343,14 +344,34 @@ def test_checkpoint_interrupt_timeout_reaps_without_qualifying_capture(tmp_path)
         assert process.poll() is not None
 
 
+@pytest.mark.parametrize("platform,native,interrupt", [
+    ("darwin", True, False), ("linux", True, True), ("darwin", False, True),
+])
+def test_midwake_native_profile_refusal_precedes_interruption(tmp_path, monkeypatch, platform, native, interrupt):
+    from benchmark.runtime.checkpoint_wake import CheckpointWake
+
+    wake = CheckpointWake({"LOOPX_WAKE_LOG_DIR": str(tmp_path / "wakes")}, {"turn_id": "fixture-turn"})
+    wake.request, wake.raw = {"native_session": native}, b"fixture declaration"
+    monkeypatch.setattr(sys, "platform", platform)
+    intent = {"capture": True, "obligation_id": "replan-0123456789abcdef"}
+    assert wake._first_replan(intent) is interrupt
+    assert wake._first_replan(intent) is False  # Same point never becomes a later attempt.
+    events = wake.receipt.get("checkpoint_handoffs", [])
+    assert len(events) == (0 if interrupt else 1)
+    if events:
+        assert not events[0]["captured"] and not events[0]["research_point_qualified"]
+
+
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN") or
                    os.environ.get("LOOPX_CHECKPOINT_EXTERNAL_CONTROLLER") != "1",
                    reason="Requires the real native CLI and explicitly attached checkpoint supervisor")
-def test_actual_worker_captures_pending_replan_before_native_model(tmp_path):
-    """Completed native source + canonical state + controller, before selection.
+@pytest.mark.parametrize("explore_mode", ["off", "planning"])
+def test_actual_worker_captures_pending_replan_before_native_model(tmp_path, explore_mode):
+    """Six real settled work wakes -> pre-decision capture -> stride -> work.
 
-    Synthetic observations trigger review; the real guard, worker, native
-    history, SQLite and Host barrier must compose without inventing authority.
+    Inference is deterministic; native history/tools, canonical SQLite, quota,
+    periodic cadence and the Host writer barrier use their production paths.
+    No synthetic run-history rows are inserted to manufacture a review.
     """
     import sys
     import tomllib
@@ -361,44 +382,107 @@ def test_actual_worker_captures_pending_replan_before_native_model(tmp_path):
     from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 
     project, runtime, registry = cli._write_fixture(tmp_path / "authority")
+    document = json.loads(registry.read_text())
+    document["goals"][0]["quota"]["allowed_slots"] = 18
+    registry.write_text(json.dumps(document))
+    state_path = project / document["goals"][0]["state_file"]
     logs = Path("/logs/agent/wakes")
     candidate = project / "candidate.txt"
-    candidate.write_text("original candidate")
+    candidate.write_text("0")
     executable = tmp_path / "loopx-cli"
     executable.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' -m loopx.cli "$@"\n')
     executable.chmod(0o700)
     skills = tmp_path / "skills"
     skills.mkdir()
-    requests, guards = [], []
+    requests, guards, work_turns = [], [], []
+    phase = {"kind": "initial", "values": [], "tool_sent": False}
+
+    def run(*args):
+        code, result = cli._run_cli(registry, runtime, *args, cwd=project)
+        assert code == 0, json.dumps(result, indent=2)
+        return result
+
+    listed = run("todo", "list", "--goal-id", cli.GOAL_ID)
+    initialize_canonical_authority(runtime, cli.GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=cli.GOAL_ID, todos=listed["todos"],
+                                            handoff_mode="hard_lease", leases=[]),
+        state_path=state_path, provider="sqlite")
+    run("task-lease", "acquire", "--goal-id", cli.GOAL_ID, "--todo-id", cli.TODO_ID,
+        "--owner", cli.AGENT_ID, "--idempotency-key", "source-work")
+    configured = run("configure-goal", "--goal-id", cli.GOAL_ID,
+        "--execution-replan-after-turns", "6", "--execution-stride-strategy", "evidence_conditioned_v1",
+        "--explore-mode", explore_mode, "--execute")
+    assert configured["after"]["execution_profile"]["replan_after_effective_turns"] == 6
 
     def response(payload, index, message):
         requests.append(payload)
-        if index == 3:
-            # These files can exist only after the actual Host capture reply;
-            # no model call is permitted while capture is still pending.
+        if phase["kind"] == "work" and not phase["tool_sent"]:
+            phase["tool_sent"] = True
+            prefix = [sys.executable, "-m", "loopx.entrypoint", "--registry", str(registry),
+                      "--runtime-root", str(runtime), "--format", "json", "quota", "should-run",
+                      "--goal-id", cli.GOAL_ID, "--agent-id", cli.AGENT_ID, "--todo-id", cli.TODO_ID,
+                      "--runtime-profile", "generic_cli", "--available-capability", "shell"]
+            # The native tool selects its current Turn before changing code.
+            # Native work and validation precede the real CLI settlement below.
+            code = ("import os,json,subprocess; from pathlib import Path; "
+                    f"p=subprocess.run({prefix!r}+['--turn-instance-id',os.environ['LOOPX_TURN']],"
+                    "capture_output=True,text=True,check=True); g=json.loads(p.stdout); "
+                    "assert not g.get('autonomous_replan_obligation'); "
+                    "assert g['interaction_contract']['agent_channel']['delivery_allowed']; "
+                    "Path('work-guard.json').write_text(p.stdout); "
+                    f"values={phase['values']!r}; "
+                    "[(Path('candidate.txt').write_text(str(v)),"
+                    "Path('evidence-'+str(v)+'.json').write_text(json.dumps({'value':v,'synthetic':True}))) for v in values]; "
+                    "assert Path('candidate.txt').read_text()==str(values[-1]); print('CANDIDATE_VERIFIED')")
+            return {"type": "function_call", "id": f"fc_work_{index}", "call_id": f"call_work_{index}",
+                    "name": "exec_command", "arguments": json.dumps({
+                        "cmd": shlex.quote(sys.executable) + " -c " + shlex.quote(code),
+                        "yield_time_ms": 10000, "max_output_tokens": 100})}
+        if phase["kind"] == "review" and not phase["tool_sent"]:
+            phase["tool_sent"] = True
             replies = list((logs.parent / "checkpoint-controller").glob("*.json"))
-            reply = next(json.loads(path.read_text()) for path in replies
-                         if path.name != "ready.json")
+            reply = next(json.loads(path.read_text()) for path in replies if path.name != "ready.json")
             assert reply["ok"] and len(reply["capture"]["sha256"]) == 64
             paths = list(logs.glob("*/checkpoint-start-guard.json"))
             assert len(paths) == 1
             guard = json.loads(paths[0].read_text())
             guards.append(guard)
+            trigger = next(t for t in guard["autonomous_replan_obligation"]["triggers"]
+                           if t["kind"] == "periodic_review_due")
+            assert trigger["run_count"] == trigger["threshold"] == 6
+            control = guard["replan_action_packet"]["stride_control"]
+            assert set(control["actions"]) == {"grow", "switch", "verify"}
+            basis = control["explore_basis"]
+            assert bool(basis and basis["harness_enabled"]) == (explore_mode == "planning")
             assert guard["heartbeat_receipt"]["settlement_binding_owed"]
             assert "settlement_identity" not in guard["heartbeat_receipt"]
             assert not guard["interaction_contract"]["agent_channel"]["delivery_allowed"]
-            # Read the original packet only: selection and research work are
-            # still owed. No guard invocation or historical effect is replayed.
+            # The sealed point precedes the policy decision and seventh work.
+            assert candidate.read_text() == "6"
             return {"type": "function_call", "id": "fc_packet", "call_id": "call_packet",
                     "name": "exec_command", "arguments": json.dumps({
                         "cmd": "cat " + shlex.quote(str(paths[0])), "max_output_tokens": 30000})}
-        message["content"][0]["text"] = "Completed source research." if index <= 2 else "Original packet read."
+        message["content"][0]["text"] = "Original packet read." if phase["kind"] == "review" else "Synthetic work verified."
         return message
 
-    def run(*args):
-        code, result = cli._run_cli(registry, runtime, *args, cwd=project)
-        assert code == 0, result
-        return result
+    def settle_work(result, expected):
+        assert result["ok"], result
+        assert candidate.read_text() == str(expected)
+        guard = json.loads((project / "work-guard.json").read_text())
+        assert guard["heartbeat_receipt"]["turn_instance_id"] == result["turn_id"]
+        binding = ("--goal-id", cli.GOAL_ID, "--agent-id", cli.AGENT_ID,
+                   "--todo-id", cli.TODO_ID, "--turn-instance-id", result["turn_id"])
+        run("refresh-state", *binding, "--classification", "synthetic_candidate_verified",
+            "--delivery-batch-scale", "implementation", "--delivery-outcome", "outcome_progress",
+            "--delivery-boundary", "in_flight_continuation", "--progress-result-class", "advanced",
+            "--progress-surface-id", "fixture:candidate", "--progress-evidence-id", f"evidence:candidate-{expected}",
+            "--no-global-sync", "--suppress-external-sinks")
+        spent = run("quota", "spend-slot", *binding, "--source", "heartbeat", "--execute")
+        assert spent["settlement_progress"]["state"] == "settled"
+        work_turns.append(result["turn_id"])
+        if expected == 3:
+            replay = run("quota", "spend-slot", *binding, "--source", "heartbeat", "--execute")
+            assert replay["idempotent_replay"] and not replay["appended"]
 
     with real_native_source(tmp_path / "provider", os.environ["LOOPX_NATIVE_CHECKPOINT_BIN"],
             project, close_source=True, response_builder=response,
@@ -410,53 +494,74 @@ def test_actual_worker_captures_pending_replan_before_native_model(tmp_path):
             LOOPX_ITERATION_CONTEXT="resume", LOOPX_SHARED_SKILLS=str(skills), MODEL_NAME="fixture",
             REASONING_EFFORT="high", OPENAI_BASE_URL=base["model_providers"]["fixture"]["base_url"],
             OPENAI_API_KEY="synthetic-local-only", LOOPX_CODEX_TURN_TIMEOUT_SEC="60")
-        prior = run_once(env)
-        assert prior["ok"] and len(calls) == 2
-        binding = ("--goal-id", cli.GOAL_ID, "--agent-id", cli.AGENT_ID,
-                   "--todo-id", cli.TODO_ID, "--turn-instance-id", prior["turn_id"])
-        run("quota", "should-run", "--runtime-profile", "generic_cli", *binding)
-        vision = tmp_path / "vision.json"
-        vision.write_text(json.dumps({"schema_version": "goal_vision_replan_contract_v0",
-            "state": "vision_patch_proposed", "vision_patch": {
-                "acceptance_summary": "Continue synthetic research; complete checkpoint qualification remains."},
-            "path_delta": {"outcome": "continue", "prior_assumption": "Source fixture is available.",
-                "observed_reality": "Actual native source and CLI boundary checked.",
-                "retained": ["Complete checkpoint qualification"],
-                "evidence_refs": ["evidence:completed-source-fixture"]}}))
-        run("refresh-state", *binding, "--classification", "source_fixture_verified",
-            "--delivery-batch-scale", "implementation", "--delivery-outcome", "outcome_progress",
-            "--delivery-boundary", "in_flight_continuation", "--agent-vision-json", str(vision))
-        run("quota", "spend-slot", *binding, "--source", "heartbeat", "--execute")
-        index_path = runtime / "goals" / cli.GOAL_ID / "runs/index.jsonl"
-        original_runs = index_path.read_bytes()
-        cli._configure_autonomous_replan_fixture(project, runtime, registry)
-        state_path = project / f".codex/goals/{cli.GOAL_ID}/ACTIVE_GOAL_STATE.md"
-        state_path.write_text(state_path.read_text().replace("## Agent Todo\n\n",
-            "## Agent Todo\n\n- [ ] [P1] Continue the retained experiment.\n"
-            f"  <!-- loopx:todo todo_id={cli.TODO_ID} status=open claimed_by={cli.AGENT_ID} -->\n"))
-        # Preserve the real source settlement; synthetic trigger rows are
-        # fixture inputs, never claims of actual research progress.
-        index_path.write_bytes(original_runs + index_path.read_bytes())
-        listed = run("todo", "list", "--goal-id", cli.GOAL_ID)
-        initialize_canonical_authority(runtime, cli.GOAL_ID,
-            build_todo_runtime_shadow_projection(goal_id=cli.GOAL_ID, todos=listed["todos"],
-                                                handoff_mode="hard_lease", leases=[]),
-            state_path=state_path, provider="sqlite")
+        for value in range(1, 7):
+            phase.update(kind="work", values=[value], tool_sent=False)
+            prior = run_once(env)
+            settle_work(prior, value)
+        assert len(set(work_turns)) == 6 and len(calls) == 13
         request = tmp_path / "request.json"
         request.write_text(json.dumps({"destination": str(logs.parent / "checkpoints"),
             "components": [{"id": "code", "source_path": str(candidate)}], "point_metadata": {},
             "trigger": "fresh_replan", "native_session": True, "loopx_state": True,
             "evaluation_opportunity": True, "controller_handoff": True}))
+        phase.update(kind="review", tool_sent=False)
         result = run_once({**env, "LOOPX_CHECKPOINT_REQUEST": str(request)})
         assert result["ok"] and result["checkpoint"]["captured"], result
         assert result["checkpoint"]["phase"] == "before_replan"
         assert result["checkpoint"]["source_turn_id"] == prior["turn_id"]
         assert result["session"]["session_id"] == prior["session"]["session_id"]
-        assert not result.get("checkpoint_handoffs") and len(calls) == 4
+        assert not result.get("checkpoint_handoffs") and len(calls) == 15
         assert cli._heartbeat_receipt_count(runtime, result["turn_id"]) == 1
-        assert "settlement_binding_owed" in json.dumps(requests[3])
-        assert candidate.read_text() == "original candidate" and len(guards) == 1
-        (tmp_path / "controller-result.json").write_text(json.dumps(result["checkpoint"]))
+        assert "settlement_binding_owed" in json.dumps(requests[14]) and len(guards) == 1
+
+        # The original source now admits its review; capture has granted nothing.
+        selected = run("quota", "should-run", "--goal-id", cli.GOAL_ID, "--agent-id", cli.AGENT_ID,
+            "--todo-id", cli.TODO_ID, "--turn-instance-id", result["turn_id"], "--runtime-profile", "generic_cli")
+        control = selected["replan_action_packet"]["stride_control"]
+        decision = json.loads(json.dumps(control["minimal_example"]))
+        decision.update(basis="supported_progress", action="grow", axes={
+            "work_slice": {"plan": "Complete candidates 7 and 8 with local validation in one work wake.",
+                           "reason": "Six settled candidates establish the same complete synthetic work path."},
+            "route_distance": {"plan": "Retain the counter increment method.",
+                               "reason": "This checks continuation, not a scientific route improvement."},
+            "validation_scope": {"plan": "Verify both candidate evidence files and final value 8.",
+                                 "reason": "A larger complete slice must preserve the tested postcondition."}},
+            next_probe={"scope": "One two-candidate synthetic work slice.", "prediction": "Final candidate is 8.",
+                        "adoption_criterion": "Both evidence files and final value agree.",
+                        "cost_bound": "One native wake plus its validation and settlement.",
+                        "minimum_evidence": "Native tool output, candidate bytes, evidence and accountable settlement."})
+        if "explore_review" in decision:
+            decision["explore_review"].update(disposition="no_applicable_evidence", considered_refs=[],
+                reason="The delivered graph contains no findings; retain the tested synthetic method.")
+        vision = tmp_path / "vision.json"
+        vision.write_text(json.dumps({"schema_version": "goal_vision_replan_contract_v0",
+            "state": "vision_patch_proposed", "vision_patch": {"acceptance_summary": "Continuation qualification remains."},
+            "path_delta": {"outcome": "continue", "prior_assumption": "One candidate per work wake.",
+                "observed_reality": "Six native work wakes and their once-only settlements succeeded.",
+                "changed": ["Complete two synthetic candidates in the next work wake."],
+                "evidence_refs": ["evidence:candidate-6"]}, "stride_decision": decision}))
+        binding = ("--goal-id", cli.GOAL_ID, "--agent-id", cli.AGENT_ID,
+                   "--turn-instance-id", result["turn_id"])
+        identity = selected["heartbeat_receipt"]["settlement_identity"]
+        # Selection may preserve a legal Todo binding. Use its actual causal
+        # identity instead of assuming every periodic review is semantic-only.
+        if identity.get("todo_id"):
+            binding += ("--todo-id", identity["todo_id"])
+        else:
+            binding += ("--replan-obligation-id", identity["replan_obligation_id"])
+        run("refresh-state", *binding, "--classification", "synthetic_stride_review",
+            "--autonomous-replan-recorded", "--delivery-outcome", "outcome_progress",
+            "--agent-vision-json", str(vision),
+            "--no-global-sync", "--suppress-external-sinks")
+        run("quota", "spend-slot", *binding, "--source", "heartbeat", "--execute")
+        phase.update(kind="work", values=[7, 8], tool_sent=False)
+        adopted = run_once(env)
+        settle_work(adopted, 8)
+        assert len(calls) == 17 and len(work_turns) == 7
+        assert all(json.loads((project / f"evidence-{v}.json").read_text())["value"] == v for v in (7, 8))
+        (tmp_path / "controller-result.json").write_text(json.dumps({**result["checkpoint"],
+            "natural_work_turns": work_turns[:6], "stride_action": "grow", "explore_mode": explore_mode,
+            "source_followthrough_verified": True, "adopted_turn_id": adopted["turn_id"]}))
 
 
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN") or os.name != "posix",
@@ -581,6 +686,17 @@ def test_actual_worker_handles_midwake_replan_and_duplicate_without_guard_replay
             return
         assert len(result["checkpoint_handoffs"]) == 1
         event = result["checkpoint_handoffs"][0]
+        if capture == "native" and sys.platform == "darwin":
+            # Unsupported native interruption is refused before any signal;
+            # the original tool result is delivered and no abort is fabricated.
+            assert not event["captured"] and "not qualified on Darwin" in event["error"]
+            assert len(calls) == 4 and (project / "continued.txt").read_text() == "continued"
+            assert any(item.get("type") == "function_call_output" and
+                       item.get("call_id") == "call_midwake" for item in requests[2]["input"])
+            assert not any(item.get("type") == "function_call_output" and
+                           "aborted" in item.get("output", "") for item in requests[2]["input"])
+            assert not list((logs.parent / "checkpoints").glob("*/checkpoint.json"))
+            return
         assert event["captured"] is (capture in {"files", "native", "controller"}), json.dumps(event)
         assert event["research_point_qualified"] is False
         assert len(calls) == 4 and (project / "continued.txt").read_text() == "continued"

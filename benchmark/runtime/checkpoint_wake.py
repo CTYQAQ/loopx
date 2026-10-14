@@ -9,6 +9,7 @@ import hashlib
 import select
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from contextlib import ExitStack
@@ -61,9 +62,22 @@ class CheckpointWake:
         return self.stack.__exit__(*args)
 
     def _first_replan(self, intent):
-        return intent["capture"] and _mark_replan_attempt(
-            self.root, intent["obligation_id"], self.receipt["turn_id"],
-            hashlib.sha256(self.raw).hexdigest())
+        if not intent["capture"] or not _mark_replan_attempt(
+                self.root, intent["obligation_id"], self.receipt["turn_id"],
+                hashlib.sha256(self.raw).hexdigest()):
+            return False
+        if self.request.get("native_session") and sys.platform == "darwin":
+            # The current Darwin CLI can persist only the user item after an
+            # interrupted tool, losing the cursor needed for a verified fork.
+            # Refuse before signalling it; neither a delay nor a relaxed history
+            # predicate can recover that point. Completed-wake capture is separate.
+            self.receipt.setdefault("checkpoint_handoffs", []).append({
+                "obligation_id": intent["obligation_id"], "captured": False,
+                "research_point_qualified": False, "error_kind": "ValueError",
+                "error": "Interrupted native checkpoint capture is not qualified on Darwin; original tool continues.",
+            })
+            return False
+        return True
 
     def _capture(self, held, deadline):
         """Capture declared files/native history; never downgrade research/effects."""

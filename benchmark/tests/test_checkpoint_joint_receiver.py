@@ -63,6 +63,7 @@ def test_captured_point_continues_with_fresh_authority(
     monkeypatch.chdir(workspace)
     candidate = workspace / "candidate.txt"
     candidate.write_bytes((unit / "components/code").read_bytes())
+    captured_candidate = candidate.read_text()
     registry, runtime = tmp_path / "registry.json", tmp_path / "runtime"
     goal, agent, turn = "joint-receiver", "joint-researcher", "joint-work"
     prefix = [
@@ -266,7 +267,7 @@ from pathlib import Path
 b=json.loads(Path('judge.json').read_text()); url,submission_token=b['url'],b['token']
 h=requests.get(url+'/api/v1/history',params={'token':submission_token},timeout=5).json()
 assert h['best_score']==7 and h['agent_submissions']==1
-assert Path('candidate.txt').read_text()=='original candidate'
+assert Path('candidate.txt').read_text()==CAPTURED_CANDIDATE
 Path('candidate.txt').write_text('8')
 r=requests.post(url+'/api/v1/submit',data={'token':submission_token},files={'archive':('candidate.tar.gz',b'8')},timeout=5)
 if EXPECTED_COOLDOWN_PENDING:
@@ -282,7 +283,8 @@ else:
   time.sleep(.01)
  assert result['status']=='completed'
  print('Retained candidate and public best 7 used; candidate 8 graded.')
-""".replace("EXPECTED_COOLDOWN_PENDING", repr(cooldown_pending)))
+""".replace("EXPECTED_COOLDOWN_PENDING", repr(cooldown_pending))
+       .replace("CAPTURED_CANDIDATE", repr(captured_candidate)))
     requests = []
 
     class Provider(BaseHTTPRequestHandler):
@@ -407,7 +409,11 @@ else:
                     "path_delta": {
                         "outcome": "continue",
                         "prior_assumption": "Joint source point can be resumed.",
-                        "observed_reality": "Isolated receiver used retained context and code, and graded a new candidate.",
+                        "observed_reality": (
+                            "Receiver used retained context and code; local candidate validated, native cooldown preserved."
+                            if cooldown_pending else
+                            "Receiver used retained context and code, and graded a new candidate."
+                        ),
                         "retained": ["Complete qualification"],
                         "evidence_refs": ["evidence:joint-receiver"],
                     },

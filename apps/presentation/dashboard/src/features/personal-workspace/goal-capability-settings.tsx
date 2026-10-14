@@ -10,7 +10,7 @@ import {
   type GoalConfigurationPreview,
   type GoalConfigurationPartialWrite,
 } from "../../data/chat";
-import { parseEditableCapabilityJson, projectEditableCapabilityConfiguration, replanCadenceEditorDefaults, replanCadenceEditorValue } from "../../data/capability-configuration";
+import { goalReplanCadenceEditorValue, goalReplanCadenceWriteValue, hasReplanCadenceOverride, parseEditableCapabilityJson, projectEditableCapabilityConfiguration, replanCadenceEditorDefaults } from "../../data/capability-configuration";
 import { useWorkspaceI18n } from "./i18n";
 import { CapabilityConfigurationFields } from "./capability-configuration-fields";
 import { withReportScheduleTimezone } from "./periodic-report-schedule-field";
@@ -32,15 +32,19 @@ type CapabilityCatalogProps = Readonly<{
 type CapabilityMutationState = Readonly<{
   busy: "preview" | "apply" | null;
   draft: Record<string, unknown>;
+  cadenceOverride: boolean;
   partialWrite: GoalConfigurationPartialWrite | null;
   preview: GoalConfigurationPreview | null;
 }>;
 
-function goalWriteDraft(selected: CapabilityConfigurationCatalog["capabilities"][number], draft: Record<string, unknown>) {
+function goalWriteDraft(selected: CapabilityConfigurationCatalog["capabilities"][number], draft: Record<string, unknown>, editorMode: "guided" | "json", cadenceOverride: boolean) {
   const defaults = selected.capability_id === "todo_replan_cadence"
-    ? replanCadenceEditorDefaults(selected.effective_configuration?.configuration, selected.default)
+    ? editorMode === "json" ? undefined : replanCadenceEditorDefaults(selected.effective_configuration?.configuration, selected.default)
     : selected.default;
   const writable = projectEditableCapabilityConfiguration(selected.configuration_editor, draft, defaults);
+  if (selected.capability_id === "todo_replan_cadence" && editorMode === "guided") {
+    return goalReplanCadenceWriteValue(writable, cadenceOverride);
+  }
   if (selected.capability_id === "pull_request_review" && !Object.hasOwn(selected.current ?? {}, "owner_logins")
     && JSON.stringify(writable.owner_logins ?? []) === JSON.stringify(selected.effective_configuration?.configuration?.owner_logins ?? [])) {
     delete writable.owner_logins;
@@ -65,6 +69,7 @@ function useCapabilityMutation({ goalId, onApplied, selected, t }: Readonly<{
   const [mutation, setMutation] = useState<CapabilityMutationState>({
     busy: null,
     draft: {},
+    cadenceOverride: false,
     partialWrite: null,
     preview: null,
   });
@@ -86,9 +91,12 @@ function useCapabilityMutation({ goalId, onApplied, selected, t }: Readonly<{
       busy: null,
       draft: projectEditableCapabilityConfiguration(
         selected?.configuration_editor ?? { fields: [] },
-        selected?.capability_id === "todo_replan_cadence" ? replanCadenceEditorValue(current) : current,
+        selected?.capability_id === "todo_replan_cadence"
+          ? goalReplanCadenceEditorValue(selected.current, selected.effective_configuration?.configuration)
+          : current,
         selected?.default,
       ),
+      cadenceOverride: hasReplanCadenceOverride(selected?.current),
       partialWrite: null,
       preview: null,
     });
@@ -100,7 +108,7 @@ function useCapabilityMutation({ goalId, onApplied, selected, t }: Readonly<{
     setMutation((current) => ({ ...current, busy: "preview", partialWrite: null }));
     setError(null);
     try {
-      const nextPreview = await previewGoalConfiguration(goalId, selected.capability_id, configuration === null ? null : goalWriteDraft(selected, configuration));
+      const nextPreview = await previewGoalConfiguration(goalId, selected.capability_id, configuration === null ? null : goalWriteDraft(selected, configuration, editorMode, mutation.cadenceOverride));
       setMutation((current) => ({ ...current, preview: nextPreview }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : t("capabilities.previewFailed"));
@@ -114,7 +122,7 @@ function useCapabilityMutation({ goalId, onApplied, selected, t }: Readonly<{
     setMutation((current) => ({ ...current, busy: "apply" }));
     setError(null);
     try {
-      const writableDraft = goalWriteDraft(selected, mutation.draft);
+      const writableDraft = goalWriteDraft(selected, mutation.draft, editorMode, mutation.cadenceOverride);
       const result = await applyGoalConfiguration(
         goalId,
         selected.capability_id,
@@ -141,6 +149,7 @@ function useCapabilityMutation({ goalId, onApplied, selected, t }: Readonly<{
       draft: selected?.capability_id === "periodic_report"
         ? withReportScheduleTimezone(current.draft, key, value)
         : { ...current.draft, [key]: value },
+      cadenceOverride: current.cadenceOverride || (selected?.capability_id === "todo_replan_cadence" && (key === "count_unit" || key === "count")),
       preview: null,
     }));
     setError(null);
@@ -152,16 +161,22 @@ function useCapabilityMutation({ goalId, onApplied, selected, t }: Readonly<{
     const parsed = parseEditableCapabilityJson(selected.configuration_editor, text);
     setMutation((current) => ({ ...current, preview: null, draft: parsed
       ? projectEditableCapabilityConfiguration(selected.configuration_editor, parsed,
-        selected.capability_id === "todo_replan_cadence"
-          ? replanCadenceEditorDefaults(selected.effective_configuration?.configuration, selected.default)
-          : selected.default)
-      : current.draft }));
+        selected.capability_id === "todo_replan_cadence" ? undefined : selected.default)
+      : current.draft,
+      cadenceOverride: selected.capability_id === "todo_replan_cadence" && parsed
+        ? hasReplanCadenceOverride(parsed) : current.cadenceOverride,
+    }));
     setError(null);
   }
 
   function changeMode() {
     if (mutation.busy || !jsonValid) return;
-    if (editorMode === "guided") setJsonDraft(JSON.stringify(mutation.draft, null, 2));
+    if (editorMode === "guided" && selected) {
+      const jsonValue = selected.capability_id === "todo_replan_cadence"
+        ? goalWriteDraft(selected, mutation.draft, editorMode, mutation.cadenceOverride)
+        : mutation.draft;
+      setJsonDraft(JSON.stringify(jsonValue, null, 2));
+    }
     setEditorMode(editorMode === "guided" ? "json" : "guided");
     setMutation((current) => ({ ...current, preview: null,
       draft: editorMode === "json" && selected?.capability_id === "todo_replan_cadence"
@@ -255,12 +270,7 @@ function CapabilityCatalog({ callbacks, catalog, goalId, notification, onApplied
 
   async function createPreview() {
     if (!localizedSelected || !editorAvailable || busy || !jsonValid) return;
-    const writableDraft = projectEditableCapabilityConfiguration(
-      localizedSelected.configuration_editor,
-      draft,
-      localizedSelected.default,
-    );
-    await requestPreview(writableDraft);
+    await requestPreview(draft);
   }
 
   async function createClearPreview() {
@@ -351,6 +361,11 @@ function CapabilityCatalog({ callbacks, catalog, goalId, notification, onApplied
             </div>
           ) : null}
           {editorMode === "guided" ? <section className="personal-capability-field-summary">
+            {selected.effective_value_policy === "goal_stride_over_live_review_cadence" ? <p>
+              {locale === "zh-CN"
+                ? `复盘周期沿用${selected.machine_current ? "设备" : "产品"}默认；步幅策略由本 Goal 设置。`
+                : `Review interval follows ${selected.machine_current ? "device" : "product"} defaults; this Goal sets the stride strategy.`}
+            </p> : null}
             <CapabilityConfigurationFields
               disabled={Boolean(busy)}
               copy={localizedCapabilityFieldCopy(locale, localizedSelected.capability_id)}

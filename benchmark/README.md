@@ -236,8 +236,14 @@ session, and captures explicitly declared inert files and optional native histor
 still resumes the source with its original packet; altered packet bytes or lost
 session identity fail closed. All resumptions share the original wake deadline.
 
-This is **not a qualified complete research checkpoint**. With `native_session`
-requested, the actual worker can seal an explicit interrupted cursor: all retained
+This is **not a qualified complete research checkpoint**. Interrupted native
+capture is qualified on the tested Linux profile. On Darwin, a first mid-wake
+replan with `native_session` is explicitly refused **before** signalling the
+native CLI: its original tool result continues and the missed point is recorded
+once. The observed Darwin Host can omit the pending command from its interrupted
+history; delayed reads and leader-only signalling did not recover that cursor.
+Completed-wake capture remains separate. No history/output predicate is relaxed.
+On the qualified profile, the actual worker can seal an explicit interrupted cursor: all retained
 pages, the failed final guard command with no released output or later visible
 item, its parsed CLI routes/Turn identity, and the original held decision bytes.
 A second matching guard is ambiguous and rejects. The exact renderer Turn
@@ -619,6 +625,13 @@ identities; wrong-source/digest and advanced-history admission reject. No old
 lease, quota, timer or token is activated. Scientific restart still requires the
 chosen installed source/profile and experiment inputs to be admitted; this
 mechanical fixture proves neither model judgment nor policy benefit.
+The completed-source qualification also runs six actual settled native work wakes
+without fabricated history, with stride enabled and Explore planning separately
+off/on. The resulting periodic review is captured before policy selection; a
+recorded grow decision is followed by a larger synthetic work slice and normal
+settlement. This proves mechanical composition, not model-selected strategy
+quality. Retained research remains inert destination context: fresh graph,
+vision/policy review adoption and same-point scientific comparison remain open.
 Omit the controller file and `controller_handoff` on a new run to disable automatic
 controller capture; removing the checkpoint request disables capture entirely.
 Existing artifacts remain inert, and the source trial is not restarted by disabling it.

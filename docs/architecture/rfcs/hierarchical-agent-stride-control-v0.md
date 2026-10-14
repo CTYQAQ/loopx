@@ -655,9 +655,11 @@ source-bound stride decision. Typed progress, successor and terminal results
 remain valid evidence/outcomes, while a bare Todo successor transition cannot
 stand in for the review. This closes the decision-recording gap; it does not
 establish that the proposed action was adopted or improved the Goal.
-Six effective work Turns remains the review cadence, not the size of a Todo,
+Six effective work Turns remains the default review cadence, not the size of a Todo,
 experiment or route change. Matched continuation must qualify actual adoption,
 target benefit and full cost before promotion or synergy claims.
+Enabling the stride strategy for one Goal inherits its live review cadence; only
+an explicit Goal cadence override pins a separate count or unit.
 
 Exploratory iteration may run only strategy-enabled test arms and reuse historical
 baselines as descriptive references. A fresh concurrent baseline is not required
@@ -930,6 +932,19 @@ cooldown outlasts its work window, local candidate work succeeds while native
 submission returns 429 without consuming a round or invoking a grader. The
 separate eligible-cursor fixture receives its next grade. These two lawful states
 must remain distinct; restoring a point does not make its next submission eligible.
+
+The completed-source fixture now reaches that review through six actual native
+work wakes and exactly-once CLI settlements rather than inserted history rows.
+Stride is enabled with Explore planning separately off/on. Capture precedes the
+decision; the source records grow with independent axis plans and completes its
+larger synthetic next slice. Fresh isolated receivers consume the sealed code and
+context while preserving pending cooldown. This qualifies mechanical composition,
+not model judgment, automatic destination graph/policy adoption or utility.
+The tested Darwin native Host can omit the pending command after interruption;
+delayed reads and leader-only signalling do not repair it. That profile refuses
+mid-wake native capture before signalling and releases the original tool response.
+Linux interrupted and completed-wake capture retain their separate qualification;
+strict history, ambiguity, source and deadline predicates remain unchanged.
 
 Committed native session admission now retains the captured artifact digest in
 the original atomic session binding. Exact controller retries after a lost binding

@@ -71,6 +71,34 @@ export function replanCadenceEditorDefaults(effective: unknown, fallback: unknow
   return defaults;
 }
 
+/** Show the live interval when a Goal stores only its strategy choice. */
+export function goalReplanCadenceEditorValue(current: unknown, effective: unknown): Record<string, unknown> {
+  const inherited = configurationObject(replanCadenceEditorValue(effective));
+  return current == null ? inherited : {
+    ...inherited,
+    ...configurationObject(replanCadenceEditorValue(current)),
+  };
+}
+
+/** Persisted or explicit JSON interval fields represent a Goal override. */
+export function hasReplanCadenceOverride(value: unknown): boolean {
+  const record = configurationObject(value);
+  return ["count_unit", "count", "completed_todos"].some((key) => Object.hasOwn(record, key));
+}
+
+/** Displaying an inherited interval must not turn it into a pinned write. */
+export function goalReplanCadenceWriteValue(
+  draft: Record<string, unknown>,
+  cadenceOverride: boolean,
+): Record<string, unknown> {
+  const value = { ...draft };
+  if (!cadenceOverride) {
+    delete value.count_unit;
+    delete value.count;
+  }
+  return value;
+}
+
 /** A v0 storage selector did not enable creation; opening Settings must not. */
 export function goalStorageEditorValue(value: unknown): unknown {
   const record = configurationObject(value);
