@@ -1085,23 +1085,12 @@ boundary. The later properly bound replan remains eligible. The Unix transport
 and typed-owner regression cover this distinction; successful restoration alone
 still does not qualify an end-to-end research continuation.
 
-中文：重放的 guard 可能在当前 Turn 尚欠原 Todo 结算时展示下一次 replan。
-checkpoint 选择器须先验证原结算身份，再将响应交回写入器，不捕获也不中断；
-可见的后继义务不能充当本 Turn 已准入的捕获边界。后续正确绑定的 replan
-仍可捕获。Unix 运输与类型化 owner 的回归覆盖这一差别；恢复成功本身仍不
-构成端到端研究接续的验收。
-
 The same boundary covers the replan owner's `settlement_only` follow-through:
 recording a successor, writing its required vision or spending the original
 receipt does not admit another capture. Selection verifies the original
 settlement identity and semantic obligation, then releases the exact response
 without native interruption. The existing settlement owner still decides the
 remaining step; capture neither performs it nor grants a fresh work budget.
-
-中文：replan owner 标记 `settlement_only` 的接续也属于同一边界：记录后继、
-写回必需的 vision 或结算原 receipt，都不准入新的捕获。选择器核对原结算身份
-及语义义务后，原样释放响应，不中断原生会话。剩余步骤仍由既有 settlement
-owner 决定；捕获既不代做结算，也不授予新的工作预算。
 
 Completed pre-model points now retain the original pending guard as a sealed
 participant, as interrupted points already do. The pending packet is read as

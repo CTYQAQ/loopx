@@ -866,6 +866,17 @@ replan ID 都不够。模型前与 wake 中两处 hook 共用门槛：当前 Goa
 后续真正的新节点才可捕获。重试、重启或准入回复丢失保留原 source-root/digest
 绑定。这是机器执行的捕获门槛，不增加执行或预算权限。
 
+重放的 guard 可能在当前 Turn 尚欠原 Todo 结算时展示下一次 replan。
+checkpoint 选择器须先验证原结算身份，再将响应交回写入器，不捕获也不中断；
+可见的后继义务不能充当本 Turn 已准入的捕获边界。后续正确绑定的 replan
+仍可捕获。Unix 运输与类型化 owner 的回归覆盖这一差别；恢复成功本身仍不
+构成端到端研究接续的验收。
+
+replan owner 标记 `settlement_only` 的接续也属于同一边界：记录后继、写回
+必需的 vision 或结算原 receipt，都不准入新的捕获。选择器核对原结算身份
+及语义义务后，原样释放响应，不中断原生会话。剩余步骤仍由既有 settlement
+owner 决定；捕获既不代做结算，也不授予新的工作预算。
+
 模型前的 completed 点现在也将原 pending guard 作为封存参与方，中断点已有
 此参与方。目标在当前 guard 下将原包读作历史决策依据，不重跑源命令、claim、
 身份与 effect。旧 pending 点缺少此参与方时不能重新开启捕获。消费后 Host 不再
