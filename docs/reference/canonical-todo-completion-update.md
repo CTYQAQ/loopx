@@ -273,6 +273,22 @@ edit under the existing provider CAS, not an execution grant. A foreign actor,
 an excluded/unregistered actor, an active lease holder or stale explicit lease
 proof is not exempted. No claim, lease generation or decision scope is created.
 
+Fresh acquire, renewal and transfer refuse `user_action` execution with
+`todo_not_executable`, including for its bound Agent. Retained acquire receipts
+cannot supply current execution proof. Before an administrative copy edit, a
+historical active or expired lease must be released with its exact
+owner/key/version. After release, the
+registered bound Agent may edit text, notes or evidence under the ordinary
+provider CAS without lease proof; the released record remains unchanged.
+Explicit old or partial proof still rejects. Recovery never recommends a new
+execution lease for a User action.
+
+`user_action` 不领取执行租约：新 acquire、renew、transfer 即使由绑定 Agent
+发起，也返回 `todo_not_executable`；历史 acquire 回执不能提供当前执行证明。
+行政编辑前，历史 active／expired lease 须先按原 owner／key／version 精确 release。之后，
+已注册的绑定 Agent 可不带租约 proof，按原 provider CAS 编辑文本、备注或证据，
+保留 released 历史；旧 proof 或部分 proof 仍被拒绝，恢复提示不再要求申请新租约。
+
 ```sh
 loopx todo complete --goal-id example --todo-id todo_observation \
   --role user --agent-id agent-a --decision-outcome cancel \
@@ -635,6 +651,14 @@ creating tasks, capture evidence or execution authority. The locked source
 binding is revalidated first; a selected but unavailable provider still fails
 rather than replaying from Markdown as fallback.
 
+A missing Markdown display does not block an exact canonical receipt replay.
+After the typed owner verifies the original plan, actor and reviewed basis,
+the existing projection owner restores the current canonical Todos, including
+later work, without another provider commit. A fresh plan still requires a
+readable source; reviewing a missing display cannot authorize new assignments.
+An undecodable display also leaves the receipt readable, but projection stays
+pending without overwriting its bytes; repair the display before retrying.
+
 The real File/SQLite Chat oracle physically removes the capture adapter from
 the package before preview and confirmation. It checks provider outage without
 Markdown fallback, restoration, original replay after newer writes, stale
@@ -651,6 +675,10 @@ canonical 投影 outbox。未迁移的新请求返回 `canonical_authority_requi
 capture producer 或 Markdown editor。原 pre-cutoff 回执在导入前也可通过同一 TS
 身份校验读回，不创建 Todo、capture 或执行授权。先在原锁内核验来源绑定；已选定
 provider 不可用时仍明确拒绝，不能将 Markdown 历史读取当作 fallback。
+Markdown 展示文件缺失不阻断 canonical 原回执重放。TS owner 校验原计划、操作者及
+审阅依据后，既有投影 owner 恢复当前 canonical Todo（含后来工作），不增加 provider
+提交。新计划仍须可读的来源；对缺失展示的审阅不能授权新分派。
+展示内容不可解码时仍可读原回执，但投影保留 pending 且不覆盖原字节；修复展示后重试。
 真实 File/SQLite Chat 检查在预览及确认前物理移除该模块，验证 provider 失效无
 Markdown fallback、恢复、后续写入后的原操作重放、审核依据过期及提交后投影失败
 恢复；导入前的历史回执重放保留后来写入与当前 revision。正常 wheel 复用同一

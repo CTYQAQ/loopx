@@ -544,11 +544,35 @@ module, response alias or test filename:
 | Normal writer cutoff and deletion | Canonical mutation/creation/Monitor adapters; cold-source import and writer-isolation tests. Markdown mutation producers stay retired. |
 | Imported completion, succession and policy repair | Typed terminal/update owners; shared provider conformance and actual CLI consumer smokes in the supplement. |
 | Claim/lease ownership and atomic completion | `test_canonical_handoff_invariants.py`, canonical mutation/claim-transfer tests and provider conformance. Metadata cannot implement the retired two-write handoff. |
-| Original-operation recovery | Fixed 1.x lease and team-plan artifacts guard exact replay, prepared matching effects, original release, lost close response and preservation of later state. Fresh legacy verification/grants remain retired. |
+| Original-operation recovery | Fixed 1.x lease, Monitor and team-plan artifacts guard exact replay, prepared matching effects, original release, lost close response and preservation of later state. Selected-provider failure remains a refusal; original receipts are checked before fresh-work admission. Fresh legacy verification/grants remain retired. |
 | Current ownership policy | Only `soft_claim` and `hard_lease` admit current work. Imported `legacy` records and original receipts cannot grant execution; reviewed backup/plan/migrate and exact release remain available. |
 | Retired lease helpers | Delete the unused Python lease writer/factory, generation/CAS helpers, owner-validation chain, and source Todo projection. The typed transaction remains the decision owner; retained JSON reading stays read-only. Release corruption/CAS assertions run through the actual native adapter with fixed 1.x records. |
 | Reviewed App creation and configuration | Chat binds the accepted operation to the reviewed provider revision and Todo identity; stale preview rejects, corrected preview can retry. Settings preserve a disabled preference and explain the required upgrade. |
 | Mutation-oracle strength and packaging | The fence oracle observes actual exclusive-open contention, including delayed startup. Existing prerelease bundle and installed-package checks retain their independent scope. |
+
+Recovery and new execution retain separate admission paths. An unmigrated
+Monitor may finish its original quota transaction only from its matching retained
+business receipt; missing or changed evidence cannot rerun the observation,
+create a new reservation, or revive an old producer. Selected-provider failure
+never authorizes a fallback to historical Markdown. These cases run through the
+ordinary CLI as well as the retained receipt reader.
+
+For completed canonical creation and team plans, a missing or unreadable
+Markdown display is not a new-operation precondition. Exact creation/plan
+receipts remain recoverable after later Todos have been committed. Project
+registration keeps its original registry intent and frozen target; incomplete
+creation still validates its original source. Missing display recovery uses the
+current canonical projection and explicitly restores Todo sections only, never
+an empty registration template. An unreadable existing display remains intact:
+registration returns only the original creation readback, while a team-plan
+projection attempt reports its pending delivery. Creation readback does not
+certify display health.
+
+User actions retain their administrative operation through the bound Agent;
+they cannot acquire, renew or transfer an execution lease. Current proof and
+inspection use the same typed eligibility owner. An old invalid lease can still
+be released with its exact identity; the bound Agent can then resume the normal
+administrative edit or completion without creating another execution lease.
 
 The absorption does not qualify a release, contributor adoption, sustained D2
 operation or an unobserved Host. Full current-head CI and the combined adopted
@@ -578,6 +602,15 @@ bytes after rejection.
 不可用时明确失败；不降级到 Markdown writer，不破坏历史恢复，回退保留迁移后的
 新写入。现有回归覆盖不等于长期 SQLite、真实 PostgreSQL、打包 App 或发布默认
 已通过，trial 与正式默认的资格继续分别记录。
+
+恢复与新执行分开准入：先验证已选 provider 可用性，再核验原操作的 typed 回执，
+最后才判断新写入。未迁移 Monitor 只能凭原业务回执完成原 quota 事务；缺失、损坏
+或身份改变不能重新观察、创建新 reservation 或恢复旧 producer。canonical 创建和
+team plan 的原回执不依赖 Markdown 展示仍然存在；重复注册保留原 registry 意图与
+已提交的新 Todo，缺展示时只从当前 canonical head 恢复 Todo 区域，不重写空模板。
+已有坏字节保留；注册只读回原创建回执，team-plan 的投影失败如实返回 pending，
+不把创建回执当成展示健康证明。User action 仍由绑定 Agent 执行行政编辑或完成，
+不能申请、续期或转移执行租约；历史错误租约可以精确释放，再继续原行政操作。
 
 **2.0 支持矩阵：**未迁移 Markdown Goal 的正常写入返回
 `canonical_authority_required`；v0 target-only 和显式关闭 canonical creation
