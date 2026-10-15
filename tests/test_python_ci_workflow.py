@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
+import yaml
 
 WORKFLOW_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (WORKFLOW_ROOT / ".github/workflows/python-tests.yml").read_text(encoding="utf-8")
@@ -221,7 +222,13 @@ def test_merge_gate_runs_on_all_prs_and_checks_every_core_aggregate() -> None:
     ) in gate
     assert "NEEDS_JSON: ${{ toJSON(needs) }}" in gate
     assert "run: python scripts/ci/review_gate.py verify" in gate
-    assert "continue-on-error" not in gate
+    gate_policy = yaml.safe_load(WORKFLOW)["jobs"]["merge-gate"]
+    assert "continue-on-error" not in gate_policy
+    # Only the read-only diagnostic report may fail independently. Checkout,
+    # setup and the qualification verdict must still fail the required check.
+    assert [step["name"] for step in gate_policy["steps"] if step.get("continue-on-error")] == [
+        "Explain qualification with current-attempt job evidence",
+    ]
     for name, output in (("checks", "core_tests"), ("test-shard", "python_tests"), ("stage2c-suite", "stage2c_tests"), ("windows-powershell", "python_tests"), ("presentation", "presentation_tests")):
         job = WORKFLOW.split(f"  {name}:\n", 1)[1].split("    steps:", 1)[0]
         if name == "checks":
@@ -230,6 +237,9 @@ def test_merge_gate_runs_on_all_prs_and_checks_every_core_aggregate() -> None:
                 "dashboard-acceptance, chat-bundle-browser]"
             ) in job
             assert "if: always() && needs.changes.outputs.core_tests == 'true'" in job
+        elif name == "test-shard":
+            assert "needs: [changes, chat-bundle, checks]" in job
+            assert f"needs.changes.outputs.{output} == 'true'" in job
         else:
             assert "needs: [changes, chat-bundle]" in job
             assert f"if: needs.changes.outputs.{output} == 'true'" in job
@@ -459,7 +469,8 @@ def test_backend_and_mixed_prs_require_the_browser_qualified_artifact() -> None:
     assert "chat-bundle-browser" in aggregate
     for name in ("chat-bundle-browser", "kernel-static-checks", "typescript-core", "dashboard-browser", "test-shard", "stage2c-suite", "windows-powershell", "presentation"):
         job = WORKFLOW.split(f"  {name}:\n", 1)[1].split("      - uses: actions/setup-", 1)[0]
-        assert "needs: [changes, chat-bundle]" in job
+        dependencies = "[changes, chat-bundle, checks]" if name == "test-shard" else "[changes, chat-bundle]"
+        assert f"needs: {dependencies}" in job
         assert "name: chat-bundle-${{ github.sha }}" in job
 
 

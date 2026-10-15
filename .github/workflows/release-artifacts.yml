@@ -249,10 +249,14 @@ jobs:
               raise SystemExit("browser fixture commit contains no correction in the fixture owners")
           if fixture != product:
               subprocess.run(["git", "merge-base", "--is-ancestor", fixture, "origin/main"], check=True)
+              corrections = {}
               for path in sorted(changed):
-                  if git("ls-tree", fixture, "--", path).split()[0] != "100644":
+                  entry = git("ls-tree", fixture, "--", path).split()
+                  if not entry or entry[0] != "100644":
                       raise SystemExit("browser fixture correction must retain a regular source file")
-                  Path(path).write_bytes(subprocess.check_output(["git", "show", fixture + ":" + path]))
+                  corrections[path] = subprocess.check_output(["git", "show", fixture + ":" + path])
+              for path, content in corrections.items():
+                  Path(path).write_bytes(content)
           Path("dist/RELEASE-SOURCES.json").write_text(json.dumps({
               "product_tag": os.environ["RELEASE_TAG"],
               "product_commit": product,
