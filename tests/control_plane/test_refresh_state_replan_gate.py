@@ -1205,7 +1205,7 @@ def test_todo_complete_then_refresh_cli_projects_direct_settlement(
         ),
     ],
 )
-def test_completed_todo_projects_executable_identity_repair(
+def test_completed_todo_identity_repair_preserves_settlement_fence(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     stored_completion_key: str | None,
@@ -1216,6 +1216,7 @@ def test_completed_todo_projects_executable_identity_repair(
     state.write_text(
         "---\n"
         f"goal_id: {GOAL_ID}\n"
+        "handoff_mode: soft_claim\n"
         "updated_at: 2026-08-22T00:00:00+00:00\n"
         "---\n\n"
         "## User Todo / Owner Review Reading Queue\n\n"
@@ -1333,7 +1334,15 @@ def test_completed_todo_projects_executable_identity_repair(
     assert "--turn-instance-id" not in action
     action_tokens = shlex.split(action)
     loopx_index = action_tokens.index("loopx")
-    assert cli_main(
+    from loopx.control_plane.coordination.local_authority import (
+        read_canonical_todos_if_promoted,
+    )
+
+    before_state = state.read_bytes()
+    before_authority = read_canonical_todos_if_promoted(
+        runtime_root=runtime_root, goal_id=GOAL_ID,
+    )
+    exit_code = cli_main(
         [
             "--registry",
             str(registry_path),
@@ -1341,9 +1350,23 @@ def test_completed_todo_projects_executable_identity_repair(
             "json",
             *action_tokens[loopx_index + 1 :],
         ]
-    ) == 0
+    )
     repaired = json.loads(capsys.readouterr().out)
+    if stored_completion_key is not None:
+        # An imported scoped identity is not proof of its original settlement.
+        # Real settled-turn success/replay is covered by the declared terminal
+        # settlement CLI journey; this fixture deliberately has no receipts.
+        assert exit_code == 1, repaired
+        assert repaired["error_code"] == "invalid_todo_completion_transaction"
+        assert "original quota identity and settled receipts" in repaired["error"]
+        assert state.read_bytes() == before_state
+        assert read_canonical_todos_if_promoted(
+            runtime_root=runtime_root, goal_id=GOAL_ID,
+        ) == before_authority
+        assert not (runtime_root / "goals" / GOAL_ID / "runs" / "index.jsonl").exists()
+        return
 
+    assert exit_code == 0, repaired
     assert repaired["completion_continuation"] == "no_followup"
     assert repaired["completion_recovery"] == (
         "lifecycle_reentry_terminal_closeout"
