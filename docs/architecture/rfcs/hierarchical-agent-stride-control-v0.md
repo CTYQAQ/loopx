@@ -966,6 +966,15 @@ also bounds typed artifact publication. Later source work cannot enter that
 point. This separates source hold time from final sealing; it grants no trial
 time, cooldown or opportunities. Direct callers retain their total timeout.
 
+Warm continuation preserves its captured remaining phase by default. An
+explicit operator-authorized phase extension defines a new study condition,
+bound to its first destination activation and included in recovery identity.
+Recovery cannot change that grant or restart its clock. The extension changes
+neither native cooldown nor accepted round limits, history or scoring. A matched
+strategy comparison declares the same extension on both arms and reports the
+shared prefix separately; it is not a matched-total-budget comparison with the
+original source. See the warm-entry options below for activation and rollback.
+
 The ordinary SForge worker's explicit warm entry composes these
 owners. It uses a fresh current preparation Todo with full retained evidence,
 then requires an accepted current replan before restoring the normal cadence.
@@ -974,6 +983,16 @@ current preparation/replan, candidate work and released native feedback using
 real native processes and deterministic local inference. Scientific utility,
 actual task/profile admission and the frontend journey remain unqualified.
 See the [warm entry contract](../../../benchmark/README.md#explicit-warm-worker-composition-qualification-in-progress).
+
+Retaining historical research files is not yet equivalent to delivering that
+research in the current typed review. Remaining continuation acceptance must
+show source-bound findings, counterevidence and prior decision followthrough at
+the first current replan, with distinct current authority. An empty destination
+projection cannot establish that the retained research is absent. The strategy's
+existing three-axis guidance now asks for a discriminating observation, checks
+that an intervention actually changes relevant behavior, and distinguishes
+non-execution from failed transfer or limited route potential. These questions
+guide judgment; they neither force a route switch nor certify research benefit.
 
 A native fresh registration is not restored admission. In the controlled native
 Docker qualification, one of twelve source submissions was consumed and its

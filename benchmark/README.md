@@ -856,6 +856,20 @@ returns. Preparation and context-reading cost belong in the comparison. Omit all
 restore flags for the unchanged cold entry; never reuse an ambiguous trial
 folder as a new attempt.
 
+The default continuation retains the captured remaining time. For a separately
+authorized longer study, explicitly add `--restore-phase-extension-seconds N`
+and set `--timeout` large enough for the extended continuation. For example,
+changing a source's total budget from 18h to 36h adds `64800` seconds; it does
+not grant 36 fresh hours after the checkpoint. Both arms need the same declared
+extension. The controller-only `restore` command exposes the corresponding
+`--phase-extension-seconds N` option. This is an operator-supplied budget, not
+permission to spend: record the authorization and new study conditions before
+admission. The first activation binds the extension and absolute deadline;
+recovery requires the same value and never refills elapsed time. Native history,
+accepted round counts, cooldown and scoring remain unchanged. Omit the option
+for the original-budget behavior; a changed budget requires a fresh destination,
+not a rewrite of a running study or its original results.
+
 The ordinary installed worker has passed a synthetic joined qualification:
 native session continuation, current preparation and accepted replan, restored
 normal cadence, candidate work and released native feedback under the original
