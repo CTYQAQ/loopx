@@ -130,6 +130,20 @@ settings. The worker uses `LOOPX_PHASE_DEADLINE_EPOCH`; legacy
 existing waits when new phases arrive. See the shared runtime for session and
 planning-readback semantics.
 
+`LOOPX_ACCEPTANCE_CONTRACT=planned` (default `off`; requires `loopx-planned`)
+adds a host acceptance checkpoint to planning: the model also writes a Goal
+acceptance document whose criteria exercise the deliverable through the
+interface the task declares for its verifier, on public inputs only. The
+trial host configures that document through the existing owner-confirmed
+`goal-acceptance` contract, scoped to the Todos planning returned. The
+selected Todos cannot complete until their criteria pass, so the Goal cannot
+derive terminal no-follow-up from Todo completion alone. On each wake the host
+re-confirms associations that the model's own Todo edits made stale; criteria
+never change after planning. A missing or invalid document fails the planning
+phase. Criteria run as bounded argv commands inside the task container and
+read no hidden verifier material; they are the model's own closure check,
+not benchmark feedback. `off` keeps the previous behavior unchanged.
+
 Model and effort defaults remain unchanged but may be selected explicitly.
 `run.sh prepare` performs networking/Harbor preparation. `preflight` now checks
 existing preparation without patching Harbor or creating a network. Smoke/full

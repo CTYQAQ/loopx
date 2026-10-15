@@ -21,6 +21,7 @@ use matched repetitions to test its effect.
 | Task entry | LoopX modes: loopx-planned | Record planned or seeded for every arm |
 | Explore | Off in heartbeat-resume; on in heartbeat-explore | Keep resume as the reference |
 | Turn envelope | Off | Enable only in its ablation |
+| Acceptance contract | Off | Harbor `acceptance_contract: planned` is an explicit closure-gate ablation |
 | Replan cadence | 6 settled effective work Turns | Use explicit completed-Todo cadence or another Turn count for ablation |
 | Iteration context | Harbor: fresh; EdgeBench heartbeat: resume | Freeze the provider and context within a comparison |
 | Evaluator feedback | EdgeBench: best-only (strict new-best snapshot notifications) | Native and blind remain explicit controls; freeze feedback mode for every comparison |
@@ -50,6 +51,7 @@ These are recommendations, not automatically launched experiments.
 | Short envelope | Add `--turn-envelope` | Does progressive context loading reduce overhead without losing decisions? |
 | Todo cadence | Replace `--replan-after-turns 6` with `--replan-after-todos 3` | How do units and thresholds change interruptions? This is a combined ablation. |
 | No LoopX | `--worker official`; omit LoopX-specific flags | What is the net effect of the whole LoopX treatment? |
+| Planned acceptance (Harbor) | Add `LOOPX_ACCEPTANCE_CONTRACT=planned` to the LHTB reference | Does an owner-locked, verifier-shaped acceptance gate stop premature closure before the budget is used? |
 
 The no-LoopX comparison changes several mechanisms; do not attribute its delta
 to one component. Native, blind and best-only feedback are a separate factor: repeat
