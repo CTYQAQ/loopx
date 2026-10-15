@@ -1328,7 +1328,7 @@ test("receipt-only claims revalidate CAS contention and recover a lost commit re
     await engageCanonicalRoute(root);
     const directory = join(root, "authority", "file-v0");
     const store = new FileAuthorityStore(directory, "goal-a");
-    const projection = withTodoReadModel({goal_id: "goal-a", todos: [
+    const projection = withTodoReadModel({goal_id: "goal-a", handoff_mode: "soft_claim", todos: [
       todoRecord({claimed_by: "agent-a"}),
     ], leases: []});
     await store.commitAuthority({operation_id: "seed", expected_provider_revision: null,
