@@ -261,7 +261,7 @@ def test_closeout_does_not_relax_settlement_identity(field, value):
             "goal_id": "source", "agent_id": "agent", "turn_instance_id": "turn"})
 
 
-@pytest.mark.parametrize("fault", [None, "first_read", "probe", "cursor_moved", "capture"])
+@pytest.mark.parametrize("fault", [None, "first_read", "probe", "cursor_moved", "source_moved", "capture"])
 @pytest.mark.parametrize("restored", [False, True])
 def test_interrupted_capture_keeps_reader_through_publication_and_cleans_up(tmp_path, monkeypatch, fault, restored):
     from contextlib import contextmanager
@@ -290,9 +290,15 @@ def test_interrupted_capture_keeps_reader_through_publication_and_cleans_up(tmp_
     token = object()
     native_options = {"retained_history": {"turn_ids": ["source"], "visible_history_sha256": "source-digest"},
                       "required_completed_turn_id": "continued"} if restored else {}
-    if restored:
+    if restored or fault == "source_moved":
+        history_reads = []
+        def history(*args, **kwargs):
+            history_reads.append(True)
+            if fault == "source_moved" and len(history_reads) == 2:
+                raise ValueError("restored capture source changed after preflight")
+            return native_options
         monkeypatch.setattr("benchmark.runtime.checkpoint_continuation.restored_capture_history",
-                            lambda *a, **k: native_options)
+                            history)
     @contextmanager
     def reader(*args, **kwargs):
         events.append("open")
@@ -325,7 +331,7 @@ def test_interrupted_capture_keeps_reader_through_publication_and_cleans_up(tmp_
     monkeypatch.setattr("benchmark.runtime.checkpoint_wake.effect_runtime_result", artifact)
     phase_deadline = time.time() + 5
     if fault:
-        with pytest.raises(ValueError, match="failure|cursor moved"):
+        with pytest.raises(ValueError, match="failure|cursor moved|source changed"):
             hook._capture(held, time.monotonic() + 5)
         assert events[-1] == "closed"
         assert ("capture" in events) is (fault == "capture")

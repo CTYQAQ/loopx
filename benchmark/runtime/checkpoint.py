@@ -364,6 +364,9 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
                 # in that gap must not be sealed under the earlier cursor. Re-read
                 # after the probe; capture's existing witness comparison then guards
                 # source writes during this recheck and through atomic publication.
+                if restored_capture_history(env, restore_gate,
+                        session_id=session.get("session_id", "")) != native_options:
+                    raise ValueError("restored capture source changed before sealing")
                 confirmed = native_session_checkpoint(env, session.get("session_id", ""),
                                                       timeout=max(.1, deadline - time.time()), transport=reader,
                                                       **native_options)

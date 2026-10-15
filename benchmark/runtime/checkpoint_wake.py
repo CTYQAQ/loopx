@@ -150,6 +150,9 @@ class CheckpointWake:
                 "action": "probe", "components": components, "deadline_epoch_ms": window * 1000,
             }, timeout=max(.1, window - time.time()), retry_safe=False)
             if native is not None:
+                if restored_capture_history(self.env, self.receipt.get("checkpoint_restore"),
+                        session_id=self.receipt["session"]["session_id"]) != native_options:
+                    raise ValueError("restored capture source changed before sealing")
                 confirmed = native_session_checkpoint(self.env, self.receipt["session"]["session_id"],
                     timeout=max(.1, window - time.time()), interrupted_guard=guard, transport=reader,
                     **native_options)
