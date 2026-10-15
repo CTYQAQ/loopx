@@ -4,7 +4,7 @@
 - 替代 / 关闭：无
 - Proposed by：LoopX maintainers
 - Date：2026-08-15
-- Last revised：2026-10-07
+- Last revised：2026-10-15
 - Scope：LoopX 控制面核心从 Python 到 TypeScript 的增量、replacement-first
   迁移；不长期维护两份语义实现
 - Tracking issue：[#3225](https://github.com/loopx-project/loopx/issues/3225)
@@ -70,6 +70,17 @@ actor／可运行状态／输入拒绝、精确 lineage 读回，以及当前输
 原观察重放。完整生产包 import 守卫解析相对导入与 alias，动态加载仍依赖真实
 隔离路径验证。新能力进入时持续守卫，不把历史库存当永久出口。最后受支持的
 旧源 writer、历史恢复、安装 cohort 与发布验收各自保持开放。
+
+当前 C1/T4 退役提案由贡献者主导的 #6396 及 fork 补缺 #2 承接，#6366 已被替代；
+[吸收清单](../../reference/local-authority-provider-selection.md#retirement-proposal-reconciliation)
+保留 canonical ownership／终态不变量、固定 1.x 回执恢复、审核后的 App 创建及真实锁竞争 oracle。
+同一 TS 策略 owner 清理第三种 live legacy 执行策略：fresh claim／update／terminal、
+Monitor、执行 fence、acquire 及租约维护拒绝 legacy；当前 proof 读回和 inspect 也不能把
+保留租约或原回执变为执行资格。delegation 首次启动和恢复都消费同一 typed support，
+包括旧“无需租约”记录；source inspect 不再二次解析 Todo 准入。历史 mode 解码、原操作恢复、精确 release 与有备份的
+plan／migrate 保留。正常 fixture 使用 soft／hard；legacy/native wire shape 与策略分开，
+显式 legacy 拒绝和固定 1.x artifact 继续验证恢复边界。提案不自动修改活跃 Goal。
+采用后的 combined head 验证、安装态策略迁移、真实 Host 采用与 D2／发布保持开放。
 
 保留的 import-compatible field writer 在既有 typed field plan 中统一等待条件
 归一化及矛盾 clear 拒绝；保持 Python 空白输入省略和锁内 IO，只退役重复的

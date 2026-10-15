@@ -4,7 +4,7 @@
 - Supersedes / closes: none
 - Proposed by: LoopX maintainers
 - Date: 2026-08-15
-- Last revised: 2026-10-07
+- Last revised: 2026-10-15
 - Scope: an incremental, replacement-first migration of the LoopX control-plane
   core from Python to TypeScript without maintaining two semantic
   implementations
@@ -134,6 +134,19 @@ reviewed App creation and the actual-contention mutation oracle from #6366.
 The competing implementation stack is not an integration prerequisite; adopted
 combined-head validation, core trial, real Host and D2/release exits stay open.
 
+
+The same C1/T4 boundary now retires the live `legacy` ownership policy rather
+than preserving a third execution strategy. The existing TS policy owner rejects
+fresh claim/update/terminal/Monitor admission and execution fences; acquire and
+lease maintenance share that rule. Current-proof readback and inspection cannot
+turn a retained lease or original receipt into execution. Delegation consumes the
+same typed support before launch/resume, including old no-lease-required records;
+source inspection no longer carries a second Todo-admission projection. Historical mode decoding,
+original-operation recovery, exact release and reviewed backup/plan/migrate remain.
+Normal fixtures use soft/hard independently of their legacy/native wire shape;
+explicit legacy-policy negatives and retained 1.x artifacts preserve that boundary.
+No live Goal is changed by this proposal. Adopted combined-head qualification,
+installed policy migration, real Host adoption and D2/release remain open.
 
 Team-plan recovery prerequisite: an unpromoted plan that published its original
 receipt can now recover through the Chat confirmation owner while shadow

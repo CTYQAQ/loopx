@@ -321,7 +321,7 @@ every Goal and not removal of every Python module:
 | --- | --- |
 | Unpromoted Markdown authority | Retain inspection and explicit upgrade/recovery; reject normal mutation before any write or new execution grant, with an actionable supported migration route. Do not silently initialize an empty canonical store. |
 | Canonical File or SQLite | Keep the recorded provider and either supported `soft_claim` or `hard_lease` policy. New unconfigured Goals default to SQLite; existing File Goals do not have to switch. Missing providers remain errors. |
-| Canonical store with `legacy` ownership policy | Review a claim-preserving policy migration to `soft_claim` or `hard_lease` before normal execution. Changing policy does not require promoting the store again or switching its provider. |
+| Canonical store with `legacy` ownership policy | Normal ownership mutations and execution proofs return `handoff_mode_retired`; old receipt recovery and exact release remain available. Review a claim-preserving policy migration to `soft_claim` or `hard_lease`. This does not require another storage promotion or provider switch. |
 | Target-only v0 or v1 creation disabled | Keep decoding for inspection and reviewed configuration upgrade. Require an explicit compatible creation choice before creating a writable Goal; do not erase the preference or reinterpret disabled as enabled. |
 | Historical ownership inputs, source captures and backups | Recognize them in declared migration/recovery contracts. Historical leases, receipts and a restored source do not grant new execution authority. Preserve supported original-operation recovery and permanent Markdown display. |
 
