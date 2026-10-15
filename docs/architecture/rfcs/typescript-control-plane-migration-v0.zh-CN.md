@@ -29,7 +29,39 @@ R1–R3 的 TS 消费者包括 App 产品路径，不只 CLI 结算。
 
 <a id="当前交付边界2026-10-02"></a>
 
-## 当前交付边界（2026-10-07）
+## 当前交付边界（2.0 候选，2026-10-15）
+
+贡献者主导的 [#6396](https://github.com/loopx-project/loopx/pull/6396)，
+已评审 head `5d29213d3`，承接 C1/T4 普通 Markdown writer 截止与 live `legacy`
+所有权策略退役，已纳入 fork 补缺及 #6366 中有价值的不变量和恢复检查，见
+[吸收清单](../../reference/local-authority-provider-selection.md#retirement-proposal-reconciliation)。
+候选已删除废弃 writer 实现及 capture producer；canonical mutation、创建、
+team-plan、Monitor 和 lease 消费者复用既有 typed owner。不能根据下方旧清单
+再次派生同样的删除工作。兼容的 1.x 线和仍开放的 2.0 提案是不同交付基线；
+本 checkpoint 不宣称截止行为已发布。
+
+新执行／配置目标统一使用 `ExecutionHandoffMode`，从既有
+`EXECUTION_HANDOFF_MODES`（`soft_claim`／`hard_lease`）派生；历史 `HandoffMode`
+及回执 codec 仍识别 `legacy`。typed 策略 owner 拒绝 fresh legacy 执行、
+acquire／维护及当前 proof 授权，包括 delegation 启动／恢复；历史原回执恢复、
+精确 release 与有备份的 plan／migrate 保留。存储转换和所有权迁移仍是不同操作；
+提案不自动迁移任何活跃 Goal。
+
+当前工作是候选集成与采用验证，不是再做 writer extraction：保留兼容 1.x 的
+升级／备份／恢复路线，完成有界可回退核心开发者试用及受影响的真实 Host／App
+旅程，保持正式 D2 的失败／缺失证据与发布默认资格开放。永久 Markdown 文档／
+显示 IO、历史 reader 及未完成的 receipt／outbox 处置仍需保留。转换演练通过
+不代表自然采用或 Goal-instance 退役完成。
+
+后续以[当前退役 ledger](ledger/shared-goal-authority-state-provider-v0/2026-09-28-retirement-cadence.zh-CN.md#current-candidate-checkpoint)
+为准。[精确 head 评审](https://github.com/loopx-project/loopx/pull/6396#pullrequestreview-5535116423)
+和[组合 tree 证据](https://github.com/loopx-project/loopx/pull/6396#issuecomment-6195855339)
+各自保留源码 revision，不认证未验证的后续 head／base、安装 cohort 或全部 RFC 验收。
+
+### 历史 1.x 前置 checkpoint（截至 2026-10-12）
+
+以下记录解释具名源码上的前置条件与验证。“writer 仍可达”及“下一次截止”
+描述当时的 1.x 基线，不是上方候选仍未实现的工作。
 
 按 main `06b6caa07` 复核，#5413/#5466/#5283，以及创建、Host 停止、UI 历史
 相关 owner #5500/#5805/#5308/#5398 均已合并。复用各自已交付的边界，不重开
@@ -70,17 +102,6 @@ actor／可运行状态／输入拒绝、精确 lineage 读回，以及当前输
 原观察重放。完整生产包 import 守卫解析相对导入与 alias，动态加载仍依赖真实
 隔离路径验证。新能力进入时持续守卫，不把历史库存当永久出口。最后受支持的
 旧源 writer、历史恢复、安装 cohort 与发布验收各自保持开放。
-
-当前 C1/T4 退役提案由贡献者主导的 #6396 及 fork 补缺 #2 承接，#6366 已被替代；
-[吸收清单](../../reference/local-authority-provider-selection.md#retirement-proposal-reconciliation)
-保留 canonical ownership／终态不变量、固定 1.x 回执恢复、审核后的 App 创建及真实锁竞争 oracle。
-同一 TS 策略 owner 清理第三种 live legacy 执行策略：fresh claim／update／terminal、
-Monitor、执行 fence、acquire 及租约维护拒绝 legacy；当前 proof 读回和 inspect 也不能把
-保留租约或原回执变为执行资格。delegation 首次启动和恢复都消费同一 typed support，
-包括旧“无需租约”记录；source inspect 不再二次解析 Todo 准入。历史 mode 解码、原操作恢复、精确 release 与有备份的
-plan／migrate 保留。正常 fixture 使用 soft／hard；legacy/native wire shape 与策略分开，
-显式 legacy 拒绝和固定 1.x artifact 继续验证恢复边界。提案不自动修改活跃 Goal。
-采用后的 combined head 验证、安装态策略迁移、真实 Host 采用与 D2／发布保持开放。
 
 保留的 import-compatible field writer 在既有 typed field plan 中统一等待条件
 归一化及矛盾 clear 拒绝；保持 Python 空白输入省略和锁内 IO，只退役重复的
