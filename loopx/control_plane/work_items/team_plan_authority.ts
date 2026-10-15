@@ -97,6 +97,9 @@ export async function commitLocalTeamPlan(value: unknown): Promise<JsonObject> {
       // Exact committed receipts replay before these admission checks. An
       // expired handoff may read history, but can never authorize a new write.
       if (!adopted) throw new EffectRuntimeRequestError("team plan source lock handoff expired; retry the original confirmation");
+      // Unreadable display may recover an existing receipt, but cannot supply the
+      // Goal intent needed to admit a new plan, even if its absence was reviewed.
+      if (typeof source.state_sha256 !== "string") return false;
       const digest = async (path: string) => createHash("sha256").update(await readFile(path)).digest("hex");
       return await digest(registry) === source.registry_sha256 && await digest(state) === source.state_sha256;
     });

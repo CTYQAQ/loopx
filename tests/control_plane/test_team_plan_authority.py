@@ -315,6 +315,83 @@ def test_canonical_chat_commit_replays_after_projection_failure(canonical_team, 
     assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")["provider_revision"] == read["provider_revision"]
 
 
+@pytest.mark.parametrize("corrupt_display", [False, True])
+def test_canonical_team_replay_recovers_unavailable_display_without_recreating_work(canonical_team, corrupt_display):
+    from loopx.control_plane.coordination.local_authority import LocalCoordinationAuthorityUnavailable
+    from loopx.control_plane.work_items.team_plan_adapter import TeamPlanCommitError, settle_team_plan
+    from loopx.todos import add_goal_todo
+
+    runtime, state, service, preview = canonical_team
+    arguments = dict(registry_path=service.registry_path, goal_id="goal-a", agent_id=None,
+        proposal={**preview["normalized_parameters"]["plan"], "proposal_id": preview["proposal_id"]},
+        expected_state_fingerprint=preview["expected_state_fingerprint"], basis_agent_id="alpha")
+    committed = settle_team_plan(**arguments)
+    add_goal_todo(registry_path=service.registry_path, goal_id="goal-a", role="agent",
+                 text="Later canonical work", operation_id="later-team-work")
+    before = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
+    state.unlink()
+    if corrupt_display:
+        state.write_bytes(b"\xffunreadable display")
+
+    def assert_display_unchanged():
+        assert state.read_bytes() == b"\xffunreadable display" if corrupt_display else not state.exists()
+
+    for changed in ({"agent_id": "alpha"},
+                    {"proposal": {**arguments["proposal"], "objective": "Changed reviewed intent"}},
+                    {"expected_state_fingerprint": "different-reviewed-basis"}):
+        with pytest.raises(TeamPlanCommitError):
+            settle_team_plan(**{**arguments, **changed})
+        assert_display_unchanged()
+        assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == before
+
+    backend = runtime / "authority" / before["source_authority"].replace("_", "-")
+    offline = backend.with_name(backend.name + "-offline")
+    backend.rename(offline)
+    try:
+        with pytest.raises(LocalCoordinationAuthorityUnavailable):
+            settle_team_plan(**arguments)
+        assert_display_unchanged()
+        assert not backend.exists()
+    finally:
+        offline.rename(backend)
+
+    if corrupt_display:
+        with pytest.raises(TeamPlanCommitError) as pending:
+            settle_team_plan(**arguments)
+        assert pending.value.code == "team_plan_projection_pending"
+        assert_display_unchanged()
+        assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == before
+        state.unlink()
+    replay = settle_team_plan(**arguments)
+    assert replay["action"] == "reused"
+    assert replay["lane_todo_ids"] == committed["lane_todo_ids"]
+    assert replay["created_todo_ids"] == []
+    assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == before
+    assert state.read_text().count("Same work") == 2
+    assert state.read_text().count("Later canonical work") == 1
+
+
+@pytest.mark.parametrize("corrupt_display", [False, True])
+def test_fresh_team_plan_cannot_use_unavailable_display_as_reviewed_source(canonical_team, corrupt_display):
+    from loopx.control_plane.work_items.team_plan_adapter import TeamPlanCommitError, settle_team_plan
+
+    runtime, state, service, preview = canonical_team
+    state.unlink()
+    if corrupt_display:
+        state.write_bytes(b"\xffunreadable display")
+    # Even a new fingerprint observing absence cannot replace the missing Goal intent.
+    missing_basis = team_plan_state_fingerprint(
+        registry_path=service.registry_path, goal_id="goal-a", basis_agent_id="alpha")
+    before = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a")
+    with pytest.raises(TeamPlanCommitError) as error:
+        settle_team_plan(registry_path=service.registry_path, goal_id="goal-a", agent_id=None,
+            proposal={**preview["normalized_parameters"]["plan"], "proposal_id": preview["proposal_id"]},
+            expected_state_fingerprint=missing_basis, basis_agent_id="alpha")
+    assert error.value.code == "team_plan_preview_stale"
+    assert state.read_bytes() == b"\xffunreadable display" if corrupt_display else not state.exists()
+    assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id="goal-a") == before
+
+
 def test_canonical_change_without_markdown_refresh_invalidates_preview(canonical_team):
     runtime, state, service, preview = canonical_team
     from loopx.todos import add_goal_todo
