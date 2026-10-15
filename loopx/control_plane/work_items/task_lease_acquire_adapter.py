@@ -466,11 +466,13 @@ def execute_native_task_lease_lifecycle(
     for attempt in range(TASK_LEASE_AUTHORITY_SNAPSHOT_ATTEMPTS):
         authority: dict[str, Any] | None = None
         canonical_lifecycle = False
-        if normalized_operation in {"renew", "transfer"}:
-            canonical_lifecycle = True
-        elif normalized_operation == "release":
+        if normalized_operation in {"renew", "transfer", "release"}:
             from ..coordination.local_authority import local_authority_is_promoted
 
+            # Select the recorded authority, not a fresh-work policy. The
+            # retained typed lifecycle owner validates original source receipts
+            # before refusing new renew/transfer operations. A promoted Goal
+            # stays canonical even when its selected provider is unavailable.
             canonical_lifecycle = local_authority_is_promoted(
                 runtime_root=runtime_root, goal_id=goal_id
             )
@@ -541,14 +543,13 @@ def execute_native_task_lease_lifecycle(
         )
         if not isinstance(payload, dict):
             raise RuntimeError("native task-lease lifecycle result shape mismatch")
-        if canonical_lifecycle:
-            from ..coordination.local_authority import raise_canonical_write_failure
+        from ..coordination.local_authority import raise_canonical_write_failure
 
-            raise_canonical_write_failure(
-                payload,
-                goal_id=goal_id,
-                operation=f"task_lease_{normalized_operation}",
-            )
+        raise_canonical_write_failure(
+            payload,
+            goal_id=goal_id,
+            operation=f"task_lease_{normalized_operation}",
+        )
         if payload.get("schema_version") != TASK_LEASE_SCHEMA_VERSION:
             raise RuntimeError("native task-lease lifecycle schema mismatch")
         if payload.get("action") != normalized_operation:

@@ -274,7 +274,7 @@ def test_external_failure_envelope_survives_ts_and_python_decoders(kind):
 
 
 def test_native_lease_permission_denial_is_a_real_source_without_a_write(tmp_path):
-    from canonical_authority_fixture import initialize_canonical_authority
+    from tests.control_plane.canonical_authority_fixture import initialize_canonical_authority
     from loopx.control_plane.coordination.coordination_state_contract_generated import (
         TASK_LEASE_CANONICAL_ACQUIRE_REQUEST_SCHEMA,
     )
