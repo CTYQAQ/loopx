@@ -166,6 +166,16 @@ source boundary, not adversarial filesystem mutation or a cross-owner transactio
 Native session reconstruction, effect reconciliation, fresh authority admission
 and evaluator cooldown/opportunity inheritance must pass before matched continuation.
 
+An explicitly checkpoint-enabled POSIX heartbeat CLI worker sets its own soft
+core-dump limit to zero before starting the native Host and its tools. This
+prevents crash memory dumps from growing a later workspace snapshot. The hard
+limit and parent launcher stay unchanged; workers without this opt-in retain
+their inherited limits. Existing files are never removed or silently excluded:
+retain any existing crash diagnostic outside the declared participants before
+requesting a new point. Omit the checkpoint declaration on a new worker to
+retain ordinary launch behavior. This is file/session reconstruction, not
+process-memory recovery or permission to inspect crash memory.
+
 For pre-decision capture at a **fresh replan projected at the start of a heartbeat
 wake**, add `"trigger": "fresh_replan"` and set `destination` to the trial's
 `checkpoints` directory itself. The Host preloads that wake's original quota guard
@@ -275,7 +285,7 @@ effective configuration digest and Host version; tools/skills and credentials ne
 their existing installation/authentication owners. Native state is opaque and its
 storage layout remains a pinned provider qualification.
 
-`benchmark.runtime.native_checkpoint.fork_native_checkpoint` verifies a unit and
+`loopx.hosts.codex_checkpoint.fork_native_checkpoint` verifies a unit and
 reconstructs a distinct native session in a **new isolated environment preserving
 the captured guest paths**, with matching configuration and Host version. It checks
 the full history digest and cursor, starts no model and registers no LoopX binding.
@@ -293,7 +303,7 @@ it does not remove historical authority. The controller environment and explicit
 configuration are not exported as authority or credentials.
 
 ```sh
-python -m benchmark.runtime.native_checkpoint \
+python -m loopx.hosts.codex_checkpoint \
   --root /private/captured-point --expected-sha256 CAPTURE_DIGEST \
   --config-path /private/qualified-config.toml --sandbox read-only
 ```
@@ -348,22 +358,24 @@ python -m benchmark.edgebench.checkpoint_judge --checkpoint-capture \
   --tasks-dir /path/to/tasks --log-dir /path/to/private-run-logs
 ```
 
-This adapter's supported SForge source is the public compatibility fork at
-[`0e20fb499ee248f012d6467c00b3dec00a29fe85`](https://github.com/huangruiteng/EdgeBench/commit/0e20fb499ee248f012d6467c00b3dec00a29fe85).
-It exposes the existing native judge/admission owner; the upstream `sforge==1.1.0`
-distribution does not provide that seam. Enabling capture against an unsupported
-provider fails before adding routes. This pin qualifies the capture prerequisite,
-not an upstream release or restored admission. From this LoopX checkout, prepare
-an isolated Python 3.13 environment and verify the actual imported source:
+The supported public checkpoint provider is the compatibility fork at
+[`071a884012754127f28f5b84be10f533a42db527`](https://github.com/loopx-agent/EdgeBench/commit/071a884012754127f28f5b84be10f533a42db527).
+It contains `sforge.harness.checkpoint` and the native
+`create_app(..., checkpoints=True)` seam used by the controller below. The earlier
+`0e20fb499ee248f012d6467c00b3dec00a29fe85` compatibility pin and upstream
+`sforge==1.1.0` do not contain that API and cannot qualify joint continuation.
+Enabling capture against an unsupported provider fails before adding routes.
+This is pinned proposed source, not an upstream release. From this LoopX checkout,
+prepare an isolated Python 3.12 environment and verify the imported API:
 
 ```sh
 CKPT_PROVIDER_ROOT=$(mktemp -d)
-git clone https://github.com/huangruiteng/EdgeBench.git "$CKPT_PROVIDER_ROOT/provider"
-git -C "$CKPT_PROVIDER_ROOT/provider" checkout --detach 0e20fb499ee248f012d6467c00b3dec00a29fe85
-uv venv --python 3.13 "$CKPT_PROVIDER_ROOT/venv"
+git clone https://github.com/loopx-agent/EdgeBench.git "$CKPT_PROVIDER_ROOT/provider"
+git -C "$CKPT_PROVIDER_ROOT/provider" checkout --detach 071a884012754127f28f5b84be10f533a42db527
+uv venv --python 3.12 "$CKPT_PROVIDER_ROOT/venv"
 uv pip install --python "$CKPT_PROVIDER_ROOT/venv/bin/python" \
   -e '.[test]' -e "$CKPT_PROVIDER_ROOT/provider" 'httpx>=0.28,<1'
-"$CKPT_PROVIDER_ROOT/venv/bin/python" -c 'import sforge,loopx; print(sforge.__file__); print(loopx.__file__)'
+"$CKPT_PROVIDER_ROOT/venv/bin/python" -c 'import inspect,sforge,loopx,sforge.harness.checkpoint; from sforge.harness.judge_server import create_app; assert "checkpoints" in inspect.signature(create_app).parameters; print(sforge.__file__); print(loopx.__file__)'
 "$CKPT_PROVIDER_ROOT/venv/bin/python" -m pytest -q benchmark/tests/test_checkpoint_judge.py
 # Linux with an owned disposable Docker daemon; grades only synthetic fixtures.
 LOOPX_EDGEBENCH_DOCKER_SMOKE=1 "$CKPT_PROVIDER_ROOT/venv/bin/python" -m pytest -q \
@@ -442,12 +454,17 @@ this context-adoption path. Leases are excluded from the read, while historical
 claim/status fields remain evidence. Declarations without `loopx_state` keep
 their previous path.
 
+The generic [research-checkpoint CLI](../docs/reference/research-checkpoint.md)
+owns ordinary Goal capture, native-session admission and research-context adoption.
+The benchmark adapter adds task workspace, evaluator and budget participants;
+Core does not import the benchmark package.
+
 After separately admitting the checkpoint's native session, an operator can
 adopt this retained context on an **already claimed and leased destination Todo**
 whose note is empty:
 
 ```sh
-python -m benchmark.runtime.research_checkpoint \
+python -m loopx.hosts.research_checkpoint \
   --root /private/checkpoints/point --expected-sha256 CHECKPOINT_SHA256 \
   --source-todo-id SOURCE_TODO --todo-id DESTINATION_TODO \
   --operation-id CONTEXT_OPERATION --expected-revision CURRENT_REVISION \
@@ -517,10 +534,10 @@ continued research.
 ### Controller-only native capsule transport
 
 The read-only participant above does **not** implement the newer native capsule
-API. The separate controller adapter targets
-[EdgeBench PR #23](https://github.com/ByteDance-Seed/EdgeBench/pull/23), pinned at
-`57dce5dd1fded9d5d5cbd44fa59c59d27a068d62`; this is proposed source, not a released
-upstream version. Start that pinned native judge with `sforge serve --checkpoints`.
+API. The separate controller adapter targets the API proposed in
+[EdgeBench PR #23](https://github.com/ByteDance-Seed/EdgeBench/pull/23), using the
+public compatibility pin `071a884012754127f28f5b84be10f533a42db527` above.
+Start that pinned native judge with `sforge serve --checkpoints`.
 Its private controller configuration file has exactly `url`, `admin_secret` and
 `bank_root` (the native log directory's `checkpoints` directory). Keep this file,
 the bank and controller process outside every solver's filesystem/network authority.
@@ -549,6 +566,9 @@ Restore writes its new token only to the explicit
 private result file; stdout contains its path. Wrong authority, corrupt bytes,
 aliases, foreign bank entries, source-run reuse and duplicate native admission
 fail without a fresh evaluation. Redirects cannot forward the admin secret.
+Controller HTTP requests connect directly to the configured origin, ignoring
+environment proxy settings. This applies only to the explicitly invoked native
+capsule adapter; it does not change model API or installation proxy behavior.
 After an uncertain restore response, repeat the same controller `restore` command
 with `--recover`, preserving the same capsule digest, run identity, result-file
 and optional phase-deadline-file. Recovery reads the original native activation
@@ -636,6 +656,70 @@ Omit the controller file and `controller_handoff` on a new run to disable automa
 controller capture; removing the checkpoint request disables capture entirely.
 Existing artifacts remain inert, and the source trial is not restarted by disabling it.
 
+To reproduce **joint source capture and both fresh-guest receivers**, use
+[`qualify_checkpoint_joint.py`](tests/qualify_checkpoint_joint.py) from the current
+clean dedicated LoopX checkout; keep it frozen for the whole command. Run the
+controller on Linux as the ordinary owner of an explicitly
+owned disposable Docker daemon. Prepare the provider/venv above, install this
+checkout's Node dependencies with `npm ci`, and put a compatible **Host** Node on
+`PATH`. Separately supply Linux **amd64** binaries for `codex-cli 0.160.0` and Node
+`24.21.0`, and a caller-prepared `python:3.12-slim` image. These inputs are explicit;
+the qualification does not download a native CLI, pull an image or use model
+credentials. The receiver also imports `harbor==0.20.0` to exercise the actual
+phase-command builder; it does not launch a Harbor job. Build Python 3.12 guest
+dependencies from the pinned provider plus this qualification prerequisite:
+
+```sh
+set -eu
+"$CKPT_PROVIDER_ROOT/venv/bin/python" -c 'import sys,tomllib; from pathlib import Path; d=tomllib.loads((Path(sys.argv[1])/"pyproject.toml").read_text()); print("\n".join(d["project"]["dependencies"]+d["dependency-groups"]["dev"]+["harbor==0.20.0"]))' \
+  "$CKPT_PROVIDER_ROOT/provider" > "$CKPT_PROVIDER_ROOT/guest-requirements.txt"
+mkdir "$CKPT_PROVIDER_ROOT/guest-deps"
+docker image inspect python:3.12-slim >/dev/null
+docker run --rm --platform linux/amd64 --user "$(id -u):$(id -g)" \
+  -v "$CKPT_PROVIDER_ROOT:/qualification" python:3.12-slim \
+  python -m pip install --target /qualification/guest-deps \
+  -r /qualification/guest-requirements.txt
+# Set these to the explicitly prepared Linux amd64 binaries.
+CKPT_GUEST_CODEX=/absolute/path/to/codex
+CKPT_GUEST_NODE=/absolute/path/to/node
+"$CKPT_PROVIDER_ROOT/venv/bin/python" -m benchmark.tests.qualify_checkpoint_joint \
+  --provider-source "$CKPT_PROVIDER_ROOT/provider" \
+  --native-binary "$CKPT_GUEST_CODEX" --guest-node "$CKPT_GUEST_NODE" \
+  --guest-dependencies "$CKPT_PROVIDER_ROOT/guest-deps" \
+  --output "$CKPT_PROVIDER_ROOT/joint-result"
+```
+
+The public fixture runs six actual native work wakes, captures the pending
+pre-decision guard and continues the source; the ordinary and stride receivers
+then use separate fresh guests with no mounted source authority. It includes a
+whole declared workspace directory and a read-only Git member. Receivers run as
+the ordinary non-root owner, select the workspace by its sealed source path and
+materialize it through the typed artifact owner. Copied source registry/state
+files remain historical: current authority uses a fresh external registry/runtime,
+and the old Goal cannot be admitted through it. Only the model
+response stream and grading/backend fixtures are synthetic; the native CLI,
+canonical SQLite authority, worker, supervisor and capsule transport are real.
+Check `result.json`, `source.log`, `ordinary.log` and `stride.log` in the private
+output directory; failure is an error, including missing prerequisites, and a
+skipped test cannot produce a passed receipt. A second attempt needs a new output
+directory. Keep its controller config, native
+stores, reports and logs private. Cleanup removes only containers owned by this
+invocation. This reproduces mechanical continuation; the receipt remains
+`research_point_qualified=false`. A real later research point, scientific policy
+benefit and the packaged frontend restore journey still need separate acceptance.
+
+An enabled checkpoint rendezvous returns an explicit failed quota readback to
+its original caller without interrupting the writer or attempting capture.
+The original failure and recovery requirements remain unchanged; delivery of
+that error grants no work or settlement authority. Successful, foreign and
+malformed readbacks retain the existing typed capture checks. This contains
+optional capture failure; it does not repair the underlying quota error.
+
+The qualifier exports only the source's digest-bound native configuration through
+the existing Docker archive transport into a controller-owned private directory.
+It works with a root source guest and ordinary controller/receivers, preserves
+source permissions, and never exports the source authentication files.
+
 An explicit **SForge phase-clock participant** preserves a declared Host file's
 remaining duration alongside native opportunities. Add
 `--phase-deadline-file /private/source-phase-deadline` to capture, and
@@ -706,7 +790,7 @@ runtime receipt 绑定摘要；programmatic adapter 也可指定已放入 guest 
 已放入 guest 的声明文件丢失、权限失败或损坏只记录捕获失败，原工作仍按
 完整的原始 quota guard 继续；准入 owner 不可用仍停止。首次 replan 捕获
 失败后，修复声明不得把后来的状态补记成同一原点。评测参与者使用上文明确的
-公开 SForge fork/pin 和 Python 3.13；普通 upstream 安装缺少该 seam 时明确
+公开 SForge fork/pin 和 Python 3.12；普通 upstream 安装缺少该 seam 时明确
 拒绝。Codex 原生会话的真实分页/compaction 与隔离 fork 须单独验证。
 评测机会及 incumbent 参与者也分配未占用的 ID，并在封存的
 `point_metadata.evaluation_opportunity` 中记录实际映射；无 incumbent 时对应值为 null。
@@ -733,8 +817,80 @@ worker 保留原 guard，controller 暂停全部容器写入者，核对仍有�
 文件 witness，再封存原生评测机会、incumbent 及剩余预算。源变化、过期或失去
 交接会拒绝；可恢复的捕获失败不取消原研究，也不得改用稍后的状态。解除暂停后，
 源会话继续使用原 packet 和 deadline。
-真实 native worker、Docker 与 native HTTP 的合成验证覆盖了联合捕获和源接续；
-产物仍是 `research_point_qualified=false`。独立目标环境的新权限准入、有效工作、
-联合丢回复恢复及后续评测尚待一体验证，不能据此重启研究实验。新运行省略
+自动 supervisor 的准备截止时间仍约束暂停、文件导出及原生捕获。成功解除暂停后，
+controller 只对自己持有的静态导出副本继续校验、封存，使用已捕获的原 Host phase
+截止时间；该截止时间同时传给类型化产物 owner，过期不能发布。源可以继续工作，
+稍后产生的文件不会进入旧点；不会增加预算、冷却或评测机会。直接调用 controller
+默认仍以显式 timeout 约束整项操作。关闭 handoff/controller 配置即停止自动路径。
+上文的公开复现命令使用固定 provider `071a884`、Python 3.12、显式 Linux amd64
+Codex/Node 及调用者准备的 Docker 镜像。非 root controller 从六个真实工作 wake
+形成模型决策前捕获，保留完整声明的目录及只读 Git 对象；普通与 stride receiver
+以非 root 身份在两个全新 guest 按封存源路径定位任务目录，由类型化 owner 物化；
+原注册表/状态只是历史，新的外置 registry/runtime 不授予原 Goal 权限。
+分别验证新权限准入、完整历史、剩余预算/冷却及实际接续。模型响应和评分为合成
+fixture，原生 CLI、worker、supervisor、SQLite 和 capsule transport 使用真实路径。
+结果及三份日志只存私有输出，失败或缺少前置条件明确报错，重试须使用新目录；
+产物仍是 `research_point_qualified=false`。真实中后期研究点、策略净收益及安装后的
+frontend restore 旅程仍须另行验收。新运行省略
 controller 文件及 handoff 开关即可关闭；移除 checkpoint 请求关闭全部捕获，
 已有产物保持惰性。
+
+### Explicit warm worker composition (qualification in progress)
+
+The native heartbeat launcher accepts a complete point through
+`--restore-checkpoint POINT --restore-sha256 SHA --restore-config CONFIG
+--restore-goal NEW_GOAL --restore-agent NEW_AGENT --restore-source-todo SOURCE_TODO`.
+All six inputs are required together. Keep the existing native
+`--eval-interval 0`, full `--capture-before-replan` handoff and
+`--checkpoint-controller-file` configuration. The native provider must expose
+`RestoredRegistration`; an older provider fails instead of cold-registering.
+
+This adapter composes existing artifact, Codex session, Todo-continuation and
+native-judge owners. It preserves the captured workspace and effective Codex
+configuration, admits a distinct native session and fresh Goal/Agent, and adopts
+retained research as evidence on a current preparation Todo. Historical registry,
+claims, leases and settlement records are not installed as current authority.
+If the sealed context contains Explore events, adoption also seeds the fresh
+Goal's ordinary Explore log. Nodes, findings, scoped counterexamples, topology,
+original attribution and timestamps survive, with each event bound to the
+checkpoint digest and source event through its opaque run reference. Operational
+research-observation lineage stays in the archive; it is not destination
+execution proof. Recovery accepts only the same immutable initial prefix, may
+finish a partial prefix, and never reapplies old statuses after newer evidence.
+Malformed, foreign or interleaved destination history rejects before model work.
+Legacy context-only points keep their original continuation behavior.
+Fresh credentials come from the ordinary runner credential source. The native
+activation's absolute deadline includes receiver installation and preparation;
+restarting the entry cannot grant another full budget or submission allowance.
+
+Both comparison arms first settle actual preparation at cadence one and consume
+the retained decision through a current semantic replan. The existing joint
+continuation gate must accept that replan before the declared normal cadence
+returns. Preparation and context-reading cost belong in the comparison. Omit all
+restore flags for the unchanged cold entry; never reuse an ambiguous trial
+folder as a new attempt.
+
+The default continuation retains the captured remaining time. For a separately
+authorized longer study, explicitly add `--restore-phase-extension-seconds N`
+and set `--timeout` large enough for the extended continuation. For example,
+changing a source's total budget from 18h to 36h adds `64800` seconds; it does
+not grant 36 fresh hours after the checkpoint. Both arms need the same declared
+extension. The controller-only `restore` command exposes the corresponding
+`--phase-extension-seconds N` option. This is an operator-supplied budget, not
+permission to spend: record the authorization and new study conditions before
+admission. The first activation binds the extension and absolute deadline;
+recovery requires the same value and never refills elapsed time. Native history,
+accepted round counts, cooldown and scoring remain unchanged. Omit the option
+for the original-budget behavior; a changed budget requires a fresh destination,
+not a rewrite of a running study or its original results.
+
+The ordinary installed worker has passed a synthetic joined qualification:
+native session continuation, current preparation and accepted replan, restored
+normal cadence, candidate work and released native feedback under the original
+remaining allowance. It reused one immutable captured prefix and preserved its
+source. Native app-server-generated skills are preserved outside discovery before
+linking the current installed skills; ordinary skill identity checks still apply.
+This used real Codex processes and native HTTP with deterministic local inference
+and synthetic grading. It does **not** qualify scientific research utility,
+matched strategy results, or the frontend restore journey. Actual task/profile
+admission and measured continuation outcomes remain required.

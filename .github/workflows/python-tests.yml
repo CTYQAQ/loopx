@@ -504,7 +504,8 @@ jobs:
 
   checks:
     # Preserve the required check name while exposing independent failure lanes.
-    if: always() && needs.changes.outputs.core_tests == 'true'
+    # Cancelled main pushes must not retain runner-backed aggregate work.
+    if: always() && needs.changes.outputs.core_tests == 'true' && (github.event_name != 'push' || !cancelled())
     needs: [changes, kernel-static-checks, typescript-coverage, dashboard-acceptance, chat-bundle-browser]
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -570,7 +571,7 @@ jobs:
     needs: [changes, chat-bundle]
     if: needs.changes.outputs.python_tests == 'true'
     runs-on: ubuntu-latest
-    # Share four long-test lanes across current PRs and other workflow runs.
+    # Share six long-test lanes across current PRs and other workflow runs.
     # Do not replace another candidate's pending shard or cancel its active head.
     # Workflow-level concurrency still retires obsolete heads of the same PR.
     concurrency:
@@ -628,9 +629,11 @@ jobs:
         # Split the whole collection, not a hand-maintained list of directories.
         # Without timing history least_duration alternates equal-weight tests.
         # Each runner retains the measured two-worker pool.
+        # Cooperative per-test Python stacks diagnose stalls without terminating tests.
         run: >-
           python -m pytest -v -n 2 -m "not stage2c_e2e"
           -p scripts.ci.pytest_timing
+          --ci-stall-after 120
           --splits 6 --group ${{ matrix.shard }}
           --splitting-algorithm least_duration
           --durations=25 --durations-min=1
@@ -656,7 +659,7 @@ jobs:
 
   pytest:
     # Keep the required check name; a skipped/failed shard must not turn it green.
-    if: always() && needs.changes.outputs.python_tests == 'true'
+    if: always() && needs.changes.outputs.python_tests == 'true' && (github.event_name != 'push' || !cancelled())
     needs: [changes, checks, test-shard]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -793,7 +796,7 @@ jobs:
 
   stage2c-correctness-e2e:
     # Preserve the public check name and reject failed, cancelled or skipped lanes.
-    if: always() && needs.changes.outputs.stage2c_tests == 'true'
+    if: always() && needs.changes.outputs.stage2c_tests == 'true' && (github.event_name != 'push' || !cancelled())
     needs: [changes, stage2c-suite]
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -837,6 +840,11 @@ jobs:
 
       - name: Verify native Windows test Python discovery
         run: node --no-warnings --experimental-strip-types --test tests/control_plane_ts/test_python_runtime.test.ts
+
+      - name: Qualify the canary plan's repository path rendering
+        run: >-
+          python -m pytest -q
+          tests/canary/test_repository_root.py::test_plan_renders_repository_paths_in_canonical_posix_form
 
       - name: Run native Windows lifecycle tests
         run: >-
@@ -936,7 +944,7 @@ jobs:
 
   merge-gate:
     # Open PRs always receive an outcome; closed PRs only cancel their old lane.
-    if: always() && github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.action != 'closed')
+    if: always() && github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.action != 'closed') && (github.event_name != 'push' || !cancelled())
     needs: [changes, checks, pytest, node-minimum-compatibility, stage2c-correctness-e2e, windows-powershell, presentation]
     runs-on: ubuntu-latest
     timeout-minutes: 3

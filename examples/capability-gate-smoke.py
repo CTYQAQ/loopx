@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from loopx.quota import build_quota_should_run, build_quota_slot_preview  # noqa: E402
+from loopx.control_plane.testing.quota_fixtures import quota_todo_summary  # noqa: E402
 from loopx.control_plane.scheduler.execution_context import (  # noqa: E402
     GENERIC_CLI_OUTER_CONTROLLER_SCHEDULER_CONTEXT,
 )
@@ -57,18 +58,8 @@ def status_payload(
     available_capabilities: list[str] | None = None,
     registered_agent: str | None = None,
 ) -> dict[str, Any]:
-    summary = {
-        "schema_version": "todo_summary_v0",
-        "source_section": "Agent Todo",
-        "total_count": len(items),
-        "open_count": len(items),
-        "done_count": 0,
-        "first_open_items": items[:3],
-        "first_executable_items": items[:3],
-        "backlog_items": items[:8],
-        "executable_backlog_items": items[:8],
-        "monitor_open_items": [],
-    }
+    summary = quota_todo_summary(items)
+
     quota = {
         "compute": 1.0,
         "window_hours": 24,

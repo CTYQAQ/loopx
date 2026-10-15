@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import subprocess
 import time
 from contextlib import contextmanager
@@ -18,6 +17,9 @@ from typing import Any
 
 from loopx.control_plane.effect_runtime import effect_runtime_result
 from loopx.control_plane.quota.settlement import read_heartbeat_settlement
+from loopx.hosts.research_checkpoint import (
+    _participant_id, native_binding_participant, research_participants, verify_research_participants,
+)
 
 
 def normalize_checkpoint_request_path(value: str) -> str:
@@ -60,142 +62,6 @@ def parse_checkpoint_request(raw: bytes) -> dict[str, Any]:
     if not isinstance(request["point_metadata"], dict):
         raise ValueError("checkpoint point_metadata must be an object")
     return request
-
-
-def _participant_id(components, preferred):
-    """Automatic participants cannot reserve an otherwise legal caller ID."""
-    occupied = {entry["id"] for entry in components}
-    candidate, suffix = preferred, 0
-    while candidate in occupied:
-        suffix += 1
-        candidate = f"{preferred}_{suffix}"
-    return candidate
-
-
-def _loopx_state_components(env, components, output_dir):
-    """Adapt the existing backup owner's inventory for one isolated trial.
-
-    No second state-discovery rule, archive execution or authority adoption.
-    The runtime owns its original evidence, quota and effect journals; this
-    adapter declares those private files to the inert artifact owner only.
-    """
-    from loopx.history import load_registry
-    from loopx.state_backup import build_state_backup_plan
-
-    project, runtime, registry = (Path(env[key]) for key in (
-        "LOOPX_PROJECT", "LOOPX_RUNTIME_ROOT", "LOOPX_REGISTRY"))
-    for path in (project, runtime, registry):
-        if not path.is_absolute() or path.resolve(strict=True) != path:
-            raise ValueError("LoopX checkpoint routes must be normalized physical paths")
-    raw_registry = registry.read_bytes()
-    source = load_registry(registry)
-    goals = source.get("goals", [])
-    if (len(goals) != 1 or goals[0].get("id") != env["LOOPX_GOAL_ID"] or
-            env["LOOPX_AGENT_ID"] not in goals[0].get("coordination", {}).get("registered_agents", [])):
-        raise ValueError("LoopX state capture requires this worker's single-Goal trial registry")
-    # Reject lexical route aliases before backup discovery resolves them.
-    goal = goals[0]
-    if Path(goal["repo"]) != project or Path(source.get("common_runtime_root", "")) != runtime:
-        raise ValueError("LoopX checkpoint routes differ from the registered trial")
-    state = Path(goal["state_file"])
-    state = state if state.is_absolute() else Path(goal["repo"]) / state
-    if not state.is_file():
-        raise ValueError("LoopX checkpoint requires its registered active state source")
-    routes = [state, *(project / path for path in (
-        ".loopx", ".codex/goals", ".claude/goals", ".local/goals"))]
-    if any(path.exists() and path.resolve(strict=True) != path for path in routes):
-        raise ValueError("LoopX checkpoint state routes must not contain symlinks")
-    plan = build_state_backup_plan(project=project, runtime_root=runtime,
-        registry_path=registry, output_dir=output_dir,
-        include_registry_projects=False, include_automations=False, include_skills=False)
-    if plan["warnings"]:
-        raise ValueError("LoopX backup inventory is incomplete; reconcile its source routes before capture")
-    # Select physical parent roots once. A caller-declared parent can already
-    # cover a discovered file; do not duplicate the same runtime/registry/state.
-    entries = list(components)
-    targets = sorted(plan["included"], key=lambda entry: len(Path(entry["source_path"]).parts))
-    for target in targets:
-        path = Path(target["source_path"])
-        if any(path.is_relative_to(Path(entry["source_path"])) for entry in entries):
-            continue
-        if any(Path(entry["source_path"]).is_relative_to(path) for entry in entries):
-            raise ValueError("LoopX state inventory overlaps a narrower declared component; declare its parent once")
-        entries.append({"id": _participant_id(entries, f"loopx_state_{len(entries)}"), "source_path": str(path)})
-    coverage = [{"key": target["key"], "source_path": target["source_path"],
-                 "component_id": next(entry["id"] for entry in entries
-                     if Path(target["source_path"]).is_relative_to(Path(entry["source_path"]))) }
-                for target in plan["included"]]
-    if registry.read_bytes() != raw_registry:
-        raise ValueError("LoopX registry moved during participant inventory")
-    registry_component = next(entry for entry in entries if registry.is_relative_to(Path(entry["source_path"])))
-    return entries, {"goal_id": env["LOOPX_GOAL_ID"], "agent_id": env["LOOPX_AGENT_ID"],
-        "source_inventory": coverage, "registry_sha256": hashlib.sha256(raw_registry).hexdigest(),
-        "registry_component_id": registry_component["id"],
-        "registry_member_path": (registry.relative_to(Path(registry_component["source_path"])).as_posix()
-                                 if registry != Path(registry_component["source_path"]) else ""),
-        "execution_authority_granted": False}
-
-
-def native_binding_participant(env, components, metadata):
-    from .codex import Execution
-    from .sessions import BenchmarkSessionWake
-    source_wake = BenchmarkSessionWake(env, Execution(context="resume",
-        sandbox=env.get("LOOPX_CODEX_SANDBOX", "danger-full-access")), {})
-    if source_wake.session_id != metadata["session"].get("session_id"):
-        raise ValueError("native checkpoint differs from the current source session binding")
-    # This sideband record belongs to the existing session owner. It
-    # must participate even when loopx_state was not requested: native
-    # store bytes alone cannot witness a binding/profile replacement.
-    from loopx.control_plane.turn_driver.codex_sessions import _session_path
-    binding_path = _session_path(source_wake.root, source_wake.lineage, "agent")
-    if not any(binding_path.is_relative_to(Path(entry["source_path"])) for entry in components):
-        components = [*components, {"id": _participant_id(components, "source_session_binding"),
-                                   "source_path": str(binding_path)}]
-    metadata["session"] = {**metadata["session"], "session_profile_digest": source_wake.digest}
-    return components, source_wake
-
-
-def research_participants(env, components, metadata, destination, evidence_path, deadline):
-    """Use the same inventory and historical context at either owned boundary."""
-    research = None
-    components, metadata["loopx_state"] = _loopx_state_components(env, components, destination)
-    from loopx.control_plane.coordination.local_authority import local_authority_is_promoted
-    if local_authority_is_promoted(runtime_root=Path(env["LOOPX_RUNTIME_ROOT"]), goal_id=env["LOOPX_GOAL_ID"]):
-        from .research_checkpoint import research_context, _encoded
-        research = research_context(env, deadline=deadline)
-        evidence = evidence_path
-        research_raw = _encoded(research)
-        with os.fdopen(os.open(evidence, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as file:
-            file.write(research_raw)
-        parent = next((entry for entry in components if evidence.is_relative_to(Path(entry["source_path"]))), None)
-        if parent is None:
-            parent = {"id": _participant_id(components, "research_context"), "source_path": str(evidence)}
-            components = [*components, parent]
-        metadata["research_context"] = {"component_id": parent["id"],
-            "member_path": evidence.relative_to(Path(parent["source_path"])).as_posix() if evidence != Path(parent["source_path"]) else "",
-            "sha256": hashlib.sha256(research_raw).hexdigest(),
-            "provider_revision": research["snapshot"]["provider_revision"], "store_identity": research["snapshot"]["store_identity"]}
-    else:
-        metadata["canonical_context_unavailable"] = "Source coordination is unpromoted; its retained inventory remains inert."
-    return components, research
-
-
-def verify_research_participants(env, components, metadata, research, witness, deadline):
-    from .research_checkpoint import research_context, verify_context_sources
-    if research is not None:
-        if research_context(env, deadline=deadline) != research:
-            raise ValueError("canonical research context moved before sealing")
-        verify_context_sources(research, components, witness)
-        retained = metadata["research_context"]
-        member = next((entry for entry in witness[retained["component_id"]]
-            if entry["path"] == retained["member_path"]), None)
-        if member is None or member.get("sha256") != retained["sha256"]:
-            raise ValueError("canonical research context bytes moved before sealing")
-    declared = metadata["loopx_state"]
-    witness = witness[declared["registry_component_id"]]
-    member = next((entry for entry in witness if entry["path"] == declared["registry_member_path"]), None)
-    if member is None or member.get("sha256") != declared["registry_sha256"]:
-        raise ValueError("LoopX registry differs from the scoped participant inventory")
 
 
 def _mark_replan_attempt(root: Path, obligation_id: str, turn_id: str, request_sha256: str | None) -> bool:
@@ -295,6 +161,13 @@ def capture_before_replan(env: dict[str, str], receipt: dict[str, Any], body: st
             "action": "select_replan", "quota": guard, "goal_id": env["LOOPX_GOAL_ID"],
             "agent_id": env["LOOPX_AGENT_ID"], "turn_instance_id": receipt["turn_id"],
         })
+        from .checkpoint_continuation import restored_capture_gate
+        restore_gate = restored_capture_gate(env, intent.get("obligation_id"))
+        receipt["checkpoint_restore"] = {k: v for k, v in restore_gate.items() if k != "instructions"}
+        preloaded_body = restore_gate.get("instructions", "") + preloaded_body
+        if not restore_gate["capture_allowed"]:
+            receipt["checkpoint"]["reason"] = restore_gate["reason"]
+            return preloaded_body
         root = Path(env["LOOPX_WAKE_LOG_DIR"]).parent / "checkpoints"
         if declaration_error is not None:
             if intent["capture"]:
@@ -341,10 +214,11 @@ def capture_before_replan(env: dict[str, str], receipt: dict[str, Any], body: st
                     "point_metadata": {**request["point_metadata"], "replan": intent,
                                        "capture_order": "before_model_replan_decision"}}
                 effective_request.pop("trigger")
-                capture_after_wake(env, prior, supplied_request=(effective_request, raw))
+                capture_after_wake(env, prior, supplied_request=(effective_request, raw), pending_guard=guard_path)
                 receipt["checkpoint"].update(prior["checkpoint"], phase="before_replan")
                 receipt["checkpoint"]["source_turn_id"] = prior["turn_id"]
     except Exception as error:
+        receipt["checkpoint_restore"] = {"capture_allowed": False, "reason": "capture_basis_unavailable"}
         receipt["checkpoint"].update(reason="capture_failed", error_kind=type(error).__name__, error=str(error)[:500])
     finally:
         receipt["checkpoint"]["elapsed_seconds"] = time.monotonic() - started
@@ -354,7 +228,8 @@ def capture_before_replan(env: dict[str, str], receipt: dict[str, Any], body: st
 
 
 def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
-                       supplied_request: tuple[dict[str, Any], bytes] | None = None) -> None:
+                       supplied_request: tuple[dict[str, Any], bytes] | None = None,
+                       pending_guard: Path | None = None) -> None:
     request_path = env.get("LOOPX_CHECKPOINT_REQUEST")
     if not request_path:
         return  # Feature-off path performs no additional read or write.
@@ -381,6 +256,12 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
             request, raw = read_checkpoint_request(request_path)
         else:
             request, raw = supplied_request
+        if supplied_request is None:
+            from .checkpoint_continuation import restored_capture_gate
+            restore_gate = restored_capture_gate(env)
+            if not restore_gate["capture_allowed"]:
+                receipt["checkpoint"]["reason"] = restore_gate["reason"]
+                return
         if request.get("trigger") == "fresh_replan":
             receipt["checkpoint"]["reason"] = "pre_replan_hook_required"
             return
@@ -414,6 +295,12 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
             "request_sha256": hashlib.sha256(raw).hexdigest(),
         }
         components = request["components"]
+        if pending_guard is not None:
+            decision_id = _participant_id(components, "held_decision")
+            components = [*components, {"id": decision_id, "source_path": str(pending_guard)}]
+            metadata.update(held_decision_component_id=decision_id,
+                decision_sha256=hashlib.sha256(pending_guard.read_bytes()).hexdigest(),
+                replan=request["point_metadata"]["replan"], capture_order="before_model_replan_decision")
         if request.get("loopx_state"):
             evidence = Path(env["LOOPX_WAKE_LOG_DIR"]) / receipt["turn_id"] / "checkpoint-research-context.json"
             components, research = research_participants(env, components, metadata, destination, evidence, deadline)
@@ -437,7 +324,7 @@ def capture_after_wake(env: dict[str, str], receipt: dict[str, Any], *,
             metadata["evaluation_opportunity"] = {"component_id": opportunity_id,
                                                    "incumbent_component_id": incumbent_id}
         if request.get("native_session"):
-            from .native_checkpoint import native_session_checkpoint
+            from loopx.hosts.codex_checkpoint import native_session_checkpoint
             from .codex import Execution
             from .sessions import BenchmarkSessionWake
 
@@ -555,19 +442,27 @@ def held_quota_decision(listener, capture_root: Path, *, goal_id: str, agent_id:
         if hashlib.sha256(raw).hexdigest() != message["sha256"]:
             raise ValueError("decision handoff digest mismatch")
         quota = json.loads(raw)
+        # This is transport dispatch, not capture admission: an explicit quota
+        # failure still belongs to its original caller's recovery path. Do not
+        # signal that writer or submit its failure to the successful-readback
+        # selector. Successful and foreign/malformed packets retain typed checks.
+        failed_readback = isinstance(quota, dict) and quota.get("ok") is False and quota.get("goal_id") == goal_id
         interrupted = None
-        if native_process is not None and interrupt_when is None:
+        if not failed_readback and native_process is not None and interrupt_when is None:
             from .worker import interrupt_checkpoint_process
 
             # Interrupt before the typed selector: even this read can outlive a
             # native tool yield. Keep original bytes for same-identity recovery.
             interrupted = interrupt_checkpoint_process(native_process, timeout=min(interrupt_timeout, remaining()))
-        intent = effect_runtime_result("runtime.checkpoint_artifacts", {
-            "action": "select_replan", "quota": quota, "goal_id": goal_id,
-            "agent_id": agent_id, "turn_instance_id": (turn_instance_id if turn_instance_id is not None
-                else (quota.get("heartbeat_receipt") or {}).get("turn_instance_id")),
-        }, timeout=remaining())
-        if native_process is not None and interrupt_when is not None and interrupt_when(intent):
+        if failed_readback:
+            intent = {"capture": False, "reason": "quota_readback_failed", "execution_authority_granted": False}
+        else:
+            intent = effect_runtime_result("runtime.checkpoint_artifacts", {
+                "action": "select_replan", "quota": quota, "goal_id": goal_id,
+                "agent_id": agent_id, "turn_instance_id": (turn_instance_id if turn_instance_id is not None
+                    else (quota.get("heartbeat_receipt") or {}).get("turn_instance_id")),
+            }, timeout=remaining())
+        if not failed_readback and native_process is not None and interrupt_when is not None and interrupt_when(intent):
             from .worker import interrupt_checkpoint_process
 
             interrupted = interrupt_checkpoint_process(native_process, timeout=min(interrupt_timeout, remaining()))

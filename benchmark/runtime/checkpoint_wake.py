@@ -62,6 +62,17 @@ class CheckpointWake:
         return self.stack.__exit__(*args)
 
     def _first_replan(self, intent):
+        # The preflight verifies immutable source, current canonical review
+        # and completed native continuation before launching this wake. A
+        # mid-wake guard cannot bypass that shared restoration barrier.
+        from loopx.control_plane.turn_driver.codex_sessions import load_codex_cli_session
+        binding = load_codex_cli_session(Path(self.env["LOOPX_RUNTIME_ROOT"]), lineage={
+            "goal_id": self.env["LOOPX_GOAL_ID"], "agent_id": self.env["LOOPX_AGENT_ID"]}, session_scope="agent")
+        restored = bool(binding and binding.get("checkpoint_artifact_sha256"))
+        gate = self.receipt.get("checkpoint_restore", {})
+        if (not gate.get("capture_allowed", not restored) or
+                intent.get("obligation_id") == gate.get("review_obligation_id")):
+            return False
         if not intent["capture"] or not _mark_replan_attempt(
                 self.root, intent["obligation_id"], self.receipt["turn_id"],
                 hashlib.sha256(self.raw).hexdigest()):
@@ -104,7 +115,7 @@ class CheckpointWake:
             if research is None:
                 raise ValueError("controller checkpoint requires complete canonical research context")
         if self.request.get("native_session"):
-            from .native_checkpoint import native_session_checkpoint
+            from loopx.hosts.codex_checkpoint import native_session_checkpoint
             from .checkpoint import native_binding_participant
             components, source_wake = native_binding_participant(self.env, components, metadata)
             guard = {"cli": self.env["LOOPX_CLI"], "workspace": self.env["LOOPX_PROJECT"],
