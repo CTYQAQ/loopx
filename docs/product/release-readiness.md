@@ -862,6 +862,15 @@ path, and canary route rather than as a user-facing release baseline.
   SQLite qualification remain unqualified. No paired-version benchmark uplift
   or isolated Astra causal effect is claimed.
 
+- `v1.4.1` on 2026-10-15 16:50 +08:00: clearer Goal workspace and result
+  adoption, explicit research decisions, and original-operation recovery at
+  frozen commit `4f27801c4e26fd51246d352eada72c98f8e7e657`. The
+  [published release](https://github.com/loopx-project/loopx/releases/tag/v1.4.1)
+  records bilingual operating instructions, community contributions and
+  source/artifact validation limits. Existing Goals retain their recorded
+  policy and require explicit migration; canonical-only retirement remains
+  a separate 2.0 candidate.
+
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.
 

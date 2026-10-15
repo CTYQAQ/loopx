@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {evaluateTaskLeaseAcquireDecision} from "../../loopx/control_plane/work_items/task_lease_acquire_decision.ts";
-import {decideTaskLeaseLifecycle} from "../../loopx/control_plane/work_items/task_lease_lifecycle_decision.ts";
+import {decideTaskLeaseLifecycle, evaluateTaskLeaseLifecycleDecision} from "../../loopx/control_plane/work_items/task_lease_lifecycle_decision.ts";
 import {evaluateTaskLeaseOwnerEligibility, leaseOwnerRejection, type LeaseEligibilityTodo} from
   "../../loopx/control_plane/work_items/task_lease_eligibility.ts";
 import {productionScaleCoordinationFixture} from "./production_scale_coordination_fixture.ts";
@@ -100,3 +100,12 @@ for (const generation of ["version", "lease_epoch"] as const) {
     assert.equal(result.code, "lease_generation_exhausted"); assert.equal(result.outcome, "rejected");
   });
 }
+
+test("lease decision wires accept only the registered historical/current policy vocabulary", () => {
+  for (const mode of ["future_policy", "hard_lease_extra", "Legacy", ""]) {
+    assert.throws(() => evaluateTaskLeaseAcquireDecision({...acquire(false), handoff_mode: mode}), /handoff_mode/);
+    assert.throws(() => evaluateTaskLeaseLifecycleDecision({handoff_mode: mode, registered_agents: ["agent-a"],
+      todo, lease, command: {operation: "renew", owner: "agent-a", idempotency_key: "first",
+        expected_version: 1, ttl_seconds: 120, new_owner: null, new_idempotency_key: null}}), /handoff_mode/);
+  }
+});

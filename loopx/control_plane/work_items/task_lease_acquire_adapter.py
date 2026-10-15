@@ -18,7 +18,6 @@ from ..coordination.coordination_state_contract_generated import (
 from ..goals.legacy_event_source import (
     state_event_log_candidates as _state_event_log_candidates,
 )
-from ..todos.contract import normalize_todo_id
 from ..todos.handoff_mode import HANDOFF_MODE_LEGACY
 from .local_lease_record import TASK_LEASE_SCHEMA_VERSION, TaskLeaseError
 
@@ -123,82 +122,22 @@ def _raw_registered_agent_candidates(goal: dict[str, Any]) -> list[Any]:
     ]
 
 
-def _compact_task_lease_todo_fact(todo: dict[str, Any]) -> dict[str, Any] | None:
-    todo_id = normalize_todo_id(todo.get("todo_id"))
-    if not todo_id:
-        return None
-    compacted = {
-        "todo_id": todo_id,
-        "status": todo.get("status"),
-        "claimed_by": todo.get("claimed_by"),
-        "excluded_agents": todo.get("excluded_agents"),
-    }
-    for field in ("role", "task_class", "bound_agent", "blocks_agent"):
-        if field in todo:
-            compacted[field] = todo.get(field)
-    return compacted
-
-
-def _compact_task_lease_todos(projection: dict[str, Any]) -> list[dict[str, Any]]:
-    todos: list[dict[str, Any]] = []
-    for raw_todo in projection.get("todos") or []:
-        if not isinstance(raw_todo, dict):
-            continue
-        compact_todo = _compact_task_lease_todo_fact(raw_todo)
-        if compact_todo is not None:
-            todos.append(compact_todo)
-    return todos
-
-
 def _task_lease_authority_projection(
     *,
-    registry_path: Path,
-    goal_id: str,
-    todo_id: str,
     goal: dict[str, Any] | None,
     state_file: Path | None,
-    project_todos: bool = True,
-) -> tuple[Any, list[Any], list[dict[str, Any]], dict[str, Any] | None]:
-    from ..todos.list_readback import list_goal_todos
+) -> tuple[Any, list[Any]]:
     from ..goals.active_state_metadata import parse_state_frontmatter
 
     if goal is None:
-        return HANDOFF_MODE_LEGACY, [], [], None
+        return HANDOFF_MODE_LEGACY, []
 
     handoff_mode: Any = HANDOFF_MODE_LEGACY
     if state_file is not None and state_file.exists():
         handoff_mode = parse_state_frontmatter(
             state_file.read_text(encoding="utf-8")
         ).get("handoff_mode")
-    if not project_todos:
-        return handoff_mode, _raw_registered_agent_candidates(goal), [], None
-    try:
-        projection = list_goal_todos(
-            registry_path=registry_path,
-            goal_id=goal_id,
-        )
-    except (OSError, ValueError) as exc:
-        projection_error = {
-            "code": "todo_projection_unavailable",
-            "message": "cannot resolve todo projection for task lease",
-            "payload": {
-                "goal_id": goal_id,
-                "todo_id": todo_id,
-                "error": str(exc),
-            },
-        }
-        return (
-            handoff_mode,
-            _raw_registered_agent_candidates(goal),
-            [],
-            projection_error,
-        )
-    return (
-        handoff_mode,
-        _raw_registered_agent_candidates(goal),
-        _compact_task_lease_todos(projection),
-        None,
-    )
+    return handoff_mode, _raw_registered_agent_candidates(goal)
 
 
 def _authority_source_identity(
@@ -215,7 +154,6 @@ def _task_lease_authority_snapshot_attempt(
     registry_path: Path,
     goal_id: str,
     todo_id: str,
-    project_todos: bool = True,
 ) -> dict[str, Any] | None:
     registry_receipt_before = _authority_source_receipt("registry", registry_path)
     registry = load_registry(registry_path)
@@ -230,15 +168,8 @@ def _task_lease_authority_snapshot_attempt(
     if receipts_before[0] != registry_receipt_before:
         return None
 
-    handoff_mode, registered_candidates, todos, projection_error = (
-        _task_lease_authority_projection(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=todo_id,
-            goal=goal,
-            state_file=state_file,
-            project_todos=project_todos,
-        )
+    handoff_mode, registered_candidates = _task_lease_authority_projection(
+        goal=goal, state_file=state_file,
     )
 
     registry_after = load_registry(registry_path)
@@ -257,8 +188,8 @@ def _task_lease_authority_snapshot_attempt(
     return {
         "handoff_mode": handoff_mode,
         "registered_agent_candidates": registered_candidates,
-        "todos": todos,
-        "todo_projection_error": projection_error,
+        "todos": [],
+        "todo_projection_error": None,
         "source_receipts": receipts_after,
     }
 
@@ -268,16 +199,14 @@ def task_lease_acquire_authority_facts(
     registry_path: Path,
     goal_id: str,
     todo_id: str,
-    project_todos: bool = True,
 ) -> dict[str, Any]:
-    """Project source-stable facts; inspection can defer Todo parsing to TS demand."""
+    """Read source-stable history metadata without reviving Todo admission."""
 
     for _attempt in range(TASK_LEASE_AUTHORITY_SNAPSHOT_ATTEMPTS):
         facts = _task_lease_authority_snapshot_attempt(
             registry_path=registry_path,
             goal_id=goal_id,
             todo_id=todo_id,
-            project_todos=project_todos,
         )
         if facts is not None:
             return facts
@@ -551,22 +480,7 @@ def execute_native_task_lease_lifecycle(
                 code="claim_transfer_requires_canonical_authority",
             )
         if registry_path is not None and needs_authority:
-            try:
-                authority = _canonical_lease_authority_facts(registry_path, goal_id)
-            except FileNotFoundError:
-                # Release is a cleanup operation and may run without its
-                # optional authority projection.  Every operation that can
-                # authorize a lease mutation remains fail-closed when the
-                # canonical registry is unavailable.
-                if needs_authority:
-                    raise
-                authority = None
-            except TaskLeaseError:
-                if needs_authority:
-                    raise
-                # Release is intentionally usable for cleanup even when its
-                # optional source projection is unavailable.
-                authority = None
+            authority = _canonical_lease_authority_facts(registry_path, goal_id)
         request: dict[str, Any] = {
             "schema_version": (
                 TASK_LEASE_CANONICAL_LIFECYCLE_REQUEST_SCHEMA
@@ -677,15 +591,14 @@ def inspect_native_task_lease(
 
     for attempt in range(TASK_LEASE_AUTHORITY_SNAPSHOT_ATTEMPTS):
         canonical = local_authority_is_promoted(runtime_root=runtime_root, goal_id=goal_id)
-        # TS alone decides whether the retained lease needs current Todo facts.
-        # Inactive legacy inspection must not parse the full work document.
+        # Source records are retained history, never a current execution policy.
+        # No retired Todo projection is needed to report them read-only.
         authority = _canonical_lease_authority_facts(registry_path, goal_id) if canonical else task_lease_acquire_authority_facts(
-            registry_path=registry_path, goal_id=goal_id, todo_id=todo_id, project_todos=False,
+            registry_path=registry_path, goal_id=goal_id, todo_id=todo_id,
         )
         request = {
             "schema_version": "loopx_task_lease_inspect_request_v0",
             "source": "canonical" if canonical else "legacy",
-            "phase": "effective_lease" if canonical else "lease_record",
             "runtime_root": str(runtime_root.resolve()), "goal_id": goal_id,
             "todo_id": todo_id, "authority": authority,
         }
@@ -694,19 +607,6 @@ def inspect_native_task_lease(
             timeout=(CANONICAL_AUTHORITY_READ_TIMEOUT_SECONDS
                      if canonical else DEFAULT_REQUEST_TIMEOUT_SECONDS),
         )
-        if isinstance(result, dict) and result.get("todo_projection_required") is True:
-            if canonical or result.get("schema_version") != TASK_LEASE_SCHEMA_VERSION or result.get("ok") is not True or result.get("action") != "inspect":
-                raise RuntimeError("native lease inspection requested an invalid source projection")
-            request["phase"] = "effective_lease"
-            request["authority"] = task_lease_acquire_authority_facts(
-                registry_path=registry_path, goal_id=goal_id, todo_id=todo_id,
-            )
-            # Re-read the lease and fence: neither the record nor its expiry is
-            # assumed unchanged while Python prepares the Todo projection.
-            result = effect_runtime_result(
-                "task_lease.inspect.native", request,
-                timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS,
-            )
         if not isinstance(result, dict) or result.get("schema_version") != TASK_LEASE_SCHEMA_VERSION or result.get("action") != "inspect" or not isinstance(result.get("ok"), bool):
             raise RuntimeError("native lease inspection result shape mismatch")
         if result.get("error_code") == "authority_source_changed" and attempt + 1 < TASK_LEASE_AUTHORITY_SNAPSHOT_ATTEMPTS:

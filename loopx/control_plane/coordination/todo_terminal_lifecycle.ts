@@ -1,3 +1,4 @@
+import {HANDOFF_MODE_RETIRED_REASON} from "./handoff_mode_policy.ts";
 import {planUserCompletion, requireCompletionDecisionOutcome} from "../todos/user_completion.ts";
 import {AUTHORITY_SOURCE_CHANGED, uncheckedAuthoritySource, type AuthoritySourceCheck} from "./authority_source.ts";
 import {
@@ -1035,6 +1036,7 @@ interface UntypedCompletionRepairPlan {
 function validateUntypedCompletionRepairPolicy(
   request: JsonObject,
   input: ResolvedCoordinationTodoTerminalLifecycleInput,
+  todo: JsonObject,
 ): void {
   const allowedFields = new Set([
     "schema_version",
@@ -1059,7 +1061,9 @@ function validateUntypedCompletionRepairPolicy(
   if (request.goal_id !== input.goal_id ||
       canonicalAuthoritySha256(policy.registered_agents) !==
         canonicalAuthoritySha256(input.registered_agents) ||
-      policy.effective_claimed_by !== null ||
+      // An explicit repeat of the stored claim is a source fact, not an edit.
+      (policy.effective_claimed_by !== null &&
+        policy.effective_claimed_by !== (todo.claimed_by ?? null)) ||
       policy.effective_next_claimed_by !== null ||
       policy.effective_next_excluded_agents.length > 0 ||
       policy.self_merged ||
@@ -1122,6 +1126,7 @@ function planUntypedCompletionRepair(
     validateUntypedCompletionRepairPolicy(
       input.completion_policy_request,
       input,
+      todo,
     );
   }
   if (input.validation_declaration_sha256 != null &&
@@ -1354,7 +1359,8 @@ export async function executeCoordinationTodoTerminalLifecycle(
   if (authority.outcome === "rejected" || authority.outcome === "conflict") {
     return terminalFailure(
       authority.code,
-      `canonical Todo terminal lifecycle rejected the request: ${authority.code}`,
+      authority.code === "handoff_mode_retired" ? HANDOFF_MODE_RETIRED_REASON
+        : `canonical Todo terminal lifecycle rejected the request: ${authority.code}`,
       {terminal_decision: authority},
       "decision_rejection",
     );
@@ -1670,6 +1676,9 @@ export async function executeCoordinationTodoTerminalLifecycle(
     );
   }
 
+  const terminalDecisionReceipt = authority.authority_mode === "delegated_orchestration_override"
+    ? {...authority, authority_reason: input.authority_reason} : authority;
+
   if (authority.outcome === "no_change" && (edit === null || !edit.changed) && terminalUpgradeReceipt === null) {
     const existingSuccessorIds = Array.isArray(todo.successor_todo_ids)
       ? todo.successor_todo_ids.map((value, index) =>
@@ -1688,7 +1697,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
       todo_id: input.todo_id,
       command: input.command,
       changed: false,
-      terminal_decision: authority,
+      terminal_decision: terminalDecisionReceipt,
       successor_todo_ids: existingSuccessorIds,
       generated_successor_todo_ids: [],
       validation_receipt: null,
@@ -1838,7 +1847,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
     ...(input.decision_outcome === null ? {} : {decision_outcome: input.decision_outcome}),
     ...(followthrough?.unblock_resume ? {unblock_resume: followthrough.unblock_resume} : {}),
     ...(followthrough?.decision_scope_resolution ? {decision_scope_resolution: followthrough.decision_scope_resolution} : {}),
-    terminal_decision: authority,
+    terminal_decision: terminalDecisionReceipt,
     successor_todo_ids: successorIds,
     generated_successor_todo_ids: generatedSuccessorIds,
     generated_successors: successorCandidates,

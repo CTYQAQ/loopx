@@ -1216,6 +1216,7 @@ def test_completed_todo_identity_repair_preserves_settlement_fence(
     state.write_text(
         "---\n"
         f"goal_id: {GOAL_ID}\n"
+        "handoff_mode: soft_claim\n"
         "updated_at: 2026-08-22T00:00:00+00:00\n"
         "---\n\n"
         "## User Todo / Owner Review Reading Queue\n\n"

@@ -18,84 +18,92 @@ import type {AuthorityStoreConformanceFactory} from "./authority_store_conforman
 
 export function registerTerminalReentryConformance(provider: string, factory: AuthorityStoreConformanceFactory): void {
   for (const schema of ["legacy", "native"] as const) {
-    test(`${provider}: imported untyped completion repairs once before terminal closeout (${schema})`, async t => {
-      const {store, contender} = await factory(t);
-      const todo: JsonObject = {schema_version: schema === "native" ? "todo_domain_item_v0" : "todo_item_v0",
-        todo_id: "todo_untyped", role: "agent", status: "done", done: true, archive_state: "active",
-        text: "Repair imported terminal metadata", claimed_by: "agent-a", completion_turn_key: "original-turn",
-        note: "Original note", evidence: "Original evidence", reason: "Original reason",
-        last_actor_agent_id: "agent-before", updated_at: "2026-09-01T01:00:00Z",
-        completion_receipt_id: "tcw_original", completed_at: "2026-09-01T00:00:00Z",
-        ...(schema === "legacy" ? {source_section: "Agent Todo"} : {})};
-      await store.commitAuthority({operation_id: "import-untyped", expected_provider_revision: null,
-        next_projection: authorityProjectionFixture("goal-a", [todo], [], schema, {handoff_mode: "soft_claim"}),
-        events: [], receipts: [{original_import: true}]});
-      const producerPolicy = {
-        schema_version: "loopx_todo_completion_policy_request_v0",
-        goal_id: "goal-a", agent_model: "peer_v1", claimed_by: null,
-        registered_agents: ["agent-a", "agent-b"], next_claimed_by: null,
-        next_agent_todo: null, next_continuation_policy: null,
-        next_excluded_agents: [], self_merged: false, evidence: null,
-        linked_successors: [],
-      };
-      const request: CoordinationTodoTerminalLifecycleInput = {
-        goal_id: "goal-a", todo_id: "todo_untyped", expected_role: "agent", command: "complete",
-        operation_identity: {kind: "completion_turn"},
-        actor_agent_id: "agent-a", registered_agents: ["agent-a", "agent-b"], lifecycle_grants: [],
-        authority_reason: null, decision_outcome: null, lease_idempotency_key: null, lease_expected_version: null,
-        allow_user_gate_auto_acquire: true, requested_no_followup: false,
-        requested_completion_turn_key: "original-turn", requested_completion_identity_source: "turn_settlement",
-        linked_successor_todo_ids: [], successor_intents: [], note: null, evidence: null, reason: null,
-        clear_claim: false, validation_declaration: null, validation_receipt: null,
-        completion_policy_request: producerPolicy,
-        dry_run: false, now: new Date("2026-09-07T07:00:00Z"),
-      };
-      const before = await store.loadAuthority(), importedReceipt = await store.readReceipt("import-untyped");
-      const rejectedChanges = [{requested_no_followup: true}, {actor_agent_id: "agent-b"},
-        {requested_completion_turn_key: "other-turn"},
-        {note: "Replace original note"}, {evidence: "Replace original evidence"},
-        {reason: "Replace original reason"}, {clear_claim: true}, {decision_outcome: "approve"},
-        {completion_policy_request: {...producerPolicy, claimed_by: "agent-a"}},
-        {successor_intents: [{role: "agent", text: "Cannot add work during repair"}]}] satisfies
-        readonly Partial<CoordinationTodoTerminalLifecycleInput>[];
-      for (const change of rejectedChanges) {
-        assert.equal((await execute(store, {...request, ...change})).status, "failed", JSON.stringify(change));
+    for (const policyClaim of [null, "agent-a"]) {
+      test(`${provider}: imported untyped completion repairs once before terminal closeout (${schema}, claim=${policyClaim})`, async t => {
+        const {store, contender} = await factory(t);
+        const todo: JsonObject = {schema_version: schema === "native" ? "todo_domain_item_v0" : "todo_item_v0",
+          todo_id: "todo_untyped", role: "agent", status: "done", done: true, archive_state: "active",
+          text: "Repair imported terminal metadata", claimed_by: "agent-a", completion_turn_key: "original-turn",
+          note: "Original note", evidence: "Original evidence", reason: "Original reason",
+          last_actor_agent_id: "agent-before", updated_at: "2026-09-01T01:00:00Z",
+          completion_receipt_id: "tcw_original", completed_at: "2026-09-01T00:00:00Z",
+          ...(schema === "legacy" ? {source_section: "Agent Todo"} : {})};
+        await store.commitAuthority({operation_id: "import-untyped", expected_provider_revision: null,
+          next_projection: authorityProjectionFixture("goal-a", [todo], [], schema, {handoff_mode: "soft_claim"}),
+          events: [], receipts: [{original_import: true}]});
+        const producerPolicy = {
+          schema_version: "loopx_todo_completion_policy_request_v0",
+          goal_id: "goal-a", agent_model: "peer_v1", claimed_by: policyClaim,
+          registered_agents: ["agent-a", "agent-b"], next_claimed_by: null,
+          next_agent_todo: null, next_continuation_policy: null,
+          next_excluded_agents: [], self_merged: false, evidence: null,
+          linked_successors: [],
+        };
+        const request: CoordinationTodoTerminalLifecycleInput = {
+          goal_id: "goal-a", todo_id: "todo_untyped", expected_role: "agent", command: "complete",
+          operation_identity: {kind: "completion_turn"},
+          actor_agent_id: "agent-a", registered_agents: ["agent-a", "agent-b"], lifecycle_grants: [],
+          authority_reason: null, decision_outcome: null, lease_idempotency_key: null, lease_expected_version: null,
+          allow_user_gate_auto_acquire: true, requested_no_followup: false,
+          requested_completion_turn_key: "original-turn", requested_completion_identity_source: "turn_settlement",
+          linked_successor_todo_ids: [], successor_intents: [], note: null, evidence: null, reason: null,
+          clear_claim: false, validation_declaration: null, validation_receipt: null,
+          completion_policy_request: producerPolicy,
+          dry_run: false, now: new Date("2026-09-07T07:00:00Z"),
+        };
+        const before = await store.loadAuthority(), importedReceipt = await store.readReceipt("import-untyped");
+        const rejectedChanges = [{requested_no_followup: true}, {actor_agent_id: "agent-b"},
+          {requested_completion_turn_key: "other-turn"},
+          {note: "Replace original note"}, {evidence: "Replace original evidence"},
+          {reason: "Replace original reason"}, {clear_claim: true}, {decision_outcome: "approve"},
+          {completion_policy_request: {claimed_by: "agent-a"}},
+          {completion_policy_request: {...producerPolicy, claimed_by: "agent-b"}},
+          {completion_policy_request: {...producerPolicy, goal_id: "other-goal"}},
+          {completion_policy_request: {...producerPolicy, registered_agents: ["agent-a"]}},
+          {completion_policy_request: {...producerPolicy, evidence: "Fresh policy evidence"}},
+          {completion_policy_request: {...producerPolicy, next_agent_todo: "Fresh policy successor"}},
+          {completion_policy_request: {...producerPolicy, unexpected: true}},
+          {successor_intents: [{role: "agent", text: "Cannot add work during repair"}]}] satisfies
+          readonly Partial<CoordinationTodoTerminalLifecycleInput>[];
+        for (const change of rejectedChanges) {
+          assert.equal((await execute(store, {...request, ...change})).status, "failed", JSON.stringify(change));
+          assert.deepEqual(await store.loadAuthority(), before);
+        }
+        const preview = await execute(store, {...request, dry_run: true});
+        assert.equal(preview.status, "planned", JSON.stringify(preview));
+        assert.equal(preview.changed, true);
         assert.deepEqual(await store.loadAuthority(), before);
-      }
-      const preview = await execute(store, {...request, dry_run: true});
-      assert.equal(preview.status, "planned", JSON.stringify(preview));
-      assert.equal(preview.changed, true);
-      assert.deepEqual(await store.loadAuthority(), before);
-      const repair = await execute(store, request);
-      assert.equal(repair.status, "applied", JSON.stringify(repair));
-      assert.equal(repair.changed, true);
-      assert.equal(repair.completion_continuation, "active_goal");
-      const repaired = await store.loadAuthority();
-      assert.equal(repaired.status, "loaded");
-      if (repaired.status !== "loaded") throw new Error("repair head missing");
-      assert.equal(before.status, "loaded");
-      if (before.status !== "loaded") throw new Error("imported head missing");
-      const repairedRows = repaired.head.todos, importedRows = before.head.todos;
-      if (!Array.isArray(repairedRows) || repairedRows.length !== 1 ||
-          !Array.isArray(importedRows) || importedRows.length !== 1) {
-        throw new Error("imported repair Todo missing");
-      }
-      const item = canonicalAuthorityObject(repairedRows[0], "repaired imported Todo");
-      const imported = canonicalAuthorityObject(importedRows[0], "original imported Todo");
-      assert.equal(item.completion_continuation, "active_goal");
-      assert.equal(item.completion_turn_key, "original-turn");
-      assert.equal(item.completed_at, todo.completed_at);
-      assert.equal(item.completion_receipt_id, todo.completion_receipt_id);
-      assert.deepEqual(item, {...imported, completion_continuation: "active_goal"});
-      assert.deepEqual(await store.readReceipt("import-untyped"), importedReceipt);
-      assert.equal((await execute(contender, request)).status, "replayed");
-      assert.deepEqual(await store.loadAuthority(), repaired);
-      const closed = await execute(store, {...request, requested_no_followup: true,
-        operation_identity: {kind: "completion_turn"}});
-      assert.equal(closed.status, "applied", JSON.stringify(closed));
-      assert.equal(closed.completion_continuation, "no_followup");
-      assert.equal(closed.completion_recovery, "same_turn_terminal_closeout");
-    });
+        const repair = await execute(store, request);
+        assert.equal(repair.status, "applied", JSON.stringify(repair));
+        assert.equal(repair.changed, true);
+        assert.equal(repair.completion_continuation, "active_goal");
+        const repaired = await store.loadAuthority();
+        assert.equal(repaired.status, "loaded");
+        if (repaired.status !== "loaded") throw new Error("repair head missing");
+        assert.equal(before.status, "loaded");
+        if (before.status !== "loaded") throw new Error("imported head missing");
+        const repairedRows = repaired.head.todos, importedRows = before.head.todos;
+        if (!Array.isArray(repairedRows) || repairedRows.length !== 1 ||
+            !Array.isArray(importedRows) || importedRows.length !== 1) {
+          throw new Error("imported repair Todo missing");
+        }
+        const item = canonicalAuthorityObject(repairedRows[0], "repaired imported Todo");
+        const imported = canonicalAuthorityObject(importedRows[0], "original imported Todo");
+        assert.equal(item.completion_continuation, "active_goal");
+        assert.equal(item.completion_turn_key, "original-turn");
+        assert.equal(item.completed_at, todo.completed_at);
+        assert.equal(item.completion_receipt_id, todo.completion_receipt_id);
+        assert.deepEqual(item, {...imported, completion_continuation: "active_goal"});
+        assert.deepEqual(await store.readReceipt("import-untyped"), importedReceipt);
+        assert.equal((await execute(contender, request)).status, "replayed");
+        assert.deepEqual(await store.loadAuthority(), repaired);
+        const closed = await execute(store, {...request, requested_no_followup: true,
+          operation_identity: {kind: "completion_turn"}});
+        assert.equal(closed.status, "applied", JSON.stringify(closed));
+        assert.equal(closed.completion_continuation, "no_followup");
+        assert.equal(closed.completion_recovery, "same_turn_terminal_closeout");
+      });
+    }
     test(`${provider}: imported untyped completion repair bypasses fresh validators (${schema})`, async t => {
       const {store} = await factory(t);
       const declaration = {validation_command: null, validation_command_argv: ["true"],

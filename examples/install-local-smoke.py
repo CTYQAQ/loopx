@@ -833,7 +833,7 @@ def main() -> int:
         )
         assert "```sh\nLOOPX_TURN=<current_time_iso>\n" in payload["task_body"], payload
         assert "not a command-prefix assignment" in payload["task_body"], payload
-        assert "guard; 2 stalls->replan" in payload["task_body"], payload
+        assert "obey projected replan/stop, never wake counts" in payload["task_body"], payload
         assert "Exact monitor settlement=no refresh/spend" in payload["task_body"], payload
         assert "Admitted work: settlement_plan even if artifacts unchanged" in payload["task_body"], payload
         assert "no-change=surface_only/no spend" not in payload["task_body"], payload

@@ -941,10 +941,9 @@ def _seed_promoted_store(
             }
         ],
     )
-    # main's builder carries no handoff mode and the claim owner reads a missing
-    # mode as legacy; this branch's builder defaults to hard_lease, so seed the
-    # legacy mode explicitly unless a test asks for another one.
-    projection["handoff_mode"] = str(handoff_mode) if handoff_mode is not None else "legacy"
+    # Normal claim tests need a current policy; historical wire shape does not
+    # imply the retired ownership strategy. Explicit modes stay caller-owned.
+    projection["handoff_mode"] = str(handoff_mode) if handoff_mode is not None else "soft_claim"
     state_path = runtime_root / "ACTIVE_GOAL_STATE.md"
     if not state_path.exists():
         state_path.write_text(

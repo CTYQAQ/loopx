@@ -10,12 +10,18 @@ from loopx.control_plane.coordination.runtime_shadow import (
     build_todo_runtime_shadow_projection,
 )
 from loopx.control_plane.coordination.local_authority import (
-    LocalCoordinationAuthorityRejection,
+    LocalCoordinationAuthorityRejection, LocalCoordinationAuthorityUnavailable,
 )
 from loopx.control_plane.scheduler.monitor_poll_writeback import (
     write_monitor_poll_todo_state,
 )
 from loopx.status import parse_active_state_todos
+import loopx.control_plane.todos.provider_terminal_lifecycle as terminal_provider
+from loopx.control_plane.work_items.task_lease import (
+    acquire_task_lease, inspect_task_lease,
+)
+from loopx.todos import list_goal_todos, archive_completed_todos
+from canonical_authority_fixture import isolate_sqlite_runtime
 from loopx.todos import (
     add_goal_todo,
     complete_goal_todo,
@@ -35,6 +41,7 @@ def _write_fixture(
     multi_agent: bool = True,
     lifecycle_authority: list[dict] | None = None,
     handoff_mode: str = "soft_claim",
+    provider: str = "file",
 ) -> tuple[Path, Path]:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -94,6 +101,7 @@ def _write_fixture(
             handoff_mode=handoff_mode,
         ),
         state_path=state,
+        provider=provider,
     )
     return registry, state
 
@@ -619,3 +627,278 @@ def test_delegated_orchestrator_can_complete_claimed_todo_with_reason(
     assert authority["authority_mode"] == "delegated_orchestration_override"
     assert authority["code"] == "terminal_transition"
     assert _agent_todo(state, todo["todo_id"])["status"] == "done"
+
+
+def _canonical_todo(registry: Path, todo_id: str) -> dict:
+    return list_goal_todos(registry_path=registry, goal_id=GOAL_ID, todo_id=todo_id)["todo"]
+
+
+def _canonical_snapshot(registry: Path, state: Path) -> tuple:
+    result = list_goal_todos(registry_path=registry, goal_id=GOAL_ID)
+    return result["authority_read"]["provider_revision"], result["todos"], state.read_bytes()
+
+
+def _canonical_lease(registry: Path, tmp_path: Path, todo_id: str) -> dict | None:
+    result = inspect_task_lease(
+        registry_path=registry, runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID, todo_id=todo_id,
+    )
+    assert result["source_authority"] in {"file_v0", "sqlite_v0"}
+    assert result["legacy_fallback_used"] is False
+    return result.get("lease")
+
+
+def _lease_path(tmp_path: Path, todo_id: str) -> Path:
+    return tmp_path / "runtime" / "goals" / GOAL_ID / "task-leases" / f"{todo_id}.json"
+
+
+@pytest.mark.parametrize("status", ["deferred", "blocked", "done"])
+def test_canonical_claim_rejects_nonopen_status_atomically(
+    tmp_path: Path, canonical_workspace, status: str,
+) -> None:
+    registry, state = canonical_workspace(tmp_path)
+    if status == "deferred":
+        todo = add_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, role="agent",
+            text="Wait for external capacity before claim.", status="deferred",
+            resume_when="capacity_available:network",
+        )
+    else:
+        todo = _add_agent_todo(registry)
+        if status == "done":
+            complete_goal_todo(
+                registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+                agent_id=AUTHOR_AGENT, evidence="finished before the contested claim",
+            )
+        else:
+            update_goal_todo(
+                registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+                agent_id=AUTHOR_AGENT, status=status,
+            )
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as error:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+            claim_only=True, claimed_by=AUTHOR_AGENT, agent_id=AUTHOR_AGENT,
+        )
+    assert error.value.code == "todo_not_open"
+    assert error.value.payload["todo_status"] == status
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) is None
+
+
+def test_canonical_claim_rejects_user_todo_atomically(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
+    todo = add_goal_todo(
+        registry_path=registry, goal_id=GOAL_ID, role="user",
+        text="Owner reviews the delivered change.", task_class="user_action",
+        bound_agent=AUTHOR_AGENT,
+    )
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as error:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+            claim_only=True, claimed_by=AUTHOR_AGENT, agent_id=AUTHOR_AGENT,
+        )
+    assert error.value.code == "todo_not_agent"
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_todo(registry, todo["todo_id"])["bound_agent"] == AUTHOR_AGENT
+
+
+def test_canonical_claim_cannot_reactivate_archived_work(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
+    todo = _add_agent_todo(registry)
+    complete_goal_todo(
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+        agent_id=AUTHOR_AGENT, evidence="finished before archival",
+    )
+    archive_completed_todos(
+        registry_path=registry, goal_id=GOAL_ID, max_active_done=0, dry_run=False,
+    )
+    assert _canonical_todo(registry, todo["todo_id"])["archive_state"] == "archive"
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as error:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+            claim_only=True, claimed_by=AUTHOR_AGENT, agent_id=AUTHOR_AGENT,
+        )
+    # Status eligibility precedes archive eligibility in the shared claim owner.
+    assert error.value.code == "todo_not_open"
+    assert _canonical_snapshot(registry, state) == before
+
+
+def test_canonical_claim_rejects_role_mismatch_atomically(tmp_path: Path, canonical_workspace) -> None:
+    registry, state = canonical_workspace(tmp_path)
+    todo = _add_agent_todo(registry, claimed_by=None)
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as error:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], role="user",
+            claim_only=True, claimed_by=AUTHOR_AGENT, agent_id=AUTHOR_AGENT,
+        )
+    assert error.value.code == "todo_role_mismatch"
+    assert error.value.payload["requested_role"] == "user"
+    assert error.value.payload["todo_role"] == "agent"
+    assert _canonical_snapshot(registry, state) == before
+
+
+def test_completion_and_lease_release_recover_after_response_loss(
+    tmp_path: Path, canonical_workspace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Canonical completion releases its lease in the same commit; there is no
+    # independent post-commit release call to fail. Lose the real response instead.
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
+    todo = _add_agent_todo(registry)
+    lease_key = "response-loss-instance"
+    acquire_task_lease(
+        registry_path=registry, runtime_root=tmp_path / "runtime", goal_id=GOAL_ID,
+        todo_id=todo["todo_id"], owner=AUTHOR_AGENT, idempotency_key=lease_key, ttl_seconds=600,
+    )
+    request = dict(
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], agent_id=AUTHOR_AGENT,
+        task_lease_idempotency_key=lease_key, task_lease_expected_version=1,
+        completion_turn_key="response-loss-turn", evidence="Original completion committed once.",
+        no_followup=True,
+    )
+    native_effect = terminal_provider.effect_runtime_result
+    committed = []
+    def lose_response(method, payload, **kwargs):
+        result = native_effect(method, payload, **kwargs)
+        if method == "coordination.local_authority.todo_terminal" and not committed:
+            assert result["status"] == "applied"
+            committed.append(result)
+            raise OSError("response lost after real canonical commit")
+        return result
+    with monkeypatch.context() as patch:
+        patch.setattr(terminal_provider, "effect_runtime_result", lose_response)
+        with pytest.raises(OSError, match="response lost"):
+            complete_goal_todo(**request)
+    assert len(committed) == 1
+    assert _canonical_todo(registry, todo["todo_id"])["status"] == "done"
+    lease_after_commit = _canonical_lease(registry, tmp_path, todo["todo_id"])
+    assert lease_after_commit["status"] == "released"
+    replay = complete_goal_todo(**request)
+    assert replay["ok"] is True and replay["idempotent_replay"] is True
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == lease_after_commit
+    after_recovery = _canonical_snapshot(registry, state)
+    assert complete_goal_todo(**request)["idempotent_replay"] is True
+    assert _canonical_snapshot(registry, state) == after_recovery
+
+
+def test_completed_todo_rejects_metadata_reopen_and_new_execution(
+    tmp_path: Path, canonical_workspace,
+) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
+    todo = _add_agent_todo(registry)
+    acquire_task_lease(
+        registry_path=registry, runtime_root=tmp_path / "runtime", goal_id=GOAL_ID,
+        todo_id=todo["todo_id"], owner=AUTHOR_AGENT, idempotency_key="first-instance", ttl_seconds=600,
+    )
+    complete_goal_todo(
+        registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], agent_id=AUTHOR_AGENT,
+        task_lease_idempotency_key="first-instance", task_lease_expected_version=1,
+        completion_turn_key="first-turn", evidence="First completion releases its lease.",
+    )
+    released = _canonical_lease(registry, tmp_path, todo["todo_id"])
+    assert released["status"] == "released"
+    before = _canonical_snapshot(registry, state)
+    # A completed ordinary Todo has no metadata-reopen contract. Keep terminal
+    # history intact rather than silently resurrecting a retired execution.
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], agent_id=AUTHOR_AGENT,
+            status="open", note="Metadata cannot reopen a completed execution.",
+        )
+    assert rejected.value.code == "unsupported_todo_update_target"
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == released
+    with pytest.raises((ValueError, LocalCoordinationAuthorityRejection)):
+        complete_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"], agent_id=AUTHOR_AGENT,
+            task_lease_idempotency_key="first-instance", task_lease_expected_version=1,
+            completion_turn_key="second-turn", evidence="Released proof cannot authorize new execution.",
+        )
+    assert _canonical_snapshot(registry, state) == before
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == released
+
+
+def test_invalid_completion_keeps_existing_lease_and_state(
+    tmp_path: Path, canonical_workspace,
+) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False, handoff_mode="hard_lease")
+    todo = _add_agent_todo(registry)
+    lease_key = "post-fence-failure-instance"
+    acquire_task_lease(
+        registry_path=registry,
+        runtime_root=tmp_path / "runtime",
+        goal_id=GOAL_ID,
+        todo_id=todo["todo_id"],
+        owner=AUTHOR_AGENT,
+        idempotency_key=lease_key,
+        ttl_seconds=600,
+    )
+    lease_before = _canonical_lease(registry, tmp_path, todo["todo_id"])
+    state_before = _canonical_snapshot(registry, state)
+
+    with pytest.raises(ValueError, match="successor_todo_ids"):
+        complete_goal_todo(
+            registry_path=registry,
+            goal_id=GOAL_ID,
+            todo_id=todo["todo_id"],
+            agent_id=AUTHOR_AGENT,
+            task_lease_idempotency_key=lease_key,
+            task_lease_expected_version=1,
+            successor_todo_ids=["!!not-a-todo-id!!"],
+            evidence="invalid successor must leave state and lease unchanged",
+            no_followup=True,
+        )
+
+    assert _canonical_lease(registry, tmp_path, todo["todo_id"]) == lease_before
+    assert lease_before["status"] == "active"
+    assert _canonical_snapshot(registry, state) == state_before
+
+
+@pytest.mark.parametrize("command", ["update", "complete"])
+def test_canonical_single_agent_owned_todo_requires_explicit_actor(
+    tmp_path: Path, canonical_workspace, command: str,
+) -> None:
+    registry, state = canonical_workspace(tmp_path, multi_agent=False)
+    todo = _add_agent_todo(registry)
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityRejection) as rejected:
+        if command == "update":
+            update_goal_todo(registry_path=registry, goal_id=GOAL_ID,
+                todo_id=todo["todo_id"], note="Actorless owned mutation is forbidden")
+        else:
+            complete_goal_todo(registry_path=registry, goal_id=GOAL_ID,
+                todo_id=todo["todo_id"], evidence="Actorless owned mutation is forbidden")
+    assert rejected.value.code == "actor_required"
+    assert _canonical_snapshot(registry, state) == before
+
+
+def test_canonical_update_revision_conflict_is_typed_without_actor_mutation(
+    tmp_path: Path, canonical_workspace,
+) -> None:
+    registry, state = canonical_workspace(tmp_path)
+    todo = _add_agent_todo(registry)
+    before = _canonical_snapshot(registry, state)
+    with pytest.raises(LocalCoordinationAuthorityUnavailable) as rejected:
+        update_goal_todo(
+            registry_path=registry, goal_id=GOAL_ID, todo_id=todo["todo_id"],
+            agent_id=AUTHOR_AGENT, note="A stale writer cannot commit",
+            update_expected_provider_revision="stale-revision",
+        )
+    assert rejected.value.code == "provider_revision_mismatch"
+    assert isinstance(rejected.value, LocalCoordinationAuthorityRejection)
+    assert rejected.value.payload["failure_kind"] == "decision_rejection"
+    assert _canonical_snapshot(registry, state) == before
+
+
+@pytest.fixture(params=["file", "sqlite"])
+def canonical_workspace(request, tmp_path, monkeypatch):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+
+    def create(root, **kwargs):
+        return _write_fixture(root, provider=request.param, **kwargs)
+
+    return create

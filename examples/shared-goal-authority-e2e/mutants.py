@@ -183,8 +183,9 @@ CASES.append(Case("fence_envelope_schema_leak", (
    pattern="^exact legacy release honors an engaged promotion fence without writes$"))
 CASES.append(Case("lifecycle_fence_guard_skipped", (
     ("loopx/control_plane/work_items/task_lease_lifecycle.ts", replacement(
-        "        await requireLegacyCoordinationPrimaryWriteAllowed(request!.runtime_root, request!.goal_id);\n",
-        "")),
+        "  await requireLegacyCoordinationPrimaryWriteAllowed(request.runtime_root, request.goal_id);\n"
+        "  const decision = retainedReleaseDecision(request, existing, at);",
+        "  const decision = retainedReleaseDecision(request, existing, at);")),
 ), "tests/control_plane_ts/task_lease_lifecycle.test.ts",
    pattern="^exact legacy release honors an engaged promotion fence without writes$"))
 

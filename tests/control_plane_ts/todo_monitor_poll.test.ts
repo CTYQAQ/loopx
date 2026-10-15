@@ -16,7 +16,7 @@ async function seeded(overrides: JsonObject = {}, extras: JsonObject[] = []) {
     status: "open", done: false, text: "Observe external progress", archive_state: "active",
     task_class: "continuous_monitor", target_key: "watch-a", cadence: "1h", ...overrides}, ...extras];
   await store.commitAuthority({operation_id: "seed", expected_provider_revision: null,
-    events: [], receipts: [], next_projection: {goal_id: "goal-a", todos: records, leases: [],
+    events: [], receipts: [], next_projection: {goal_id: "goal-a", handoff_mode: "soft_claim", todos: records, leases: [],
       todo_read_model: {schema_version: TODO_DOMAIN_READ_RECORD_SCHEMA, todo_count: records.length,
         records_sha256: canonicalAuthoritySha256(records), contract_fields: [...TODO_DOMAIN_RECORD_CONTRACT.fields]}}});
   const request = {goal_id: "goal-a", operation_id: "poll-a", actor_agent_id: "agent-a",
