@@ -776,6 +776,11 @@ binding 已提交但控制器响应丢失时，重复原命令会核对原凭据
 确定性测试覆盖这一边界，并验证缺失、多结果和外来目标拒绝；evaluator/Host
 联合激活恢复仍未资格化。
 
+自动 supervisor 的准备截止时间约束源屏障和原生捕获。成功恢复源运行后，仅对
+controller 私有导出副本继续封存，沿用捕获的原 Host phase 截止时间并传给类型化
+产物发布 owner。源后续工作不会进入该点；不会补发预算、冷却或机会。直接调用
+仍默认保留整项 timeout。该调整不证明任意规模的捕获时限或完整科学接续收益。
+
 显式 Docker controller 现提供有界的文件写入屏障：暂停自己拥有的运行中 worker，
 经 daemon archive 复制声明文件及 phase 时钟，捕获原生 evaluator capsule，恢复
 worker 后再发布惰性联合产物。真实持续写入容器与 native HTTP 验证了文件稳定、

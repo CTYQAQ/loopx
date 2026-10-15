@@ -959,6 +959,13 @@ resume prevents publication. This closes the manual provider's file-writer
 barrier gap only. No process memory, native cursor eligibility, external writers,
 automatic pre-decision handoff or isolated continuation are qualified by it.
 
+The automatic supervisor keeps the prepared deadline for the live-source
+barrier and native capture. After successful source release it seals only its
+private exported files under the captured original Host phase deadline, which
+also bounds typed artifact publication. Later source work cannot enter that
+point. This separates source hold time from final sealing; it grants no trial
+time, cooldown or opportunities. Direct callers retain their total timeout.
+
 The ordinary SForge worker's explicit warm entry composes these
 owners. It uses a fresh current preparation Todo with full retained evidence,
 then requires an accepted current replan before restoring the normal cadence.

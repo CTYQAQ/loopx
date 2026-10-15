@@ -812,6 +812,11 @@ worker 保留原 guard，controller 暂停全部容器写入者，核对仍有�
 文件 witness，再封存原生评测机会、incumbent 及剩余预算。源变化、过期或失去
 交接会拒绝；可恢复的捕获失败不取消原研究，也不得改用稍后的状态。解除暂停后，
 源会话继续使用原 packet 和 deadline。
+自动 supervisor 的准备截止时间仍约束暂停、文件导出及原生捕获。成功解除暂停后，
+controller 只对自己持有的静态导出副本继续校验、封存，使用已捕获的原 Host phase
+截止时间；该截止时间同时传给类型化产物 owner，过期不能发布。源可以继续工作，
+稍后产生的文件不会进入旧点；不会增加预算、冷却或评测机会。直接调用 controller
+默认仍以显式 timeout 约束整项操作。关闭 handoff/controller 配置即停止自动路径。
 上文的公开复现命令使用固定 provider `071a884`、Python 3.12、显式 Linux amd64
 Codex/Node 及调用者准备的 Docker 镜像。非 root controller 从六个真实工作 wake
 形成模型决策前捕获，保留完整声明的目录及只读 Git 对象；普通与 stride receiver
