@@ -200,7 +200,7 @@ def test_inactive_legacy_inspection_does_not_project_todos(tmp_path, monkeypatch
     assert expired["active"] is False and expired["handoff_mode"] == "hard_lease"
 
 
-def test_legacy_inspection_reloads_lease_after_demanding_todo_facts(tmp_path, monkeypatch):
+def test_retained_source_inspection_never_projects_current_execution(tmp_path, monkeypatch):
     registry = tmp_path / "registry.json"
     state = tmp_path / "state.md"
     state.write_text("---\nhandoff_mode: hard_lease\n---\n# Synthetic state\n")
@@ -212,16 +212,17 @@ def test_legacy_inspection_reloads_lease_after_demanding_todo_facts(tmp_path, mo
     lease = {"schema_version": "task_lease_v0", "status": "active", "owner": "agent-a", "expires_at": "2099-01-01T00:00:00Z"}
     lease_path.write_text(json.dumps(lease))
     from loopx.control_plane.todos import list_readback
-    calls = []
-    def release_during_projection(**_):
-        calls.append(True)
-        lease_path.write_text(json.dumps({**lease, "status": "released"}))
-        return {"todos": [{"todo_id": TODO, "status": "open", "claimed_by": None, "excluded_agents": []}]}
-    monkeypatch.setattr(list_readback, "list_goal_todos", release_during_projection)
+    original = lease_path.read_bytes()
+    def forbidden_projection(**_):
+        raise AssertionError("retained source inspection must not revive Todo admission")
+    monkeypatch.setattr(list_readback, "list_goal_todos", forbidden_projection)
     result = _inspect(registry, runtime)
-    assert len(calls) == 1
     assert result["active"] is False
-    assert result["lease"]["status"] == "released"
+    assert result["lease"] == lease
+    assert lease_path.read_bytes() == original
+    assert result["executor_constraint"]["reason"] == "canonical_authority_required"
+    assert result["execution_policy"]["supported"] is False
+    assert result["execution_policy"]["execution_authority_granted"] is False
     assert "todo_projection_required" not in result
 
 

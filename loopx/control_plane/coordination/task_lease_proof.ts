@@ -1,5 +1,6 @@
 /** Current nonterminal mutation proof. Admission stays in the lifecycle owner;
  * this boundary never acquires, renews, releases or transfers a lease. */
+import {retiredHandoffModeRejection} from "./handoff_mode_policy.ts";
 import type {JsonObject} from "../effect_program.ts";
 import {requireJsonObject} from "../runtime_decode.ts";
 import {EffectRuntimeRequestError} from "../effect_runtime_errors.ts";
@@ -70,6 +71,8 @@ export function evaluateCanonicalTaskLeaseProof(input: {
   actor_agent_id: string | null; registered_agents: readonly string[];
   lease_idempotency_key: string | null; lease_expected_version: number | null; now: Date;
 }) {
+  const retired = retiredHandoffModeRejection(input.handoff_mode);
+  if (retired !== null) return {outcome: "rejected", code: retired};
   const {lease} = input;
   if (!(input.now instanceof Date) || !Number.isFinite(input.now.valueOf())) {
     throw new EffectRuntimeRequestError("lease proof requires a valid transaction clock");

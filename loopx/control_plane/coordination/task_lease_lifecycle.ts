@@ -11,7 +11,7 @@ import {planLeaseClaimTransfer} from "./lease_claim_transfer.ts";
 import {decideTaskLeaseLifecycle, materializeTaskLeaseLifecycle,
   type TaskLeaseLifecycleDecisionOperation, type TaskLeaseLifecycleDecisionCommand} from "../work_items/task_lease_lifecycle_decision.ts";
 import {requireStringLiteral} from "../runtime_decode.ts";
-import {HANDOFF_MODES} from "./handoff_mode_policy.ts";
+import {HANDOFF_MODES, retiredHandoffModeRejection, HANDOFF_MODE_RETIRED_REASON} from "./handoff_mode_policy.ts";
 import {leaseEpoch, leaseIsActive, leaseVersion, normalizeAgent, normalizeGoalId,
   normalizeIdempotencyKey, normalizeOwner, normalizeTodoId,
   normalizeTtl, utcIsoformat, TaskLeaseAcquireError, type LeaseRecord} from "../work_items/task_lease_acquire.ts";
@@ -112,6 +112,9 @@ export async function executeCanonicalTaskLeaseLifecycle(store: AuthorityStore, 
       const current = await store.loadAuthority();
       if (current.status !== "loaded") throw new AuthorityStoreProtocolError("current lease authority unavailable");
       validateCoordinationTodoReadModel(current.head, input.goal_id);
+      const retired = retiredHandoffModeRejection(current.head.handoff_mode ?? "legacy");
+      if (retired !== null) return {...failed(retired, HANDOFF_MODE_RETIRED_REASON),
+        original_receipt: result.original_receipt};
       const dependency = todoExecutionDependencyRejection(
         indexCoordinationProjection(current.head, input.goal_id).todos, input.todo_id, input.now);
       return dependency === null ? result : {...failed(dependency.code, dependency.reason),

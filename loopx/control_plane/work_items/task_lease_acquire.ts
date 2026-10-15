@@ -1,3 +1,4 @@
+import {HANDOFF_MODES, type HandoffMode} from "../coordination/handoff_mode_vocabulary.ts";
 import {LeaseWorktreeObservationError, observeLeaseWorktree, type LeaseWorkspace} from "./task_lease_workspace.ts";
 import {isCanonicalTodoId} from "../todos/identity.ts";
 import {executeCanonicalTaskLeaseAcquire} from "../coordination/task_lease_acquire.ts";
@@ -386,16 +387,16 @@ export function decodeTaskLeaseAuthority(value: unknown): AuthorityFacts {
   };
 }
 
-export function normalizeHandoffMode(value: unknown): string {
+export function normalizeHandoffMode(value: unknown): HandoffMode {
   const mode = compact(value) || "legacy";
-  if (!new Set(["legacy", "soft_claim", "hard_lease"]).has(mode)) {
+  if (!HANDOFF_MODES.some(candidate => candidate === mode)) {
     throw new TaskLeaseAcquireError(
       `unsupported handoff_mode '${mode}'; expected one of: legacy, soft_claim, hard_lease`,
       "invalid_handoff_mode",
-      { handoff_mode: mode, supported: ["legacy", "soft_claim", "hard_lease"] },
+      { handoff_mode: mode, supported: [...HANDOFF_MODES] },
     );
   }
-  return mode;
+  return mode as HandoffMode;
 }
 
 function decodeRequest(value: unknown): AcquireRequest {

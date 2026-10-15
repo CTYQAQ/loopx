@@ -420,6 +420,51 @@ export function registerAuthorityStoreConformance(
   assert.deepEqual(await store.loadAuthority(),released);
   });
 
+  for (const operation of ["renew", "transfer"] as const) test(`${providerName} retired policy cannot replay acquisition or ${operation} as current proof`, async t => {
+    const {store} = await factory(t);
+    const todo = {todo_id: "todo_work", role: "agent", status: "open", done: false,
+      text: "Imported work", archive_state: "active", claimed_by: null, task_class: "advancement_task"};
+    assert.equal((await store.commitAuthority({expected_provider_revision: null, operation_id: "seed",
+      next_projection: authorityProjectionFixture("goal-a", [todo], [], "native", {handoff_mode: "hard_lease"}),
+      events: [], receipts: []})).status, "applied");
+    const command = {goal_id: "goal-a", todo_id: "todo_work", owner: "agent-a", idempotency_key: "original-execution",
+      expected_version: 0, ttl_seconds: 600, write_scopes: [], registered_agents: ["agent-a", "agent-b"],
+      now: new Date("2026-09-01T03:01:00Z")};
+    const accepted = await executeCanonicalTaskLeaseAcquire(store, command);
+    assert.equal(accepted.status, "applied", JSON.stringify(accepted));
+    const acquisitionOperation = String(accepted.operation_id);
+    const original = await store.readReceipt(acquisitionOperation);
+    const maintenance = {...command, operation, expected_version: 1,
+      ...(operation === "transfer" ? {new_owner: "agent-b", new_idempotency_key: "receiver-execution"} : {})};
+    const maintained = await executeCanonicalTaskLeaseLifecycle(store, maintenance);
+    assert.equal(maintained.status, "applied", JSON.stringify(maintained));
+    const originalMaintenance = await store.readReceipt(String(maintained.operation_id));
+    const current = await store.loadAuthority();
+    if (current.status !== "loaded") throw new Error("fixture unavailable");
+    assert.equal((await store.commitAuthority({expected_provider_revision: current.provider_revision,
+      operation_id: "imported-policy", next_projection: {...current.head, handoff_mode: "legacy"},
+      events: [], receipts: []})).status, "applied");
+    const before = await store.loadAuthority();
+    for (const replay of [command, {...command, idempotency_key: "fresh-execution", expected_version: 2}]) {
+      const refused = await executeCanonicalTaskLeaseAcquire(store, replay);
+      assert.equal(refused.status, "failed", JSON.stringify(refused));
+      assert.equal(refused.reason_code, "handoff_mode_retired");
+      assert.equal(refused.lease, undefined, "historical acceptance is not a current execution grant");
+      assert.deepEqual(await store.readReceipt(acquisitionOperation), original);
+      assert.deepEqual(await store.loadAuthority(), before);
+    }
+    const replayedMaintenance = await executeCanonicalTaskLeaseLifecycle(store, maintenance);
+    assert.equal(replayedMaintenance.reason_code, "handoff_mode_retired");
+    assert.equal(replayedMaintenance.lease, undefined);
+    assert.deepEqual(await store.readReceipt(String(maintained.operation_id)), originalMaintenance);
+    assert.deepEqual(await store.loadAuthority(), before);
+    const released = await executeCanonicalTaskLeaseLifecycle(store, {...command,
+      operation: "release", expected_version: 2, ttl_seconds: null,
+      ...(operation === "transfer" ? {owner: "agent-b", idempotency_key: "receiver-execution"} : {})});
+    assert.equal(released.status, "applied", JSON.stringify(released));
+    assert.deepEqual(await store.readReceipt(acquisitionOperation), original);
+  });
+
   registerClaimContentionConformance(providerName, factory);
   registerAuthorityScanConformance(providerName, factory);
   registerOwnershipObservationConformance(providerName, factory);
@@ -478,14 +523,14 @@ export function registerAuthorityStoreConformance(
     assert.equal((await executeCoordinationTodoArchiveCompleted(store, request)).status, "replayed");
   });
 
-  for (const native of [false, true]) test(`${providerName} conformance: lease-free legacy-mode Monitor observation and successor (${native ? "native" : "legacy"})`, async (t) => {
+  for (const native of [false, true]) test(`${providerName} conformance: lease-free soft-claim Monitor observation and successor (${native ? "native" : "legacy"})`, async (t) => {
     const {store, contender} = await factory(t);
     const goal = "goal-monitor";
     const fixture = productionScaleCoordinationFixture(goal, native ? "native" : "legacy");
     const projection = structuredClone(fixture.projection);
-    // A lease-free observation is legal in legacy mode. Hard mode now requires
+    // A lease-free observation is legal in soft_claim. Hard mode requires
     // current execution proof; its positive/negative cases have their own fixture.
-    projection.handoff_mode = "legacy";
+    projection.handoff_mode = "soft_claim";
     const records = projection.todos as Record<string, unknown>[];
     const monitor = records.find(todo => todo.task_class === "continuous_monitor" && todo.status !== "done" &&
       !(projection.leases as Record<string, unknown>[]).some(lease => lease.todo_id === todo.todo_id));

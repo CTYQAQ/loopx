@@ -27,7 +27,7 @@ export const COORDINATION_TERMINAL_FENCE_REQUEST_SCHEMA =
   "loopx_coordination_terminal_fence_request_v0";
 export const COORDINATION_TERMINAL_FENCE_RESULT_SCHEMA =
   "loopx_coordination_terminal_fence_result_v0";
-import {HANDOFF_MODES, type HandoffMode} from "./handoff_mode_policy.ts";
+import {HANDOFF_MODES, retiredHandoffModeRejection, type HandoffMode} from "./handoff_mode_policy.ts";
 const OUTCOMES = ["approve", "reject", "cancel"] as const;
 const AUTHORITY_ACTIONS = ["complete", "reassign", "supersede", "update"] as const;
 const EXECUTOR_RECLAIM_ACTION = "reclaim";
@@ -385,6 +385,8 @@ function authority(request: LifecycleDecisionRequest):
   | { mode: string; ownershipGate: CoordinationTodoTerminalDecisionResult["ownership_gate"] }
   | CoordinationTodoTerminalDecisionResult {
   const { todo, actor_agent_id: actor, registered_agents: registered } = request;
+  const retired = retiredHandoffModeRejection(request.handoff_mode);
+  if (retired !== null) return result("rejected", retired);
   if (registered.length <= 1) {
     if (actor !== null) {
       const rejection = registeredTodoMutationRejection(todo, actor, registered);
@@ -443,6 +445,8 @@ function terminalFence(
   authorityMode: string | null,
   requireActiveWhenFenceSupplied = true,
 ): CoordinationTodoTerminalDecisionResult {
+  const retired = retiredHandoffModeRejection(request.handoff_mode);
+  if (retired !== null) return result("rejected", retired);
   const lease = request.lease;
   const timeActive = lease !== null && lease.present && lease.active;
   const effective = timeActive && ownerEligible(request, lease.owner);

@@ -1,7 +1,9 @@
+import {HANDOFF_MODES} from "../coordination/handoff_mode_vocabulary.ts";
+import {retiredHandoffModeRejection} from "../coordination/handoff_mode_policy.ts";
 import {leaseOwnerRejection as ownerRejection} from "./task_lease_eligibility.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { type JsonObject } from "../effect_program.ts";
-import { requireJsonObject } from "../runtime_decode.ts";
+import { requireJsonObject, requireStringLiteral } from "../runtime_decode.ts";
 import {leaseEpoch, utcIsoformat, type LeaseRecord} from "./task_lease_acquire.ts";
 import {normalizeTodoRepository} from "../todos/work_requirements.ts";
 import {leaseWriteRepository, leaseRepositoryRejection} from "./task_lease_repository.ts";
@@ -164,7 +166,7 @@ function decodeInput(value: unknown): TaskLeaseLifecycleDecisionInput {
     "task lease lifecycle decision command",
   );
   return {
-    handoff_mode: stringValue(input.handoff_mode, "handoff_mode"),
+    handoff_mode: requireStringLiteral(input.handoff_mode, HANDOFF_MODES, "handoff_mode"),
     registered_agents: stringArray(
       input.registered_agents,
       "registered_agents",
@@ -266,9 +268,8 @@ export function decideTaskLeaseLifecycle(
       nextLease: { ...lease, active: false, status: "released" },
     });
   }
-  if (input.handoff_mode === "legacy") {
-    return result("rejected", "handoff_mode_retired");
-  }
+  const retired = retiredHandoffModeRejection(input.handoff_mode);
+  if (retired !== null) return result("rejected", retired);
   if (lease === null || !lease.present || !lease.active) {
     return result("rejected", "lease_not_active");
   }

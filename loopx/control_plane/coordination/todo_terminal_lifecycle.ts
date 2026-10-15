@@ -1,3 +1,4 @@
+import {HANDOFF_MODE_RETIRED_REASON} from "./handoff_mode_policy.ts";
 import {planUserCompletion, requireCompletionDecisionOutcome} from "../todos/user_completion.ts";
 import {AUTHORITY_SOURCE_CHANGED, uncheckedAuthoritySource, type AuthoritySourceCheck} from "./authority_source.ts";
 import {
@@ -1358,7 +1359,8 @@ export async function executeCoordinationTodoTerminalLifecycle(
   if (authority.outcome === "rejected" || authority.outcome === "conflict") {
     return terminalFailure(
       authority.code,
-      `canonical Todo terminal lifecycle rejected the request: ${authority.code}`,
+      authority.code === "handoff_mode_retired" ? HANDOFF_MODE_RETIRED_REASON
+        : `canonical Todo terminal lifecycle rejected the request: ${authority.code}`,
       {terminal_decision: authority},
       "decision_rejection",
     );

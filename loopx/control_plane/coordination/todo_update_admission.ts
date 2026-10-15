@@ -1,6 +1,7 @@
 /** Admission for Todo edits; terminal completion retains its own lease proof.
  * Grants may cross a claim owner;
  * exclusions, bindings and execution lineage remain independent restrictions. */
+import {retiredHandoffModeRejection, HANDOFF_MODE_RETIRED_REASON} from "./handoff_mode_policy.ts";
 import {leaseRepositoryRejection} from "../work_items/task_lease_repository.ts";
 import {isExploreReferenceAppend} from "../todos/field_update.ts";
 import {acceptanceRestoration} from "./todo_acceptance_restoration.ts";
@@ -49,6 +50,8 @@ export function todoUpdateAdmissionRejection(
   if (typeof mode !== "string" || !["legacy", "soft_claim", "hard_lease"].includes(mode)) {
     return reject("invalid_handoff_mode", "canonical handoff mode is invalid");
   }
+  const retired = retiredHandoffModeRejection(mode);
+  if (retired !== null) return {...reject(retired, HANDOFF_MODE_RETIRED_REASON), handoff_mode: mode};
   const intent = input.planning_intent ?? {};
   const ownershipMutation = ["claimed_by", "clear_claim", "excluded_agents", "bound_agent",
     "goal_bound", "blocks_agent", "clear_blocks_agent", "global_gate", "clear_global_gate"]
