@@ -1,6 +1,6 @@
 import {HANDOFF_MODES} from "../coordination/handoff_mode_vocabulary.ts";
 import {retiredHandoffModeRejection} from "../coordination/handoff_mode_policy.ts";
-import {leaseOwnerRejection as ownerRejection} from "./task_lease_eligibility.ts";
+import {leaseOwnerRejection as ownerRejection, type LeaseEligibilityTodo} from "./task_lease_eligibility.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { type JsonObject } from "../effect_program.ts";
 import { requireJsonObject, requireStringLiteral } from "../runtime_decode.ts";
@@ -21,12 +21,9 @@ export type TaskLeaseLifecycleDecisionOutcome =
   | "conflict"
   | "rejected";
 
-export interface TaskLeaseLifecycleDecisionTodo {
+export interface TaskLeaseLifecycleDecisionTodo extends LeaseEligibilityTodo {
   task_repository?: string | null;
   todo_id: string;
-  status: string;
-  claimed_by: string | null;
-  excluded_agents: readonly string[];
 }
 
 export interface TaskLeaseLifecycleDecisionLease {
@@ -131,6 +128,7 @@ function decodeTodo(value: unknown): TaskLeaseLifecycleDecisionTodo | null {
     todo_id: stringValue(todo.todo_id, "todo.todo_id"),
     task_repository: normalizeTodoRepository(todo.task_repository),
     status: stringValue(todo.status, "todo.status"),
+    task_class: nullableString(todo.task_class, "todo.task_class"),
     claimed_by: nullableString(todo.claimed_by, "todo.claimed_by"),
     excluded_agents: stringArray(todo.excluded_agents, "todo.excluded_agents"),
   };

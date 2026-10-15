@@ -139,7 +139,10 @@ def apply_team_plan(
     runtime = effective_runtime_root(registry_path, None)
     if find_registry_goal(load_registry(registry_path), goal_id) is None:
         raise ValueError("steward team plan proposal names an unknown Goal")
-    project, state = resolve_todo_state_path(registry_path=registry_path, goal_id=goal_id)
+    # The registered route is still required, but a missing display must not
+    # prevent the typed owner from recovering an exact canonical receipt.
+    project, state = resolve_todo_state_path(
+        registry_path=registry_path, goal_id=goal_id, require_existing=False)
     request = {
         "goal_id": goal_id, "plan": dict(proposal),
         "actor_agent_id": agent_id,
@@ -155,7 +158,8 @@ def apply_team_plan(
         goal = find_registry_goal(load_registry(registry_path), goal_id)
         if goal is None:
             raise ValueError("steward team plan proposal names an unknown Goal")
-        _, current_state = resolve_todo_state_path(registry_path=registry_path, goal_id=goal_id)
+        _, current_state = resolve_todo_state_path(
+            registry_path=registry_path, goal_id=goal_id, require_existing=False)
         if (effective_runtime_root(registry_path, None).resolve() != runtime.resolve()
                 or current_state.resolve() != state.resolve()):
             raise TeamPlanCommitError("team_plan_preview_stale", "team plan source binding changed after preview")
@@ -196,8 +200,20 @@ def apply_team_plan(
         # Observe the selected provider under the transition/source locks:
         # provider loss never authorizes a fallback to historical source.
         canonical = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal_id)
+        try:
+            source_bytes = state.read_bytes()
+        except FileNotFoundError:
+            source_bytes = None
+        try:
+            source_text = source_bytes.decode("utf-8") if source_bytes is not None else None
+        except UnicodeDecodeError:
+            if canonical is None:
+                raise
+            # Canonical history can still be read, but these bytes cannot
+            # establish fresh Goal intent or a historical Markdown receipt.
+            source_text = None
         # An exact pre-cutoff receipt is read-only recovery, not fresh work.
-        previous = previous_receipt(state.read_text(encoding="utf-8"))
+        previous = previous_receipt(source_text) if source_text is not None else None
         if previous is not None:
             return dict(effect_runtime_result("work_items.team_plan.plan", {
                 **request, "previous_receipt": previous})["result"])
@@ -210,7 +226,9 @@ def apply_team_plan(
             "source": {
                 "registry": str(registry_path.resolve()), "state_file": str(state.resolve()),
                 "registry_sha256": hashlib.sha256(registry_path.read_bytes()).hexdigest(),
-                "state_sha256": hashlib.sha256(state.read_bytes()).hexdigest(),
+                # Absence is an observation, never a fresh source witness.
+                # The native owner checks receipts before source admission.
+                "state_sha256": hashlib.sha256(source_bytes).hexdigest() if source_text is not None else None,
             },
             "locks": [cross_runtime_lock_witness(target) for target in targets],
         })

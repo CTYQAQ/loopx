@@ -393,34 +393,9 @@ def _register_project_goal_unlocked(
             )
         effective_root = resolve_runtime_root(registry, str(runtime_root) if runtime_root else None, registry_path=registry_path)
         if existing_project is not None and existing_goal is not None:
-            if state_file.exists():
-                existing_state = state_file.read_text(encoding="utf-8")
-                existing_updated_at = registration_state_updated_at(existing_state)
-                matching_state = (
-                    render_registration_state(
-                        project_id=project_id,
-                        goal_id=goal_id,
-                        objective=objective,
-                        non_goals=non_goals,
-                        acceptance=acceptance,
-                        unknowns=unknowns,
-                        next_effect=next_effect,
-                        stop_condition=stop_condition,
-                        updated_at=existing_updated_at,
-                    )
-                    if existing_updated_at is not None
-                    else None
-                )
-                if matching_state is None or not registration_state_matches(
-                    existing_state, matching_state, objective=objective,
-                ):
-                    raise ValueError(
-                        f"goal state file conflicts with registration: {state_file}"
-                    )
-            if not state_file.exists():
-                _atomic_write_text(state_file, state_text)
-            else:
-                changed = False
+            # A completed canonical operation can outlive its initial display.
+            # Defer source validation to the typed creation owner's request.
+            changed = False
         else:
             state_file.parent.mkdir(parents=True, exist_ok=True)
             state_created = False
@@ -442,13 +417,40 @@ def _register_project_goal_unlocked(
         for item in current_registry.get("goals", [])
         if isinstance(item, dict) and item.get("id") == goal_id
     )
+
+    def validate_registration_source(existing_state: str) -> None:
+        existing_updated_at = registration_state_updated_at(existing_state)
+        matching_state = (
+            render_registration_state(
+                project_id=project_id, goal_id=goal_id, objective=objective,
+                non_goals=non_goals, acceptance=acceptance, unknowns=unknowns,
+                next_effect=next_effect, stop_condition=stop_condition,
+                updated_at=existing_updated_at,
+            ) if existing_updated_at is not None else None
+        )
+        if matching_state is None or not registration_state_matches(
+            existing_state, matching_state, objective=objective,
+        ):
+            raise ValueError(f"goal state file conflicts with registration: {state_file}")
+
     storage_selection = initialize_goal_storage_target(
         effective_root,
         registered_goal,
         registry_path=registry_path,
+        validate_source=validate_registration_source,
     )
     if storage_selection is None or storage_selection.get("authority_initialized") is not True:
         raise RuntimeError("canonical project Goal initialization did not complete")
+
+    state_projection = None
+    if not state_file.exists():
+        from ..todos.provider_projection import project_current_canonical_todos
+
+        state_projection = project_current_canonical_todos(
+            registry_path=registry_path, runtime_root=effective_root,
+            goal_id=goal_id, project=knowledge_root, state_file=state_file,
+        )
+        changed = changed or state_projection["changed"]
 
     return {
         "ok": True,
@@ -459,6 +461,7 @@ def _register_project_goal_unlocked(
         "goal": goal_record,
         "state_file": str(state_file),
         "storage_selection": storage_selection,
+        **({"state_projection": state_projection} if state_projection is not None else {}),
     }
 
 

@@ -403,16 +403,16 @@ test("user-action metadata exception retains actor, binding, class, lifecycle an
     {facts: {}, input: {actor_agent_id: "agent-b"}, code: "bound_agent_mismatch"},
     {facts: {}, input: {actor_agent_id: null}, code: "actor_not_registered"},
     {facts: {excluded_agents: ["agent-a"]}, input: {}, code: "actor_excluded"},
-    {facts: {bound_agent: null}, input: {}, code: "handoff_mode_requires_lease"},
+    {facts: {bound_agent: null}, input: {}, code: "todo_not_executable"},
     {facts: {task_class: "user_gate"}, input: {}, code: "handoff_mode_requires_lease"},
     {facts: {role: "agent", task_class: "advancement_task", claimed_by: "agent-a"},
       input: {expected_role: "agent"}, code: "handoff_mode_requires_lease"},
-    {facts: {status: "blocked"}, input: {}, code: "handoff_mode_requires_lease"},
-    {facts: {}, input: {planning_intent: {status: "blocked"}}, code: "handoff_mode_requires_lease"},
-    {facts: {}, input: {planning_intent: {required_capabilities: ["shell"]}}, code: "handoff_mode_requires_lease"},
+    {facts: {status: "blocked"}, input: {}, code: "todo_not_executable"},
+    {facts: {}, input: {planning_intent: {status: "blocked"}}, code: "todo_not_executable"},
+    {facts: {}, input: {planning_intent: {required_capabilities: ["shell"]}}, code: "todo_not_executable"},
     {facts: {}, input: {planning_intent: {bound_agent: "agent-b"}}, code: "handoff_mode_requires_lease"},
-    {facts: {}, input: {lease_idempotency_key: "supplied-proof", lease_expected_version: 1}, code: "handoff_mode_requires_lease"},
-    {facts: {}, input: {lease_expected_version: 1}, code: "handoff_mode_requires_lease"},
+    {facts: {}, input: {lease_idempotency_key: "supplied-proof", lease_expected_version: 1}, code: "todo_not_executable"},
+    {facts: {}, input: {lease_expected_version: 1}, code: "todo_not_executable"},
   ];
   for (const {facts, input, code} of cases) {
     const {store, request} = await boundUserAction(facts);
@@ -424,8 +424,8 @@ test("user-action metadata exception retains actor, binding, class, lifecycle an
   }
 });
 
-test("user-action copy edits never bypass retained active, expired or released lease lineage", async () => {
-  for (const status of ["active", "expired", "released"]) {
+test("user-action copy edits require retained active or expired executions to be released", async () => {
+  for (const status of ["active", "expired"]) {
     for (const owner of ["agent-a", "agent-b"]) {
       const lease = {todo_id: "todo_a", owner, status, idempotency_key: "retained-key",
         version: 2, lease_epoch: 1, write_scopes: [], expires_at: status === "expired"
@@ -440,14 +440,13 @@ test("user-action copy edits never bypass retained active, expired or released l
   }
 });
 
-test("bound user-action metadata consumes a current lease proof without a claim or lease mutation", async () => {
-  const lease = {todo_id: "todo_a", owner: "agent-a", status: "active", idempotency_key: "copy-key",
+test("bound user-action metadata preserves released history without consuming execution proof", async () => {
+  const lease = {todo_id: "todo_a", owner: "agent-a", status: "released", idempotency_key: "copy-key",
     version: 2, lease_epoch: 1, write_scopes: [], expires_at: "2026-09-06T00:00:00Z"};
   const {store, request} = await boundUserAction({}, [lease]);
   const before = await store.loadAuthority();
   if (before.status !== "loaded") assert.fail("missing fixture");
-  const edit = {...request, expected_provider_revision: before.provider_revision,
-    lease_idempotency_key: "copy-key", lease_expected_version: 2};
+  const edit = {...request, expected_provider_revision: before.provider_revision};
   assert.equal((await executeCoordinationTodoUpdate(store, {...edit, dry_run: true})).status, "planned");
   assert.deepEqual(await store.loadAuthority(), before);
   const applied = await executeCoordinationTodoUpdate(store, edit);
@@ -470,7 +469,7 @@ test("bound user-action metadata consumes a current lease proof without a claim 
   assert.deepEqual(await store.loadAuthority(), after);
 });
 
-test("a bound user-action lease proof authorizes copy only and retains all execution fences", async () => {
+test("a retained user-action lease proof cannot authorize a new copy or execution edit", async () => {
   const cases: {facts?: Record<string, unknown>; lease?: Record<string, unknown>;
     input?: Partial<CoordinationTodoUpdateInput>}[] = [
     {input: {actor_agent_id: "agent-b"}}, {input: {actor_agent_id: null}},
@@ -499,17 +498,19 @@ test("a bound user-action lease proof authorizes copy only and retains all execu
   }
 });
 
-test("bound user-action recovery points to its current proof or a fresh lease, never an agent claim", async () => {
+test("bound user-action recovery requires exact release and never recommends another lease", async () => {
   for (const state of ["active", "released", "expired"] as const) {
     const lease = {todo_id: "todo_a", owner: "agent-a", status: state === "released" ? "released" : "active",
       idempotency_key: "copy-key", version: 2, lease_epoch: 1, write_scopes: [],
       expires_at: state === "expired" ? "2026-09-05T22:00:00Z" : "2026-09-06T00:00:00Z"};
     const {store, request} = await boundUserAction({}, [lease]);
     const before = await store.loadAuthority();
-    const result = await executeCoordinationTodoUpdate(store, request);
+    const result = await executeCoordinationTodoUpdate(store, {...request,
+      lease_idempotency_key: "copy-key", lease_expected_version: 2});
     assert.equal(result.status, "failed");
     const recovery = result.recovery as Record<string, unknown>;
-    assert.equal(recovery.action, state === "active" ? "inspect_current_proof" : "acquire_fresh_lease");
+    assert.equal(recovery.action, state === "released" ? "resolve_lifecycle_edit" : "reconcile_lease_owner");
+    assert.equal(recovery.acquire, undefined);
     assert.equal(recovery.execution_authority_granted, false);
     assert.deepEqual(await store.loadAuthority(), before);
   }

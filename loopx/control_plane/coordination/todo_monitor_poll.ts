@@ -17,6 +17,8 @@ export const COORDINATION_MONITOR_POLL_REQUEST_SCHEMA = "loopx_coordination_moni
 export const COORDINATION_LEASED_MONITOR_POLL_REQUEST_SCHEMA = "loopx_coordination_monitor_poll_request_v1";
 export const COORDINATION_WITNESSED_MONITOR_POLL_REQUEST_SCHEMA = "loopx_coordination_monitor_poll_request_v2";
 export const COORDINATION_GUARDED_MONITOR_POLL_REQUEST_SCHEMA = "loopx_coordination_monitor_poll_request_v3";
+/** v4 can only recover an existing receipt; older runtimes reject its schema. */
+export const COORDINATION_MONITOR_RECEIPT_ONLY_REQUEST_SCHEMA = "loopx_coordination_monitor_poll_request_v4";
 export const COORDINATION_MONITOR_POLL_RESULT_SCHEMA = "loopx_coordination_monitor_poll_result_v0";
 const RECEIPT_SCHEMA = "loopx_coordination_monitor_poll_receipt_v0";
 
@@ -31,6 +33,8 @@ export interface CoordinationMonitorPollInput {
   lease_proof?: TaskLeaseProof | null;
   /** New auxiliary effects must qualify dependencies on the commit head. */
   gate_scope_guard?: boolean;
+  /** A damaged display cannot authorize a fresh canonical observation. */
+  receipt_only?: boolean;
   /** Authority clock supplied by the runtime, never observation.generated_at. */
   now?: Date;
 }
@@ -88,6 +92,7 @@ function normalize(raw: CoordinationMonitorPollInput): NormalizedMonitorPollInpu
     dry_run: requireBoolean(raw.dry_run, "dry_run"),
     ...normalizeMonitorPollFields(raw.observation, raw.intent),
     gate_scope_guard: raw.gate_scope_guard == null ? false : requireBoolean(raw.gate_scope_guard, "gate_scope_guard"),
+    receipt_only: raw.receipt_only == null ? false : requireBoolean(raw.receipt_only, "receipt_only"),
     lease_proof: decodeTaskLeaseProof(raw.lease_proof), now: raw.now ?? new Date()};
   return input;
 }
@@ -120,6 +125,8 @@ export async function executeCoordinationMonitorPoll(store: AuthorityStore,
   const receipt = monitorReceipt(input, hash);
   const previous = await receipt.read(store);
   if (previous) return previous;
+  if (input.receipt_only) return rejection("monitor_poll_original_receipt_required",
+    "Original Monitor receipt is unavailable; restore the historical source before retrying recovery");
   if (!await authoritySourcesCurrent()) {
     return rejection(AUTHORITY_SOURCE_CHANGED.code, AUTHORITY_SOURCE_CHANGED.reason);
   }

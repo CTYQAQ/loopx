@@ -12,34 +12,24 @@ from ..coordination.local_authority import (
     LocalCoordinationAuthorityRejection,
     LocalCoordinationAuthorityUnavailable,
     raise_canonical_write_failure,
-    read_canonical_todos_if_promoted,
-    require_canonical_authority,
 )
 from ..effect_runtime import (
     CANONICAL_AUTHORITY_WRITE_TIMEOUT_SECONDS,
     effect_runtime_result,
 )
 from ..todos.provider_projection import settle_canonical_todo_projection
-
-
-
-
-def require_monitor_poll_source_available(*, runtime_root: Path, goal_id: str) -> None:
-    """Fail closed on unavailable promoted authority before unrelated quota work."""
-    if read_canonical_todos_if_promoted(runtime_root=runtime_root, goal_id=goal_id) is None:
-        require_canonical_authority(goal_id=goal_id, operation="monitor_poll")
-
-
 def poll_canonical_monitor_if_promoted(
     *, registry_path: Path, runtime_root: Path, goal_id: str, execute: bool,
     monitor_effect_id: str | None, agent_id: str | None,
     observation: dict[str, Any], intent: dict[str, Any],
     lease_proof: dict[str, Any] | None = None, gate_scope_guard: bool = False,
+    receipt_only: bool = False,
 ) -> dict[str, Any]:
     with authority_registry_source(registry_path) as registry_source:
         registered = registered_agent_ids_from_registry(registry_path, goal_id)
     result = effect_runtime_result("coordination.local_authority.monitor_poll", {
-        "schema_version": ("loopx_coordination_monitor_poll_request_v3" if gate_scope_guard
+        "schema_version": ("loopx_coordination_monitor_poll_request_v4" if receipt_only
+            else "loopx_coordination_monitor_poll_request_v3" if gate_scope_guard
             else "loopx_coordination_monitor_poll_request_v2"),
         **({"lease_proof": lease_proof} if lease_proof is not None else {}),
         **({"gate_scope_guard": True} if gate_scope_guard else {}),
