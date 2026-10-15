@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import fs, { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, {type TestContext} from "node:test";
+import {syncBuiltinESMExports} from "node:module";
 import { atomicWriteJson } from "../../loopx/control_plane/effect_runtime_io.ts";
 import { withCanonicalWriter } from "../../loopx/control_plane/coordination/local_authority_write.ts";
 import {
@@ -192,23 +193,70 @@ test("fence engagement refuses malformed durable maintenance before publishing",
   await assert.rejects(access(legacyCoordinationWriterFencePath(root, "goal-a")));
 });
 
-for (const kind of ["todo", "state", "lease"] as const) {
-  test(`fence engagement waits for an existing ${kind} writer before publication`, async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "loopx-fence-lock-"));
-    t.after(() => rm(root, {recursive: true, force: true}));
-    const statePath = join(root, "ACTIVE_GOAL_STATE.md");
-    await writeFile(statePath, "---\ngoal_id: goal-a\n---\n");
-    const lock = kind === "todo" ? legacyCoordinationTodoLockPath(root, "goal-a") : kind === "state" ? statePath : taskLeaseLockPath({runtime_root: root, goal_id: "goal-a"});
-    let pending: Promise<Record<string, unknown>> | undefined;
-    let completed = false;
-    await withFileMutationLock(lock, async () => {
-      pending = engageLegacyCoordinationWriterFence(fenceRequest(root)).then((result) => {completed = true; return result;});
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      assert.equal(completed, false, "the fence must not pass an active primary writer");
-      await assert.rejects(access(legacyCoordinationWriterFencePath(root, "goal-a")));
+// Observe a real failed exclusive open, rather than assuming an operation has
+// reached its lock after a wall-clock sleep. Slow startup must not let a broken
+// lock path pass before the test releases the primary writer.
+async function whileWriterContended(
+  t: TestContext, target: string, invoke: () => Promise<Record<string, unknown>>,
+  checkBlocked: () => Promise<void>,
+): Promise<Record<string, unknown>> {
+  let pending: Promise<Record<string, unknown>> | undefined;
+  try {
+    await withFileMutationLock(target, async () => {
+      const heldPath = await fs.realpath(`${target}.ts-effect.lock`);
+      let observed!: () => void;
+      const contention = new Promise<void>(resolve => { observed = resolve; });
+      const originalOpen = fs.open;
+      const probe = t.mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+        try {
+          return await originalOpen(...args);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "EEXIST" &&
+              await fs.realpath(String(args[0])) === heldPath) observed();
+          throw error;
+        }
+      });
+      syncBuiltinESMExports();
+      try {
+        pending = invoke();
+        const first = await Promise.race([
+          contention.then(() => "contended"),
+          pending.then(() => "completed"),
+        ]);
+        assert.equal(first, "contended", "the fence must encounter the active primary writer lock");
+        await checkBlocked();
+      } finally {
+        probe.mock.restore();
+        syncBuiltinESMExports();
+      }
     });
-    assert.equal((await pending)!.status, "applied");
-  });
+    return await pending!;
+  } finally {
+    // The real holder is released even after a failed assertion. Drain the
+    // operation before fixture cleanup, preserving the original test failure.
+    await pending?.catch(() => undefined);
+  }
+}
+
+for (const kind of ["todo", "state", "lease"] as const) {
+  for (const startupDelay of [0, 200]) {
+    const suffix = startupDelay ? " after delayed startup" : "";
+    test(`fence engagement waits for an existing ${kind} writer before publication${suffix}`, {timeout: 10_000}, async (t) => {
+      const root = await mkdtemp(join(tmpdir(), "loopx-fence-lock-"));
+      t.after(() => rm(root, {recursive: true, force: true}));
+      const statePath = join(root, "ACTIVE_GOAL_STATE.md");
+      await writeFile(statePath, "---\ngoal_id: goal-a\n---\n");
+      const lock = kind === "todo" ? legacyCoordinationTodoLockPath(root, "goal-a") : kind === "state" ? statePath : taskLeaseLockPath({runtime_root: root, goal_id: "goal-a"});
+      const result = await whileWriterContended(t, lock,
+        async () => {
+          if (startupDelay) await new Promise(resolve => setTimeout(resolve, startupDelay));
+          return engageLegacyCoordinationWriterFence(fenceRequest(root));
+        },
+        async () => { await assert.rejects(access(legacyCoordinationWriterFencePath(root, "goal-a"))); });
+      assert.equal(result.status, "applied");
+      assert.equal(JSON.parse(await readFile(legacyCoordinationWriterFencePath(root, "goal-a"), "utf8")).fence_id, "fence-a");
+    });
+  }
 }
 
 test("fence engagement requires the actual source state path", async (t) => {
