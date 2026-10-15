@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from loopx.control_plane.effect_runtime import effect_runtime_result
 from benchmark.runtime.worker import PHASE_WORK_RESERVE_SECONDS
@@ -61,7 +61,9 @@ def _post(controller: dict, route: str, body: dict, timeout: float) -> dict:
         data=json.dumps({**body, "admin_secret": controller["admin_secret"]}).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with build_opener(_NoRedirect).open(request, timeout=timeout) as response:
+        # Controller authority belongs to this explicit origin. Environment
+        # proxies must not redirect private native traffic or its credentials.
+        with build_opener(ProxyHandler({}), _NoRedirect).open(request, timeout=timeout) as response:
             result = json.load(response)
     except HTTPError as error:
         # A remote body can echo submitted credentials. Keep only the status.

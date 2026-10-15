@@ -873,6 +873,14 @@ reauthentication remains with the existing owner. Full research state means the
 declared participants needed to resume useful work, not a copy of every file or
 the model's unobservable internal state.
 
+The optional POSIX heartbeat CLI entry now disables only its worker process's
+soft core-dump limit before launching the native Host and tools. It preserves
+the hard limit, parent launcher and feature-off behavior. Existing declared
+files are still captured exactly; diagnostic retention or relocation is an
+explicit operator action, never a filename filter in the artifact owner.
+This prevents one source of later snapshot growth, but neither qualifies the
+capture deadline for arbitrary inputs nor provides process-memory recovery.
+
 Historical conversation truncation cannot reconstruct earlier code, research
 state or feedback consumption from their terminal versions. Without a qualified
 contemporaneous capture of those participants, such a probe establishes Host
@@ -950,6 +958,13 @@ owned or released, and failed
 resume prevents publication. This closes the manual provider's file-writer
 barrier gap only. No process memory, native cursor eligibility, external writers,
 automatic pre-decision handoff or isolated continuation are qualified by it.
+
+The automatic supervisor keeps the prepared deadline for the live-source
+barrier and native capture. After successful source release it seals only its
+private exported files under the captured original Host phase deadline, which
+also bounds typed artifact publication. Later source work cannot enter that
+point. This separates source hold time from final sealing; it grants no trial
+time, cooldown or opportunities. Direct callers retain their total timeout.
 
 The ordinary SForge worker's explicit warm entry composes these
 owners. It uses a fresh current preparation Todo with full retained evidence,
@@ -1076,6 +1091,21 @@ obligation itself remains ineligible; a subsequent genuinely new node can be
 captured. Retry, restart and a lost admission response preserve the original
 source-root/digest binding. This is a machine-enforced capture barrier, not
 additional execution or budget authority.
+
+A replayed guard can expose the next replan while the current Turn still owes
+its original Todo closeout. The checkpoint selector validates that original
+settlement identity and releases the response without capture or interruption;
+it must not treat the visible next obligation as this Turn's admitted capture
+boundary. The later properly bound replan remains eligible. The Unix transport
+and typed-owner regression cover this distinction; successful restoration alone
+still does not qualify an end-to-end research continuation.
+
+The same boundary covers the replan owner's `settlement_only` follow-through:
+recording a successor, writing its required vision or spending the original
+receipt does not admit another capture. Selection verifies the original
+settlement identity and semantic obligation, then releases the exact response
+without native interruption. The existing settlement owner still decides the
+remaining step; capture neither performs it nor grants a fresh work budget.
 
 Completed pre-model points now retain the original pending guard as a sealed
 participant, as interrupted points already do. The pending packet is read as
