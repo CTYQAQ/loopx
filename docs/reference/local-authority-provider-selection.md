@@ -545,6 +545,8 @@ module, response alias or test filename:
 | Imported completion, succession and policy repair | Typed terminal/update owners; shared provider conformance and actual CLI consumer smokes in the supplement. |
 | Claim/lease ownership and atomic completion | `test_canonical_handoff_invariants.py`, canonical mutation/claim-transfer tests and provider conformance. Metadata cannot implement the retired two-write handoff. |
 | Original-operation recovery | Fixed 1.x lease and team-plan artifacts guard exact replay, prepared matching effects, original release, lost close response and preservation of later state. Fresh legacy verification/grants remain retired. |
+| Current ownership policy | Only `soft_claim` and `hard_lease` admit current work. Imported `legacy` records and original receipts cannot grant execution; reviewed backup/plan/migrate and exact release remain available. |
+| Retired lease helpers | Delete the unused Python lease writer/factory, generation/CAS helpers, owner-validation chain, and source Todo projection. The typed transaction remains the decision owner; retained JSON reading stays read-only. Release corruption/CAS assertions run through the actual native adapter with fixed 1.x records. |
 | Reviewed App creation and configuration | Chat binds the accepted operation to the reviewed provider revision and Todo identity; stale preview rejects, corrected preview can retry. Settings preserve a disabled preference and explain the required upgrade. |
 | Mutation-oracle strength and packaging | The fence oracle observes actual exclusive-open contention, including delayed startup. Existing prerelease bundle and installed-package checks retain their independent scope. |
 
@@ -553,6 +555,15 @@ operation or an unobserved Host. Full current-head CI and the combined adopted
 candidate retain their own acceptance. Historical output aliases and tests
 whose only subject was a deleted producer are superseded by the typed current
 contract and its supported recovery tests.
+
+Retirement removes internal Python helper exports with no shipped caller or
+registered import contract; it does not remove CLI/API lease operations, the
+historical wire vocabulary or receipt decoding. Test fixtures describe source
+records directly instead of keeping a production writer solely to construct
+fixtures. Owner eligibility remains covered at its typed owner and by real
+canonical claim/lease transactions. Historical generation checks belong to
+native recovery/release, including corrupt boolean generations and unchanged
+bytes after rejection.
 
 ### 2.0 退役边界
 
