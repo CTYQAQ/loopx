@@ -186,8 +186,9 @@ layout or responsive navigation is introduced.
 
 </details>
 
-To disable future canonical creation, preview and apply the same v1 document
-with `canonical_creation=false`. Removing the preference restores the candidate
+In 2.0, `canonical_creation=false` preserves an inspectable preference but
+refuses new Goal creation. Enable canonical creation and review the preview
+before retrying. Removing the preference restores the candidate
 SQLite/hard-lease default for future new Goals; removal is **not** opt-out.
 To remove the whole preference:
 
@@ -247,7 +248,8 @@ CLI 使用上面的完整 JSON 和 preview/apply/inspect/bootstrap 命令；App 
 后的存储丢失须恢复完整备份，不能重新创建空库；通用 force 不能重建。原回执在
 后续写入后仍可读回，重试不得丢失或重复 Todo。
 
-显式设置 `canonical_creation=false` 才关闭之后的新建；remove 删除偏好会恢复候选
+2.0 中，显式 `canonical_creation=false` 保留可查看的偏好，但拒绝之后的新建；
+须启用并审核配置，再重试创建。remove 删除偏好会恢复候选
 SQLite/hard-lease 默认，不能用于关闭。两者均不会迁回已有数据、
 删除 fence 或重新开放旧 writer。既有 Goal 升级仍需备份、停止写入、结算租约和
 审核计划；反向迁移须保留新增写入。受支持的旧备份、格式和原回执恢复能力保留。
@@ -528,6 +530,29 @@ hard stops. Record representative usability/cost evidence separately from frozen
 D2 capacity/soak qualification; missing or failed D2 evidence stays visible.
 A microbenchmark failure alone does not block an unrelated, proven internal
 deletion, and passing those deletions does not certify the release default.
+
+### Retirement proposal reconciliation
+
+The contributor-led [#6396](https://github.com/loopx-project/loopx/pull/6396)
+and [supplement #2](https://github.com/Duang777/loopx/pull/2) carry the useful
+contracts from [#6366](https://github.com/loopx-project/loopx/pull/6366).
+Reconciliation follows supported behavior, rather than preserving every old
+module, response alias or test filename:
+
+| Contract | Current owner and regression evidence |
+| --- | --- |
+| Normal writer cutoff and deletion | Canonical mutation/creation/Monitor adapters; cold-source import and writer-isolation tests. Markdown mutation producers stay retired. |
+| Imported completion, succession and policy repair | Typed terminal/update owners; shared provider conformance and actual CLI consumer smokes in the supplement. |
+| Claim/lease ownership and atomic completion | `test_canonical_handoff_invariants.py`, canonical mutation/claim-transfer tests and provider conformance. Metadata cannot implement the retired two-write handoff. |
+| Original-operation recovery | Fixed 1.x lease and team-plan artifacts guard exact replay, prepared matching effects, original release, lost close response and preservation of later state. Fresh legacy verification/grants remain retired. |
+| Reviewed App creation and configuration | Chat binds the accepted operation to the reviewed provider revision and Todo identity; stale preview rejects, corrected preview can retry. Settings preserve a disabled preference and explain the required upgrade. |
+| Mutation-oracle strength and packaging | The fence oracle observes actual exclusive-open contention, including delayed startup. Existing prerelease bundle and installed-package checks retain their independent scope. |
+
+The absorption does not qualify a release, contributor adoption, sustained D2
+operation or an unobserved Host. Full current-head CI and the combined adopted
+candidate retain their own acceptance. Historical output aliases and tests
+whose only subject was a deleted producer are superseded by the typed current
+contract and its supported recovery tests.
 
 ### 2.0 退役边界
 

@@ -127,6 +127,14 @@ The existing delivery Todos should carry these concrete exits:
 This updates the existing R5/T4 frontier and release proposal; it creates no
 parallel migration owner, runtime gate or release activation.
 
+The retirement proposal is now reconciled through contributor-led #6396 and
+its fork supplement #2. The [absorption map](../../reference/local-authority-provider-selection.md#retirement-proposal-reconciliation)
+retains canonical ownership/terminal invariants, fixed 1.x receipt recovery,
+reviewed App creation and the actual-contention mutation oracle from #6366.
+The competing implementation stack is not an integration prerequisite; adopted
+combined-head validation, core trial, real Host and D2/release exits stay open.
+
+
 Team-plan recovery prerequisite: an unpromoted plan that published its original
 receipt can now recover through the Chat confirmation owner while shadow
 bootstrap is interrupted. Registry/Todo/source locks still protect the read,
