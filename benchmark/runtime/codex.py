@@ -16,6 +16,9 @@ DEFAULT_REPLAN_AFTER_TURNS = 6
 MODES = ("plain", "native-goal", "heartbeat", "turn", "loopx-goal")
 CONTEXTS = ("fresh", "resume")
 TASK_ENTRIES = ("seeded-todo", "loopx-planned")
+# "planned": the planning checkpoint also writes an owner-confirmed Goal
+# acceptance document; "off" keeps the existing closure semantics.
+ACCEPTANCE_CONTRACTS = ("off", "planned")
 SANDBOXES = ("read-only", "workspace-write", "danger-full-access")
 
 
@@ -28,6 +31,7 @@ class Execution:
     validation_command: tuple[str, ...] = ()
     task_entry: str | None = None
     turn_envelope: bool = False
+    acceptance_contract: str = "off"
 
     def __post_init__(self) -> None:
         if not isinstance(self.turn_envelope, bool) or (self.turn_envelope and self.mode != "heartbeat"):
@@ -40,6 +44,10 @@ class Execution:
             raise ValueError("unsupported task entry")
         if self.task_entry == "loopx-planned" and not self.uses_loopx:
             raise ValueError("loopx-planned requires a LoopX execution mode")
+        if self.acceptance_contract not in ACCEPTANCE_CONTRACTS:
+            raise ValueError("unsupported acceptance contract")
+        if self.acceptance_contract == "planned" and self.task_entry != "loopx-planned":
+            raise ValueError("acceptance_contract=planned requires loopx-planned task entry")
         if self.context != "fresh" and self.mode not in {"turn", "heartbeat"}:
             raise ValueError("resume requires mode=turn or mode=heartbeat")
         if self.sandbox not in SANDBOXES:

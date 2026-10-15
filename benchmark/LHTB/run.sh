@@ -51,6 +51,7 @@ LOOPX_TASK_ENTRY="${LOOPX_TASK_ENTRY:-}"
 [[ -z "${LOOPX_PLANNING_TIMEOUT_SEC:-}" ]] || die "Remove LOOPX_PLANNING_TIMEOUT_SEC; planning shares LOOPX_SCHEDULER_TIMEOUT_SEC with execution"
 LOOPX_ITERATION_CONTEXT="${LOOPX_ITERATION_CONTEXT:-fresh}"
 LOOPX_VALIDATION_COMMAND_JSON="${LOOPX_VALIDATION_COMMAND_JSON:-[]}"
+LOOPX_ACCEPTANCE_CONTRACT="${LOOPX_ACCEPTANCE_CONTRACT:-off}"
 SHARED_CODEX_AGENT_DIR="$LOOPX_SRC_DIR/benchmark/runtime"
 [[ -f "$SHARED_CODEX_AGENT_DIR/codex_offline.py" ]] || \
   die "Shared offline Codex adapter not found: $SHARED_CODEX_AGENT_DIR/codex_offline.py"
@@ -117,7 +118,9 @@ if [[ "$MODE" == smoke ]]; then
   expected_task_count=1
   job_suffix="smoke-${SMOKE_TASK}"
 fi
-job_name="lhtb-${LOOPX_EXECUTION_MODE}-${LOOPX_TASK_ENTRY:-default}-${LOOPX_ITERATION_CONTEXT}-${job_suffix}-${run_stamp}"
+acceptance_suffix=""
+[[ "$LOOPX_ACCEPTANCE_CONTRACT" == off ]] || acceptance_suffix="-acceptance-${LOOPX_ACCEPTANCE_CONTRACT}"
+job_name="lhtb-${LOOPX_EXECUTION_MODE}-${LOOPX_TASK_ENTRY:-default}${acceptance_suffix}-${LOOPX_ITERATION_CONTEXT}-${job_suffix}-${run_stamp}"
 generated_config="$CODE_DIR/.generated/${job_name}.yaml"
 jobs_dir="$CODE_DIR/runs"
 
@@ -142,6 +145,7 @@ fi
   "${task_entry_args[@]}" \
   --iteration-context "$LOOPX_ITERATION_CONTEXT" \
   --validation-command-json "$LOOPX_VALIDATION_COMMAND_JSON" \
+  --acceptance-contract "$LOOPX_ACCEPTANCE_CONTRACT" \
   "${turn_timeout_args[@]}" \
   --scheduler-timeout "$LOOPX_SCHEDULER_TIMEOUT_SEC" \
   "${task_args[@]}"

@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 import yaml
-from benchmark.runtime.codex import CONTEXTS, MODES, TASK_ENTRIES, Execution
+from benchmark.runtime.codex import ACCEPTANCE_CONTRACTS, CONTEXTS, MODES, TASK_ENTRIES, Execution
 
 
 def main() -> int:
@@ -28,6 +28,8 @@ def main() -> int:
     parser.add_argument("--task-entry", choices=TASK_ENTRIES,
                         help="LoopX modes default to loopx-planned; explicit seeded-todo retains legacy entry")
     parser.add_argument("--validation-command-json", default="[]")
+    parser.add_argument("--acceptance-contract", choices=ACCEPTANCE_CONTRACTS, default="off",
+                        help="planned: planning also writes an owner-confirmed Goal acceptance document")
     parser.add_argument("--turn-timeout", type=float, default=None)
     parser.add_argument("--scheduler-timeout", type=int, default=5080)
     args = parser.parse_args()
@@ -62,6 +64,7 @@ def main() -> int:
         timeout_seconds=args.turn_timeout,
         validation_command=json.loads(args.validation_command_json),
         task_entry=args.task_entry,
+        acceptance_contract=args.acceptance_contract,
     )
     agent["kwargs"].update(
         execution_mode=execution.mode,
@@ -70,6 +73,7 @@ def main() -> int:
         turn_timeout_sec=execution.timeout_seconds,
         scheduler_timeout_sec=args.scheduler_timeout,
         task_entry=execution.task_entry,
+        acceptance_contract=execution.acceptance_contract,
     )
     if agent["kwargs"].get("planning_timeout_sec") is not None:
         parser.error("remove planning_timeout_sec from the template; planning shares scheduler-timeout")

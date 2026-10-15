@@ -60,6 +60,7 @@ class BenchmarkCodex(CodexOffline):
         task_entry=None,
         planning_timeout_sec=None,
         turn_envelope=False,
+        acceptance_contract="off",
         task_objective=None,
         goal_id=_GOAL_ID,
         agent_id=_AGENT_ID,
@@ -76,6 +77,7 @@ class BenchmarkCodex(CodexOffline):
             validation_command if validation_command is not None else (),
             task_entry,
             turn_envelope,
+            acceptance_contract=acceptance_contract,
         )
         if planning_timeout_sec is not None:
             raise ValueError(
@@ -335,6 +337,10 @@ class BenchmarkCodex(CodexOffline):
             Path(name).unlink(missing_ok=True)
 
     @property
+    def _acceptance_document(self) -> str:
+        return f"{_CONTROL}/acceptance-phase-{self._phase_number:03d}.json"
+
+    @property
     def _task_document(self) -> str:
         # Existing Todos keep their original input when Harbor supplies a new phase.
         return f"{_CONTROL}/task-phase-{self._phase_number:03d}.md"
@@ -543,6 +549,9 @@ class BenchmarkCodex(CodexOffline):
                 **({"LOOPX_CHECKPOINT_REQUEST": self.checkpoint_request_path}
                    if self.checkpoint_request_path is not None else {}),
                 **({"LOOPX_TURN_ENVELOPE": "1"} if self.execution.turn_envelope else {}),
+                "LOOPX_ACCEPTANCE_CONTRACT": self.execution.acceptance_contract,
+                **({"LOOPX_ACCEPTANCE_DOCUMENT": self._acceptance_document}
+                   if self.execution.acceptance_contract == "planned" else {}),
                 "LOOPX_ITERATION_CONTEXT": self.execution.context,
                 "LOOPX_CODEX_SANDBOX": self.execution.sandbox,
                 "LOOPX_VALIDATION_COMMAND_JSON": json.dumps(
@@ -655,6 +664,8 @@ class BenchmarkCodex(CodexOffline):
             "iteration_context": self.execution.context,
             "task_entry": self.execution.task_entry,
             **({"turn_envelope": True} if self.execution.turn_envelope else {}),
+            **({"acceptance_contract": self.execution.acceptance_contract}
+               if self.execution.acceptance_contract != "off" else {}),
             "home_scope": "trial",
             **self._replan_receipt(),
             "benchmark_phase": self._phase_number,
@@ -715,6 +726,9 @@ class BenchmarkCodex(CodexOffline):
                     raise RuntimeError("Planning did not return verified Todo readback")
                 if entry["status"] == "blocked":
                     return
+                if (self.execution.acceptance_contract == "planned"
+                        and (entry.get("acceptance") or {}).get("status") != "applied"):
+                    raise RuntimeError("Planning did not configure the Goal acceptance contract")
             remaining = int(deadline - time.monotonic())
             if remaining <= 160:
                 raise TimeoutError("Task budget exhausted before execution handoff")

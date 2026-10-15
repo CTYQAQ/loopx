@@ -281,6 +281,7 @@ def run_once(env: dict[str, str]) -> dict:
         validation_command=json.loads(env.get("LOOPX_VALIDATION_COMMAND_JSON", "[]")),
         task_entry=env.get("LOOPX_TASK_ENTRY"),
         turn_envelope=env.get("LOOPX_TURN_ENVELOPE", "0") == "1",
+        acceptance_contract=env.get("LOOPX_ACCEPTANCE_CONTRACT", "off"),
     )
     stage = env.get("LOOPX_TASK_STAGE", "execute")
     if stage not in {"plan", "execute"} or (stage == "plan" and execution.task_entry != "loopx-planned"):
@@ -300,6 +301,8 @@ def run_once(env: dict[str, str]) -> dict:
         **({"turn_envelope": True} if execution.turn_envelope else {}),
         "stage": stage,
         "home_scope": "trial",
+        **({"acceptance_contract": execution.acceptance_contract}
+           if execution.acceptance_contract != "off" else {}),
         "ok": False,
         "timed_out": False,
     }
@@ -341,6 +344,11 @@ def run_once(env: dict[str, str]) -> dict:
         from benchmark.runtime.checkpoint_wake import CheckpointWake
 
         checkpoint_wake = checkpoint_context.enter_context(CheckpointWake(env, receipt))
+        if stage == "execute" and execution.acceptance_contract == "planned":
+            from benchmark.runtime.acceptance import reconfirm_planned_acceptance
+
+            # Owner re-confirmation of edited selected Todos; criteria never change here.
+            receipt["acceptance"] = reconfirm_planned_acceptance(env, loopx_command(env))
         body = "Finish the task."
         if stage == "plan":
             from benchmark.runtime.planning import render_planning_prompt, task_plan_packet
@@ -410,6 +418,11 @@ def run_once(env: dict[str, str]) -> dict:
                     receipt["planning"] = validate_plan_readback(
                         result, planning_before, task_plan_packet(env, loopx_command(env)),
                     )
+                    if execution.acceptance_contract == "planned" and receipt["planning"]["status"] == "ready":
+                        from benchmark.runtime.acceptance import apply_planned_acceptance
+
+                        receipt["planning"]["acceptance"] = apply_planned_acceptance(
+                            env, receipt["planning"], loopx_command(env))
                     target = Path(env["LOOPX_PLANNING_RESULT"])
                     temporary = target.with_suffix(".tmp")
                     temporary.write_text(json.dumps(receipt["planning"]))
