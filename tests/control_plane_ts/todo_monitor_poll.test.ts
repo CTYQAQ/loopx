@@ -54,6 +54,27 @@ test("monitor and independent successor commit together, preview is inert, recei
   "coordination_operation_identity_mismatch");
 });
 
+test("receipt-only recovery preserves the original hash and never plans fresh work", async () => {
+  const {store, request} = await seeded();
+  const before = await store.loadAuthority();
+  let sourceChecks = 0;
+  const source = async () => {sourceChecks += 1; return false;};
+  const missing = await executeCoordinationMonitorPoll(store, {...request, receipt_only: true}, source);
+  assert.equal(missing.reason_code, "monitor_poll_original_receipt_required");
+  assert.equal(sourceChecks, 0);
+  assert.deepEqual(await store.loadAuthority(), before);
+  assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+  assert.equal((await executeCoordinationMonitorPoll(store, request)).status, "applied");
+  const after = await store.loadAuthority();
+  assert.equal((await executeCoordinationMonitorPoll(store, {...request, receipt_only: true}, source)).status, "replayed");
+  assert.equal((await executeCoordinationMonitorPoll(store, {...request, receipt_only: false})).status, "replayed");
+  const changed = await executeCoordinationMonitorPoll(store, {...request, receipt_only: true,
+    intent: {...request.intent, next_agent_todo: "A different operation"}}, source);
+  assert.equal(changed.reason_code, "coordination_operation_identity_mismatch");
+  assert.equal(sourceChecks, 0);
+  assert.deepEqual(await store.loadAuthority(), after);
+});
+
 test("invalid successor, inactive target, ownership and exclusion reject before any write", async () => {
   for (const overrides of [{status: "done", done: true}, {archive_state: "archive"},
     {claimed_by: "agent-b"}, {excluded_agents: ["agent-a"]}, {bound_agent: "agent-b"}]) {

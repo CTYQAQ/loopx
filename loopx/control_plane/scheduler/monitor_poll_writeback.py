@@ -9,6 +9,7 @@ from ..todos.contract import (
 )
 from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 from ..coordination.local_authority import (
+    LocalCoordinationAuthorityRejection,
     read_canonical_todos_if_promoted,
     require_canonical_authority,
 )
@@ -110,22 +111,42 @@ def write_monitor_poll_todo_state(
         "gate_scope_guard": gate_scope_guard, "legacy_batch_version": legacy_batch_version}
     from .provider_monitor_poll import (
         poll_canonical_monitor_if_promoted,
-        require_monitor_poll_source_available,
     )
 
-    require_monitor_poll_source_available(
+    # A selected provider must be readable before any historical fallback.
+    # An unmigrated source may still replay its exact business receipt; that
+    # typed readback does not admit a fresh Monitor write or drain old captures.
+    authority = read_canonical_todos_if_promoted(
         runtime_root=runtime_root,
         goal_id=goal_id,
     )
+    source_error: OSError | ValueError | None = None
     if monitor_effect_id and lease_proof is None:
         # Legacy receipts are historical facts even after authority promotion.
-        previous = replay_legacy_monitor_poll(registry_path=registry_path, request=request)
+        try:
+            previous = replay_legacy_monitor_poll(registry_path=registry_path, request=request)
+        except (OSError, ValueError) as error:
+            if authority is None:
+                raise
+            # Keep the typed native receipt available when its display is
+            # damaged. v4 forbids planning or committing if that receipt is
+            # absent; a malformed historical source never permits fresh work.
+            previous = None
+            source_error = error
         if previous is not None:
             return previous
-    canonical = poll_canonical_monitor_if_promoted(
-        registry_path=registry_path, runtime_root=runtime_root, goal_id=goal_id,
-        execute=execute, monitor_effect_id=monitor_effect_id, agent_id=agent_id,
-        lease_proof=lease_proof, gate_scope_guard=gate_scope_guard,
-        observation=observation, intent=intent,
-    )
+    if authority is None:
+        require_canonical_authority(goal_id=goal_id, operation="monitor_poll")
+    try:
+        canonical = poll_canonical_monitor_if_promoted(
+            registry_path=registry_path, runtime_root=runtime_root, goal_id=goal_id,
+            execute=execute, monitor_effect_id=monitor_effect_id, agent_id=agent_id,
+            lease_proof=lease_proof, gate_scope_guard=gate_scope_guard,
+            receipt_only=source_error is not None,
+            observation=observation, intent=intent,
+        )
+    except LocalCoordinationAuthorityRejection as error:
+        if source_error is not None and error.code == "monitor_poll_original_receipt_required":
+            raise source_error from error
+        raise
     return canonical
