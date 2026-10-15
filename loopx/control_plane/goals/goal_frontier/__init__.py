@@ -1746,7 +1746,8 @@ def build_goal_frontier_projection_context_from_status(
                 user_todo_summary=user_todo_summary, agent_todo_summary=summary,
                 work_lane_contract=work_lane_contract, agent_id=agent_id,
                 existing_replan_obligation=None, agent_todo_source_items=agent_todo_source_items,
-                _frontier_counts=frontier_counts,
+                # Reconstruct the admitted closed-row source, not the current
+                # frontier: independent work may have arrived after admission.
             ),
         )
 

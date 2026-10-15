@@ -103,8 +103,9 @@ def _todo_binding_facts(item: Mapping[str, Any] | None) -> dict[str, Any] | None
 def restore_receipt_bound_todo_source(
     payload: dict[str, Any], *, registry_path: Path, runtime_root: Path,
     goal_id: str, todo_id: str | None, replay_phase: ReceiptBoundReplayPhase | None,
+    replan_guard_scoped: bool = False,
 ) -> dict[str, Any]:
-    """Complete a display snapshot from the original binding's exact reader.
+    """Complete a display snapshot from the original binding's provider reader.
 
     Display lane caps cannot decide whether a committed Todo still exists.
     This only transports provider facts to the existing decision owner; it
@@ -112,6 +113,23 @@ def restore_receipt_bound_todo_source(
     """
     from ..todos.quota_summary import select_planning_inventory_source_items
 
+    if replan_guard_scoped and replay_phase is ReceiptBoundReplayPhase.OPEN:
+        # A replan receipt names an obligation, not a Todo. Its lifecycle
+        # source may be absent from every bounded display lane; the typed
+        # owner still validates the original source identity and timestamps.
+        from ..todos.list_readback import list_goal_todos
+
+        source = list_goal_todos(
+            registry_path=registry_path, runtime_root_arg=str(runtime_root), goal_id=goal_id,
+        )
+        todo_fields = {key: source[key] for key in ("user_todos", "agent_todos")}
+        queue = payload.get("attention_queue") or {}
+        return {**payload, "attention_queue": {**queue, "items": [
+            {**row, **todo_fields,
+                "project_asset": {**(row.get("project_asset") or {}), **todo_fields}}
+            if row.get("goal_id") == goal_id else row
+            for row in queue.get("items") or []
+        ]}}
     if not todo_id or replay_phase is ReceiptBoundReplayPhase.SETTLED:
         return payload
     queue = payload.get("attention_queue") or {}
