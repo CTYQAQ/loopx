@@ -11,8 +11,9 @@ from test_replan_successor_guard_reentry import AGENT, GOAL, _fixture, _guard
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("later_user_gate", [False, True])
 def test_hidden_completed_source_recovers_its_original_guard_after_new_work(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, later_user_gate: bool,
 ) -> None:
     original_id = "todo_original_lifecycle"
     completion_key = "local_completion_" + sha256(
@@ -60,6 +61,11 @@ def test_hidden_completed_source_recovers_its_original_guard_after_new_work(
         "--claimed-by", AGENT, "--text", "Validate the newly requested independent source.",
         "--task-class", "advancement_task", "--action-kind", "validate",
         "--target-key", "new-independent-source")
+    user_gate = None
+    if later_user_gate:
+        user_gate = call("todo", "add", "--goal-id", GOAL, "--role", "user",
+            "--agent-id", AGENT, "--task-class", "user_gate", "--global-gate",
+            "--text", "Authorize the separate newly requested source.")
 
     recovered = _guard(call, turn)
     assert recovered["heartbeat_receipt"]["settlement_identity"] == identity
@@ -93,5 +99,12 @@ def test_hidden_completed_source_recovers_its_original_guard_after_new_work(
     assert call(*spend)["settlement_progress"]["state"] == "settled"
     assert call(*spend)["appended"] is False
     assert call("todo", "list", "--goal-id", GOAL, "--todo-id", later["todo_id"])["todo"]["status"] == "open"
+    if user_gate:
+        assert call("todo", "list", "--goal-id", GOAL, "--todo-id", user_gate["todo_id"])["todo"]["status"] == "open"
+        fresh = _guard(call, "turn-independent-source-after-lifecycle")
+        interaction = fresh["interaction_contract"]
+        assert interaction["agent_channel"]["delivery_allowed"] is False
+        assert interaction["agent_channel"]["must_attempt"] is False
+        assert interaction["response_plan"]["decision"] == "ask_user"
     assert len([row for row in index.read_text().splitlines()
         if json.loads(row).get("classification") == "quota_slot_spent"]) == 1
