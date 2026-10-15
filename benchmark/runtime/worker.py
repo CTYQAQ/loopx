@@ -320,6 +320,9 @@ def run_once(env: dict[str, str]) -> dict:
                 execution, timeout_seconds=(remaining - PHASE_WORK_RESERVE_SECONDS if execution.timeout_seconds is None
                                              else min(execution.timeout_seconds, remaining - PHASE_WORK_RESERVE_SECONDS))
             )
+        if env.get("LOOPX_WARM_START"):
+            from benchmark.runtime.sforge_warm_start import finish_preparation
+            receipt["warm_preparation"] = finish_preparation(env)
         prepare_codex_home(
             home,
             execution=execution,
@@ -330,6 +333,10 @@ def run_once(env: dict[str, str]) -> dict:
             api_key=env.get("OPENAI_API_KEY", ""),
             wire_api=env.get("CODEX_WIRE_API", "responses"),
             skills=Path(env["LOOPX_SHARED_SKILLS"]) if execution.uses_loopx else None,
+            web_search=env.get("LOOPX_WEB_SEARCH", "disabled"),
+            model_catalog=(
+                Path(env["LOOPX_MODEL_CATALOG"]) if env.get("LOOPX_MODEL_CATALOG") else None
+            ),
         )
         from benchmark.runtime.checkpoint_wake import CheckpointWake
 
@@ -456,6 +463,15 @@ def main() -> int:
         raise KeyboardInterrupt("worker cancelled")
 
     signal.signal(signal.SIGTERM, cancelled)
+    if (os.name == "posix" and os.environ.get("LOOPX_CHECKPOINT_REQUEST")
+            and os.environ.get("LOOPX_EXECUTION_MODE", "heartbeat") == "heartbeat"):
+        # This entrypoint owns one disposable worker process. Its native Host
+        # and tools inherit the soft limit; the parent launcher and hard limit
+        # stay unchanged. Crash memory is not a resumable file participant.
+        import resource
+
+        _, hard = resource.getrlimit(resource.RLIMIT_CORE)
+        resource.setrlimit(resource.RLIMIT_CORE, (0, hard))
     receipt = run_once(dict(os.environ))
     print(json.dumps(receipt))
     if receipt.get("budget_exhausted") and receipt["mode"] in {"heartbeat", "turn"}:

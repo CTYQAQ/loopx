@@ -31,13 +31,7 @@ from .provider_create import create_canonical_todo_if_promoted
 from .provider_terminal_lifecycle import route_terminal_call
 from ...paths import effective_runtime_root
 from .completed_archive import (
-    DEFAULT_COMPLETED_TODO_ARCHIVE_HEADROOM,
-    DEFAULT_MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE,
-)
-
-
-ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE = max(
-    0, DEFAULT_MAX_ACTIVE_DONE_TODOS_BEFORE_ARCHIVE - DEFAULT_COMPLETED_TODO_ARCHIVE_HEADROOM
+    ARCHIVE_COMPLETED_DEFAULT_MAX_ACTIVE_DONE,
 )
 
 
