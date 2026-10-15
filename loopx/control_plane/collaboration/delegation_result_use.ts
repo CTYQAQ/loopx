@@ -15,7 +15,7 @@ type Input = {operation_id: string; ref: string; sha256: string; input_ref: stri
 type Node = {operation_id: string; accepted: boolean; artifacts: {ref: string; sha256: string}[]; inputs: Input[]};
 export const DELEGATION_RESULT_USE_MAX_OPERATIONS = 64;
 export const DELEGATION_RESULT_USE_MAX_DEPTH = 16;
-export const DELEGATION_RESULT_USE_MAX_SECONDS = 30;
+export const DELEGATION_RESULT_USE_MAX_SECONDS = 15;
 
 export function delegationResultUseLimits(): JsonObject {
   return {max_operations: DELEGATION_RESULT_USE_MAX_OPERATIONS,
