@@ -873,6 +873,14 @@ reauthentication remains with the existing owner. Full research state means the
 declared participants needed to resume useful work, not a copy of every file or
 the model's unobservable internal state.
 
+The optional POSIX heartbeat CLI entry now disables only its worker process's
+soft core-dump limit before launching the native Host and tools. It preserves
+the hard limit, parent launcher and feature-off behavior. Existing declared
+files are still captured exactly; diagnostic retention or relocation is an
+explicit operator action, never a filename filter in the artifact owner.
+This prevents one source of later snapshot growth, but neither qualifies the
+capture deadline for arbitrary inputs nor provides process-memory recovery.
+
 Historical conversation truncation cannot reconstruct earlier code, research
 state or feedback consumption from their terminal versions. Without a qualified
 contemporaneous capture of those participants, such a probe establishes Host

@@ -166,6 +166,16 @@ source boundary, not adversarial filesystem mutation or a cross-owner transactio
 Native session reconstruction, effect reconciliation, fresh authority admission
 and evaluator cooldown/opportunity inheritance must pass before matched continuation.
 
+An explicitly checkpoint-enabled POSIX heartbeat CLI worker sets its own soft
+core-dump limit to zero before starting the native Host and its tools. This
+prevents crash memory dumps from growing a later workspace snapshot. The hard
+limit and parent launcher stay unchanged; workers without this opt-in retain
+their inherited limits. Existing files are never removed or silently excluded:
+retain any existing crash diagnostic outside the declared participants before
+requesting a new point. Omit the checkpoint declaration on a new worker to
+retain ordinary launch behavior. This is file/session reconstruction, not
+process-memory recovery or permission to inspect crash memory.
+
 For pre-decision capture at a **fresh replan projected at the start of a heartbeat
 wake**, add `"trigger": "fresh_replan"` and set `destination` to the trial's
 `checkpoints` directory itself. The Host preloads that wake's original quota guard
