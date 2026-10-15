@@ -395,7 +395,6 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "global-todos",
         "goal-actions",
         "goal-alignment",
-        "goal-direction",
         "amendment-proposal",
         "goal-amendment-proposal",
         "handoff-mode",
@@ -423,7 +422,6 @@ MANPAGE_COMMAND_HELP_ONLY = frozenset(
         "value-connectors",
         "version",
         "worker-bridge",
-        "zcode-goal",
     }
 )
 
