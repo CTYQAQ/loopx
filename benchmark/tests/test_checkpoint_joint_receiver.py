@@ -939,6 +939,7 @@ print('Current grow adopted: two complete candidates 9 and 10 validated; origina
             (wakes / boundary_turn).mkdir()
             boundary = {"turn_id": boundary_turn, "mode": "heartbeat", "stage": "execute", "ok": False}
             capture_before_replan(env, boundary, "Current new decision contract.")
+            assert boundary["checkpoint_restore"]["native_continuation_cursor"] == grown["completed_turn_id"]
             if boundary["checkpoint"].get("reason") == "no_fresh_replan":
                 # Capture eligibility does not manufacture a quota obligation.
                 # This source may not have another due review yet.

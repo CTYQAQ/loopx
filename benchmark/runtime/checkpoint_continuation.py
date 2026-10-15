@@ -14,7 +14,12 @@ from loopx.control_plane.quota.settlement import read_heartbeat_settlement
 from loopx.control_plane.turn_driver.codex_sessions import load_codex_cli_session
 
 
-def restored_capture_gate(env, current_obligation_id=None):
+def restored_capture_gate(env, current_obligation_id=None, *, full_history=True):
+    """Admit a capture attempt; a cursor preflight is not full history proof.
+
+    Preparation callers retain full verification. Capture hooks may defer the
+    expensive prefix read only because both capture observations enforce it.
+    """
     root = Path(env["LOOPX_RUNTIME_ROOT"])
     lineage = {"goal_id": env["LOOPX_GOAL_ID"], "agent_id": env["LOOPX_AGENT_ID"]}
     binding = load_codex_cli_session(root, lineage=lineage, session_scope="agent")
@@ -22,7 +27,7 @@ def restored_capture_gate(env, current_obligation_id=None):
         return {"capture_allowed": True}
     from .codex import Execution
     from .sessions import BenchmarkSessionWake
-    from loopx.hosts.codex_checkpoint import native_session_checkpoint
+    from loopx.hosts.codex_checkpoint import native_completed_cursor, native_session_checkpoint
 
     wake = BenchmarkSessionWake(env, Execution(context="resume",
         sandbox=env.get("LOOPX_CODEX_SANDBOX", "danger-full-access")), {})
@@ -86,7 +91,13 @@ def restored_capture_gate(env, current_obligation_id=None):
             # Qualification happens before launching this wake's model. A
             # current receipt alone cannot stand in for native continuation.
             native = metadata["native_session"]
-            native_session_checkpoint(env, wake.session_id, timeout=30, retained_history=native)
+            if full_history:
+                observed = native_session_checkpoint(env, wake.session_id, timeout=30, retained_history=native)
+                cursor = observed["metadata"]["completed_turn_id"]
+            else:
+                cursor = native_completed_cursor(env, wake.session_id,
+                    retained_turn_ids=native["turn_ids"], timeout=30)
+            result["native_continuation_cursor"] = cursor
             result["review_turn_id"] = guard_path.parent.name
             break
     result["checkpoint_sha256"] = sha
@@ -102,3 +113,28 @@ def restored_capture_gate(env, current_obligation_id=None):
            if packet is not None else "This source has no retained pending replan packet.\n\n")
     )
     return result
+
+
+def restored_capture_history(env, preflight, *, session_id):
+    """Rebind full capture to the source and completed cursor seen before work.
+
+    This never treats an absent/new session binding as a non-restored shortcut.
+    The existing typed owner still decides canonical review acceptance.
+    """
+    binding = load_codex_cli_session(Path(env["LOOPX_RUNTIME_ROOT"]), lineage={
+        "goal_id": env["LOOPX_GOAL_ID"], "agent_id": env["LOOPX_AGENT_ID"]}, session_scope="agent")
+    sha = binding.get("checkpoint_artifact_sha256") if binding else None
+    expected = (preflight or {}).get("checkpoint_sha256")
+    if sha != expected:
+        raise ValueError("restored capture source changed after preflight")
+    if sha is None:
+        return {}
+    cursor = preflight.get("native_continuation_cursor")
+    if (preflight.get("capture_allowed") is not True or binding.get("session_id") != session_id or
+            not isinstance(cursor, str) or not cursor or not binding.get("checkpoint_artifact_root")):
+        raise ValueError("restored capture requires its admitted session and completed cursor")
+    manifest = effect_runtime_result("runtime.checkpoint_artifacts", {
+        "action": "read_basis", "root": binding["checkpoint_artifact_root"], "expected_sha256": sha,
+    })
+    return {"retained_history": manifest["point_metadata"]["native_session"],
+            "required_completed_turn_id": cursor}
