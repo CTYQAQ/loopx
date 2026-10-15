@@ -194,7 +194,7 @@ function useCapabilityMutation({ goalId, loading, onApplied, selected, t }: Read
 
 function CapabilityMutationFeedback({ mutationError, onApplied, partialWrite, preview }: Readonly<{
   mutationError: string | null;
-  onApplied: () => void;
+  onApplied: () => Promise<void>;
   partialWrite: GoalConfigurationPartialWrite | null;
   preview: GoalConfigurationPreview | null;
 }>) {
@@ -214,7 +214,7 @@ function CapabilityMutationFeedback({ mutationError, onApplied, partialWrite, pr
               : "capabilities.partialWriteDescription")}</p>
             <small>{partialWrite.recommended_action}</small>
           </div>
-          <button onClick={onApplied} type="button"><RefreshCw aria-hidden size={15} />{t("capabilities.refreshSource")}</button>
+          <button onClick={() => void onApplied()} type="button"><RefreshCw aria-hidden size={15} />{t("capabilities.refreshSource")}</button>
         </section>
       ) : null}
       {preview ? (
@@ -304,7 +304,7 @@ function CapabilityCatalog({ callbacks, catalog, goalId, loading, notification, 
 
         {selected.capability_id === "progress_review" && selected.observation ? <section className="personal-capability-observation" aria-label={locale === "zh-CN" ? "审查证据读回" : "Review evidence readback"}>
           <h3>{locale === "zh-CN" ? "审查证据读回" : "Review evidence readback"}</h3>
-          <button type="button" onClick={onApplied}>{locale === "zh-CN" ? "重新读取审查证据" : "Recheck review evidence"}</button>
+          <button type="button" onClick={() => void onApplied()}>{locale === "zh-CN" ? "重新读取审查证据" : "Recheck review evidence"}</button>
           <p>{selected.observation.read_state === "unavailable" ? (locale === "zh-CN" ? "审查存储不可读，当前判断未知。" : "Review storage unavailable; current judgment unknown.")
             : selected.observation.read_state === "missing" ? (locale === "zh-CN" ? "尚无审查回执。" : "No review receipts yet.")
             : `${selected.observation.receipt_count} ${locale === "zh-CN" ? "条已读取回执" : "loaded receipts"}`}</p>
@@ -451,7 +451,7 @@ export function GoalCapabilitySettings({ callbacks, goalId, notification, onChan
       <section className="personal-capability-error" role="alert">
         <AlertTriangle aria-hidden size={18} />
         <span><strong>{t("capabilities.loadFailed")}</strong><small>{error}</small></span>
-        <button onClick={load} type="button"><RefreshCw aria-hidden size={15} />{t("capabilities.retry")}</button>
+        <button onClick={() => void load()} type="button"><RefreshCw aria-hidden size={15} />{t("capabilities.retry")}</button>
       </section>
     );
   }
