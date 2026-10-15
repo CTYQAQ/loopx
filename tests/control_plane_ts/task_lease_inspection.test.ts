@@ -50,6 +50,8 @@ async function fixture(t: test.TestContext, provider: Provider, schema: "native"
     {name: "archived", todo: {archive_state: "archive"}, active: false, constraint: {effective: false, reason: "todo_not_found"}},
     {name: "orphan", todo: null, active: false, constraint: {effective: false, reason: "todo_not_found"}},
     {name: "closed", todo: {status: "done", done: true}, active: false, constraint: {effective: false, reason: "todo_not_open", todo_status: "done"}},
+    {name: "user-action", todo: {role: "user", task_class: "user_action", bound_agent: "agent-b"},
+      active: false, constraint: {effective: false, reason: "todo_not_executable"}},
     {name: "excluded", todo: {excluded_agents: ["agent-a"], claimed_by: "agent-b"}, active: false,
       constraint: {effective: false, reason: "owner_excluded_from_todo", excluded_agents: ["agent-a"]}},
     {name: "claim", todo: {claimed_by: "agent-b"}, active: false,

@@ -216,6 +216,7 @@ function decodeDecisionTodo(value: unknown): TodoFact | null {
   return {
     todo_id: stringValue(todo.todo_id, "todo.todo_id"),
     status: stringValue(todo.status, "todo.status"),
+    task_class: decisionNullableString(todo.task_class, "todo.task_class"),
     claimed_by: decisionNullableString(todo.claimed_by, "todo.claimed_by"),
     excluded_agents: decisionStringArray(todo.excluded_agents, "todo.excluded_agents"),
     task_repository: normalizeTodoRepository(todo.task_repository),
