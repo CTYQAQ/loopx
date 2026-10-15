@@ -463,6 +463,38 @@ def test_invalid_controller_import_never_registers_or_regrades(controllers, tmp_
         assert (bank / "foreign").read_text() == "keep"
 
 
+def test_controller_connects_to_declared_origin_without_environment_proxy(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi import FastAPI, Request
+    from fastapi.responses import JSONResponse
+
+    origin, proxy = FastAPI(), FastAPI()
+    origin_requests, proxy_requests = [], []
+
+    async def capture(request):
+        origin_requests.append(await request.json())
+        return {"source": "declared-origin"}
+
+    capture.__annotations__["request"] = Request
+    origin.post("/api/v1/checkpoint/capture")(capture)
+
+    @proxy.middleware("http")
+    async def intercept(request, call_next):
+        proxy_requests.append(await request.body())
+        return JSONResponse({"source": "unexpected-proxy"})
+
+    with server(origin) as url, server(proxy) as proxy_url:
+        for key in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
+            monkeypatch.setenv(key, proxy_url)
+        for key in ("no_proxy", "NO_PROXY"):
+            monkeypatch.setenv(key, "")
+        result = transport._post({"url": url, "admin_secret": "synthetic-credential"},
+                                 "/api/v1/checkpoint/capture", {"token": "source"}, 5)
+    assert result == {"source": "declared-origin"}
+    assert origin_requests == [{"token": "source", "admin_secret": "synthetic-credential"}]
+    assert proxy_requests == []
+
+
 def test_redirect_never_forwards_controller_authority(tmp_path):
     pytest.importorskip("fastapi")
     from fastapi import FastAPI

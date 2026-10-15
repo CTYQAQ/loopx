@@ -551,6 +551,9 @@ Restore writes its new token only to the explicit
 private result file; stdout contains its path. Wrong authority, corrupt bytes,
 aliases, foreign bank entries, source-run reuse and duplicate native admission
 fail without a fresh evaluation. Redirects cannot forward the admin secret.
+Controller HTTP requests connect directly to the configured origin, ignoring
+environment proxy settings. This applies only to the explicitly invoked native
+capsule adapter; it does not change model API or installation proxy behavior.
 After an uncertain restore response, repeat the same controller `restore` command
 with `--recover`, preserving the same capsule digest, run identity, result-file
 and optional phase-deadline-file. Recovery reads the original native activation
