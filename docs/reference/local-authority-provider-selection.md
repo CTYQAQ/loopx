@@ -550,6 +550,13 @@ module, response alias or test filename:
 | Reviewed App creation and configuration | Chat binds the accepted operation to the reviewed provider revision and Todo identity; stale preview rejects, corrected preview can retry. Settings preserve a disabled preference and explain the required upgrade. |
 | Mutation-oracle strength and packaging | The fence oracle observes actual exclusive-open contention, including delayed startup. Existing prerelease bundle and installed-package checks retain their independent scope. |
 
+The ordinary lease CLI routes `renew`, `transfer` and `release` by the recorded
+provider. Unpromoted retries reach the retained typed lifecycle owner, which
+recognizes the original prepared/committed receipt before refusing fresh work.
+A successful historical renewal or transfer replay is not a current execution
+proof. Changed intent, ambiguous prepared effects and unavailable selected
+providers still refuse; the public adapter does not implement receipt decisions.
+
 Recovery and new execution retain separate admission paths. An unmigrated
 Monitor may finish its original quota transaction only from its matching retained
 business receipt; missing or changed evidence cannot rerun the observation,
@@ -602,6 +609,11 @@ bytes after rejection.
 不可用时明确失败；不降级到 Markdown writer，不破坏历史恢复，回退保留迁移后的
 新写入。现有回归覆盖不等于长期 SQLite、真实 PostgreSQL、打包 App 或发布默认
 已通过，trial 与正式默认的资格继续分别记录。
+
+普通 lease CLI 的 renew／transfer／release 按原 provider 路由；未迁移的原操作重试
+先由既有 typed lifecycle owner 核验 prepared／committed 回执，再拒绝真正的新工作。
+历史 renew／transfer 的成功回读不提供当前执行证明；改意图、prepared 效果歧义或
+已选 provider 不可用仍拒绝，Python adapter 不新增回执判断规则。
 
 恢复与新执行分开准入：先验证已选 provider 可用性，再核验原操作的 typed 回执，
 最后才判断新写入。未迁移 Monitor 只能凭原业务回执完成原 quota 事务；缺失、损坏
