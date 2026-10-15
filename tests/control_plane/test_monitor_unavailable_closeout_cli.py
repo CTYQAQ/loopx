@@ -117,6 +117,13 @@ def test_unavailable_monitor_closes_original_turn_without_observation_or_debit(
                        "--target-key", "synthetic-source", "--result-hash", "synthetic-observed",
                        *lease_args,
                        "--execute")
+        if provider == "markdown":
+            assert rc == 1 and poll["error_code"] == "canonical_authority_required", poll
+            assert poll["write_admitted"] is False
+            assert poll["legacy_fallback_used"] is False
+            assert _classification_count(runtime, "quota_monitor_poll") == 0
+            assert _spend_run_count(runtime) == 0
+            return
         assert rc == 0 and poll["appended"] is True, poll
         rc, denied = cli(*refresh)
         assert rc != 0 and denied["appended"] is False, denied
@@ -247,15 +254,25 @@ def test_unavailable_monitor_closes_original_turn_without_observation_or_debit(
 
     # A newly executable independent advancement belongs to the same recovery
     # host Turn after the original effect is closed, without a third identity.
-    if provider != "markdown":
-        rc, restored = cli("task-lease", "release", "--goal-id", GOAL_ID, "--todo-id", MONITOR_ID,
-                           "--owner", AGENT_ID, "--idempotency-key", f"unavailable-{provider}",
-                           "--expected-version", str(lease["lease"]["version"]))
-        assert rc == 0, restored
-    rc, successor = cli("todo", "add", "--goal-id", GOAL_ID, "--role", "agent",
-                        "--text", "Inspect an independent public source.", "--task-class", "advancement_task",
-                        "--claimed-by", AGENT_ID,
-                        *(("--operation-id", f"independent-{provider}") if provider != "markdown" else ()))
+    successor_args = (
+        "todo", "add", "--goal-id", GOAL_ID, "--role", "agent",
+        "--text", "Inspect an independent public source.",
+        "--task-class", "advancement_task", "--claimed-by", AGENT_ID,
+    )
+    if provider == "markdown":
+        state_before_add = state.read_bytes()
+        rc, successor = cli(*successor_args)
+        assert rc == 1 and successor["error_code"] == "canonical_authority_required", successor
+        assert successor["write_admitted"] is False
+        assert successor["legacy_fallback_used"] is False
+        assert state.read_bytes() == state_before_add
+        return
+
+    rc, restored = cli("task-lease", "release", "--goal-id", GOAL_ID, "--todo-id", MONITOR_ID,
+                       "--owner", AGENT_ID, "--idempotency-key", f"unavailable-{provider}",
+                       "--expected-version", str(lease["lease"]["version"]))
+    assert rc == 0, restored
+    rc, successor = cli(*successor_args, "--operation-id", f"independent-{provider}")
     assert rc == 0, successor
     rc, next_turn = cli("quota", "should-run", "--goal-id", GOAL_ID, "--codex-app",
                         "--agent-id", AGENT_ID, "--turn-instance-id", recovery_turn, *capabilities)

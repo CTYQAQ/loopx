@@ -242,8 +242,8 @@ def build_goal_configuration_catalog(
                     "cutover to canonical local authority."
                 ),
                 "effect": (
-                    "Captures transaction-bound Todo and task-lease mutations in "
-                    "the file-v0 shadow used by parity qualification."
+                    "Retains inspection and bootstrap controls for pre-cutoff "
+                    "file-v0 shadow lineage; normal writes no longer feed it."
                 ),
                 "does_not": [
                     "promote the Goal or fence legacy writers",

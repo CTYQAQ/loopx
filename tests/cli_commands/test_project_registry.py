@@ -14,6 +14,14 @@ from loopx.control_plane.projects import registry as project_registry
 from loopx.control_plane.projects import registry_codec
 
 
+def canonical_storage_target(_runtime_root: Path) -> dict[str, object]:
+    return {
+        "schema_version": "loopx_new_goal_storage_target_v1",
+        "provider": "sqlite",
+        "handoff_mode": "hard_lease",
+    }
+
+
 @pytest.mark.parametrize("objective", [
     "Deliver the Atlas import pipeline.",
     "```text Deliver the Atlas import pipeline. ```",
@@ -105,6 +113,61 @@ def test_project_register_creates_project_goal_and_resumable_state(
     assert items == {"user": [], "agent": []}
     assert archive == []
     assert active_state_section_text(state, "Objective") == " ".join(objective.split())
+
+
+def test_project_register_resumes_interrupted_canonical_initialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loopx.control_plane.effect_runtime import restart_effect_runtime
+    from tests.control_plane.canonical_authority_fixture import isolate_sqlite_runtime
+
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    knowledge_root = tmp_path / "atlas"
+    registry_path = knowledge_root / ".loopx" / "registry.json"
+    runtime_root = tmp_path / "runtime"
+    arguments = {
+        "registry_path": registry_path,
+        "runtime_root": runtime_root,
+        "project_id": "atlas",
+        "project_kind": "work",
+        "knowledge_root": knowledge_root,
+        "goal_id": "atlas-import",
+        "objective": "Deliver the Atlas import pipeline.",
+        "non_goals": [],
+        "acceptance": ["A verified import report is produced."],
+        "unknowns": [],
+        "next_effect": "Inspect Atlas.",
+        "stop_condition": "Stop while Atlas is unavailable.",
+        "repository_bindings": [],
+        "external_locator_bindings": [],
+        "resolve_new_goal_storage_target": canonical_storage_target,
+    }
+    initialize = project_registry.initialize_goal_storage_target
+
+    def interrupt(*_args, **_kwargs):
+        raise TimeoutError("canonical initialization interrupted")
+
+    monkeypatch.setattr(project_registry, "initialize_goal_storage_target", interrupt)
+    with pytest.raises(TimeoutError, match="initialization interrupted"):
+        project_registry.register_project_goal(**arguments)
+
+    pending = json.loads(registry_path.read_text(encoding="utf-8"))["goals"][0]
+    assert pending["coordination"]["storage_target"]["schema_version"] == (
+        "loopx_new_goal_storage_target_v1"
+    )
+    assert pending["creation_operation_id"].startswith("goal-create:project-register:")
+
+    monkeypatch.setattr(project_registry, "initialize_goal_storage_target", initialize)
+    try:
+        recovered = project_registry.register_project_goal(**arguments)
+        assert recovered["changed"] is False
+        assert recovered["storage_selection"]["authority_initialized"] is True
+        assert recovered["storage_selection"]["creation_operation_id"] == (
+            pending["creation_operation_id"]
+        )
+    finally:
+        restart_effect_runtime()
 
 
 def test_project_register_defaults_to_knowledge_root_when_global_registry_exists(
@@ -221,23 +284,28 @@ def test_project_register_serializes_one_state_across_distinct_registries(
     knowledge_root = tmp_path / "atlas"
     registry_paths = [tmp_path / f"registry-{index}.json" for index in range(8)]
 
-    def register(registry_path: Path) -> dict[str, object]:
-        return project_registry.register_project_goal(
-            registry_path=registry_path,
-            runtime_root=tmp_path / "runtime",
-            project_id="atlas",
-            project_kind="work",
-            knowledge_root=knowledge_root,
-            goal_id="atlas-import",
-            objective="Deliver the Atlas import pipeline.",
-            non_goals=[],
-            acceptance=["A verified import report is produced."],
-            unknowns=[],
-            next_effect="Inspect Atlas.",
-            stop_condition="Stop while Atlas is unavailable.",
-            repository_bindings=[],
-            external_locator_bindings=[],
-        )
+    def register(registry_path: Path) -> tuple[str, object]:
+        try:
+            result = project_registry.register_project_goal(
+                registry_path=registry_path,
+                runtime_root=tmp_path / "runtime",
+                project_id="atlas",
+                project_kind="work",
+                knowledge_root=knowledge_root,
+                goal_id="atlas-import",
+                objective="Deliver the Atlas import pipeline.",
+                non_goals=[],
+                acceptance=["A verified import report is produced."],
+                unknowns=[],
+                next_effect="Inspect Atlas.",
+                stop_condition="Stop while Atlas is unavailable.",
+                repository_bindings=[],
+                external_locator_bindings=[],
+                resolve_new_goal_storage_target=canonical_storage_target,
+            )
+        except ValueError as error:
+            return "rejected", str(error)
+        return "registered", result
 
     with ThreadPoolExecutor(max_workers=len(registry_paths)) as executor:
         results = list(executor.map(register, registry_paths))
@@ -245,8 +313,14 @@ def test_project_register_serializes_one_state_across_distinct_registries(
     state_file = (
         knowledge_root / ".loopx" / "goals" / "atlas-import" / "ACTIVE_GOAL_STATE.md"
     )
-    assert all(result["ok"] is True for result in results)
-    assert all(path.exists() for path in registry_paths)
+    registered = [result for status, result in results if status == "registered"]
+    rejected = [result for status, result in results if status == "rejected"]
+    assert len(registered) == 1
+    assert registered[0]["ok"] is True
+    assert len(rejected) == len(registry_paths) - 1
+    assert all("bound to canonical authority through another registry" in str(error)
+               for error in rejected)
+    assert sum(path.exists() for path in registry_paths) == 1
     assert state_file.exists()
 
 
@@ -273,6 +347,7 @@ def test_project_register_conflict_does_not_create_losing_root_under_concurrency
                 stop_condition="Stop while Atlas is unavailable.",
                 repository_bindings=[],
                 external_locator_bindings=[],
+                resolve_new_goal_storage_target=canonical_storage_target,
             )
         except ValueError:
             return "conflict", knowledge_root
@@ -386,7 +461,7 @@ def test_project_register_repeated_identical_request_is_a_noop(
         assert registry_path.read_bytes() == registry_before
 
 
-def test_project_register_reuses_legacy_state_from_strict_registry(
+def test_project_register_rejects_rebinding_canonical_creation_source_from_strict_registry(
     tmp_path: Path, capsys,
 ) -> None:
     project = tmp_path / "atlas"
@@ -421,10 +496,9 @@ def test_project_register_reuses_legacy_state_from_strict_registry(
     registry_path.write_text(json.dumps(envelope, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     before = registry_path.read_bytes()
 
-    assert main(args) == 0
+    assert main(args) == 1
     result = json.loads(capsys.readouterr().out)
-    assert result["changed"] is False
-    assert result["state_file"] == str(legacy_state)
+    assert "not bound to the registered original operation" in result["error"]
     assert registry_path.read_bytes() == before
     assert legacy_state.exists() and not new_state.exists()
 

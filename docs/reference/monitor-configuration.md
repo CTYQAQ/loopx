@@ -2,8 +2,9 @@
 
 `todo update` changes an existing Monitor's configuration. After whole-Goal
 promotion it uses the same TS planning/CAS/receipt owner as other supported
-Todo updates; it does not read Markdown as authority. Before promotion it
-uses the legacy writer and the same typed configuration policy.
+Todo updates; it does not read Markdown as authority. In 2.0 an unmigrated
+Goal returns `canonical_authority_required`; back up and migrate it before
+retrying the configuration write.
 
 ```sh
 loopx todo update --goal-id demo --todo-id todo_watch --agent-id agent-a \
@@ -84,8 +85,9 @@ route/handoff/closure behavior; existing v0/v1/v2 requests keep their input cont
 
 ## 中文
 
-Monitor 配置修改复用 `todo update`。晋升后由 TS 在同一个 canonical revision 上
-校验并提交状态、事件和回执；晋升前保留 legacy writer，复用相同 typed 配置规则。
+Monitor 配置修改复用 `todo update`。TS 在同一个 canonical revision 上校验并提交
+状态、事件和回执；2.0 中未迁移 Goal 返回 `canonical_authority_required`，需先备份
+并迁移后再重试。
 上面的 CLI 给出了预览、带 operation ID 的执行和回读；operation ID 只适用于已
 晋升 Goal，修正或撤销使用新 ID，重试同一请求使用原 ID。
 

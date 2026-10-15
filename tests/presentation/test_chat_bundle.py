@@ -299,6 +299,58 @@ def test_release_predecessor_is_stable_older_and_checksum_verified(
     assert downloads == ["v1.0.5"]
 
 
+def test_release_predecessor_supports_prerelease_target(monkeypatch):
+    releases = [[
+        {
+            "tag_name": "v1.4.0",
+            "draft": False,
+            "prerelease": False,
+            "assets": [{"name": "loopx-1.4.0-py3-none-any.whl"}],
+        },
+        {
+            "tag_name": "v2.0.0",
+            "draft": False,
+            "prerelease": False,
+            "assets": [{"name": "loopx-2.0.0-py3-none-any.whl"}],
+        },
+    ]]
+    monkeypatch.setattr(
+        builder.subprocess,
+        "check_output",
+        lambda *args, **kwargs: json.dumps(releases),
+    )
+    downloads = []
+
+    def download(command, **kwargs):
+        downloads.append(command[3])
+        directory = Path(command[command.index("--dir") + 1])
+        wheel = directory / "loopx-1.4.0-py3-none-any.whl"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr(
+                "loopx/web/chat/index.html",
+                '<script src="/chat/assets/old.js"></script>',
+            )
+            archive.writestr("loopx/web/chat/assets/old.js", "old code")
+        (directory / "SHA256SUMS").write_text(
+            f"{builder.contract.digest(wheel)}  {wheel.name}\n"
+        )
+
+    monkeypatch.setattr(builder.subprocess, "run", download)
+    builds = []
+    monkeypatch.setattr(
+        builder,
+        "build",
+        lambda previous, **kwargs: builds.append(
+            (previous / "assets/old.js").read_text()
+        ),
+    )
+
+    builder.release_build("v2.0.0a1", "fixture/repository")
+
+    assert downloads == ["v1.4.0"]
+    assert builds == ["old code"]
+
+
 def test_windows_drive_paths_are_not_portable_bundle_names():
     assert not builder.contract.safe_relative("C:/escape.js")
     assert not builder.contract.safe_relative("C:escape.js")
