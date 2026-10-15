@@ -1674,6 +1674,9 @@ export async function executeCoordinationTodoTerminalLifecycle(
     );
   }
 
+  const terminalDecisionReceipt = authority.authority_mode === "delegated_orchestration_override"
+    ? {...authority, authority_reason: input.authority_reason} : authority;
+
   if (authority.outcome === "no_change" && (edit === null || !edit.changed) && terminalUpgradeReceipt === null) {
     const existingSuccessorIds = Array.isArray(todo.successor_todo_ids)
       ? todo.successor_todo_ids.map((value, index) =>
@@ -1692,7 +1695,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
       todo_id: input.todo_id,
       command: input.command,
       changed: false,
-      terminal_decision: authority,
+      terminal_decision: terminalDecisionReceipt,
       successor_todo_ids: existingSuccessorIds,
       generated_successor_todo_ids: [],
       validation_receipt: null,
@@ -1842,7 +1845,7 @@ export async function executeCoordinationTodoTerminalLifecycle(
     ...(input.decision_outcome === null ? {} : {decision_outcome: input.decision_outcome}),
     ...(followthrough?.unblock_resume ? {unblock_resume: followthrough.unblock_resume} : {}),
     ...(followthrough?.decision_scope_resolution ? {decision_scope_resolution: followthrough.decision_scope_resolution} : {}),
-    terminal_decision: authority,
+    terminal_decision: terminalDecisionReceipt,
     successor_todo_ids: successorIds,
     generated_successor_todo_ids: generatedSuccessorIds,
     generated_successors: successorCandidates,

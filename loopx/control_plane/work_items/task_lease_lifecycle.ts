@@ -43,7 +43,6 @@ import {
   normalizeOwner,
   normalizeTodoId,
   readLease,
-  revalidateAuthoritySources,
   TaskLeaseAcquireError,
   taskLeaseDirectory,
   taskLeaseLockPath,
@@ -51,11 +50,9 @@ import {
   type AuthorityFacts,
   type LeaseRecord,
   type TodoFact,
-  type TodoFactField,
 } from "./task_lease_acquire.ts";
 import {
   decideTaskLeaseLifecycle,
-  materializeTaskLeaseLifecycle,
   releasedTaskLeaseRecord as releasedLease,
   type TaskLeaseLifecycleDecision,
   type TaskLeaseLifecycleDecisionInput,
@@ -838,50 +835,7 @@ function errorInfo(error: unknown, fallbackStage: LifecycleStage = "durable_writ
   };
 }
 
-function authorityTodo(
-  request: LifecycleRequest,
-): TodoFact | null {
-  if (request.authority?.todo_projection_error) {
-    const error = request.authority.todo_projection_error;
-    throw new TaskLeaseLifecycleError(
-      error.message,
-      error.code,
-      error.payload,
-      "validation",
-    );
-  }
-  const projected = request.authority?.todos.get(request.todo_id) ?? null;
-  if (request.todo && projected && !todoFactsMatch(request.todo, projected)) {
-    throw new TaskLeaseLifecycleError(
-      "caller todo snapshot disagrees with the canonical authority projection",
-      "authority_todo_mismatch",
-      { goal_id: request.goal_id, todo_id: request.todo_id },
-      "validation",
-    );
-  }
-  // The authority projection is the only authorization source.  A caller
-  // supplied Todo can elaborate it, but cannot create an otherwise missing
-  // row or override its state.
-  return projected;
-}
 
-function todoFactsMatch(left: TodoFact, right: TodoFact): boolean {
-  const provided = left.provided_fields;
-  // Lifecycle authority depends on the core identity/state fields.  They are
-  // required by the compact caller contract and remain strict even when an
-  // older producer omitted optional metadata.  The latter can be derived by
-  // the canonical projection, so absence is treated as "unspecified".
-  const matchesOptional = (field: TodoFactField, equal: boolean): boolean =>
-    provided === undefined || provided.includes(field) ? equal : true;
-  return left.todo_id === right.todo_id &&
-    left.status === right.status &&
-    left.claimed_by === right.claimed_by &&
-    JSON.stringify(left.excluded_agents) === JSON.stringify(right.excluded_agents) &&
-    matchesOptional("role", (left.role ?? null) === (right.role ?? null)) &&
-    matchesOptional("task_class", (left.task_class ?? null) === (right.task_class ?? null)) &&
-    matchesOptional("bound_agent", left.bound_agent === right.bound_agent) &&
-    matchesOptional("blocks_agent", left.blocks_agent === right.blocks_agent);
-}
 
 function ownerError(
   request: LifecycleRequest,
@@ -1060,6 +1014,24 @@ function ordinaryDecision(
   return decideTaskLeaseLifecycle(input);
 }
 
+function rejectFreshSourceLeaseOperation(request: LifecycleRequest): never {
+  throw new TaskLeaseLifecycleError(
+  "Canonical authority is required; back up and migrate this Goal before mutating a task lease",
+  "canonical_authority_required",
+  {
+    goal_id: request.goal_id,
+    operation: `task_lease_${request.operation}`,
+    write_admitted: false,
+    decision_read_from_provider: false,
+    legacy_fallback_used: false,
+    recovery: {
+      action: "migrate_goal_authority",
+      backup_required: true,
+    },
+  },
+);
+}
+
 async function ordinaryOperation(
   request: LifecycleRequest,
   dependencies: LifecycleDependencies,
@@ -1125,13 +1097,14 @@ async function ordinaryOperation(
     return replay;
   }
 
-  let todo: TodoFact | null = null;
+  // Prepared-with-matching-bytes and committed receipts above are recovery.
+  // A missing/ambiguous effect cannot be renewed or transferred after cutoff.
   if (request.operation !== "release") {
-    const authority = request.authority;
-    if (!authority) throw new TaskLeaseLifecycleError("authority is required", "authority_required");
-    await revalidateAuthoritySources(authority.source_receipts);
-    todo = authorityTodo(request);
+    rejectFreshSourceLeaseOperation(request);
   }
+
+  await requireLegacyCoordinationPrimaryWriteAllowed(request.runtime_root, request.goal_id);
+  const todo: TodoFact | null = null;
   const decision = ordinaryDecision(request, existing, todo, at);
   if (decision.outcome === "conflict" || decision.outcome === "rejected") {
     if (
@@ -1141,64 +1114,36 @@ async function ordinaryOperation(
       decision.code === "owner_excluded_from_todo" ||
       decision.code === "owner_conflicts_with_claim"
     ) {
-      const rejectedOwner = request.operation === "transfer" &&
-          decision.code === "owner_not_registered" &&
-          !request.authority?.registered_agents.includes(request.owner!)
-        ? request.owner
-        : request.operation === "transfer" ? request.new_owner : request.owner;
+      const rejectedOwner = request.owner;
       throw ownerError(request, decision.code, todo, rejectedOwner);
     }
     throw transitionError(request, decision.code, existing, leasePath);
   }
 
-  if (request.operation === "release") {
-    if (decision.code === "lease_missing") {
-      return {
-        ok: true,
-        schema_version: "task_lease_v0",
-        action: "release",
-        released: false,
-        missing: true,
-        lease_path: leasePath,
-        ...(request.authority?.handoff_mode
-          ? { handoff_mode: request.authority.handoff_mode }
-          : {}),
-        settlement: lifecycleSettlement(request, "committed"),
-      };
-    }
-    if (decision.code === "lease_release_replay" && existing !== null) {
-      return responseForOrdinary(request, leasePath, existing, true, { released: true });
-    }
-    if (existing === null || decision.next_lease === null) {
-      throw transitionError(request, "invalid_lease_snapshot", existing, leasePath);
-    }
-    const next = releasedLease(existing, at);
-    const response = responseForOrdinary(request, leasePath, next, false, { released: true });
-    await persistOperationReceipt(request, "prepared", next, response);
-    await dependencies.beforeWrite?.(next);
-    await atomicWriteJson(leasePath, next);
-    await persistOperationReceipt(request, "committed", next, response);
-    return response;
+  if (decision.code === "lease_missing") {
+    return {
+      ok: true,
+      schema_version: "task_lease_v0",
+      action: "release",
+      released: false,
+      missing: true,
+      lease_path: leasePath,
+      ...(request.authority?.handoff_mode
+        ? { handoff_mode: request.authority.handoff_mode }
+        : {}),
+      settlement: lifecycleSettlement(request, "committed"),
+    };
+  }
+  if (decision.code === "lease_release_replay" && existing !== null) {
+    return responseForOrdinary(request, leasePath, existing, true, { released: true });
   }
   if (existing === null || decision.next_lease === null) {
     throw transitionError(request, "invalid_lease_snapshot", existing, leasePath);
   }
-  const next = materializeTaskLeaseLifecycle(existing, {
-    operation: request.operation as "renew" | "transfer", owner: request.owner!,
-    idempotency_key: request.idempotency_key!, expected_version: request.expected_version,
-    ttl_seconds: request.ttl_seconds, new_owner: request.new_owner,
-    new_idempotency_key: request.new_idempotency_key,
-  }, decision, at);
-  const response = responseForOrdinary(
-    request,
-    leasePath,
-    next,
-    false,
-    request.operation === "renew" ? { renewed: true } : { transferred: true },
-  );
+  const next = releasedLease(existing, at);
+  const response = responseForOrdinary(request, leasePath, next, false, { released: true });
   await persistOperationReceipt(request, "prepared", next, response);
   await dependencies.beforeWrite?.(next);
-  if (request.authority) await revalidateAuthoritySources(request.authority.source_receipts);
   await atomicWriteJson(leasePath, next);
   await persistOperationReceipt(request, "committed", next, response);
   return response;
@@ -1608,27 +1553,14 @@ export async function executeTaskLeaseLifecycle(
         },
       );
     }
-    if (request.operation !== "release") {
-      throw new TaskLeaseLifecycleError(
-        "Canonical authority is required; back up and migrate this Goal before mutating a task lease",
-        "canonical_authority_required",
-        {
-          goal_id: request.goal_id,
-          operation: `task_lease_${request.operation}`,
-          write_admitted: false,
-          decision_read_from_provider: false,
-          legacy_fallback_used: false,
-          recovery: {
-            action: "migrate_goal_authority",
-            backup_required: true,
-          },
-        },
-      );
-    }
+    // Presence only selects the recovery path. The existing owner re-reads the
+    // receipt and current lease under both locks; it never mints a fresh grant.
+    if (request.operation !== "release" && await readOperationReceipt(
+      operationReceiptPath(request), request, leasePathFor(request),
+    ) === null) rejectFreshSourceLeaseOperation(request);
     return await withFileMutationLock(
       legacyCoordinationLeaseLockPath(request.runtime_root, request.goal_id),
       () => withFileMutationLock(lockPathFor(request!), async () => {
-        await requireLegacyCoordinationPrimaryWriteAllowed(request!.runtime_root, request!.goal_id);
         return await ordinaryOperation(request!, dependencies);
       }),
     );

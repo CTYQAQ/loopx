@@ -440,3 +440,22 @@ test("hard-lease divergence and terminal replay fail closed in the established o
   assert.equal(replayed.code, "terminal_replay");
   assert.equal(replayed.idempotent, true);
 });
+test("unneeded malformed delegation cannot block ordinary actor authority", () => {
+  for (const evaluate of [evaluateCoordinationTodoTerminalDecision, evaluateCoordinationTodoMutationDecision]) {
+    const build = evaluate === evaluateCoordinationTodoTerminalDecision ? request : mutation;
+    const invalid = [{agent_id: "agent-b", actions: [], requires_reason: true}];
+    const own = build({handoff_mode: "soft_claim", lifecycle_grants: invalid});
+    assert.equal(evaluate(own).outcome, "apply");
+    assert.equal(evaluate({...own, actor_agent_id: "unknown"}).code, "actor_not_registered");
+    assert.equal(evaluate({...own, todo: {...own.todo, excluded_agents: ["agent-a"]}}).code, "actor_excluded");
+    // This caller really needs delegation: malformed authority must fail closed.
+    assert.throws(() => evaluate({...own, actor_agent_id: "agent-b"}), /supported actions/);
+    const granted = {...own, actor_agent_id: "agent-b", authority_reason: "reviewed worker result",
+      lifecycle_grants: [{agent_id: "agent-b", actions: [own.authority_action]}]};
+    assert.equal(evaluate(granted).authority_mode, "delegated_orchestration_override");
+    assert.equal(evaluate({...granted, authority_reason: null}).code, "delegation_reason_required");
+    assert.throws(() => evaluate({...granted, lifecycle_grants: [
+      {agent_id: "agent-b", actions: [own.authority_action], requires_reason: null},
+    ]}), /requires_reason/);
+  }
+});
