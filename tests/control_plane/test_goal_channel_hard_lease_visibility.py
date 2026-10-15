@@ -321,20 +321,28 @@ def test_status_attention_queue_surfaces_hard_lease_end_to_end(
     from the attention item's goal_channel_projection and fails this test.
     """
 
+    from canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    from loopx.control_plane.todos.todo_summary import canonical_todo_read_record, structured_todo_item
     from loopx.status import collect_status
-    from loopx.todos import add_goal_todo
 
     registry, repo, runtime_root = _write_status_workspace(tmp_path)
-    added = add_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        role="agent",
-        text="Deliver one bounded control-plane change.",
-        task_class="advancement_task",
-        claimed_by="agent-b",
-    )
-    todo_id = added["todo_id"]
+    todo_id = TODO_ID
     lease = _write_active_lease(runtime_root, owner="agent-a", todo_id=todo_id)
+    # Import the conflicting historical facts together. A fresh canonical
+    # acquire would correctly refuse this owner/claim mismatch.
+    initialize_canonical_authority(
+        runtime_root, GOAL_ID,
+        build_todo_runtime_shadow_projection(
+            goal_id=GOAL_ID, handoff_mode="hard_lease", leases=[lease],
+            todos=[canonical_todo_read_record(structured_todo_item({
+                "todo_id": todo_id, "role": "agent", "status": "open",
+                "text": "Deliver one bounded control-plane change.",
+                "task_class": "advancement_task", "claimed_by": "agent-b",
+            }, role="agent", source_section="Agent Todo"))],
+        ),
+        state_path=repo / "ACTIVE_GOAL_STATE.md",
+    )
 
     payload = collect_status(
         registry_path=registry,
@@ -351,6 +359,8 @@ def test_status_attention_queue_surfaces_hard_lease_end_to_end(
     assert items, "expected an attention item for the fixture goal"
     projection = items[0].get("goal_channel_projection")
     assert isinstance(projection, dict)
+    assert projection["coordination_observation"]["source_authority"] == "file_v0"
+    assert projection["coordination_observation"]["legacy_fallback_used"] is False
     assert _entries_with_status(projection, "soft_claim") == [
         {"todo_id": todo_id, "owner_agent": "agent-b", "status": "soft_claim"}
     ]
