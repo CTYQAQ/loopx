@@ -1002,6 +1002,15 @@ def record_quota_monitor_poll_for_decision(
             ) as source_admission:
                 native, after_status = transact(source_admission)
     except ValueError as exc:
+        from ..coordination.local_authority import (
+            CanonicalAuthorityRequired,
+            LocalCoordinationAuthorityRejection,
+        )
+
+        if isinstance(exc, CanonicalAuthorityRequired):
+            # Moving fresh admission under the quota lock must preserve the
+            # public refusal type and its structured migration/no-write facts.
+            raise
         payload = failure(
             str(exc),
             include_capability_retry=(
@@ -1012,10 +1021,6 @@ def record_quota_monitor_poll_for_decision(
         if isinstance(exc, _NativeMonitorPollRejected):
             payload["error_code"] = exc.diagnostic_code
         else:
-            from ..coordination.local_authority import (
-                LocalCoordinationAuthorityRejection,
-            )
-
             if isinstance(exc, LocalCoordinationAuthorityRejection):
                 payload["error_code"] = exc.code
         return payload

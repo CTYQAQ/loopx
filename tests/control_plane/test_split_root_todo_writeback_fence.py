@@ -246,10 +246,14 @@ def test_quota_monitor_poll_cli_rejects_unavailable_canonical_before_collection(
     registry, state, _runtime_registry, runtime_override = (
         _write_split_root_goal(tmp_path)
     )
+    _initialize_canonical_override(runtime_override, state)
+    backend = runtime_override / "authority" / "file-v0"
+    offline = backend.with_name("file-v0-offline")
+    backend.rename(offline)
     before = state.read_bytes()
 
     def unexpected_collection(**_kwargs: Any) -> dict[str, Any]:
-        pytest.fail("unmigrated monitor write must be rejected before status collection")
+        pytest.fail("selected provider loss must be rejected before status collection")
 
     monkeypatch.setattr("loopx.cli_commands.quota.collect_status", unexpected_collection)
 
@@ -281,10 +285,11 @@ def test_quota_monitor_poll_cli_rejects_unavailable_canonical_before_collection(
 
     assert exit_code == 1
     payload = json.loads(capsys.readouterr().out)
-    assert payload["error_code"] == "canonical_authority_required"
-    assert payload["write_admitted"] is False
+    assert payload["error_code"] != "canonical_authority_required"
     assert payload["legacy_fallback_used"] is False
     assert state.read_bytes() == before
+    assert not backend.exists()
+    offline.rename(backend)
 
 
 @pytest.mark.parametrize("command", ["should-run", "monitor-poll"])
