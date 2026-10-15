@@ -5,12 +5,15 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
+
 from loopx.control_plane.goals.goal_channel import attach_goal_channel_projection
 from loopx.control_plane.goals.goal_channel_projection import (
     build_goal_channel_projection,
 )
 from loopx.control_plane.work_items.task_lease import (
-    build_lease,
     isoformat,
     now_utc,
     task_lease_dir,
@@ -48,19 +51,21 @@ def _write_active_lease(
     ttl_seconds: int = 600,
 ) -> dict[str, Any]:
     at = now_utc()
-    lease = build_lease(
-        goal_id=GOAL_ID,
-        todo_id=todo_id,
-        owner=owner,
-        idempotency_key=f"{owner}-instance-1",
-        write_scopes=["src/"],
-        acquire_ttl_seconds=ttl_seconds,
-        version=version,
-        lease_epoch=1,
-        acquired_at=isoformat(at),
-        updated_at=isoformat(at),
-        expires_at=isoformat(at + timedelta(seconds=ttl_seconds)),
-    )
+    lease = {
+        "schema_version": "task_lease_v0",
+        "status": "active",
+        "goal_id": GOAL_ID,
+        "todo_id": todo_id,
+        "owner": owner,
+        "idempotency_key": f"{owner}-instance-1",
+        "write_scopes": ["src/"],
+        "acquire_ttl_seconds": ttl_seconds,
+        "version": version,
+        "lease_epoch": 1,
+        "acquired_at": isoformat(at),
+        "updated_at": isoformat(at),
+        "expires_at": isoformat(at + timedelta(seconds=ttl_seconds)),
+    }
     path = task_lease_path(runtime_root=runtime_root, goal_id=GOAL_ID, todo_id=todo_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(lease), encoding="utf-8")
@@ -152,19 +157,21 @@ def test_missing_runtime_root_preserves_previous_projection_shape() -> None:
 
 def test_expired_lease_is_not_surfaced(tmp_path: Path) -> None:
     at = now_utc()
-    lease = build_lease(
-        goal_id=GOAL_ID,
-        todo_id=TODO_ID,
-        owner="agent-a",
-        idempotency_key="agent-a-instance-1",
-        write_scopes=[],
-        acquire_ttl_seconds=60,
-        version=1,
-        lease_epoch=1,
-        acquired_at=isoformat(at - timedelta(seconds=120)),
-        updated_at=isoformat(at - timedelta(seconds=120)),
-        expires_at=isoformat(at - timedelta(seconds=60)),
-    )
+    lease = {
+        "schema_version": "task_lease_v0",
+        "status": "active",
+        "goal_id": GOAL_ID,
+        "todo_id": TODO_ID,
+        "owner": "agent-a",
+        "idempotency_key": "agent-a-instance-1",
+        "write_scopes": [],
+        "acquire_ttl_seconds": 60,
+        "version": 1,
+        "lease_epoch": 1,
+        "acquired_at": isoformat(at - timedelta(seconds=120)),
+        "updated_at": isoformat(at - timedelta(seconds=120)),
+        "expires_at": isoformat(at - timedelta(seconds=60)),
+    }
     path = task_lease_path(runtime_root=tmp_path, goal_id=GOAL_ID, todo_id=TODO_ID)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(lease), encoding="utf-8")
@@ -309,8 +316,9 @@ def _write_status_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
     return registry, repo, runtime_root
 
 
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_status_attention_queue_surfaces_hard_lease_end_to_end(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
 ) -> None:
     """Regression pin for the real delivery surface.
 
@@ -322,19 +330,20 @@ def test_status_attention_queue_surfaces_hard_lease_end_to_end(
     """
 
     from loopx.status import collect_status
-    from loopx.todos import add_goal_todo
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
     registry, repo, runtime_root = _write_status_workspace(tmp_path)
-    added = add_goal_todo(
-        registry_path=registry,
-        goal_id=GOAL_ID,
-        role="agent",
-        text="Deliver one bounded control-plane change.",
-        task_class="advancement_task",
-        claimed_by="agent-b",
-    )
-    todo_id = added["todo_id"]
+    todo_id = TODO_ID
     lease = _write_active_lease(runtime_root, owner="agent-a", todo_id=todo_id)
+    # Import an inconsistent retained claim/lease pair into the real provider.
+    # The observation must expose it; current mutation must never create it.
+    todo = {"schema_version": "todo_item_v0", "todo_id": todo_id, "role": "agent", "status": "open", "done": False,
+        "text": "Deliver one bounded control-plane change.", "task_class": "advancement_task",
+        "claimed_by": "agent-b", "archive_state": "active", "source_section": "Agent Todo", "index": 1}
+    initialize_canonical_authority(runtime_root, GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=[todo], leases=[lease], handoff_mode="hard_lease"),
+        state_path=repo / "ACTIVE_GOAL_STATE.md", provider=provider)
 
     payload = collect_status(
         registry_path=registry,

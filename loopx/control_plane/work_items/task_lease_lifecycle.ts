@@ -49,13 +49,11 @@ import {
   taskLeasePath,
   type AuthorityFacts,
   type LeaseRecord,
-  type TodoFact,
 } from "./task_lease_acquire.ts";
 import {
   decideTaskLeaseLifecycle,
   releasedTaskLeaseRecord as releasedLease,
   type TaskLeaseLifecycleDecision,
-  type TaskLeaseLifecycleDecisionInput,
 } from "./task_lease_lifecycle_decision.ts";
 import {decodeTaskLeaseLifecycleRequest, TaskLeaseLifecycleError, TASK_LEASE_LIFECYCLE_OPERATIONS,
   type LifecycleRequest, type CanonicalLifecycleRequest, type LifecycleErrorInfo, type LifecycleStage,
@@ -837,35 +835,6 @@ function errorInfo(error: unknown, fallbackStage: LifecycleStage = "durable_writ
 
 
 
-function ownerError(
-  request: LifecycleRequest,
-  code: string,
-  todo: TodoFact | null,
-  owner = request.owner,
-): TaskLeaseLifecycleError {
-  let message: string;
-  const payload: JsonObject = {
-    goal_id: request.goal_id,
-    todo_id: request.todo_id,
-    owner,
-    reason: code,
-  };
-  if (code === "todo_not_found") message = "todo is missing from the canonical projection";
-  else if (code === "todo_not_open") {
-    payload.todo_status = todo?.status || "unknown";
-    message = `task lease requires an open todo; '${request.todo_id}' is '${payload.todo_status}'`;
-  } else if (code === "owner_excluded_from_todo") {
-    payload.excluded_agents = [...(todo?.excluded_agents ?? [])];
-    message = `task lease owner '${owner}' is excluded from todo '${request.todo_id}'`;
-  } else if (code === "owner_conflicts_with_claim") {
-    payload.claimed_by = todo?.claimed_by ?? null;
-    message = `task lease owner '${owner}' conflicts with todo claim '${payload.claimed_by}'`;
-  } else {
-    message = `task lease owner '${owner}' is not registered for goal '${request.goal_id}'`;
-  }
-  return new TaskLeaseLifecycleError(message, code, payload, "validation");
-}
-
 function transitionError(
   request: LifecycleRequest,
   code: string,
@@ -958,23 +927,17 @@ async function persistOperationReceipt(
   });
 }
 
-function ordinaryDecision(
+function retainedReleaseDecision(
   request: LifecycleRequest,
   lease: LeaseRecord | null,
-  todo: TodoFact | null,
   at: Date,
 ): TaskLeaseLifecycleDecision {
-  const input: TaskLeaseLifecycleDecisionInput = {
+  return decideTaskLeaseLifecycle({
+    // Release preserves historical cleanup in every decoded mode. It neither
+    // reads Todo admission nor authorizes a fresh execution lease.
     handoff_mode: request.authority?.handoff_mode ?? "legacy",
-    registered_agents: request.authority?.registered_agents ?? [],
-    todo: todo === null
-      ? null
-      : {
-          todo_id: todo.todo_id,
-          status: todo.status,
-          claimed_by: todo.claimed_by,
-          excluded_agents: todo.excluded_agents,
-        },
+    registered_agents: [],
+    todo: null,
     lease: lease === null
       ? null
       : {
@@ -985,33 +948,19 @@ function ordinaryDecision(
           idempotency_key: persistedKey(lease),
           version: leaseVersion(lease),
           lease_epoch: leaseEpoch(lease),
-          write_scopes: Array.isArray(lease.write_scopes)
-            ? lease.write_scopes.filter((scope): scope is string =>
-                typeof scope === "string"
-              )
-            : [],
-          // Lifecycle decisions do not depend on the original acquire TTL.
-          // Legacy records may carry an unrelated malformed value here; keep
-          // that compatibility field out of the decision instead of turning
-          // renew/release into a new validation surface.
-          acquire_ttl_seconds:
-            typeof lease.acquire_ttl_seconds === "number" &&
-              Number.isSafeInteger(lease.acquire_ttl_seconds) &&
-              lease.acquire_ttl_seconds >= 0
-              ? lease.acquire_ttl_seconds
-              : null,
+          write_scopes: [],
+          acquire_ttl_seconds: null,
         },
     command: {
-      operation: request.operation as "renew" | "transfer" | "release",
+      operation: "release",
       owner: request.owner!,
       idempotency_key: request.idempotency_key!,
       expected_version: request.expected_version,
-      ttl_seconds: request.ttl_seconds,
-      new_owner: request.new_owner,
-      new_idempotency_key: request.new_idempotency_key,
+      ttl_seconds: null,
+      new_owner: null,
+      new_idempotency_key: null,
     },
-  };
-  return decideTaskLeaseLifecycle(input);
+  });
 }
 
 function rejectFreshSourceLeaseOperation(request: LifecycleRequest): never {
@@ -1104,19 +1053,8 @@ async function ordinaryOperation(
   }
 
   await requireLegacyCoordinationPrimaryWriteAllowed(request.runtime_root, request.goal_id);
-  const todo: TodoFact | null = null;
-  const decision = ordinaryDecision(request, existing, todo, at);
+  const decision = retainedReleaseDecision(request, existing, at);
   if (decision.outcome === "conflict" || decision.outcome === "rejected") {
-    if (
-      decision.code === "todo_not_found" ||
-      decision.code === "todo_not_open" ||
-      decision.code === "owner_not_registered" ||
-      decision.code === "owner_excluded_from_todo" ||
-      decision.code === "owner_conflicts_with_claim"
-    ) {
-      const rejectedOwner = request.owner;
-      throw ownerError(request, decision.code, todo, rejectedOwner);
-    }
     throw transitionError(request, decision.code, existing, leasePath);
   }
 

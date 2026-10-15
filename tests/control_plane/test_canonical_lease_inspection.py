@@ -171,16 +171,6 @@ def test_continuous_source_churn_exhausts_bounded_retry_without_success(tmp_path
     assert len(calls) == 3
 
 
-def test_owner_constraint_requires_the_native_diagnostic_contract(monkeypatch):
-    from loopx.control_plane import effect_runtime
-    from loopx.control_plane.work_items.task_lease import task_lease_owner_constraint
-    monkeypatch.setattr(effect_runtime, "effect_runtime_result", lambda *_: {
-        "schema_version": "task_lease_owner_eligibility_v0", "outcome": "apply", "code": "lease_owner_allowed",
-    })
-    with pytest.raises(RuntimeError, match="constraint shape mismatch"):
-        task_lease_owner_constraint({"status": "open"}, owner="agent-a")
-
-
 def test_inactive_legacy_inspection_does_not_project_todos(tmp_path, monkeypatch):
     registry = tmp_path / "registry.json"
     state = tmp_path / "state.md"
@@ -200,10 +190,11 @@ def test_inactive_legacy_inspection_does_not_project_todos(tmp_path, monkeypatch
     assert expired["active"] is False and expired["handoff_mode"] == "hard_lease"
 
 
-def test_retained_source_inspection_never_projects_current_execution(tmp_path, monkeypatch):
+@pytest.mark.parametrize("mode", ["legacy", "soft_claim", "hard_lease"])
+def test_retained_source_inspection_never_projects_current_execution(tmp_path, monkeypatch, mode):
     registry = tmp_path / "registry.json"
     state = tmp_path / "state.md"
-    state.write_text("---\nhandoff_mode: hard_lease\n---\n# Synthetic state\n")
+    state.write_text(f"---\nhandoff_mode: {mode}\n---\n# Synthetic state\n")
     registry.write_text(json.dumps({"goals": [{"id": GOAL, "repo": str(tmp_path), "state_file": str(state),
         "coordination": {"registered_agents": ["agent-a"]}}]}))
     runtime = tmp_path / "runtime"

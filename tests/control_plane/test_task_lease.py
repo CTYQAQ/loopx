@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -11,12 +12,10 @@ from loopx.control_plane.work_items.local_lease_record import read_lease
 from loopx.control_plane.work_items.task_lease import (
     MAX_TASK_LEASE_TTL_SECONDS,
     TaskLeaseError,
-    assert_expected_version,
     normalize_idempotency_key,
     normalize_ttl_seconds,
     release_task_lease,
     renew_task_lease,
-    task_lease_owner_constraint,
     write_scopes_overlap,
 )
 
@@ -63,57 +62,6 @@ def test_write_scopes_overlap(
     assert write_scopes_overlap(left, right) is expected
 
 
-@pytest.mark.parametrize(
-    ("todo", "owner", "registered_agents", "reason"),
-    [
-        (None, "agent-a", ["agent-a"], "todo_not_found"),
-        ({"status": "done"}, "agent-a", ["agent-a"], "todo_not_open"),
-        ({"status": "open"}, "", ["agent-a"], "invalid_owner"),
-        ({"status": "open"}, "agent-b", ["agent-a"], "owner_not_registered"),
-        (
-            {"status": "open", "excluded_agents": ["agent-a"]},
-            "agent-a",
-            ["agent-a"],
-            "owner_excluded_from_todo",
-        ),
-        (
-            {"status": "open", "claimed_by": "agent-b"},
-            "agent-a",
-            ["agent-a", "agent-b"],
-            "owner_conflicts_with_claim",
-        ),
-    ],
-)
-def test_task_lease_owner_constraint_rejects_ineligible_owner(
-    todo: dict[str, Any] | None,
-    owner: str,
-    registered_agents: list[str],
-    reason: str,
-) -> None:
-    constraint = task_lease_owner_constraint(
-        todo,
-        owner=owner,
-        registered_agents=registered_agents,
-    )
-
-    assert constraint["effective"] is False
-    assert constraint["reason"] == reason
-
-
-def test_task_lease_owner_constraint_accepts_matching_claim() -> None:
-    constraint = task_lease_owner_constraint(
-        {
-            "status": "open",
-            "claimed_by": "agent-a",
-            "excluded_agents": ["agent-b"],
-        },
-        owner="agent-a",
-        registered_agents=["agent-a", "agent-b"],
-    )
-
-    assert constraint == {"effective": True}
-
-
 @pytest.mark.parametrize("ttl", [0, -1, MAX_TASK_LEASE_TTL_SECONDS + 1])
 def test_normalize_ttl_seconds_rejects_out_of_range(ttl: int) -> None:
     with pytest.raises(TaskLeaseError, match="ttl seconds") as error:
@@ -130,43 +78,40 @@ def test_normalize_idempotency_key_rejects_non_token(key: str) -> None:
     assert error.value.code == "invalid_idempotency_key"
 
 
-def test_expected_version_is_compare_and_swap_guard() -> None:
+@pytest.fixture
+def retained_lease(tmp_path: Path):
+    # Fixed original 1.x bytes; the current runtime must read/release these
+    # without relying on a surviving Python lease producer.
+    original = json.loads((Path(__file__).parent / "fixtures" / "retained_lease_receipts_1x.json").read_text())["scenarios"]["original"]
+    relative, lease = next(iter(original["files"].items()))
+    runtime = tmp_path / "runtime"
+    path = runtime / relative
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(lease))
+    request = {key: original["request"][key] for key in ("goal_id", "todo_id", "owner", "idempotency_key")}
+    return path, lease, {**request, "runtime_root": runtime, "expected_version": lease["version"]}
+
+
+def test_retained_release_enforces_cas_without_rewriting_history(retained_lease) -> None:
+    path, lease, request = retained_lease
+    before = path.read_bytes()
     with pytest.raises(TaskLeaseError) as error:
-        assert_expected_version({"version": 3}, 2)
-
+        release_task_lease(**{**request, "expected_version": lease["version"] + 1})
     assert error.value.code == "version_mismatch"
-    assert error.value.payload == {"expected_version": 2, "actual_version": 3}
+    assert path.read_bytes() == before
 
 
-def test_lease_epoch_migrates_legacy_records_and_rejects_corruption() -> None:
-    assert task_lease.lease_epoch(None) == 0
-    assert (
-        task_lease.lease_epoch({"schema_version": "task_lease_v0", "version": 7}) == 1
-    )
-
-    for raw_epoch in (0, -1, "not-an-epoch"):
-        with pytest.raises(TaskLeaseError) as error:
-            task_lease.lease_epoch({"lease_epoch": raw_epoch})
-        assert error.value.code == "corrupt_lease"
-
-
-def test_bool_disguised_lease_integers_fail_closed() -> None:
-    """bool is an int subclass: a JSON ``true`` must not become epoch/version/
-    TTL ``1`` silently.  The shared Stage 2 head codec already rejects bool
-    (head._is_count); the local record codec is the migration source for
-    ``last_lease_epoch`` seeding, so the same typed corrupt_lease applies
-    before any local-to-shared migration."""
-
-    for raw in (True, False):
-        with pytest.raises(TaskLeaseError) as error:
-            task_lease.lease_epoch({"lease_epoch": raw})
-        assert error.value.code == "corrupt_lease"
-        with pytest.raises(TaskLeaseError) as error:
-            task_lease.lease_version({"version": raw})
-        assert error.value.code == "corrupt_lease"
-        with pytest.raises(TaskLeaseError) as error:
-            task_lease.lease_acquire_ttl_seconds({"acquire_ttl_seconds": raw})
-        assert error.value.code == "corrupt_lease"
+@pytest.mark.parametrize(("field", "raw"), [
+    ("lease_epoch", value) for value in [0, -1, "not-an-epoch", True, False]
+] + [("version", value) for value in [-1, "not-a-version", True, False]])
+def test_retained_release_rejects_corrupt_generation_without_writes(retained_lease, field, raw) -> None:
+    path, lease, request = retained_lease
+    path.write_text(json.dumps({**lease, field: raw}))
+    before = path.read_bytes()
+    with pytest.raises(TaskLeaseError) as error:
+        release_task_lease(**request)
+    assert error.value.code == "corrupt_lease"
+    assert path.read_bytes() == before
 
 
 def test_lifecycle_mutation_fails_closed_without_registry(
@@ -181,24 +126,24 @@ def test_lifecycle_mutation_fails_closed_without_registry(
         goal_id="goal-a",
         todo_id="todo_missing_registry",
     )
-    task_lease.write_lease(
-        lease_path,
-        task_lease.build_lease(
-            goal_id="goal-a",
-            todo_id="todo_missing_registry",
-            owner="agent-a",
-            idempotency_key="turn-1",
-            write_scopes=[],
-            acquire_ttl_seconds=120,
-            version=1,
-            lease_epoch=1,
-            acquired_at=now.isoformat().replace("+00:00", "Z"),
-            updated_at=now.isoformat().replace("+00:00", "Z"),
-            expires_at=(now + timedelta(seconds=120))
+    lease_path.parent.mkdir(parents=True)
+    lease_path.write_text(json.dumps({
+        "schema_version": "task_lease_v0",
+        "status": "active",
+        "goal_id": "goal-a",
+        "todo_id": "todo_missing_registry",
+        "owner": "agent-a",
+        "idempotency_key": "turn-1",
+        "write_scopes": [],
+        "acquire_ttl_seconds": 120,
+        "version": 1,
+        "lease_epoch": 1,
+        "acquired_at": now.isoformat().replace("+00:00", "Z"),
+        "updated_at": now.isoformat().replace("+00:00", "Z"),
+        "expires_at": (now + timedelta(seconds=120))
             .isoformat()
             .replace("+00:00", "Z"),
-        ),
-    )
+    }))
     before = task_lease.read_lease(lease_path)
 
     with pytest.raises(TaskLeaseError) as error:
@@ -228,9 +173,8 @@ def test_legacy_generation_and_unrelated_ttl_do_not_block_release(
         goal_id="goal-a",
         todo_id="todo_legacy",
     )
-    task_lease.write_lease(
-        lease_path,
-        {
+    lease_path.parent.mkdir(parents=True)
+    lease_path.write_text(json.dumps({
             "schema_version": "task_lease_v0",
             "goal_id": "goal-a",
             "todo_id": "todo_legacy",
@@ -245,8 +189,7 @@ def test_legacy_generation_and_unrelated_ttl_do_not_block_release(
             "expires_at": (now + timedelta(seconds=120))
             .isoformat()
             .replace("+00:00", "Z"),
-        },
-    )
+        }))
 
     released = release_task_lease(
         runtime_root=runtime_root,

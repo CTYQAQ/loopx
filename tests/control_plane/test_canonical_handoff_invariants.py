@@ -29,7 +29,6 @@ from loopx.control_plane.work_items import task_lease
 from loopx.control_plane.work_items.task_lease import (
     TaskLeaseError,
     acquire_task_lease,
-    build_lease,
     inspect_task_lease,
     release_task_lease,
     renew_task_lease,
@@ -263,19 +262,21 @@ def canonical_workspace(request, tmp_path, monkeypatch):
             now = task_lease.now_utc()
             start = now - timedelta(hours=2) if retained.get("expired") else now
             leases = [
-                build_lease(
-                    goal_id=GOAL_ID,
-                    todo_id="todo_retained",
-                    owner=AGENT_A,
-                    idempotency_key="turn-lease-1",
-                    write_scopes=[],
-                    acquire_ttl_seconds=600,
-                    version=1,
-                    lease_epoch=1,
-                    acquired_at=task_lease.isoformat(start),
-                    updated_at=task_lease.isoformat(start),
-                    expires_at=task_lease.isoformat(start + timedelta(seconds=600)),
-                )
+                {
+                    "schema_version": "task_lease_v0",
+                    "status": "active",
+                    "goal_id": GOAL_ID,
+                    "todo_id": "todo_retained",
+                    "owner": AGENT_A,
+                    "idempotency_key": "turn-lease-1",
+                    "write_scopes": [],
+                    "acquire_ttl_seconds": 600,
+                    "version": 1,
+                    "lease_epoch": 1,
+                    "acquired_at": task_lease.isoformat(start),
+                    "updated_at": task_lease.isoformat(start),
+                    "expires_at": task_lease.isoformat(start + timedelta(seconds=600)),
+                }
             ]
         projection = build_todo_runtime_shadow_projection(
             goal_id=GOAL_ID, todos=todos, leases=leases, handoff_mode=handoff_mode

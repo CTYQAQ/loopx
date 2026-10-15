@@ -5,10 +5,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...agent_registry import (
-    registered_agent_ids_from_registry,
-    require_registered_agent_id,
-)
 from ...history import load_registry
 from ...paths import resolve_runtime_root
 from ..runtime.time import now_utc as runtime_now_utc
@@ -19,20 +15,12 @@ from ..coordination.authority_core import (
 from ..todos.contract import (
     normalize_required_write_scopes,
     normalize_todo_claimed_by,
-    normalize_todo_excluded_agents,
     normalize_todo_id,
 )
 from .local_lease_record import (
     TASK_LEASE_SCHEMA_VERSION,
     TaskLeaseError,
-    assert_expected_version as assert_expected_version,
-    build_lease as build_lease,
-    lease_acquire_ttl_seconds as lease_acquire_ttl_seconds,
-    lease_epoch as lease_epoch,
-    lease_version as lease_version,
     read_lease as read_lease,
-    require_expected_version as require_expected_version,
-    write_lease as write_lease,
 )
 
 DEFAULT_TASK_LEASE_TTL_SECONDS = 45 * 60
@@ -136,138 +124,6 @@ def runtime_root_from_registry(
         runtime_root_override,
         registry_path=registry_path,
     )
-
-
-def task_lease_todo_projection(
-    *,
-    registry_path: Path,
-    goal_id: str,
-    todo_id: str,
-) -> dict[str, Any] | None:
-    """Resolve the canonical Markdown/event todo projection for lease guards."""
-
-    from ...control_plane.todos.list_readback import list_goal_todos
-
-    try:
-        payload = list_goal_todos(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            todo_id=todo_id,
-        )
-    except (OSError, ValueError) as exc:
-        raise TaskLeaseError(
-            "cannot resolve todo projection for task lease",
-            code="todo_projection_unavailable",
-            payload={"goal_id": goal_id, "todo_id": todo_id, "error": str(exc)},
-        ) from exc
-    todo = payload.get("todo")
-    return dict(todo) if isinstance(todo, dict) else None
-
-
-def task_lease_owner_constraint(
-    todo: dict[str, Any] | None,
-    *,
-    owner: Any,
-    registered_agents: list[str] | None = None,
-) -> dict[str, Any]:
-    from ..effect_runtime import effect_runtime_result
-
-    normalized_owner = normalize_todo_claimed_by(owner)
-    registered = registered_agents if registered_agents is not None else ([normalized_owner] if normalized_owner else [])
-    result = effect_runtime_result("task_lease.owner_eligibility", {
-        "todo": None if todo is None else {
-            "status": str(todo.get("status") or "").strip().lower(),
-            "claimed_by": normalize_todo_claimed_by(todo.get("claimed_by")),
-            "excluded_agents": normalize_todo_excluded_agents(todo.get("excluded_agents")),
-        },
-        "owner": normalized_owner, "registered_agents": registered,
-    })
-    if not isinstance(result, dict) or result.get("schema_version") != "task_lease_owner_eligibility_v0":
-        raise RuntimeError("typed lease owner constraint is missing; update the runtime")
-    constraint = result.get("constraint")
-    if not isinstance(constraint, dict) or not isinstance(constraint.get("effective"), bool):
-        raise RuntimeError("typed lease owner constraint shape mismatch")
-    if constraint["effective"] is False and not isinstance(constraint.get("reason"), str):
-        raise RuntimeError("typed lease owner rejection omitted its reason")
-    return constraint
-
-
-def require_registered_task_lease_owner(
-    *,
-    registry_path: Path,
-    goal_id: str,
-    todo_id: str,
-    owner: str,
-) -> str:
-    try:
-        return require_registered_agent_id(
-            registry_path=registry_path,
-            goal_id=goal_id,
-            agent_id=owner,
-            field="task lease owner",
-        )
-    except ValueError as exc:
-        raise TaskLeaseError(
-            str(exc),
-            code="owner_not_registered",
-            payload={"goal_id": goal_id, "todo_id": todo_id, "owner": owner},
-        ) from exc
-
-
-def require_task_lease_owner_allowed(
-    *,
-    registry_path: Path,
-    goal_id: str,
-    todo_id: str,
-    owner: str,
-) -> dict[str, Any]:
-    owner = require_registered_task_lease_owner(
-        registry_path=registry_path,
-        goal_id=goal_id,
-        todo_id=todo_id,
-        owner=owner,
-    )
-    todo = task_lease_todo_projection(
-        registry_path=registry_path,
-        goal_id=goal_id,
-        todo_id=todo_id,
-    )
-    constraint = task_lease_owner_constraint(
-        todo,
-        owner=owner,
-        registered_agents=registered_agent_ids_from_registry(registry_path, goal_id),
-    )
-    if constraint.get("effective") is not True:
-        reason = str(constraint.get("reason") or "owner_not_allowed")
-        if reason == "todo_not_found":
-            message = "todo is missing from the canonical projection"
-        elif reason == "todo_not_open":
-            message = (
-                f"task lease requires an open todo; "
-                f"{todo_id!r} is {constraint.get('todo_status')!r}"
-            )
-        elif reason == "owner_excluded_from_todo":
-            message = f"task lease owner {owner!r} is excluded from todo {todo_id!r}"
-        elif reason == "owner_conflicts_with_claim":
-            message = (
-                f"task lease owner {owner!r} conflicts with todo claim "
-                f"{constraint.get('claimed_by')!r}"
-            )
-        elif reason == "owner_not_registered":
-            message = f"task lease owner {owner!r} is not registered for goal {goal_id!r}"
-        else:
-            message = f"task lease owner {owner!r} is not eligible for todo {todo_id!r}"
-        raise TaskLeaseError(
-            message,
-            code=reason,
-            payload={
-                "goal_id": goal_id,
-                "todo_id": todo_id,
-                "owner": owner,
-                **constraint,
-            },
-        )
-    return todo
 
 
 def lease_expires_at(lease: dict[str, Any] | None) -> datetime | None:
