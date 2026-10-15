@@ -31,7 +31,46 @@ T0–T4, not additional provider promotion or completed migration claims.
 
 <a id="current-delivery-frontier-2026-10-02"></a>
 
-## Current delivery frontier (2026-10-12)
+## Current delivery frontier (2.0 candidate, 2026-10-15)
+
+Contributor-led [#6396](https://github.com/loopx-project/loopx/pull/6396),
+at reviewed head `5d29213d3`, carries the C1/T4 normal-Markdown-writer cutoff
+and live `legacy` ownership-policy retirement. It incorporates the fork
+supplements and the valuable #6366 invariants and recovery checks documented in
+[the absorption map](../../reference/local-authority-provider-selection.md#retirement-proposal-reconciliation).
+The candidate removes the obsolete writer implementations and capture producers;
+canonical mutation, creation, team-plan, Monitor and lease consumers reuse their
+existing typed owners. Do not schedule those deletions again from the older
+writer inventory below. The additive 1.x line and an open 2.0 proposal remain
+different delivery baselines; this checkpoint does not claim a released cutoff.
+
+New execution/configuration targets share `ExecutionHandoffMode`, derived from
+`EXECUTION_HANDOFF_MODES` (`soft_claim` / `hard_lease`). Historical `HandoffMode`
+and receipt codecs still recognize `legacy`. The typed policy owner refuses
+fresh legacy execution, acquire/maintenance and current-proof grants, including
+delegation launch/resume; exact historical receipt recovery, release and
+reviewed backup/plan/migrate remain supported. Storage conversion and ownership
+migration remain distinct. No active Goal is migrated by this proposal.
+
+Current work is candidate integration and adoption qualification, not another
+writer extraction: retain the compatible 1.x upgrade/backup/recovery route,
+finish the bounded reversible core-developer trial and affected real Host/App
+journeys, and keep formal D2 failures/missing evidence and release-default
+qualification open. Permanent Markdown document/display IO, historical readers
+and outstanding receipt/outbox disposition are retained obligations. A passing
+conversion drill does not establish natural adoption or Goal-instance retirement.
+
+Use the [current retirement ledger](ledger/shared-goal-authority-state-provider-v0/2026-09-28-retirement-cadence.md#current-candidate-checkpoint)
+for that frontier. [Exact-head review](https://github.com/loopx-project/loopx/pull/6396#pullrequestreview-5535116423)
+and [combined-tree evidence](https://github.com/loopx-project/loopx/pull/6396#issuecomment-6195855339)
+retain their source revisions; they do not certify an untested later head/base,
+a completed installed cohort or all RFC acceptance.
+
+### Historical 1.x prerequisite checkpoints (through 2026-10-12)
+
+The following records explain the prerequisites and validation at their named
+sources. Their references to reachable writers and a “next” cutoff describe
+that 1.x baseline, not remaining implementation work in the candidate above.
 
 Rechecked at main `38cb407ed`: #5413/#5466/#5283 and the affected creation,
 Host-stop and UI-history owners #5500/#5805/#5308/#5398 are merged. Reuse
@@ -126,27 +165,6 @@ The existing delivery Todos should carry these concrete exits:
 
 This updates the existing R5/T4 frontier and release proposal; it creates no
 parallel migration owner, runtime gate or release activation.
-
-The retirement proposal is now reconciled through contributor-led #6396 and
-its fork supplement #2. The [absorption map](../../reference/local-authority-provider-selection.md#retirement-proposal-reconciliation)
-retains canonical ownership/terminal invariants, fixed 1.x receipt recovery,
-reviewed App creation and the actual-contention mutation oracle from #6366.
-The competing implementation stack is not an integration prerequisite; adopted
-combined-head validation, core trial, real Host and D2/release exits stay open.
-
-
-The same C1/T4 boundary now retires the live `legacy` ownership policy rather
-than preserving a third execution strategy. The existing TS policy owner rejects
-fresh claim/update/terminal/Monitor admission and execution fences; acquire and
-lease maintenance share that rule. Current-proof readback and inspection cannot
-turn a retained lease or original receipt into execution. Delegation consumes the
-same typed support before launch/resume, including old no-lease-required records;
-source inspection no longer carries a second Todo-admission projection. Historical mode decoding,
-original-operation recovery, exact release and reviewed backup/plan/migrate remain.
-Normal fixtures use soft/hard independently of their legacy/native wire shape;
-explicit legacy-policy negatives and retained 1.x artifacts preserve that boundary.
-No live Goal is changed by this proposal. Adopted combined-head qualification,
-installed policy migration, real Host adoption and D2/release remain open.
 
 Team-plan recovery prerequisite: an unpromoted plan that published its original
 receipt can now recover through the Chat confirmation owner while shadow
