@@ -952,6 +952,30 @@ print('Current grow adopted: two complete candidates 9 and 10 validated; origina
                 assert next_metadata["replan"]["obligation_id"] != obligation["obligation_id"]
                 assert next_metadata["held_decision_component_id"]
                 assert next_metadata["native_session"]["turn_ids"] == grown["turn_ids"]
+
+            # Qualify the existing explicit after-wake path too, even if the
+            # next automatic replan is not due. This is a partial manual point,
+            # not a substitute for that future decision boundary.
+            from benchmark.runtime.checkpoint import capture_after_wake
+            manual = wakes.parent / "checkpoints" / "settled-continuation"
+            manual_request = tmp_path / "manual-capture-request.json"
+            manual_request.write_text(json.dumps({"destination": str(manual), "native_session": True,
+                "components": [{"id": "code", "source_path": str(candidate)}],
+                "point_metadata": {"meaning": "Explicit settled-work partial capture; no research utility claim."}}))
+            capture_env = {**env, "LOOPX_CHECKPOINT_REQUEST": str(manual_request)}
+            completed = {"ok": True, "turn_id": next_turn, "mode": "heartbeat", "stage": "execute",
+                "session": {"session_id": admitted["session_id"], "binding_scope": "agent", "action": "resume"}}
+            capture_after_wake(capture_env, completed)
+            assert completed["checkpoint"]["captured"], completed
+            assert not completed["checkpoint"]["research_point_qualified"]
+            assert (manual / "components/code").read_text() == "10"
+            captured = json.loads((manual / "checkpoint.json").read_text())
+            assert captured["point_metadata"]["native_session"]["turn_ids"] == grown["turn_ids"]
+            verification = effect_runtime_result("runtime.checkpoint_artifacts", {
+                "action": "verify", "root": str(manual), "expected_sha256": captured["sha256"]})
+            assert verification["integrity_verified"] and not verification["research_point_qualified"]
+            capture_after_wake(capture_env, completed)
+            assert completed["checkpoint"]["reason"] == "destination_already_present_no_replay"
         effect_runtime_result(
             "runtime.checkpoint_artifacts",
             {"action": "verify", "root": str(unit), "expected_sha256": digest},
