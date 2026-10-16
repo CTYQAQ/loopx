@@ -98,7 +98,6 @@ def point(tmp_path):
 @pytest.mark.parametrize("change", [
     {"goal_id": "source-goal"}, {"agent_id": "source-agent"}, {"source_todo_id": "missing"},
     {"deadline_epoch": 1}, {"deadline_epoch": True}, {"normal_cadence": 0}, {"normal_cadence": True},
-    {"fresh_after_replan": "false"},
 ])
 def test_invalid_participant_rejects_before_workspace_or_authority_changes(point, change):
     start, workspace = point
@@ -426,8 +425,11 @@ def test_research_selection_survives_staging(research_point, monkeypatch, tmp_pa
     assert declaration["research_component_ids"] == ["experiments"]
 
 
-@pytest.mark.parametrize("options", [["--restore-research-component", "experiments"], ["--restore-fresh-after-replan"]])
-def test_research_option_without_warm_entry_rejects_before_registration(tmp_path, options):
+@pytest.mark.parametrize("options, error", [
+    (["--restore-research-component", "experiments"], "Research component restoration requires"),
+    (["--restore-fresh-after-replan"], "unrecognized arguments: --restore-fresh-after-replan"),
+])
+def test_restore_options_reject_before_registration(tmp_path, capsys, options, error):
     pytest.importorskip("harbor")
     from benchmark.edgebench import run as entry
     with pytest.raises(SystemExit) as rejected:
@@ -436,6 +438,7 @@ def test_research_option_without_warm_entry_rejects_before_registration(tmp_path
             "--effort", "high", "--judge-url", "http://localhost:1",
             *options])
     assert rejected.value.code == 2 and not list(tmp_path.iterdir())
+    assert error in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("research_point", ["file"], indirect=True)
