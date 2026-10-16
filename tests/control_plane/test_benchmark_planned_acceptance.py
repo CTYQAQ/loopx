@@ -48,7 +48,7 @@ def test_planning_prompt_feature_off_parity_and_opt_in_guidance():
                                 execution_reserve_seconds=150)
     assert on.endswith(off.removeprefix("$loopx\n\n")) and on.startswith("$loopx\n\n")
     for required in ("/control/acceptance.json", '"selected_work"', "must not read",
-                     "fails this planning phase", "25 seconds in total"):
+                     "fails this planning phase", "25 seconds in total", "do not add validation_files"):
         assert required in on
 
 
@@ -122,6 +122,10 @@ def test_real_goal_holds_selected_todo_until_criteria_pass_and_reconfirms_edits(
     unbound = _document(todo_id); unbound["bindings"] = []
     document_path.write_text(json.dumps(unbound))
     with pytest.raises(ValueError, match="binding"):
+        apply_planned_acceptance(env, planning, cli)
+    bare_pins = _document(todo_id); bare_pins["criteria"][0]["validation_files"] = ["outputs/result.txt"]
+    document_path.write_text(json.dumps(bare_pins))
+    with pytest.raises(ValueError, match="validation_files must be"):
         apply_planned_acceptance(env, planning, cli)
     assert run("goal-acceptance", "inspect", *goal)[1]["goal_acceptance_contract"] == {"enabled": False}
 
@@ -203,6 +207,10 @@ def test_worker_planning_stage_configures_or_requires_the_document(tmp_path, mon
         with pytest.raises(ValueError, match="did not write"):
             run_once(env)
         assert not Path(env["LOOPX_PLANNING_RESULT"]).exists()
+        (receipt_path,) = (tmp_path / "wakes").glob("*/receipt.json")
+        saved = json.loads(receipt_path.read_text())
+        assert saved["ok"] is False and saved["planning"]["acceptance"]["status"] == "failed"
+        assert "did not write" in saved["planning"]["acceptance"]["error"]
         return
     receipt = run_once(env)
     assert receipt["ok"] and receipt["stage"] == "plan", receipt

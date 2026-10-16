@@ -421,8 +421,14 @@ def run_once(env: dict[str, str]) -> dict:
                     if execution.acceptance_contract == "planned" and receipt["planning"]["status"] == "ready":
                         from benchmark.runtime.acceptance import apply_planned_acceptance
 
-                        receipt["planning"]["acceptance"] = apply_planned_acceptance(
-                            env, receipt["planning"], loopx_command(env))
+                        try:
+                            receipt["planning"]["acceptance"] = apply_planned_acceptance(
+                                env, receipt["planning"], loopx_command(env))
+                        except ValueError as exc:
+                            # Keep the public-safe reason in the wake receipt; host
+                            # transports truncate the traceback.
+                            receipt["planning"]["acceptance"] = {"status": "failed", "error": str(exc)}
+                            raise
                     target = Path(env["LOOPX_PLANNING_RESULT"])
                     temporary = target.with_suffix(".tmp")
                     temporary.write_text(json.dumps(receipt["planning"]))

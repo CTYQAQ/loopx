@@ -27,7 +27,8 @@ def acceptance_planning_guidance(document_path: str) -> str:
         "It is a JSON object with objective, non_goals (list), scope "
         '{"kind": "selected_work", "todo_ids": [...]} naming the Todo(s) whose '
         "completion delivers the task result, criteria (list of {id, description, "
-        "validation_argv, validation_timeout_seconds, optional validation_files}) and "
+        "validation_argv, validation_timeout_seconds}; do not add validation_files or "
+        "other keys) and "
         "bindings (one {todo_id, criterion_ids} per selected Todo). Use the exact "
         "Todo ids you created. Each criterion is an argv command run from the task "
         "workspace without a shell, 1-25 seconds each and 25 seconds in total. "
@@ -95,6 +96,15 @@ def _selected_and_bound(document: dict[str, Any]) -> tuple[list[str], list[dict[
         not isinstance(row, dict) or not isinstance(row.get("id"), str) for row in criteria
     ):
         raise ValueError("Goal acceptance requires identified criteria")
+    # The owner contract pins validator files as {path, sha256}; planning cannot
+    # know digests of files that do not exist yet, so a bare path list is a
+    # misunderstanding of the schema rather than a usable pin.
+    for row in criteria:
+        pins = row.get("validation_files", [])
+        if pins and any(not isinstance(pin, dict) or set(pin) != {"path", "sha256"} for pin in pins):
+            raise ValueError(
+                f"criterion {row['id']}: validation_files must be [{{path, sha256}}] pins or omitted"
+            )
     return list(selected), bindings
 
 
