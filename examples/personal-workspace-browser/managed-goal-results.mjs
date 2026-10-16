@@ -33,10 +33,19 @@ export const managedGoalResultsScenario = {
     });
     try {
       await page.locator(".personal-goal-link", {hasText: "Product Release"}).click();
-      await page.getByRole("navigation", {name: "Goal 视图"}).getByRole("button", {name: "成果", exact: true}).click();
+      const views = page.getByRole("navigation", {name: "Goal 视图"});
       const results = page.getByRole("region", {name: "已验收的团队报告"});
       await results.getByRole("table").waitFor();
-      assert.equal(reads, 1, "The selected body must be revalidated after inventory read");
+      assert.equal(reads, 1, "The default Overview must verify its selected report body");
+      await views.getByRole("button", {name: "任务", exact: true}).click();
+      await results.waitFor({state: "hidden"});
+      await page.waitForLoadState("networkidle");
+      assert.equal(reads, 1, "Tasks must not read an inactive report body");
+      await page.emulateMedia({reducedMotion: "reduce"});
+      await views.getByRole("button", {name: "成果", exact: true}).focus();
+      await page.keyboard.press("Enter");
+      await results.getByRole("table").waitFor();
+      assert.equal(reads, 2, "Entering Files must freshly verify the selected body after inventory read");
       assert.match(await results.textContent(), /Revised cash flow/);
       assert.equal(await results.locator("script,img").count(), 0);
       await page.screenshot({path: resolve(outputDir, "managed-goal-results-desktop.png"), animations: "disabled"});
@@ -55,7 +64,7 @@ export const managedGoalResultsScenario = {
         "Malformed managed results must not crash the existing Files view");
       assert.equal(api.turnRequests.length, 0, "Report reading must not start a model");
       await page.screenshot({path: resolve(outputDir, "managed-goal-results-stale.png"), animations: "disabled"});
-      return {note: "Packaged Files shows only exact-read reports and clears stale results", coverageEntries: await context.close()};
+      return {note: "Packaged Overview and Files verify report bodies, Tasks stays lazy, and Files clears stale results", coverageEntries: await context.close()};
     } finally {
       if (!page.isClosed()) await context.close();
     }
