@@ -216,6 +216,11 @@ counter observations are differenced across Turns; summing the cumulative
 `turn.completed` snapshots would charge earlier work repeatedly. Cached input is
 part of input, and reasoning is part of output, not another additive cost.
 
+Complete counter histories use the existing private local snapshot transport
+when they exceed the ordinary 2 MiB RPC wire. Only this explicitly allowed
+method opts in; reduced snapshots retain the 64 MiB ceiling and digest checks.
+Oversized captures fail explicitly rather than dropping earlier Turns.
+
 This adapter deliberately rejects missing prefixes/counter gaps, resets, wrong
 session IDs, forked sessions, unmatched or unmeasured completions and a capture
 ending inside a Turn. Unsupported captures are not zero-cost sessions. The

@@ -137,6 +137,7 @@ def _usage_capture(source_root: Path, artifact: str, session_id: str) -> dict:
     projection = effect_runtime_result(
         "benchmark.trajectory.codex-usage",
         {"events": events, "session_id": session_id},
+        large_local_snapshot=True,
     )
     return {
         "artifact": artifact,
