@@ -21,7 +21,9 @@ def main():
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()
     source = Path(__file__).resolve().parents[2] / "apps/presentation/dashboard/src/data/fixtures/edgebench-research-history.json"
-    capture = json.loads(source.read_text())
+    source_bytes = source.read_bytes()
+    capture = json.loads(source_bytes)
+    source_sha256 = hashlib.sha256(source_bytes).hexdigest()
     events = [validate_explore_result_event(event) for event in capture["events"]]
     goal_id = capture["goal_id"]
     assert all(event["goal_id"] == goal_id for event in events)
@@ -49,7 +51,7 @@ def main():
                 if path == "/fixture/readback":
                     return self._send_json({"ok": True, **metrics,
                         "source_unchanged": all(path.read_bytes() == value for path, value in original.items()),
-                        "fixture_sha256": hashlib.sha256(source.read_bytes()).hexdigest()})
+                        "fixture_sha256": source_sha256})
                 if path == "/api/chat/explore-results":
                     metrics["history_reads"] += 1
                 if path in {"/healthz", "/status.json", "/api/chat/explore-results"} or path.startswith("/chat/"):

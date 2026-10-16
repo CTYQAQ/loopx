@@ -17,8 +17,8 @@ it must not be relabeled as this operator graph.
 
 ## Time and coverage
 
-Recorded times are shifted by one constant offset to start at 2030-01-01 UTC.
-Their intervals and append order are preserved, including the original
+Recorded dates are shifted by whole UTC days to begin on 2030-01-01. Time of
+day, UTC-day grouping, intervals and append order are preserved, including the original
 828,959-second span (9 days, 14 hours, 15 minutes, 59 seconds). The illustrative
 dates are not the real research dates. They measure **recording**, not attempt
 age, active work, model cost or result quality. An inherited or backfilled
@@ -46,8 +46,8 @@ LOOPX_PERSONAL_WORKSPACE_PACKAGED=1 LOOPX_PERSONAL_WORKSPACE_SCENARIO=research-h
 The scenario uses a disposable registry/runtime and the production history
 HTTP owner. It reads every page into the packaged UI, distinguishes explicit
 edges from parent grouping, preserves selection across reload, tests narrow
-layout and a failed-refresh recovery, and verifies unchanged source bytes and
-zero mutation attempts/model starts. Its surrounding workspace is a test
+layout and a failed-refresh recovery, and verifies unchanged source bytes,
+zero mutation attempts against that history owner and no Agent starts. Its surrounding workspace is a test
 scaffold. It does not validate the installed desktop App, native result curves,
 Agent analysis or scientific conclusions. The backend can be started separately
 for read-only inspection; its execution services are deliberately unavailable:
@@ -55,6 +55,11 @@ for read-only inspection; its execution services are deliberately unavailable:
 ```sh
 uv run --extra test python examples/personal-workspace-browser/research-history-backend.py
 ```
+
+The backend freezes the fixture bytes and digest at startup. Restart it after
+editing the capture; a later file read must not retag an already served snapshot.
+Standalone inspection rejects all writes, including presentation preferences;
+execution/session warnings describe this fixture boundary, not a live benchmark.
 
 中文：这是保留真实结构与相对时间的脱敏研究工作图，不是 solver 轨迹或原生成绩。
 所有正文均已改写，引用只保留相等关系；完整源材料留在私有边界内。以记录时间呈现
