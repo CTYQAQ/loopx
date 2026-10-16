@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +75,7 @@ def _run_cli(env: dict[str, str], cli: list[str], args: list[str]) -> dict[str, 
     return payload
 
 
-def _load_document(env: dict[str, str]) -> tuple[Path, dict[str, Any]]:
+def _load_document(env: dict[str, str]) -> dict[str, Any]:
     path = Path(env[ACCEPTANCE_DOCUMENT_ENV])
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
@@ -84,7 +85,7 @@ def _load_document(env: dict[str, str]) -> tuple[Path, dict[str, Any]]:
         raise ValueError("Goal acceptance document is unreadable or not JSON") from exc
     if not isinstance(document, dict):
         raise ValueError("Goal acceptance document must be a JSON object")
-    return path, document
+    return document
 
 
 def _accepted_record_path(env: dict[str, str]) -> Path:
@@ -132,15 +133,22 @@ def _selected_and_bound(document: dict[str, Any]) -> tuple[list[str], list[dict[
     return list(selected), bindings
 
 
-def _configure(env, cli, document_path: Path, *, operation_id: str,
+def _configure(env, cli, document: dict[str, Any], *, operation_id: str,
                expected_todo_ids: list[str]) -> dict[str, Any]:
     goal = ["--goal-id", env["LOOPX_GOAL_ID"]]
     basis = _run_cli(env, cli, ["goal-acceptance", "inspect", *goal])
-    applied = _run_cli(env, cli, [
-        "goal-acceptance", "configure", *goal, "--document", str(document_path),
-        "--expected-provider-revision", str(basis["provider_revision"]),
-        "--operation-id", operation_id, "--execute",
-    ])
+    record_path = _accepted_record_path(env)
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    # Configure exactly the document already read and validated by the host.
+    # Neither side of this IO may re-read the model's mutable planning draft.
+    with tempfile.TemporaryDirectory(prefix="acceptance-", dir=record_path.parent) as directory:
+        snapshot_path = Path(directory) / "document.json"
+        _write_json(snapshot_path, document)
+        applied = _run_cli(env, cli, [
+            "goal-acceptance", "configure", *goal, "--document", str(snapshot_path),
+            "--expected-provider-revision", str(basis["provider_revision"]),
+            "--operation-id", operation_id, "--execute",
+        ])
     contract = applied.get("goal_acceptance_contract") or {}
     if applied.get("status") != "applied" or contract.get("enabled") is not True:
         raise ValueError("Goal acceptance configuration was not applied")
@@ -149,9 +157,9 @@ def _configure(env, cli, document_path: Path, *, operation_id: str,
     not_ready = [todo_id for todo_id in expected_todo_ids if states.get(todo_id) != "ready"]
     if not_ready:
         raise ValueError(f"acceptance association is not ready for {', '.join(not_ready)}")
-    _write_json(_accepted_record_path(env), {
+    _write_json(record_path, {
         "revision": contract["revision"], "digest": contract["digest"],
-        "document": json.loads(document_path.read_text(encoding="utf-8")),
+        "document": document,
     })
     return {
         "status": "applied",
@@ -166,15 +174,16 @@ def _configure(env, cli, document_path: Path, *, operation_id: str,
 def apply_planned_acceptance(env: dict[str, str], planning: dict[str, Any],
                              cli: list[str]) -> dict[str, Any]:
     """Configure the model-written document for the Todos planning returned."""
-    document_path, document = _load_document(env)
+    document = _load_document(env)
     selected, _ = _selected_and_bound(document)
     unknown = sorted(set(selected) - set(planning["todo_ids"]))
     if unknown:
         raise ValueError(f"acceptance selects Todos outside the planning result: {', '.join(unknown)}")
     digest = hashlib.sha256(
-        document_path.read_bytes() + planning["input_digest"].encode("utf-8")
+        json.dumps(document, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        + planning["input_digest"].encode("utf-8")
     ).hexdigest()
-    return _configure(env, cli, document_path,
+    return _configure(env, cli, document,
                       operation_id=f"planned-acceptance:{digest[:32]}",
                       expected_todo_ids=selected)
 
@@ -213,9 +222,7 @@ def reconfirm_planned_acceptance(env: dict[str, str], cli: list[str]) -> dict[st
     revised = {**document,
                "scope": {"kind": "selected_work", "todo_ids": applicable},
                "bindings": [row for row in bindings if row["todo_id"] in applicable]}
-    revised_path = record_path.with_name("benchmark-acceptance-reconfirm.json")
-    _write_json(revised_path, revised)
-    receipt = _configure(env, cli, revised_path,
+    receipt = _configure(env, cli, revised,
                          operation_id=f"planned-acceptance-reconfirm:{contract['revision']}",
                          expected_todo_ids=applicable)
     return {"reconfirmed": stale, "revision": receipt["revision"]}

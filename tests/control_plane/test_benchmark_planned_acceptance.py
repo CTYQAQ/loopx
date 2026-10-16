@@ -107,7 +107,10 @@ def _document(todo_id: str) -> dict:
     }
 
 
-def test_real_goal_holds_selected_todo_until_criteria_pass_and_reconfirms_edits(tmp_path, monkeypatch):
+@pytest.mark.parametrize("draft_edit", [None, "before-configure", "after-configure"])
+def test_real_goal_holds_selected_todo_until_criteria_pass_and_reconfirms_edits(
+    tmp_path, monkeypatch, draft_edit,
+):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     env, cli = _bootstrap_goal(tmp_path)
     todo_id, project = env["TEST_TODO_ID"], Path(env["LOOPX_PROJECT"])
@@ -141,6 +144,29 @@ def test_real_goal_holds_selected_todo_until_criteria_pass_and_reconfirms_edits(
     assert run("goal-acceptance", "inspect", *goal)[1]["goal_acceptance_contract"] == {"enabled": False}
 
     document_path.write_text(json.dumps(_document(todo_id)))
+    # Change only the model draft at either edge of the real configuration IO.
+    # Native configuration, lease/edit, reconfirm and completion stay real.
+    from benchmark.runtime import acceptance
+
+    original_run_cli = acceptance._run_cli
+    changed_draft = False
+
+    def configure_barrier(env, cli, args):
+        nonlocal changed_draft
+        mutate = draft_edit and not changed_draft and args[:2] == ["goal-acceptance", "configure"]
+        weakened = _document(todo_id)
+        weakened["criteria"][0]["validation_argv"] = [sys.executable, "-c", "pass"]
+        if mutate and draft_edit == "before-configure":
+            document_path.write_text(json.dumps(weakened))
+        payload = original_run_cli(env, cli, args)
+        if mutate:
+            assert payload["status"] == "applied"
+            if draft_edit == "after-configure":
+                document_path.write_text(json.dumps(weakened))
+            changed_draft = True
+        return payload
+
+    monkeypatch.setattr(acceptance, "_run_cli", configure_barrier)
     applied = apply_planned_acceptance(env, planning, cli)
     assert applied["status"] == "applied" and applied["selected_todo_ids"] == [todo_id]
     assert applied["criterion_ids"] == ["result-present"] and "validation_argv" not in json.dumps(applied)
