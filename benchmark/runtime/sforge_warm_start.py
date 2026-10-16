@@ -298,7 +298,7 @@ def prepare_context(env: dict[str, str], declaration: dict) -> dict:
     context = adopt_todo_context(env, unit, digest,
         source_todo_id=declaration["source_todo_id"], todo_id=todo,
         operation_id="checkpoint-context", expected_revision=revision,
-        lease_key=key, lease_version=lease["version"])
+        lease_key=key, lease_version=lease["version"], deadline=declaration["deadline_epoch"])
     # The first work guard owns the next execution lease. Context adoption is
     # finished before this lease is released; no historical lease is imported.
     cli("task-lease", "release", "--goal-id", goal, "--todo-id", todo,

@@ -966,7 +966,13 @@ native registration; subsequent participant checks still verify the retained
 bytes. Workspace restoration uses the same bounded full-artifact read allowance.
 Native conversation admission and fresh-replan revalidation allow up to 90 seconds
 per read, capped by the original phase deadline, while preserving full-history,
-cursor and identity checks. These allowances grant no extra execution time and
+cursor and identity checks. Core research-context adoption also gives complete
+artifact and native-history reads up to 90 seconds each (previously the generic
+10-second artifact RPC and 30-second native read defaults). Warm preparation
+passes its original phase deadline through adoption; expiration rejects the next
+write, and uncertain prior writes must replay their original operation. Ordinary
+Core callers remain lease-governed and may supply an absolute adoption deadline.
+These allowances grant no extra execution time and
 do not establish sustained performance for growing checkpoints.
 
 Concurrent receivers importing the same native point serialize bank publication
