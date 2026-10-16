@@ -423,9 +423,12 @@ read the same task again: `resume_ready=true` allows acquisition under the usual
 owner/key/version checks. If the wait itself needs correction, use the existing
 authorized `todo update --resume-when ...` or `--clear-resume-when` operation;
 neither inspecting nor editing the wait grants execution authority.
-In hard-lease mode, ordinary edits still need an active execution proof. After
-release or expiry, use the existing narrow owner pause/reopen lifecycle, with a
-stable operation id, current provider revision and explicit reason:
+In hard-lease mode, execution-sensitive updates retain their active-proof or
+dedicated lifecycle admission. Ordinary owner text, note, evidence, reason and
+priority edits use the administrative provider-CAS path without acquiring a
+lease; see [administrative edits and explicit execution proof](../project-agent-todo-contract.md#administrative-edits-and-explicit-execution-proof).
+Correct an obsolete execution wait through the bounded owner pause/reopen
+lifecycle, with a stable operation id, current provider revision and explicit reason:
 
 ```bash
 loopx todo update --goal-id example-goal --todo-id todo_work --agent-id owner \
@@ -438,6 +441,7 @@ loopx todo update --goal-id example-goal --todo-id todo_work --agent-id owner \
 
 Read back between operations and acquire a fresh lease before executing. Do not
 attach an old lease proof or bundle ownership, text or work-requirement edits.
+Optional note/evidence may accompany each lifecycle step in its atomic update.
 
 在 canonical File、SQLite 和 PostgreSQL Goal 中，`todo_done` 和 `resume_at` 等待同时约束
 实际执行入口，而不只是候选任务展示。必须由真实前置 Todo 的 `done` 状态满足条件，
@@ -449,10 +453,12 @@ attach an old lease proof or bundle ownership, text or work-requirement edits.
 但有效 `active=false`。释放、历史完成读回、授权 supersede、普通分配和等待修复
 沿用原规则。前置任务正常完成或到达指定恢复时刻后，重新读回并按原 owner、key、
 version 规则继续执行。其他恢复条件及 governed amendment 的边界保持独立。
-hard-lease 普通编辑仍须提供有效执行 proof。租约释放或到期后，可按上面的既有窄范围
-流程，以明确理由、稳定操作 ID 和当前 provider revision 暂停并清除等待；读回后再用
-新 revision 明确重新打开，最后领取新租约。不能附带旧 proof、文案、归属或工作要求修改，
-也不能把暂停或重新打开当作执行授权。
+hard-lease 的执行敏感更新仍须有效执行 proof 或专属 lifecycle 准入；本人的普通说明、
+备注、证据、原因和优先级编辑走行政性 provider CAS，无需获取执行租约。
+修正过时等待时，可按上面的既有窄范围流程，以明确理由、稳定操作 ID 和当前
+provider revision 暂停并清除等待；读回后再用
+新 revision 明确重新打开，最后领取新租约。不能附带旧 proof、任务正文、归属或工作要求修改，
+也不能把暂停或重新打开当作执行授权；每步可原子附带备注和证据。
 
 A successful readback is still a point-in-time proof, not a lock over subsequent
 external effects. Execution must retain its existing mutation fences; this
