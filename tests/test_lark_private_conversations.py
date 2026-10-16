@@ -641,6 +641,105 @@ def test_group_mention_text_does_not_invent_a_control(ordinary, raw_text, identi
         runtime.close()
 
 
+@pytest.mark.parametrize("text,command", [("/stop", "stop"), ("/status", "status"),
+                                         ("/help", "help"), ("/new", "new")])
+@pytest.mark.parametrize("followup", [False, True])
+def test_group_control_does_not_require_display_service(ordinary, text, command, followup):  # noqa: F811
+    store, runtime, provider, transport = connect_group(ordinary)
+    try:
+        root = provider.topic("canonical-control-root", "/help") if followup else None
+        event = provider.topic("canonical-control", text, root=root["message_id"] if root else None)
+
+        def unavailable_display(args, cwd=None, timeout=None):
+            if "+messages-mget" in args:
+                return {"returncode": 1, "stdout": '{"ok":false}'}
+            return provider(args, cwd, timeout)
+
+        transport.runner = unavailable_display
+        assert transport.admit("notes-app", event)["status"] == "command_recorded"
+        request = transport.core.pending()[0]
+        assert request["command"] == command and request["turn_id"] is None
+        assert store.list_sessions() == []
+        assert transport.admit("notes-app", event)["status"] == "command_recorded"
+        assert transport.core.pending()[0] == request
+        # Event hints cannot replace a fresh canonical read on the next attempt.
+        provider.messages[(root or event)["message_id"]]["mentions"] = []
+        assert transport.admit("notes-app", event)["status"] == "source_verification_failed"
+        assert not provider.writes
+    finally:
+        runtime.close()
+
+
+def test_group_old_rendered_control_keeps_exact_native_replay(ordinary):  # noqa: F811
+    _, runtime, provider, transport = connect_group(ordinary)
+    try:
+        event = provider.topic("old-rendered-control", "/stop")
+        message = provider.messages[event["message_id"]]
+        message.update(content="Earlier thread context\n/stop", body={"content": '{"text":"/stop"}'})
+        binding = transport._binding("notes-app")
+        source = lark_private_source(provider_ref=binding["provider_ref"], event=event)
+        request_ref = identity_ref(binding["provider_ref"], event["message_id"])
+        original = transport.core.admit(binding_id=binding["binding_id"], source=source,
+            request_ref=request_ref, message=message["content"], command="stop")
+        assert transport.admit("notes-app", event)["status"] == "command_recorded"
+        assert transport.core.read_request(request_ref) == original
+        assert any("+messages-mget" in args for args in provider.calls)
+    finally:
+        runtime.close()
+
+
+def test_group_control_hint_cannot_override_canonical_ordinary_text(ordinary):  # noqa: F811
+    _, runtime, provider, transport = connect_group(ordinary)
+    try:
+        event = provider.topic("forged-control-hint", "/stop")
+        provider.messages[event["message_id"]]["content"] = "Explain the public project"
+        assert transport.admit("notes-app", event)["status"] == "durably_accepted"
+        request = transport.core.pending()[0]
+        assert request["command"] is None and request["message"] == "Explain the public project"
+        assert any("+messages-mget" in args for args in provider.calls)
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("body", ["invalid json", "{}", '{"text":null}', '{"text":"  "}'])
+def test_group_display_cannot_supply_a_control_missing_from_canonical_text(ordinary, body):  # noqa: F811
+    store, runtime, provider, transport = connect_group(ordinary)
+    try:
+        event = provider.topic("invalid-control-source", "/stop")
+        provider.messages[event["message_id"]]["body"] = {"content": body}
+        assert transport.admit("notes-app", event)["status"] == "source_verification_failed"
+        assert not transport.core.pending() and not store.list_sessions()
+        assert not list(transport.root.glob("*.json")) and not provider.writes
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("group", [False, True])
+@pytest.mark.parametrize("command", ["/stop", "/status", "/help", "/new"])
+def test_completed_control_reply_precedes_optional_received_reaction(ordinary, monkeypatch, group, command):  # noqa: F811
+    store, runtime, provider, transport = (connect_group if group else connect)(ordinary)
+    original = Provider.__call__
+    try:
+        def reaction_after_reply(self, args, cwd=None, timeout=None):
+            if "reactions" in args and "create" in args:
+                assert self.writes, "optional receipt feedback must not delay the control result"
+            return original(self, args, cwd, timeout)
+
+        monkeypatch.setattr(Provider, "__call__", reaction_after_reply)
+        event = provider.topic("control-order", command) if group else provider.event("notes-app", "control-order", command)
+        assert transport.admit("notes-app", event)["status"] == "command_recorded"
+        transport.reconcile()
+        record = json.loads(next(transport.root.glob("*.json")).read_text())
+        assert record["status"] == "delivered" and record["deliveries"]["terminal"]["verified"]
+        assert record["feedback"]["received"]["ok"]
+        assert len(provider.writes) == 1 and len(provider.reaction_creates) == 1
+        transport.reconcile()
+        assert len(provider.writes) == 1 and len(provider.reaction_creates) == 1
+        assert store.list_sessions() == []
+    finally:
+        runtime.close()
+
+
 def test_group_provenance_and_revocation_prevent_private_or_wrong_topic_delivery(ordinary):  # noqa: F811
     store, runtime, provider, transport = connect_group(ordinary)
     try:
@@ -772,10 +871,11 @@ def test_group_reply_uses_raw_ancestry_when_display_readback_omits_it(ordinary):
 
 
 @pytest.mark.parametrize("failure", ["unavailable", "code_error", "wrong_sender", "wrong_chat", "wrong_type", "wrong_root"])
-def test_group_raw_readback_failure_cannot_fall_back_to_display_authority(ordinary, failure):  # noqa: F811
+@pytest.mark.parametrize("control", [False, True])
+def test_group_raw_readback_failure_cannot_fall_back_to_display_authority(ordinary, failure, control):  # noqa: F811
     store, runtime, provider, transport = connect_group(ordinary)
     root = provider.topic("raw-root", "Explain this project")
-    reply = provider.topic("raw-reply", "Compare its configuration", root=root["message_id"])
+    reply = provider.topic("raw-reply", "/stop" if control else "Compare its configuration", root=root["message_id"])
 
     def conflicting_provider(args, cwd=None, timeout=None):
         result = provider(args, cwd, timeout)
