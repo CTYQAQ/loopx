@@ -394,6 +394,52 @@ inert inspection by the [recorded maintainer decision](../architecture/rfcs/comp
 Compound worst cases and broader platforms/providers remain unqualified; no
 production SLO or merge authority follows from capacity consent.
 
+### Native authority capture in new full backups
+
+Ordinary full backups now also call the existing authority archive owner for
+each configuration-selected local Goal. The private `execution.authority_captures`
+rows bind the configuration checkpoint digest and captured runtime route to an
+actual capture interval, provider/store identity, revision, cursor and native
+history export. Selector and writer-fence bytes, including confirmed absence,
+travel beside that export with their byte digests. Missing authority is not
+initialized; a dependency or store-lineage change during export leaves that
+Goal's capture unknown. Ordinary concurrent appends may continue: the archive
+owner verifies the complete retained prefix at its captured cursor.
+
+Inspection prefers this owner export when the new rows are present. It verifies
+the full transition/receipt chain and reads the Goal/Todo model through the
+existing typed owners. A damaged or missing native capture stays unknown even
+when the earlier raw store copy is readable. An independent valid native export
+can remain readable when a raw database is unreadable; that database still has
+its own unknown storage finding and is never queried through restored views.
+Older v0 archives without these rows retain their existing raw-store inspection.
+Explicit migration-only backups keep their existing capture contract.
+
+After inert verification, the native artifact is at the row's `archive_path`
+under the new destination's `data/`. Its `archive.archive_sha256` is the native
+archive's chained seal, **not** the file byte checksum. Existing
+`authority-archive verify`, `restore` and `audit` can independently verify,
+restore to a new standalone store, and check every original receipt. Those
+operations grant no Goal, lease, session or effect admission; use the
+[authority archive procedure](../architecture/rfcs/complete-state-recovery-v0.md#relationship-to-existing-recovery-contracts)
+and the existing owner cutover rules before live use.
+
+The additional logical export preserves the raw safety copy and consumes the
+same unchanged archive, history and verifier budgets. It is not a shared epoch
+with configuration, quota, session, scheduler, material or external-effect
+owners. Every audit remains `held` / `legacy_best_effort`; M2 profile
+qualification and M3 activation remain open. Rollback is to the earlier producer
+for future backups; already-created artifacts remain private inert data.
+
+新完整备份会通过既有 authority owner 保存各 Goal 的完整历史前缀，并绑定配置摘要、
+来源 runtime、实际捕获区间、provider/store 身份、revision、cursor，以及 selector 和
+writer fence 的原始字节或确认不存在。并发追加可继续；捕获中依赖或存储身份变化、
+来源缺失时保持 unknown，不会初始化来源。新格式优先检查原生导出，损坏时不会用较早
+的 raw copy 冒充成功；旧 v0 和专用迁移备份保留原有规则。导出可由现有
+`authority-archive verify` / `restore` / `audit` 独立核验和恢复到全新隔离 store，
+不会激活 Goal、租约、会话或外部操作。额外历史占用原有容量预算；跨 owner 一致性、
+M2 完整资格和 M3 执行准入仍未完成，报告继续保持 held。
+
 ### Choosing backup inspection or a research checkpoint
 
 Use this Settings entry or `backup-state verify` to read a complete archive when
