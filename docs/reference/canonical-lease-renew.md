@@ -173,6 +173,39 @@ already assigned to the eligible receiver. Without `--transfer-claim`, transfer 
 claim. Neither form overrides an exclusion or widens write scopes. Use the actual readback
 versions, not these example numbers.
 
+### Ordinary task operations
+
+Use `todo update` for ordinary owner notes, evidence, priority, pause and resume.
+The canonical typed owner prepares current state and performs the authorized
+operation in one CAS; do not acquire a lease merely to edit a note. A pause can
+retire its current holder's lease atomically with note/evidence. Resume grants no
+execution; a new execution still uses this document's explicit lease lifecycle.
+See [Todo administrative and nonterminal updates](../project-agent-todo-contract.md#canonical-nonterminal-planning-updates).
+
+An explicit key/version remains a strict generation constraint. LoopX never
+silently replaces it, borrows a foreign holder or retries an ambiguous mutation
+as new work. Acquire, renew and transfer change execution authority and remain
+explicit. Every CLI lease refusal includes a routed `inspection.cli_args` command
+to read the actual holder/state/version; JSON and Markdown retain the original
+error. Parameter errors additionally explain missing and unsupported flags.
+Inspection is read-only and does not authorize the displayed lease's use.
+
+中文：普通本人任务的备注、证据、优先级、暂停和恢复直接使用 `todo update`，无需为改
+备注临时领租约。本人暂停可原子退休当前租约，恢复不授予执行。显式 key/version 仍是
+严格 generation 约束；不会自动替换、借用他人或把不确定提交作为新工作重试。
+领取、续期和转交执行权限仍须明确请求。所有 CLI lease 拒绝都提供带原路由的
+`inspection.cli_args`，可直接读取真实持有者、状态和版本；JSON/Markdown 保留原错误，
+参数错误另列缺失和冲突参数。读回不是使用凭证的授权。
+
+The synthetic deferred task below uses the same disposable canonical data in
+both views. The task detail now offers **Resume task** as its primary operation;
+completion proof is kept with completion. These compare source presentations,
+not an installed-App upgrade or a claim that a process stopped.
+
+| Previous task detail | Task detail with explicit resume |
+| --- | --- |
+| ![Deferred task with completion controls](../../apps/presentation/dashboard/smoke/assets/todo-lifecycle/before-deferred.png) | ![Deferred task with resume controls](../../apps/presentation/dashboard/smoke/assets/todo-lifecycle/after-deferred.png) |
+
 ### Action help and argument recovery
 
 Use `loopx task-lease renew --help` to inspect only that action's options;
