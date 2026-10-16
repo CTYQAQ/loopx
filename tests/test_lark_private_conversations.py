@@ -1103,7 +1103,7 @@ def test_group_admission_source_reads_overlap_but_keep_rendered_model_input(ordi
         event = provider.topic("overlap-follow", "@notes-app Explain config", root=root["message_id"])
         provider.messages[event["message_id"]]["body"] = {
             "content": json.dumps({"text": "@_user_1 Explain config"})}
-        started = threading.Barrier(3)
+        started = threading.Barrier(2)
         source_reading = threading.Event()
         original_source = transport._source_message
         original_observe = transport.bindings.observe
@@ -1116,8 +1116,7 @@ def test_group_admission_source_reads_overlap_but_keep_rendered_model_input(ordi
                 source_reading.clear()
 
         def observe(*args, **kwargs):
-            if source_reading.is_set():
-                started.wait(timeout=2)
+            assert not source_reading.is_set(), "source rendering must reuse its admission identity"
             return original_observe(*args, **kwargs)
 
         def overlap(args, cwd=None, timeout=None):
@@ -1135,6 +1134,38 @@ def test_group_admission_source_reads_overlap_but_keep_rendered_model_input(ordi
         assert row["source"]["topic_ref"] == lark_private_source(
             provider_ref=identity_ref("cli_notes_app"), event=event)["topic_ref"]
         assert not provider.writes
+    finally:
+        runtime.close()
+
+
+def test_group_admission_identity_is_not_cached_between_requests(ordinary, monkeypatch):  # noqa: F811
+    _, runtime, provider, transport = connect_group(ordinary)
+    try:
+        observed = []
+        admission_thread = threading.get_ident()
+        original_observe = transport.bindings.observe
+
+        def observe(*args, **kwargs):
+            if threading.get_ident() == admission_thread:
+                observed.append(args[0])
+            return original_observe(*args, **kwargs)
+
+        monkeypatch.setattr(transport.bindings, "observe", observe)
+        event = provider.topic("fresh-preflight", "Explain the project")
+        assert transport.admit("notes-app", event)["status"] == "durably_accepted"
+        # The admission preflight does not replace the Core owner's checks.
+        assert len(observed) > 1 and set(observed) == {"notes-app"}
+        first_request_observations = len(observed)
+        record = json.loads(next(transport.root.glob("*.json")).read_text())
+        assert "observation" not in record
+        assert "observation" not in transport.core.read_request(record["request_ref"])
+
+        provider.bot_ready = False
+        next_event = provider.topic("unavailable-next-preflight", "Explain config")
+        assert transport.admit("notes-app", next_event)["status"] == "audience_rejected"
+        assert observed == ["notes-app"] * (first_request_observations + 1)
+        assert len(list(transport.root.glob("*.json"))) == 1
+        assert not provider.writes and not provider.reaction_creates
     finally:
         runtime.close()
 

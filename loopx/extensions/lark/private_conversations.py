@@ -126,14 +126,18 @@ class LarkPrivateConversations:
                 # Outbound provenance needs no display rendering. Admission
                 # retains that projection unchanged for text and media inputs.
                 if render_content:
-                    # The fresh Bot identity and exact message projections
-                    # are independent reads. Join all three before checking
-                    # the root mention; Core still rechecks under its fences.
+                    # Admission already verified this exact App. Reuse only
+                    # that call's ephemeral observation; Core still rechecks
+                    # under its fences, and outbound verification stays fresh.
+                    observation = selected.get("observation")
                     with ThreadPoolExecutor(max_workers=3) as reads:
                         current = reads.submit(self._group_source_message, record["profile"], event["message_id"])
                         display = reads.submit(rendered)
-                        identity = reads.submit(self.bindings.observe, record["profile"])
-                        canonical, result, observation = current.result(), display.result(), identity.result()
+                        identity = (reads.submit(self.bindings.observe, record["profile"])
+                                    if observation is None else None)
+                        canonical, result = current.result(), display.result()
+                        if identity is not None:
+                            observation = identity.result()
                     message = _message(json_payload(result), event["message_id"])
                 else:
                     # Delivery still needs both fresh observations. Their IO
@@ -254,7 +258,7 @@ class LarkPrivateConversations:
         try:
             binding = self._binding(profile)
             source = lark_private_source(provider_ref=binding["provider_ref"], event=event)
-            selected = self.bindings.resolve(binding_id=binding["binding_id"], **source)
+            selected = self.bindings.resolve(binding_id=binding["binding_id"], **source, include_observation=True)
         except (KeyError, StopIteration, ValueError):
             return {"status": "audience_rejected"}
         request = identity_ref(binding["provider_ref"], event["message_id"])
