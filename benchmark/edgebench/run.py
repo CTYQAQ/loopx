@@ -120,6 +120,8 @@ def main(argv=None):
                          help="Heartbeat default: 6 settled effective work Turns")
     cadence.add_argument("--replan-after-todos", type=int, choices=range(1, 6),
                          help="Explicit completed-Todo cadence ablation for heartbeat profiles")
+    parser.add_argument("--planning-horizon-goal", action=argparse.BooleanOptionalAction, default=None,
+                        help="Opt-in full Goal in preselection horizon; --no-planning-horizon-goal explicitly disables it")
     parser.add_argument("--stride-strategy", choices=stride_strategy_options(),
                         help="Explicit heartbeat Goal-review strategy; omitted keeps the ordinary off treatment")
     parser.add_argument("--checkpoint-controller-file", type=Path,
@@ -168,6 +170,8 @@ def main(argv=None):
         parser.error("Replan cadence requires a heartbeat worker")
     if args.stride_strategy is not None and not args.worker.startswith("heartbeat-"):
         parser.error("--stride-strategy requires a heartbeat worker")
+    if args.planning_horizon_goal is not None and not args.worker.startswith("heartbeat-"):
+        parser.error("--planning-horizon-goal requires a heartbeat worker")
     checkpoint_request = None
     if args.checkpoint_request is not None:
         if not args.worker.startswith("heartbeat-"):
@@ -276,6 +280,7 @@ def main(argv=None):
                          native_goal_continue=args.native_goal_continue,
                          replan_after_turns=args.replan_after_turns,
                          replan_after_todos=args.replan_after_todos,
+                         planning_horizon_goal=args.planning_horizon_goal,
                          **({"stride_strategy": args.stride_strategy}
                             if args.stride_strategy is not None else {}),
                          **({"checkpoint_request": checkpoint_request}
@@ -352,6 +357,8 @@ def main(argv=None):
            if agent.replan_after_turns is not None else {}),
         **({"replan_after_completed_todos": agent.replan_after_todos}
            if agent.replan_after_todos is not None else {}),
+        **({"planning_horizon_goal": args.planning_horizon_goal}
+           if args.planning_horizon_goal is not None else {}),
         **({"stride_strategy": args.stride_strategy}
            if args.stride_strategy is not None else {}),
         **({"checkpoint_request_sha256": hashlib.sha256(checkpoint_request).hexdigest()}

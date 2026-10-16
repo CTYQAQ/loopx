@@ -55,9 +55,12 @@ def build_quota_planning_packet(
     goal_frontier_projection: Mapping[str, Any] | None,
     replan_selection_context: Mapping[str, Any] | None = None,
     source_status: Mapping[str, Any] | None = None,
+    planning_horizon_goal: bool = False,
 ) -> dict[str, Any]:
     """Project every requested planning lens through one TypeScript request."""
 
+    if not isinstance(planning_horizon_goal, bool):
+        raise ValueError("planning_horizon_goal must be a boolean")
     if not projection_enabled and not include_detail and replan_selection_context is None:
         return {}
     inventory_request = build_quota_planning_inventory_request(
@@ -75,7 +78,7 @@ def build_quota_planning_packet(
 
     goal_facts = (
         goal_context_facts(source_status, goal_id, (agent_todo_summary or {}).get("goal_acceptance_contract"))
-        if source_status and source_status.get("registry") else None
+        if planning_horizon_goal and source_status and source_status.get("registry") else None
     )
     try:
         projected = effect_runtime_result(
