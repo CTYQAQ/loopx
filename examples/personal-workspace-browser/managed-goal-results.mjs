@@ -35,6 +35,7 @@ export const managedGoalResultsScenario = {
       }});
     });
     try {
+      assert.equal(reads, 0, "The directory must not read a Goal's report body");
       await page.locator(".personal-goal-link", {hasText: "Product Release"}).click();
       // Overview and Files each own an exact acceptance read. Wait for the
       // first surface before navigating; racing it must not decide the count.

@@ -59,6 +59,8 @@ export const researchResultsScenario = {
     });
     const {page, api} = context;
     try {
+      assert.equal(indexes, 0, "Research must remain lazy in the directory before a Goal is opened");
+      assert.equal(reads, 0, "No Goal's research body is read from the directory");
       await page.locator(".personal-goal-link", {hasText: "Product Release"}).click();
       // Overview and Files have independent exact projection reads. Do not
       // race navigation against the first read or count it as duplicate work.
