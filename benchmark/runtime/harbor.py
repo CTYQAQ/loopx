@@ -65,6 +65,7 @@ class BenchmarkCodex(CodexOffline):
         replan_after_todos=None,
         replan_after_turns=None,
         stride_strategy=None,
+        planning_horizon_goal=None,
         checkpoint_request_path=None,
         checkpoint_request=None,
         task_entry=None,
@@ -115,6 +116,12 @@ class BenchmarkCodex(CodexOffline):
             raise ValueError("stride_strategy requires a LoopX execution mode")
         self.stride_strategy = (normalize_stride_strategy(stride_strategy)
                                 if stride_strategy is not None else None)
+        if planning_horizon_goal is not None:
+            if not isinstance(planning_horizon_goal, bool):
+                raise ValueError("planning_horizon_goal must be a boolean")
+            if not self.execution.uses_loopx:
+                raise ValueError("planning_horizon_goal requires a LoopX execution mode")
+        self.planning_horizon_goal = planning_horizon_goal
         self.checkpoint_request_path = None
         self._checkpoint_declaration = None
         if checkpoint_request is not None:
@@ -161,7 +168,9 @@ class BenchmarkCodex(CodexOffline):
     def _replan_receipt(self) -> dict[str, int | str]:
         key, _, value = self._replan_configuration()
         return {key: value, **({"stride_strategy": self.stride_strategy}
-                             if self.stride_strategy is not None else {})}
+                             if self.stride_strategy is not None else {}),
+                **({"planning_horizon_goal": self.planning_horizon_goal}
+                   if self.planning_horizon_goal is not None else {})}
 
     @staticmethod
     def name() -> str:
@@ -414,6 +423,9 @@ class BenchmarkCodex(CodexOffline):
         key, option, expected = self._replan_configuration()
         stride_args = (["--execution-stride-strategy", self.stride_strategy]
                        if self.stride_strategy is not None else [])
+        if self.planning_horizon_goal is not None:
+            stride_args.append("--execution-planning-horizon-goal" if self.planning_horizon_goal
+                               else "--no-execution-planning-horizon-goal")
         pending = await environment.exec(
             command=f"test -e {_LOOPX_RUNTIME}/benchmark-pending-turn.json"
         )
@@ -494,6 +506,9 @@ class BenchmarkCodex(CodexOffline):
             raise RuntimeError(
                 f"replan cadence readback mismatch for {key}: expected {expected}, got {configured!r}"
             )
+        actual_horizon = configured_state.get("execution_profile", {}).get("planning_horizon_goal", False)
+        if actual_horizon != (self.planning_horizon_goal or False):
+            raise RuntimeError("planning_horizon_goal readback mismatch")
         strategy = configured_state.get("execution_profile", {}).get("stride_strategy", "off")
         if strategy != (self.stride_strategy or "off"):
             raise RuntimeError(
