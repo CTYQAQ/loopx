@@ -80,3 +80,30 @@ test("sparse question capture is grouped without inventing routes or hiding vers
   assert.equal(view.edges.length, 1, "date buckets create no source edges or scientific route");
   assert.equal(new Set([...members, ...display.nodes].map(node => node.id)).size, 120);
 });
+
+test("time-anchored reading keeps record-time thirds, routes and explicit decisions without causality", async () => {
+  const {buildExploreTimeline, parseExploreFindingSections} = await import("../../loopx/control_plane/presentation/explore_timeline.ts");
+  const rows = [
+    event({event_id: "n1", result_id: "q1", title: "Early question", recorded_at: "2026-01-01T00:00:00Z", status: "resolved"}),
+    event({event_id: "n2", result_id: "q2", title: "Mid question", recorded_at: "2026-01-02T00:00:00Z", status: "resolved", parent_id: "q1"}),
+    event({event_id: "n3", result_id: "q3", title: "Late question", recorded_at: "2026-01-03T00:00:00Z", status: "open"}),
+    event({event_id: "f1", event_kind: "finding", result_id: "finding1", node_id: "q1", status: "confirmed", evidence_refs: ["artifact:v1"]}),
+    event({event_id: "f3", event_kind: "finding", result_id: "finding3", node_id: "q3", status: "tentative", recorded_at: "2026-01-03T00:00:00Z", evidence_refs: ["artifact:v3"],
+      summary: "Input revision: plan:abc Applicability: exact input Observation: child resource finished Interpretation: Outcome: replan\nretained:\n- original owner\nchanged:\n- child DONE\nstopped:\n- do not rerun the old probe"}),
+  ];
+  const view = projectExploreHistory(rows, goal);
+  const timeline = buildExploreTimeline(view.nodes, view.edges, view.events);
+  assert.equal(timeline.bins.length > 0, true);
+  assert.deepEqual(timeline.phases.map(phase => phase.questions), [1, 1, 1]);
+  assert.equal(timeline.routes.length, 1, "recorded parent grouping joins a reading route");
+  assert.equal(timeline.routes[0]!.nodeIds[0], "q1");
+  assert.equal(timeline.singles.length, 1, "time adjacency never joins q3 to the route");
+  assert.equal(timeline.decisions.length, 1);
+  const decision = timeline.decisions[0]!.sections!.decision!;
+  assert.equal(decision.outcome, "replan");
+  assert.deepEqual(decision.changed, ["child DONE"]);
+  assert.deepEqual(decision.stopped, ["do not rerun the old probe"]);
+  const sections = parseExploreFindingSections(rows[4]!.summary)!;
+  assert.equal(sections.observation, "child resource finished");
+  assert.equal(parseExploreFindingSections("free-form finding text"), null, "unstructured findings stay raw prose");
+});

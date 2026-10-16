@@ -1,10 +1,13 @@
 import {useEffect, useId, useMemo, useRef, useState} from "react";
 import {ArrowLeft, Circle, FlaskConical, GitBranch, RefreshCw, Sparkles} from "lucide-react";
+import {buildExploreTimeline, parseExploreFindingSections} from "../../../../../../loopx/control_plane/presentation/explore_timeline.js";
+import {GoalResearchTimeline} from "./goal-research-timeline";
 import {requestJson} from "../../data/chat";
 import {groupUnlinkedHistoryQuestions, layoutExploreHistory, parseExploreHistoryPage, projectExploreHistory, type ExploreHistoryEvent} from "../../../../../../loopx/control_plane/presentation/explore_history.js";
 import "./goal-research-history.css";
 
 type Selection = {node: string; day: string | null};
+type Lens = "timeline" | "graph";
 type Read = {events: ExploreHistoryEvent[]; total: number | null; complete: boolean};
 const selectedFromUrl = (goal: string): Selection => {
   const query = new URLSearchParams(window.location.search);
@@ -22,6 +25,8 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0}: {
   const [selection, setSelection] = useState(() => selectedFromUrl(goalId));
   const [recordsOpen, setRecordsOpen] = useState(false);
   const [recordLimit, setRecordLimit] = useState(50);
+  const [lens, setLens] = useState<Lens>(() => new URLSearchParams(window.location.search).get("research_lens") === "graph" ? "graph" : "timeline");
+  const [phase, setPhase] = useState<number | null>(null);
   const presentationId = useId().replace(/:/g, "");
   const detail = useRef<HTMLDivElement>(null);
   const graph = useRef<HTMLDivElement>(null);
@@ -54,7 +59,24 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0}: {
   const timeLabel = (value: string | null) => value && Number.isFinite(Date.parse(value))
     ? new Intl.DateTimeFormat(zh ? "zh-CN" : "en", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}).format(new Date(value)) : copy.unknown;
 
-  const findingElement = (finding: ExploreHistoryEvent) => <div className="research-recorded-finding" key={finding.event_id}><strong>{finding.title}</strong><small>{zh ? "来源标记" : "Source label"} · {stateLabel(finding.status)}{finding.confidence !== null ? ` · ${zh ? "来源自报置信度" : "Source-reported confidence"} ${finding.confidence}` : ""}</small><p>{finding.summary}</p>{finding.evidence_refs.map(ref => <code key={ref}>{ref}</code>)}</div>;
+  const sectionCopy = zh ? {inputRevision: "输入版本", applicability: "适用范围", observation: "观察", interpretation: "解读", changed: "变化", stopped: "停止", retained: "保留"}
+    : {inputRevision: "Input revision", applicability: "Applicability", observation: "Observation", interpretation: "Interpretation", changed: "Changed", stopped: "Stopped", retained: "Retained"};
+  const outcomeCopy: Record<string, string> = zh ? {replan: "转向", continue: "继续", stop: "停止", wait: "等待", no_change: "无变化", ask_human: "请人决定"} : {replan: "Replan", continue: "Continue", stop: "Stop", wait: "Wait", no_change: "No change", ask_human: "Ask human"};
+  const findingBody = (finding: ExploreHistoryEvent) => {
+    const sections = parseExploreFindingSections(finding.summary);
+    if (!sections) return <p>{finding.summary}</p>;
+    const decision = sections.decision;
+    return <dl className="research-finding-sections">
+      <dt>{sectionCopy.observation}</dt><dd>{sections.observation}</dd>
+      {decision ? <>
+        <dt>{zh ? "决策" : "Decision"}</dt><dd><b className={`research-outcome is-${decision.outcome}`}>{outcomeCopy[decision.outcome] ?? decision.outcome}</b></dd>
+        {(["changed", "stopped", "retained"] as const).map(key => decision[key].length ? <><dt key={`${key}-t`}>{sectionCopy[key]}</dt><dd key={key}><ul>{decision[key].map(item => <li key={item}>{item}</li>)}</ul></dd></> : null)}
+      </> : <><dt>{sectionCopy.interpretation}</dt><dd>{sections.interpretation}</dd></>}
+      <dt>{sectionCopy.applicability}</dt><dd className="is-muted">{sections.applicability}</dd>
+      <dt>{sectionCopy.inputRevision}</dt><dd><code>{sections.inputRevision}</code></dd>
+    </dl>;
+  };
+  const findingElement = (finding: ExploreHistoryEvent) => <div className="research-recorded-finding" key={finding.event_id}><strong>{finding.title}</strong><small>{timeLabel(finding.recorded_at)} · {zh ? "来源标记" : "Source label"} · {stateLabel(finding.status)}{finding.confidence !== null ? ` · ${zh ? "来源自报置信度" : "Source-reported confidence"} ${finding.confidence}` : ""}</small>{findingBody(finding)}{finding.evidence_refs.map(ref => <code key={ref}>{ref}</code>)}</div>;
   const updateRecords = (events: readonly ExploreHistoryEvent[]) => <ol className="research-history-records">{events.map(event => <li key={event.event_id}><time>{timeLabel(event.recorded_at)}</time><span>{stateLabel(event.status)} · {event.title}{event.summary ? ` — ${event.summary}` : ""}</span>{event.parent_id ? <code>{copy.group}: {event.parent_id}</code> : null}{event.evidence_refs.map(ref => <code key={ref}>{ref}</code>)}{event.run_id ? <code>{event.run_id}</code> : null}</li>)}</ol>;
 
   useEffect(() => {
@@ -105,6 +127,10 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0}: {
   const value = history.value;
   const grouped = useMemo(() => groupUnlinkedHistoryQuestions(value?.nodes ?? [], value?.edges ?? []), [value]);
   const layout = useMemo(() => layoutExploreHistory(grouped.nodes, value?.edges ?? []), [grouped, value]);
+  const timeline = useMemo(() => value ? buildExploreTimeline(value.nodes, value.edges, value.events) : null, [value]);
+  const chooseLens = (next: Lens) => { setLens(next); const url = new URL(window.location.href); if (next === "graph") url.searchParams.set("research_lens", "graph"); else url.searchParams.delete("research_lens"); window.history.replaceState(window.history.state, "", url); };
+  const fullTime = (at: number) => new Intl.DateTimeFormat(zh ? "zh-CN" : "en", {month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false}).format(new Date(at));
+  const dayTime = (at: number) => new Intl.DateTimeFormat(zh ? "zh-CN" : "en", {month: "numeric", day: "numeric"}).format(new Date(at));
   const positions = new Map(layout.map(item => [item.node.id, item]));
   const selectedId = selection.node;
   const selected = value?.nodes.find(node => node.id === selectedId);
@@ -131,6 +157,7 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0}: {
       <p>{copy.scope}{value?.startAt ? <> · {copy.time} <time>{timeLabel(value.startAt)}</time> — <time>{timeLabel(value.endAt)}</time></> : null}</p></div>
       <div className="research-history-controls">
         {selectedId || selection.day !== null ? <button type="button" onClick={() => {choose("", false); graph.current?.focus();}}><ArrowLeft size={14} aria-hidden/>{copy.all}</button> : null}
+        <div className="research-lens" role="group" aria-label={zh ? "视图" : "View"}>{(["timeline", "graph"] as const).map(item => <button key={item} type="button" aria-pressed={lens === item} onClick={() => chooseLens(item)}>{item === "timeline" ? (zh ? "时间线" : "Timeline") : (zh ? "关系图" : "Graph")}</button>)}</div>
         <button type="button" disabled title={copy.unavailable} aria-describedby={`${presentationId}-analysis`}><Sparkles size={14} aria-hidden/>{copy.analysis}</button>
         <button type="button" aria-label={copy.refresh} disabled={busy} onClick={() => setRevision(n => n + 1)}><RefreshCw size={15} aria-hidden/></button>
       </div></header>
@@ -140,7 +167,9 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0}: {
     {error || history.error ? <p role="alert" className="research-history-error">{copy.failure} <small>{error || history.error}</small></p> : null}
     {busy && !read.events.length ? <div className="research-history-loading" role="status">{copy.loading}…</div> : null}
     {value?.nodes.length ? <div className={`research-history-layout${selected || selectedGroup ? " has-selection" : ""}`}>
-      <div className="research-history-canvas" ref={graph} tabIndex={0} aria-label={zh ? "完整已载入研究关系图；可滚动" : "Full loaded research graph; scrollable"}>
+      {lens === "timeline" && timeline ? <div className="research-history-canvas is-timeline" ref={graph} tabIndex={-1}>
+        <GoalResearchTimeline timeline={timeline} zh={zh} selectedId={selectedId} phase={phase} onPhase={setPhase} onSelect={id => choose(id)} timeLabel={fullTime} dayLabel={dayTime}/>
+      </div> : <div className="research-history-canvas" ref={graph} tabIndex={0} aria-label={zh ? "完整已载入研究关系图；可滚动" : "Full loaded research graph; scrollable"}>
         <div className="research-history-stage" style={{width, height}}>
           <svg width={width} height={height} aria-hidden="true" className="research-history-edges">
             <defs><marker id={`${presentationId}-arrow`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1,1 L7,4 L1,7" className="research-edge-arrow"/></marker></defs>
@@ -172,7 +201,7 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0}: {
             <strong>{group.day ? `${group.day} UTC` : copy.unknown}</strong><span className="research-node-count">{group.nodes.length} {zh ? "个问题 · 展开全部" : "questions · read all"}</span>
           </button>)}
         </div>
-      </div>
+      </div>}
       {selected ? <div className="research-history-detail" ref={detail} role="region" aria-label={selected.latest.title} tabIndex={-1} onKeyDown={event => {if (event.key === "Escape") {event.stopPropagation(); choose("", false); graph.current?.focus();}}}>
         <p className="research-detail-kind"><GitBranch size={14} aria-hidden/>{kindLabel(selected.latest.node_kind)} · {stateLabel(selected.latest.status)}</p>
         <h3>{selected.latest.title}</h3><p>{selected.latest.summary || (zh ? "此节点尚无详细说明。" : "No detail was recorded for this node.")}</p>
