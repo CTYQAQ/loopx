@@ -70,6 +70,50 @@ def _rewrite(archive: Path, manifest: Path, extra: tarfile.TarInfo | None = None
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_valid_backup_with_capture_skew_stays_inert(tmp_path, monkeypatch, provider):
+    original_add = tarfile.TarFile.add
+    writes = []
+
+    def add_then_write(tar, source, *args, **kwargs):
+        result = original_add(tar, source, *args, **kwargs)
+        if kwargs.get("arcname") == "configuration/registry.source.json":
+            # Real source writes after the earlier store/registry copy, before
+            # the producer's later configuration capture. Do not mock verifiers.
+            registry = tmp_path / "registry.json"
+            code, added = _cli("--registry", registry, "--runtime-root", tmp_path / "runtime",
+                "todo", "add", "--goal-id", "goal-a", "--role", "agent",
+                "--claimed-by", "agent-a", "--operation-id", "during-capture",
+                "--text", "Later work belongs to a later capture")
+            assert code == 0, added
+            writes.append(added)
+            configuration = json.loads(registry.read_text())
+            configuration["goals"][0]["description"] = "Later configuration"
+            registry.write_text(json.dumps(configuration))
+        return result
+
+    with monkeypatch.context() as capture:
+        capture.setattr(tarfile.TarFile, "add", add_then_write)
+        archive, manifest = _backup(tmp_path, provider)
+    assert len(writes) == 1
+    with tarfile.open(archive, "r:gz") as tar:
+        earlier = json.load(tar.extractfile("configuration/registry.source.json"))
+        later = json.load(tar.extractfile("configuration-backup.json"))
+    assert "description" not in earlier["goals"][0]
+    assert later["data"]["goals"][0]["goal_configuration"]["description"] == "Later configuration"
+    for name in ("project", "runtime", "registry.json"):
+        (tmp_path / name).rename(tmp_path / f"unavailable-{name}")
+    audit = verify_state_backup(archive=archive, manifest=manifest,
+        destination=tmp_path / "inert", execute=True)
+    assert audit["manifest_verified"] is True and audit["file_witnesses_verified"] is True
+    [goal] = [row for row in audit["components"] if row["owner_kind"] == "coordination_authority"]
+    assert goal["state"] == "readable" and goal["facts"]["todo_count"] == 1
+    assert goal["facts"]["history_commits"] == 2
+    assert audit["status"] == "held" and audit["capture_profile"] == "legacy_best_effort"
+    assert any(row["reason_code"] == "legacy_manifest_incomplete" for row in audit["findings"])
+    assert audit["activation_eligible"] is False and audit["execution_authority_granted"] is False
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_real_backup_recovers_readable_authority_after_original_sources_disappear(tmp_path, provider):
     archive, manifest = _backup(tmp_path, provider)
     (tmp_path / "project").rename(tmp_path / "unavailable-project")
