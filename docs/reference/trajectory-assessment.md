@@ -189,3 +189,67 @@ and historical states, inline source return and packaged frontend/backend
 readback. Present the key finding and uncertainty first, episode decisions next,
 and citations/method/cost on demand. CLI success alone does not complete that
 journey or qualify the model assessor.
+
+## Measured solver session cost (optional)
+
+A trusted pack curator can bind a **complete captured Codex session** separately
+from the model evidence. The existing register command accepts:
+
+```sh
+loopx benchmark trajectory-pack-register --goal-id OWNER_GOAL \
+  --input-json evidence-pack.json --source-root authorized-capture \
+  --title "Case · observation window" \
+  --usage-jsonl solver-session.jsonl --usage-session-id EXPECTED_SESSION_ID \
+  --format json
+```
+
+The capture path is relative to `source-root`, under the same containment rules.
+The expected session ID must be supplied with it. Registration reads the original
+file, verifies one unforked session with complete measured Turns, and retains its
+hash and a deterministic numeric projection. It never sends the session text to
+the analysis model. It does not execute, resume or change the solver.
+
+`solver_usage.projection` is returned by existing discovery and pack inspection,
+without a model call. It includes actual first/last event times, per-Turn source
+lines, input, cached input, uncached input and output tokens. Codex cumulative
+counter observations are differenced across Turns; summing the cumulative
+`turn.completed` snapshots would charge earlier work repeatedly. Cached input is
+part of input, and reasoning is part of output, not another additive cost.
+
+This adapter deliberately rejects missing prefixes/counter gaps, resets, wrong
+session IDs, forked sessions, unmatched or unmeasured completions and a capture
+ending inside a Turn. Unsupported captures are not zero-cost sessions. The
+current adapter does not combine donor and continuation sessions. A curator must
+verify that the session belongs to the selected run; identity and hash checks do
+not independently establish that scientific association.
+
+The projection's own event window can differ from the curated episode window.
+`elapsed_seconds` spans its first Turn start to its last completion;
+`turn_elapsed_seconds` sums those non-overlapping timestamp intervals, excluding
+between-Turn gaps. Both include model/tool/orchestration time and are neither CPU
+usage nor token-generation time. They deliberately use event timestamps rather
+than mixing in provider-rounded `duration_ms`. Dollar, evaluator and inherited
+study costs remain unknown; no token price or waste fraction is inferred.
+
+Usage facts have their own provenance and applicability. A changed or missing
+capture leaves the captured values visible as historical, while unrelated model
+evidence retains its existing availability. Changing a bound capture produces a
+new pack ID but does not invalidate a reusable assessment of unchanged evidence.
+The source binding and projection are covered by that ID. Omit both options to
+retain the previous registration identity and response shape. To stop using this
+projection, register/select a pack without the optional capture; no solver change
+or destructive removal of historical evidence is necessary.
+
+Ownership stays with `benchmark-toolkit`: this built-in provider adapter produces
+a read-only observation-window diagnostic. The existing quota Codex reader owns
+live cumulative observations and idempotent ledger booking; it intentionally
+accepts partial active sessions and does not validate complete per-Turn windows.
+This diagnostic neither books usage nor replaces that authority. Python performs
+file containment and counter-only transport; TypeScript owns window validation
+and reduction, and the browser-safe assessment types expose the result.
+
+This is the measured-cost producer for the existing research workbench. Its
+HTTP consumer can read the same inspection field; numerical presentation and the
+full packaged user journey remain a companion acceptance. No new renderer path
+or command input, model execution permission, score authority or default analysis
+is introduced.

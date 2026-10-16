@@ -227,3 +227,113 @@ def test_method_upgrade_reads_verified_old_result_without_rejudging(pack, monkey
     result_file.write_text("{}")
     with pytest.raises(PackUnavailable, match="historical_result_unverified"):
         inspect_pack(**scope)
+
+
+def _usage_fixture():
+    def counts(i, c, o):
+        return dict(input_tokens=i, cached_input_tokens=c, output_tokens=o)
+
+    events = [
+        dict(type="session_meta", payload=dict(id="solver-session")),
+        dict(type="event_msg", payload=dict(type="task_started", turn_id="a")),
+        dict(
+            type="event_msg",
+            payload=dict(
+                type="token_count",
+                info=dict(
+                    total_token_usage=counts(100, 60, 10),
+                    last_token_usage=counts(100, 60, 10),
+                ),
+            ),
+        ),
+        dict(type="event_msg", payload=dict(type="task_complete", turn_id="a")),
+        dict(type="event_msg", payload=dict(type="task_started", turn_id="b")),
+        dict(
+            type="event_msg",
+            payload=dict(
+                type="token_count",
+                info=dict(
+                    total_token_usage=counts(140, 80, 15),
+                    last_token_usage=counts(40, 20, 5),
+                ),
+            ),
+        ),
+        dict(type="event_msg", payload=dict(type="task_complete", turn_id="b")),
+    ]
+    for i, event in enumerate(events):
+        event["timestamp"] = f"2026-01-01T00:00:0{i}Z"
+    return "\n".join(json.dumps(e) for e in events) + "\n"
+
+
+def test_optional_solver_usage_is_read_only_scoped_and_separate_from_model(pack):
+    scope, _, old, input_path, sources, _ = pack
+    assert "solver_usage" not in inspect_pack(**scope)
+    (sources / "usage.jsonl").write_text(_usage_fixture())
+    args = dict(
+        **scope,
+        input_path=input_path,
+        source_root=sources,
+        title=old["title"],
+        usage_jsonl="usage.jsonl",
+        usage_session_id="solver-session",
+    )
+    registered = register_pack(**args)
+    assert registered["pack_id"] != old["pack_id"]
+    assert registered["analysis_key"] == old["analysis_key"]
+    assert register_pack(**args) == registered
+    view = inspect_pack(**scope)
+    cost = view["solver_usage"]
+    assert cost["projection"]["input_tokens"] == 140
+    assert cost["projection"]["uncached_input_tokens"] == 60
+    assert cost["projection"]["turns"][1]["usage"]["input_tokens"] == 40
+    assert view["job"] is None and view["result"] is None
+    assert discover(**scope)["packs"][-1]["solver_usage"] == cost
+    assert not list(scope["runtime_root"].rglob("receipt.json"))
+    (sources / "usage.jsonl").write_text("changed capture")
+    stale = inspect_pack(**scope)["solver_usage"]
+    assert stale["applicability"] == "historical"
+    assert stale["reason_code"] == "source_changed"
+    assert stale["projection"] == cost["projection"]
+    (sources / "usage.jsonl").unlink()
+    assert inspect_pack(**scope)["solver_usage"]["reason_code"] == "source_unavailable"
+    assert "solver_usage" not in inspect_pack(**scope, pack_id=old["pack_id"])
+
+
+def test_usage_registration_rejects_wrong_identity_paths_gaps_and_tampering(pack):
+    from loopx.control_plane.effect_runtime import EffectRuntimeRejected
+
+    scope, _, old, input_path, sources, _ = pack
+    args = dict(
+        **scope,
+        input_path=input_path,
+        source_root=sources,
+        title=old["title"],
+        usage_jsonl="usage.jsonl",
+        usage_session_id="solver-session",
+    )
+    path = sources / "usage.jsonl"
+    path.write_text(_usage_fixture())
+    with pytest.raises(ValueError, match="supplied together"):
+        register_pack(**{**args, "usage_session_id": None})
+    with pytest.raises(EffectRuntimeRejected, match="session"):
+        register_pack(**{**args, "usage_session_id": "wrong-session"})
+    with pytest.raises(PackUnavailable, match="invalid_source_path"):
+        register_pack(**{**args, "usage_jsonl": "../usage.jsonl"})
+    outside = sources.parent / "outside.jsonl"
+    outside.write_text(_usage_fixture())
+    (sources / "escaping.jsonl").symlink_to(outside)
+    with pytest.raises(PackUnavailable, match="invalid_source_path"):
+        register_pack(**{**args, "usage_jsonl": "escaping.jsonl"})
+    path.write_text(
+        _usage_fixture().replace('"input_tokens": 140', '"input_tokens": 240')
+    )
+    with pytest.raises(EffectRuntimeRejected, match="gap"):
+        register_pack(**args)
+    path.write_text(_usage_fixture())
+    registered = register_pack(**args)
+    stored = next(scope["runtime_root"].rglob(registered["pack_id"] + ".json"))
+    row = json.loads(stored.read_text())
+    row["solver_usage"]["projection"]["input_tokens"] = 0
+    stored.write_text(json.dumps(row))
+    with pytest.raises(PackUnavailable, match="invalid_registration"):
+        inspect_pack(**scope)
