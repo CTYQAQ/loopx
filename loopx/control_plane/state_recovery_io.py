@@ -379,6 +379,7 @@ def verify_state_backup(
                      "recovery_input_changed")
             audit = _audit_owners({"data_root": str(data), "verified": verified,
                 "registry_discovery": external.get("registry_discovery"), "included": external.get("included"),
+                "authority_captures": external.get("execution", {}).get("authority_captures"),
                 "measurements": {"archive_bytes": archive_size,
                     "regular_file_bytes": copied["logical_bytes"],
                     "archive_processing_ms": (time.monotonic_ns() - started) // 1_000_000},

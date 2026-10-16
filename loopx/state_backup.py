@@ -842,6 +842,26 @@ def execute_state_backup_plan(payload: dict[str, Any]) -> dict[str, Any]:
             info.size, info.mode = len(configuration_bytes), 0o600
             tar.addfile(info, io.BytesIO(configuration_bytes))
             updated["execution"]["configuration_backup"] = verify_configuration_backup(configuration)
+            if tar.record_file_members and "goal_runtime_roots" in payload.get("registry_discovery", {}):
+                # Capture through the authority owner, not by decoding a store
+                # here. Raw roots remain a separate historical safety copy.
+                targets = {item["archive_path"]: item["source_path"] for item in included}
+                roots = payload["registry_discovery"]["goal_runtime_roots"]
+                captures = []
+                for goal in configuration["data"]["goals"]:
+                    goal_id = goal["goal_id"]
+                    root = roots.get(goal_id)
+                    capture = effect_runtime_result("coordination.authority_backup.capture", {
+                        "goal_id": goal_id, "runtime_root": str(_resolved(Path(targets[root]))) if root in targets else None,
+                        "destination": str(staging),
+                    }, timeout=300.0, retry_safe=False)
+                    capture["runtime_archive_path"] = root
+                    capture["configuration_sha256"] = configuration["sha256"]
+                    captures.append(capture)
+                    if capture["state"] == "readable":
+                        directory = str(PurePosixPath(capture["archive_path"]).parent)
+                        tar.add(staging / directory, arcname=directory)
+                updated["execution"]["authority_captures"] = captures
             updated["execution"]["sqlite_snapshots"] = [entry[1] for entry in snapshots.values()]
             # manifest.json is deliberately excluded: it contains this list.
             # The existing external archive checksum witnesses the whole tar.
