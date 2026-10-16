@@ -51,7 +51,9 @@ can freeze the current Todo identity. Malformed frozen identities fail closed.
 Renewal, transfer and release preserve the frozen value and historical receipts.
 Current execution proof, acquire replay and inspection reject known repository
 drift with `lease_repository_divergence`; cleanup still uses exact owner/key/version.
-Changing retained work requirements is not a metadata-edit shortcut.
+Changing retained work requirements is not a metadata-edit shortcut: the
+[owner revision lifecycle](#revising-declared-work-requirements) retires the old
+grant atomically and requires a fresh acquisition for subsequent execution.
 
 JSON inspection exposes `lease.write_repository`; Markdown lease readback also
 shows the identity or `unknown (conservative overlap)`. This is a Goal-local,
@@ -460,6 +462,54 @@ hard-lease 的执行敏感更新仍须有效执行 proof 或专属 lifecycle 准
 provider revision 暂停并清除等待；读回后再用
 新 revision 明确重新打开，最后领取新租约。不能附带旧 proof、任务正文、归属或工作要求修改，
 也不能把暂停或重新打开当作执行授权；每步可原子附带备注和证据。
+
+### Revising declared work requirements
+
+In canonical **hard-lease** mode, the registered current Todo owner can revise
+the existing work-requirement fields through one `todo update`. The same provider
+transaction updates the declaration and releases the owner's active or expired
+lease. Absent or already released history needs no acquire/release preparation.
+The retained key, generation, repository and scopes remain historical facts;
+the update grants no execution and does not terminate a running process.
+
+```bash
+loopx todo update --goal-id example-goal --todo-id todo_work --agent-id owner \
+  --required-write-scope 'src/**' --required-write-scope 'tests/**' \
+  --required-capability filesystem_write --reason 'Include regression coverage' \
+  --update-operation-id revise-work
+loopx todo list --goal-id example-goal --todo-id todo_work
+loopx task-lease inspect --goal-id example-goal --todo-id todo_work
+```
+
+`work_requirements_transition` reports changed fields, lease retirement and
+`execution_authority_granted=false` in the preview, committed result and replay.
+Unchanged declarations preserve the current grant. After an actual revision,
+acquire a fresh generation with a new idempotency key and explicitly requested
+scopes before executing. Acquisition still checks the current Todo, repository,
+workspace, Goal policy and competing holders. Repository revisions preserve the
+old grant's frozen repository; the next grant binds the revised identity.
+
+This corrects the former default rejection of every retained requirement edit;
+it is limited to the existing hard-lease owner update path. Foreign retained
+holders, actor exclusions/bindings, archived/completed tasks and provider or
+registry conflicts remain fenced. Supplied proof must match one current active
+generation: stale, partial, expired or released proof is rejected and never
+silently replaced. Status, ownership, validation and dependency transitions
+cannot be bundled into this revision. Optional task copy, note, priority,
+reason and evidence may accompany it. Soft-claim behavior is unchanged.
+
+在 canonical **hard-lease** 模式中，当前已注册的 Todo owner 可通过一次既有
+`todo update` 修订工作要求。同一 provider 事务更新声明并释放本人有效或过期的
+旧租约；没有租约或已经释放时，无需先领取或再次释放。旧 key、代际、仓库和
+写入范围作为历史保留，修改不授予执行权，也不声称终止运行中的进程。
+预览、提交和重放的 `work_requirements_transition` 显示修改字段与租约结果；
+相同声明不会结束现有授权。真正修改后，必须用新幂等 key、明确写入范围重新
+申请租约；仓库修订只影响下一次授权，不改写旧授权的仓库身份。
+他人保留的租约、排除/绑定限制、归档/完成、provider 与 registry 冲突仍被拒绝；
+显式 proof 必须精确对应当前有效代际，陈旧、不完整、过期或已释放 proof 不会
+被自动替换。状态、归属、验证和依赖转换不能混在本次修订里；可附带普通正文、
+备注、优先级、原因及证据。此处明确改变的是 hard-lease owner 工作要求编辑的
+默认拒绝行为，soft-claim 规则保持原样。
 
 A successful readback is still a point-in-time proof, not a lock over subsequent
 external effects. Execution must retain its existing mutation fences; this
