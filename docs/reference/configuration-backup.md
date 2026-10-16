@@ -420,9 +420,9 @@ under the new destination's `data/`. Its `archive.archive_sha256` is the native
 archive's chained seal, **not** the file byte checksum. Existing
 `authority-archive verify`, `restore` and `audit` can independently verify,
 restore to a new standalone store, and check every original receipt. Those
-operations grant no Goal, lease, session or effect admission; use the
-[authority archive procedure](../architecture/rfcs/complete-state-recovery-v0.md#relationship-to-existing-recovery-contracts)
-and the existing owner cutover rules before live use.
+operations grant no Goal, lease, session or effect admission; follow the
+[existing recovery contracts](../architecture/rfcs/complete-state-recovery-v0.md#relationship-to-existing-recovery-contracts)
+and owner cutover rules before live use.
 
 The additional logical export preserves the raw safety copy and consumes the
 same unchanged archive, history and verifier budgets. It is not a shared epoch
