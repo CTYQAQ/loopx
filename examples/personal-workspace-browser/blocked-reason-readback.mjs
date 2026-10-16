@@ -143,7 +143,9 @@ export const blockedReasonReadbackScenario = {
           const suffix = `${locale}-${mobile ? "mobile" : "desktop"}`;
           try {
             const openTodo = async (text) => {
-              const card = page.locator("button[aria-pressed]", { hasText: text });
+              // The same task can appear in Overview, its rail and Tasks.
+              // Open the active Tasks surface rather than an arbitrary copy.
+              const card = page.locator(".personal-task-board:visible button[aria-pressed]", { hasText: text });
               if (await page.getByRole("dialog").isVisible()) {
                 await page.keyboard.press("Escape");
                 await page.getByRole("dialog").waitFor({ state: "hidden" });
