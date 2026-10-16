@@ -36,8 +36,11 @@ class WarmStart:
     normal_cadence: int = 6
     research_component_ids: tuple[str, ...] = ()
     fresh_after_replan: bool = False
+    fresh_replan: bool = False
 
     def verify(self, workspace: str) -> dict:
+        if type(self.fresh_replan) is not bool or (self.fresh_replan and self.fresh_after_replan):
+            raise ValueError("fresh_replan requires an exclusive boolean context treatment")
         if type(self.fresh_after_replan) is not bool:
             raise ValueError("fresh_after_replan requires an explicit boolean treatment")
         if (type(self.normal_cadence) is not int or not 1 <= self.normal_cadence <= 6
@@ -95,6 +98,8 @@ class WarmStart:
                        normal_cadence=self.normal_cadence)
         if self.research_component_ids:
             payload["research_component_ids"] = list(self.research_component_ids)
+        if self.fresh_replan:
+            payload["fresh_replan"] = True
         if self.fresh_after_replan:
             payload["fresh_after_replan"] = True
         with tempfile.TemporaryDirectory() as folder:
