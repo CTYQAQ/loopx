@@ -3,9 +3,10 @@
 `quota_planning_horizon_v0` is the bounded, read-only context that lets an
 agent reason beyond one locally selected Todo without inlining LoopX's full
 Todo store or task graph. It is present on the default `quota should-run` path
-only when the current selected work has typed lineage, waiting/blocking,
-scheduled-observation, or goal-acceptance context. Flat runnable alternatives
-remain solely in `action_portfolio`, avoiding a duplicate hot-path view.
+when a planning choice is available. It carries the current `core_goal` before
+work selection, including for a single local Todo or flat backlog. Older
+snapshot-only callers that supply no Goal facts retain the strategic-context
+condition. Flat runnable alternatives remain owned by `action_portfolio`.
 
 The problem it addresses is narrower than scheduling. A selected regression
 gate can be locally runnable while the strategic path also contains a facts
@@ -35,6 +36,21 @@ not silently replace the selected Todo.
   authorities. Planning-horizon items are context until the agent performs the
   existing explicit selection/re-entry flow.
 
+The Goal lens reuses the replan source reader and TypeScript `projectCoreGoal`
+projection: active-state Objective first, registered objective as fallback,
+explicit missing state, and the existing separately scoped acceptance contract.
+It does not persist another Goal, promote an Agent vision or Todo into the
+original objective, add a strategy switch, or change action eligibility. When
+available, `core_goal.read_action` reads the same complete Goal state, with the
+source path shell-quoted. A corrected source is read on the next planning
+projection; no copied objective needs synchronization.
+
+This intentionally extends default planning context. Existing Todo selection,
+claim/lease, admission, replan precedence and settlement authority remain
+unchanged. Goal text is scoped decision input; public export remains a separate
+boundary. The complete original objective is not shortened to the Todo display
+budget. Transport-size warnings remain visible rather than discarding its tail.
+
 ## Shape
 
 ```json
@@ -44,6 +60,12 @@ not silently replace the selected Todo.
   "goal_id": "loopx-meta",
   "agent_id": "codex-main-control",
   "selected_todo_id": "todo_regression_gate",
+  "core_goal": {
+    "objective": "Deliver the complete accepted outcome.",
+    "objective_source": "active_state",
+    "objective_missing": false,
+    "acceptance_contract": null
+  },
   "selection_contract": {
     "selected_todo_authority": "$.selected_todo",
     "action_choice_authority": "$.action_portfolio",
@@ -179,6 +201,10 @@ A conforming implementation must prove:
 - portfolio, horizon, and agent-Todo detail consume the same typed inventory;
 - task graph consumes the same canonical Todo selector, plus terminal evidence
   rows, without acquiring agent-scoped selection or claim authority;
+- the same current Goal reaches preselection horizon and replan, with original
+  trailing constraints and source readback intact;
+- missing, corrected and fallback sources stay explicit; scoped acceptance and
+  latest Agent vision do not replace the original Goal;
 - the horizon never changes `selected_todo` or action-portfolio eligibility;
 - runnable unclaimed work preserves `claim_required_before_work=true`;
 - typed successor/resume/route relations survive the default compact path;
