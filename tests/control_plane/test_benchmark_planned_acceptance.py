@@ -44,8 +44,16 @@ def test_planning_prompt_feature_off_parity_and_opt_in_guidance():
     off = render_planning_prompt(packet, {"UNRELATED": "1"}, execution_reserve_seconds=150)
     assert off == render_planning_prompt(packet, {}, execution_reserve_seconds=150)
     assert "acceptance document" not in off
-    on = render_planning_prompt(packet, {ACCEPTANCE_DOCUMENT_ENV: "/control/acceptance.json"},
-                                execution_reserve_seconds=150)
+    # An explicit off keeps the original prompt even when a stale locator leaks in.
+    legacy = render_planning_prompt(
+        packet, {"LOOPX_ACCEPTANCE_CONTRACT": "off", ACCEPTANCE_DOCUMENT_ENV: "/control/acceptance.json"},
+        execution_reserve_seconds=150)
+    assert legacy == off
+    with pytest.raises(ValueError, match="requires LOOPX_ACCEPTANCE_DOCUMENT"):
+        render_planning_prompt(packet, {"LOOPX_ACCEPTANCE_CONTRACT": "planned"}, execution_reserve_seconds=150)
+    on = render_planning_prompt(
+        packet, {"LOOPX_ACCEPTANCE_CONTRACT": "planned", ACCEPTANCE_DOCUMENT_ENV: "/control/acceptance.json"},
+        execution_reserve_seconds=150)
     assert on.endswith(off.removeprefix("$loopx\n\n")) and on.startswith("$loopx\n\n")
     for required in ("/control/acceptance.json", '"selected_work"', "must not read",
                      "fails this planning phase", "25 seconds in total", "do not add validation_files"):
@@ -55,7 +63,8 @@ def test_planning_prompt_feature_off_parity_and_opt_in_guidance():
 def _bootstrap_goal(tmp_path: Path) -> tuple[dict[str, str], list[str]]:
     """Mirror the Harbor adapter's bootstrap, registration and seeded Todo."""
     project, control, runtime = tmp_path / "project", tmp_path / "control", tmp_path / "runtime"
-    project.mkdir(); control.mkdir()
+    project.mkdir()
+    control.mkdir()
     (control / "task.md").write_text("# Task\nProduce outputs/result.txt containing ok.\n")
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT), "LOOPX_PROJECT": str(project),
            "LOOPX_REGISTRY": str(control / "registry.json"), "LOOPX_RUNTIME_ROOT": str(runtime),
@@ -119,11 +128,13 @@ def test_real_goal_holds_selected_todo_until_criteria_pass_and_reconfirms_edits(
     document_path.write_text(json.dumps(_document("todo_elsewhere")))
     with pytest.raises(ValueError, match="outside the planning result"):
         apply_planned_acceptance(env, planning, cli)
-    unbound = _document(todo_id); unbound["bindings"] = []
+    unbound = _document(todo_id)
+    unbound["bindings"] = []
     document_path.write_text(json.dumps(unbound))
     with pytest.raises(ValueError, match="binding"):
         apply_planned_acceptance(env, planning, cli)
-    bare_pins = _document(todo_id); bare_pins["criteria"][0]["validation_files"] = ["outputs/result.txt"]
+    bare_pins = _document(todo_id)
+    bare_pins["criteria"][0]["validation_files"] = ["outputs/result.txt"]
     document_path.write_text(json.dumps(bare_pins))
     with pytest.raises(ValueError, match="validation_files must be"):
         apply_planned_acceptance(env, planning, cli)
@@ -146,19 +157,50 @@ def test_real_goal_holds_selected_todo_until_criteria_pass_and_reconfirms_edits(
     code, updated = run("todo", "update", *goal, *binding, "--text", "[P0] Deliver outputs/result.txt (ok)", "--execute")
     assert code == 0 and updated["ok"], updated
     assert tasks() == [("stale", True)]
+    # The model rewrites its draft to a vacuous check; re-confirmation must keep
+    # the host-accepted criterion instead of adopting the draft.
+    weakened = _document(todo_id)
+    weakened["criteria"][0]["validation_argv"] = [sys.executable, "-c", "pass"]
+    document_path.write_text(json.dumps(weakened))
     assert reconfirm_planned_acceptance(env, cli) == {"reconfirmed": [todo_id], "revision": 2}
     assert tasks() == [("ready", True)]
-    assert json.loads(document_path.read_text())["criteria"] == _document(todo_id)["criteria"]
+    assert json.loads(document_path.read_text()) == weakened
 
     code, rejected = run("todo", "complete", *goal, *binding, "--evidence", "local run", "--no-follow-up")
     assert code == 1 and rejected["error_code"] == "goal_acceptance_validation_rejected", rejected
     assert rejected["goal_acceptance_validation_failure"]["criterion_id"] == "result-present"
     assert run("todo", "list", *goal, "--role", "agent")[1]["todos"][0]["status"] == "open"
-    (project / "outputs").mkdir(); (project / "outputs" / "result.txt").write_text("ok\n")
+    (project / "outputs").mkdir()
+    (project / "outputs" / "result.txt").write_text("ok\n")
     code, completed = run("todo", "complete", *goal, *binding, "--evidence", "local run", "--no-follow-up")
     assert code == 0 and completed["changed"] is True, completed
     assert run("todo", "list", *goal, "--role", "agent")[1]["todos"][0]["status"] == "done"
     assert reconfirm_planned_acceptance(env, cli)["reconfirmed"] == []
+
+
+def test_reconfirm_refuses_a_contract_changed_outside_the_host(tmp_path, monkeypatch):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    env, cli = _bootstrap_goal(tmp_path)
+    todo_id, document_path = env["TEST_TODO_ID"], Path(env[ACCEPTANCE_DOCUMENT_ENV])
+    planning = {"todo_ids": [todo_id], "input_digest": "digest-1", "status": "ready"}
+    with pytest.raises(ValueError, match="no host-accepted"):
+        reconfirm_planned_acceptance(env, cli)
+    document_path.write_text(json.dumps(_document(todo_id)))
+    apply_planned_acceptance(env, planning, cli)
+    weakened = _document(todo_id)
+    weakened["criteria"][0]["validation_argv"] = [sys.executable, "-c", "pass"]
+    other = Path(env["LOOPX_PROJECT"]).parent / "control" / "out-of-band.json"
+    other.write_text(json.dumps(weakened))
+    goal = ["--goal-id", GOAL_ID]
+    basis = json.loads(subprocess.run(cli + ["goal-acceptance", "inspect", *goal], cwd=env["LOOPX_PROJECT"],
+                                      env=env, text=True, capture_output=True).stdout)
+    configured = subprocess.run(cli + ["goal-acceptance", "configure", *goal, "--document", str(other),
+                                       "--expected-provider-revision", basis["provider_revision"],
+                                       "--operation-id", "out-of-band", "--execute"],
+                                cwd=env["LOOPX_PROJECT"], env=env, text=True, capture_output=True)
+    assert configured.returncode == 0, configured.stdout
+    with pytest.raises(ValueError, match="changed outside the planned host"):
+        reconfirm_planned_acceptance(env, cli)
 
 
 _SYNTHETIC_CODEX = """#!{python}
@@ -183,14 +225,15 @@ print(json.dumps({{"type": "thread.started", "thread_id": "synthetic-planning-se
 """
 
 
-@pytest.mark.parametrize("contract", ["off", "planned", "planned-missing-document"])
+@pytest.mark.parametrize("contract", ["off", "off-legacy-locator", "planned", "planned-missing-document"])
 def test_worker_planning_stage_configures_or_requires_the_document(tmp_path, monkeypatch, contract):
     from benchmark.runtime.worker import run_once
 
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     env, cli = _bootstrap_goal(tmp_path)
     binary = tmp_path / "codex"
-    binary.write_text(_SYNTHETIC_CODEX.format(python=sys.executable)); binary.chmod(0o755)
+    binary.write_text(_SYNTHETIC_CODEX.format(python=sys.executable))
+    binary.chmod(0o755)
     (tmp_path / "skills").mkdir()
     env.update({"CODEX_BIN": str(binary), "LOOPX_CODEX_HOME": str(tmp_path / "home"),
                 "LOOPX_WAKE_LOG_DIR": str(tmp_path / "wakes"), "LOOPX_SHARED_SKILLS": str(tmp_path / "skills"),
@@ -198,7 +241,7 @@ def test_worker_planning_stage_configures_or_requires_the_document(tmp_path, mon
                 "OPENAI_API_KEY": "fixture-key", "LOOPX_TASK_ENTRY": "loopx-planned", "LOOPX_TASK_STAGE": "plan",
                 "LOOPX_PLANNING_RESULT": str(tmp_path / "control" / "planning-phase-001.json"),
                 "LOOPX_PHASE_DEADLINE_EPOCH": str(time.time() + 600),
-                "LOOPX_ACCEPTANCE_CONTRACT": "off" if contract == "off" else "planned",
+                "LOOPX_ACCEPTANCE_CONTRACT": "off" if contract.startswith("off") else "planned",
                 "SYNTHETIC_WRITE_DOCUMENT": "1" if contract == "planned" else "0"})
     if contract == "off":
         env.pop(ACCEPTANCE_DOCUMENT_ENV)
@@ -220,7 +263,7 @@ def test_worker_planning_stage_configures_or_requires_the_document(tmp_path, mon
     inspect = subprocess.run(cli + ["goal-acceptance", "inspect", "--goal-id", GOAL_ID], cwd=env["LOOPX_PROJECT"],
                              env=env, text=True, capture_output=True)
     contract_state = json.loads(inspect.stdout)["goal_acceptance_contract"]
-    if contract == "off":
+    if contract.startswith("off"):
         assert "acceptance" not in planning and "acceptance_contract" not in receipt
         assert "acceptance document" not in body and not document_path.exists()
         assert contract_state == {"enabled": False}

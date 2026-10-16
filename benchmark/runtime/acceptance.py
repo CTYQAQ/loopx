@@ -17,6 +17,19 @@ from pathlib import Path
 from typing import Any
 
 ACCEPTANCE_DOCUMENT_ENV = "LOOPX_ACCEPTANCE_DOCUMENT"
+ACCEPTANCE_CONTRACT_ENV = "LOOPX_ACCEPTANCE_CONTRACT"
+# Host-held copy of the last configured document. The model may keep editing its
+# planning draft; re-confirmation only ever re-applies what the host accepted.
+ACCEPTED_RECORD_NAME = "benchmark-accepted-acceptance.json"
+
+
+def planned_acceptance_document(env: dict[str, str]) -> str | None:
+    """Return the document locator only when the explicit planned switch is on."""
+    if env.get(ACCEPTANCE_CONTRACT_ENV, "off") != "planned":
+        return None
+    if not env.get(ACCEPTANCE_DOCUMENT_ENV):
+        raise ValueError(f"{ACCEPTANCE_CONTRACT_ENV}=planned requires {ACCEPTANCE_DOCUMENT_ENV}")
+    return env[ACCEPTANCE_DOCUMENT_ENV]
 
 
 def acceptance_planning_guidance(document_path: str) -> str:
@@ -74,6 +87,17 @@ def _load_document(env: dict[str, str]) -> tuple[Path, dict[str, Any]]:
     return path, document
 
 
+def _accepted_record_path(env: dict[str, str]) -> Path:
+    return Path(env.get("LOOPX_RUNTIME_ROOT") or env["LOOPX_CODEX_HOME"]) / ACCEPTED_RECORD_NAME
+
+
+def _write_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
 def _selected_and_bound(document: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
     scope = document.get("scope")
     selected = scope.get("todo_ids") if isinstance(scope, dict) else None
@@ -125,6 +149,10 @@ def _configure(env, cli, document_path: Path, *, operation_id: str,
     not_ready = [todo_id for todo_id in expected_todo_ids if states.get(todo_id) != "ready"]
     if not_ready:
         raise ValueError(f"acceptance association is not ready for {', '.join(not_ready)}")
+    _write_json(_accepted_record_path(env), {
+        "revision": contract["revision"], "digest": contract["digest"],
+        "document": json.loads(document_path.read_text(encoding="utf-8")),
+    })
     return {
         "status": "applied",
         "revision": contract["revision"],
@@ -155,16 +183,26 @@ def reconfirm_planned_acceptance(env: dict[str, str], cli: list[str]) -> dict[st
     """Re-confirm associations the model's own Todo edits made stale.
 
     The criteria never change here: owner confirmation of the current Todo text
-    is what the product requires after a selected Todo was edited. Completed or
+    is what the product requires after a selected Todo was edited. The document
+    re-applied is the host's accepted copy, never the model-writable draft, and
+    it must still match the owner's current contract digest. Completed or
     cancelled Todos leave the selection; their checks already ran at completion.
     """
-    document_path, document = _load_document(env)
+    record_path = _accepted_record_path(env)
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        document = record["document"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ValueError("no host-accepted Goal acceptance document to re-confirm") from exc
     selected, bindings = _selected_and_bound(document)
     goal = ["--goal-id", env["LOOPX_GOAL_ID"]]
     contract = _run_cli(env, cli, ["goal-acceptance", "inspect", *goal]).get(
         "goal_acceptance_contract") or {}
     if contract.get("enabled") is not True:
         raise ValueError("planned acceptance contract is no longer enabled")
+    if contract.get("digest") != record.get("digest"):
+        raise ValueError("Goal acceptance contract changed outside the planned host; "
+                         "refusing to re-confirm it from the host copy")
     tasks = {task["todo_id"]: task for task in contract.get("tasks", [])
              if isinstance(task, dict) and isinstance(task.get("todo_id"), str)}
     applicable = [todo_id for todo_id in selected
@@ -175,9 +213,9 @@ def reconfirm_planned_acceptance(env: dict[str, str], cli: list[str]) -> dict[st
     revised = {**document,
                "scope": {"kind": "selected_work", "todo_ids": applicable},
                "bindings": [row for row in bindings if row["todo_id"] in applicable]}
-    document_path.write_text(json.dumps(revised, ensure_ascii=False, indent=2) + "\n",
-                             encoding="utf-8")
-    receipt = _configure(env, cli, document_path,
+    revised_path = record_path.with_name("benchmark-acceptance-reconfirm.json")
+    _write_json(revised_path, revised)
+    receipt = _configure(env, cli, revised_path,
                          operation_id=f"planned-acceptance-reconfirm:{contract['revision']}",
                          expected_todo_ids=applicable)
     return {"reconfirmed": stale, "revision": receipt["revision"]}

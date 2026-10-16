@@ -9,8 +9,8 @@ import time
 from pathlib import Path
 
 from benchmark.runtime.acceptance import (
-    ACCEPTANCE_DOCUMENT_ENV,
     acceptance_planning_guidance,
+    planned_acceptance_document,
 )
 
 
@@ -36,8 +36,9 @@ def render_planning_prompt(packet: dict, env: dict[str, str], *, execution_reser
             "runtime startup and settlement reserves also consume it.",
         ])
     prefix = "$loopx\n\n"
-    if env.get(ACCEPTANCE_DOCUMENT_ENV):
-        prefix += acceptance_planning_guidance(env[ACCEPTANCE_DOCUMENT_ENV])
+    document = planned_acceptance_document(env)
+    if document:
+        prefix += acceptance_planning_guidance(document)
     if window:
         prefix += "Host execution window:\n" + "\n".join(window) + "\n"
         prefix += (
