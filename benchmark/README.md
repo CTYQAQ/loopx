@@ -963,7 +963,17 @@ Warm verification hashes the complete checkpoint with a read window of up to
 60 seconds, capped by the original execution deadline. It rejects a read that
 finishes after that deadline. The launcher reuses this verified metadata before
 native registration; subsequent participant checks still verify the retained
-bytes. This read window grants no extra execution time.
+bytes. Workspace restoration uses the same bounded full-artifact read allowance.
+Native conversation admission and fresh-replan revalidation allow up to 90 seconds
+per read, capped by the original phase deadline, while preserving full-history,
+cursor and identity checks. These allowances grant no extra execution time and
+do not establish sustained performance for growing checkpoints.
+
+Concurrent receivers importing the same native point serialize bank publication
+with a bounded per-point lock. Each receiver still obtains its own native run and
+credentials; an existing bank member must match the sealed bytes. Conflicting or
+partial members fail closed. A lock timeout leaves the attempt for inspection;
+it does not authorize reusing a failed trial directory.
 
 Both comparison arms first settle actual preparation at cadence one and consume
 the retained decision through a current semantic replan. The existing joint
@@ -971,6 +981,23 @@ continuation gate must accept that replan before the declared normal cadence
 returns. Preparation and context-reading cost belong in the comparison. Omit all
 restore flags for the unchanged cold entry; never reuse an ambiguous trial
 folder as a new attempt.
+
+To test a new decision from the same pre-replan state, use
+`--restore-fresh-replan`. The point must contain a verified pending replan packet.
+The first destination model call starts a fresh native conversation, before
+preparation and the first current-Goal replan. It reads the original task,
+retained research evidence, code and incumbent; no post-checkpoint decision or
+old native message prefix is supplied. Preparation remains charged work, and
+capture remains closed until the ordinary current review/settlement gate passes.
+This flag is mutually exclusive with the post-review reset below. Omit both for
+retained-history continuation. Change treatments only in a new attempt; the
+same checkpoint budget, opportunities and cooldown remain binding.
+
+同一个决策前 checkpoint 的重新决策实验使用 `--restore-fresh-replan`：首次模型调用
+就在 fresh 原生会话中准备并完成当前目标的 replan，读取原任务、研究证据、代码和最佳
+候选，不预置 checkpoint 之后的决定或旧原生消息前缀。准备成本仍计入原预算，后续捕获
+仍须通过当前复盘和结算校验。它与下面的复盘后清空选项互斥；省略两者保持历史接续。
+必须用新 attempt 改变处理方式，不能重置预算、机会或冷却。
 
 An independently authorized context ablation can add
 `--restore-fresh-after-replan`. After the initial accepted, settled destination
