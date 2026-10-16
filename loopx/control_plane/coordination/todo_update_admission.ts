@@ -15,6 +15,7 @@ import {evaluateCoordinationTodoMutationDecision,
 import {decodeTaskLeaseProof, evaluateCanonicalTaskLeaseProof, todoUpdateLeaseRecovery, leasedTodoEditRejection, isBoundUserActionMetadataUpdate, isSoftClaimReleasedCopyUpdate, isOwnerAdministrativeCopyUpdate} from "./task_lease_proof.ts";
 import {deferredReopenRejection, isDeferredReopen, isOwnerDeferral} from "./todo_deferred_lifecycle.ts";
 import {blockedLifecycleRejection, isBlockedLifecycleTransition} from "./todo_blocked_lifecycle.ts";
+import {isOwnerWorkRequirementsRevision, workRequirementsRevisionRejection} from "./todo_work_requirements_lifecycle.ts";
 import {indexCoordinationProjection} from "./coordination_projection.ts";
 import {canonicalTaskLease} from "./task_lease_state.ts";
 import {leaseIsActive} from "../work_items/task_lease_acquire.ts";
@@ -132,6 +133,23 @@ export function todoUpdateAdmissionRejection(
       return reject("update_lease_requirements_transition_unsupported", "Complete leased work before changing its requirements");
     }
     return null;
+  }
+  if (mode === "hard_lease" && isOwnerWorkRequirementsRevision(todo, input)) {
+    try {
+      // Supplied proof pins one live generation. Never turn stale/partial proof
+      // into a proof-free administrative request by looking up another lease.
+      if (hasProof) {
+        const fence = evaluateCanonicalTaskLeaseProof({todo, lease, handoff_mode: mode,
+          registered_agents: input.registered_agents, actor_agent_id: input.actor_agent_id,
+          lease_idempotency_key: input.lease_idempotency_key ?? null,
+          lease_expected_version: input.lease_expected_version ?? null, now: input.now});
+        if (fence.outcome !== "apply") return withRecovery(reject(String(fence.code),
+          "Explicit execution proof is stale or unavailable; inspect this Todo before retrying"));
+      }
+      return withRecovery(workRequirementsRevisionRejection(todo, input, lease));
+    } catch (error) {
+      return reject("invalid_coordination_projection", error instanceof Error ? error.message : "invalid retained lease");
+    }
   }
   if (mode === "hard_lease" && isBlockedLifecycleTransition(input, todo)) {
     try {

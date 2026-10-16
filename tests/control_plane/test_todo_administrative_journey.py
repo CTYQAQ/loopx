@@ -106,3 +106,46 @@ def test_chat_uses_same_atomic_owner_and_refuses_changed_review_basis(journey, t
     cli("todo", "update", "--agent-id", "agent-a", "--note", "Intervening task change")
     assert service.apply(priority["proposal_id"])["proposal"]["status"] == "stale"
     assert cli("todo", "list")["todo"].get("priority") != "P2"
+
+
+@pytest.mark.parametrize("retained", ["active", "released"])
+def test_cli_revises_requirements_without_a_release_acquire_dead_end(journey, retained):
+    cli, _, _, _ = journey
+    lease = cli("task-lease", "acquire", "--owner", "agent-a", "--idempotency-key", "original")["lease"]
+    if retained == "released":
+        cli("task-lease", "release", "--owner", "agent-a", "--idempotency-key", "original",
+            "--expected-version", str(lease["version"]))
+    revision = ("todo", "update", "--agent-id", "agent-a", "--required-write-scope", "src/**",
+        "--required-capability", "filesystem_write", "--update-operation-id", "revise-once")
+    if retained == "active":
+        revision += ("--task-lease-idempotency-key", "original", "--task-lease-expected-version", str(lease["version"]))
+    before = cli("task-lease", "inspect")["lease"]
+    assert cli(*revision, "--dry-run")["status"] == "planned"
+    assert cli("task-lease", "inspect")["lease"] == before
+    applied = cli(*revision)
+    assert applied["work_requirements_transition"]["execution_authority_granted"] is False
+    assert cli(*revision)["status"] == "replayed"
+    todo = cli("todo", "list")["todo"]
+    assert todo["required_write_scopes"] == ["src/**"]
+    assert todo["required_capabilities"] == ["filesystem_write"]
+    retired = cli("task-lease", "inspect")["lease"]
+    assert retired["status"] == "released" and retired["version"] == lease["version"]
+    stale = cli("todo", "update", "--agent-id", "agent-a", "--note", "Old execution proof",
+        "--task-lease-idempotency-key", "original", "--task-lease-expected-version", str(lease["version"]), ok=False)
+    assert stale["ok"] is False
+    fresh = cli("task-lease", "acquire", "--owner", "agent-a", "--idempotency-key", "revised",
+        "--write-scope", "src/**")["lease"]
+    assert fresh["version"] == lease["version"] + 1
+    assert fresh["write_scopes"] == ["src/**"]
+
+
+def test_cli_repository_revision_preserves_frozen_history_and_acquires_the_new_identity(journey):
+    cli, _, _, _ = journey
+    cli("todo", "update", "--agent-id", "agent-a", "--task-repository", "git:github.com/example/original")
+    lease = cli("task-lease", "acquire", "--owner", "agent-a", "--idempotency-key", "original")["lease"]
+    cli("todo", "update", "--agent-id", "agent-a", "--task-repository", "git:github.com/example/revised")
+    retained = cli("task-lease", "inspect")["lease"]
+    assert retained["status"] == "released" and retained["write_repository"] == "git:github.com/example/original"
+    fresh = cli("task-lease", "acquire", "--owner", "agent-a", "--idempotency-key", "revised")["lease"]
+    assert fresh["version"] == lease["version"] + 1
+    assert fresh["write_repository"] == "git:github.com/example/revised"
