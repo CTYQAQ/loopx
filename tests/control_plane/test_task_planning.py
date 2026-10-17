@@ -150,6 +150,10 @@ def test_public_cli_returns_a_read_only_checkpoint_and_rejects_execution(bound_g
         "deliberately weak placeholder",
         "quality, latency and full cost",
         "existing acceptance, feedback and authority limits",
+        "declared interface, units, scale",
+        "preserve that reference while testing a replacement",
+        "negative experiment can complete its own Todo",
+        "neither creates a new acceptance document",
     ):
         assert obligation in quality
     for fine_grained in (False, True):

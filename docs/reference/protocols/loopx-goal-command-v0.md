@@ -154,14 +154,24 @@ but the shape depends on how clear the goal already is:
   concise todos to make the approach explicit, without arbitrary item-count
   caps or management-only filler.
 
-The shared planner now includes `first_delivery_guidance`, also rendered in the
-guided `/loopx` start prompt and the existing `todo plan` packet. This changes
+The shared planner includes `first_delivery_guidance`, consumed by the guided
+`/loopx` start prompt and the existing `todo plan` packet. Structured command
+packs keep the full guidance in the planner and refer to it from repeated plan
+prompts. Standalone bootstrap messages retain the full text without requiring
+another packet read. This changes
 default Agent guidance in both ordinary and fine-grained planning: preserve a
 strong feasible first deliverable and its coherent implementation/validation,
 rather than deliberately weakening it to produce an earlier feedback signal.
 Judge initial quality alongside latency and full cost; diagnostic probes remain
 legal under the original acceptance, feedback, budget and authority limits, and
-preparation must not grow indefinitely. The guidance adds no quality oracle,
+preparation must not grow indefinitely. Check decision-critical interface, unit
+and scale assumptions against available task material before expensive work.
+Compare a feasible alternative with the strongest available starting point,
+retain that reference and use a discriminating check when it resolves the
+choice. Budget enough work to complete the selected experiment. An informative
+negative experiment can finish its own Todo while the broader objective stays
+open; evaluation readiness and replacement of the best artifact remain separate.
+No new acceptance document is required. The guidance adds no quality oracle,
 mandatory external evaluation, submission allowance or machine admission gate.
 Model adoption and resulting quality require separate real-task evidence.
 

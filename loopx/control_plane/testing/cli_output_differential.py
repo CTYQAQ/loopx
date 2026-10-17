@@ -758,16 +758,33 @@ def _authoring_input_migration(
                       "bootstrap_command_pack", "bootstrap_command_pack_message_only"}
             and before.get("first_delivery_guidance") is False
             and after.get("first_delivery_guidance") is True):
-        # Frozen 96-row fixture: +2,340 JSON chars, +3,496 for explicit
-        # command-pack detail, +578 Markdown. Keep all existing consumers and
-        # the full guidance; no additional lines or absolute budget increase.
+        # Structured prompts reference the shared planner once. JSON packs that
+        # also carry their rendered message hold the expanded 1,238-byte
+        # guidance twice: the planner field plus the labelled block the
+        # message-only consumer needs (bootstrap measured 2,821; detail more).
+        # Keep growth scoped to the first introduction only.
         chars = (
-            (3_600 if surface == "start_goal_guided_command_pack_detail" else 2_400)
-            if base.get("format") == "json" else 600
+            (3_600 if surface == "start_goal_guided_command_pack_detail"
+             else 3_000 if surface == "bootstrap_command_pack" else 2_400)
+            if base.get("format") == "json" else 1_400
         )
-        limits = {"chars": chars, "utf8_bytes": chars, "lines": 0,
+        limits = {"chars": chars, "utf8_bytes": chars, "lines": 4,
                   "compact_payload_chars": chars if base.get("format") == "json" else 0}
         reason = "complete initial-delivery quality guidance added"
+    elif (surface in {"bootstrap_command_pack", "bootstrap_command_pack_message_only"}
+            and before.get("first_delivery_guidance") is True
+            and after.get("first_delivery_guidance") is True
+            and before.get("expanded_first_delivery_guidance") is False
+            and after.get("expanded_first_delivery_guidance") is True):
+        # Main already carries the original complete instruction. The same
+        # 96-row workload measures +481 JSON chars, +801 Markdown chars and
+        # three Markdown lines for the expanded guidance and standalone label.
+        # Qualify that upgrade separately; absence and future growth are not it.
+        chars = 512 if base.get("format") == "json" else 832
+        limits = {"chars": chars, "utf8_bytes": chars,
+                  "lines": 0 if base.get("format") == "json" else 3,
+                  "compact_payload_chars": chars if base.get("format") == "json" else 0}
+        reason = "complete initial-delivery guidance upgraded with research followthrough"
     return limits, [reason + "; bounded one-time growth"] if limits else []
 
 

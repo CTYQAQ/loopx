@@ -13,7 +13,15 @@ _FIRST_DELIVERY_GUIDANCE = (
     "latency and full cost; neither immediate feedback nor indefinite preparation "
     "is the objective. Useful diagnostic probes remain allowed under the existing "
     "acceptance, feedback and authority limits; identify their purpose and do not "
-    "substitute them for the requested deliverable."
+    "substitute them for the requested deliverable. Before an expensive implementation, "
+    "check the declared interface, units, scale and other decision-critical assumptions "
+    "against the available task material. Compare a feasible alternative with the "
+    "strongest available starting point; preserve that reference while testing a replacement. "
+    "Use a cheap discriminating check when it can resolve the choice, then budget enough "
+    "work for the selected complete experiment. An informative negative experiment can "
+    "complete its own Todo without satisfying the broader goal. Keep evaluation readiness "
+    "separate from evidence for replacing the best artifact; neither creates a new "
+    "acceptance document or permission requirement."
 )
 
 
@@ -176,12 +184,26 @@ def build_goal_start_contract(
     return contract
 
 
+
+def render_goal_start_quality_message(contract: dict[str, Any]) -> str:
+    """Render the shared planner's complete instruction for standalone messages."""
+    planner = contract.get("planner") or {}
+    quality = planner.get("first_delivery_guidance")
+    # Structured packs carry this once in the shared planner. Message-only
+    # consumers need its complete text here, without another packet read.
+    return (
+        f"goal_start_contract.planner.first_delivery_guidance:\n{quality}\n\n"
+        if isinstance(quality, str) and quality else ""
+    )
+
+
 def build_goal_start_prompt(
     *,
     goal_text: str | None,
     goal_id: str,
     agent_id: str | None,
     fine_grained: bool,
+    inline_first_delivery_guidance: bool = True,
 ) -> str:
     goal_clause = (
         f"Goal text: {goal_text}"
@@ -213,6 +235,10 @@ def build_goal_start_prompt(
         if fine_grained
         else ""
     )
+    quality_rule = (
+        _FIRST_DELIVERY_GUIDANCE if inline_first_delivery_guidance else
+        "Apply `goal_start_contract.planner.first_delivery_guidance` from the returned packet."
+    )
     return f"""Plan; returned `ordered_steps` + `goal_start_contract` are authoritative.
 
 {goal_clause}
@@ -221,7 +247,7 @@ Goal id: {goal_id}.{agent_clause}
 Rules:
 1. Identity: use verified binding/active contract; a stable unbound host gets a fresh public-safe agent. Existing lanes require explicit takeover plus bind/readback before Todo; never infer peers from Todo/worktree/arguments. Unknown host: `loopx agent-onboard --list-agent-types`.
 2. Capability: only `selected_capability_route`; run entry/admission and its later `capability show`; never infer from text/URLs. Capability state owns facts; generic Todos schedule.
-3. Todos: {todo_rule}. {_FIRST_DELIVERY_GUIDANCE}
+3. Todos: {todo_rule}. {quality_rule}
 4. Writeback: current Todo evidence + next executable Todo, then `loopx refresh-state --goal-id {goal_id}` and quota readback. Chat/model summaries are not durable state.
 5. Host loop: after Todo write, activate missing/unknown/stale/type-changed Codex App heartbeat automation, CLI/TraeX `/goal`, Claude `/loop`, OpenCode bridge, Ark one-shot, or custom gate. Else surface the exact pasteable gate; never claim autonomy.
 6. Run the returned typed `quota_guard`; finish one bounded segment with validation + LoopX writeback or an exact blocker. Setup/planning/claim is not delivery.

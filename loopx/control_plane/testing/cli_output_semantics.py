@@ -15,6 +15,13 @@ def authoring_input_observations(text: str) -> dict[str, bool]:
     These observations never classify runtime authority. Match the structured
     owner and full instruction, not a keyword in arbitrary operator prose.
     """
+    # The base/head differential probe copies this module out of the package
+    # and measures a base checkout that may predate the planner constant. A
+    # missing owner means the guidance is absent there, never an import error.
+    try:
+        from loopx.control_plane.goals.start_contract import _FIRST_DELIVERY_GUIDANCE
+    except ImportError:
+        _FIRST_DELIVERY_GUIDANCE = None
     readback_purpose = (
         "Read each authored/reused id: one match, todo_detail_projection.source_complete=true; "
         "compare .todo.text, status/claim. Excerpts cannot verify writes. "
@@ -36,13 +43,21 @@ def authoring_input_observations(text: str) -> dict[str, bool]:
         'authority limits; identify their purpose and do not substitute them for the requested'
         ' deliverable.'
     )
+    complete_guidance = tuple(
+        value for value in (first_delivery_guidance, _FIRST_DELIVERY_GUIDANCE) if value
+    )
     observed = {"complete_todo_readback": False, "vision_cli_authoring": False,
-                "first_delivery_guidance": False}
+                "first_delivery_guidance": False, "expanded_first_delivery_guidance": False}
+
+    def guidance(value: Any) -> None:
+        if value in complete_guidance:
+            observed["first_delivery_guidance"] = True
+            if value != first_delivery_guidance:
+                observed["expanded_first_delivery_guidance"] = True
 
     def collect(value: Any) -> None:
         if isinstance(value, dict):
-            if value.get("first_delivery_guidance") == first_delivery_guidance:
-                observed["first_delivery_guidance"] = True
+            guidance(value.get("first_delivery_guidance"))
             if (value.get("id") == "read_back_authored_todos"
                     and value.get("kind") == "operator_or_agent_actions"
                     and value.get("purpose") == readback_purpose
@@ -60,10 +75,13 @@ def authoring_input_observations(text: str) -> dict[str, bool]:
     try:
         collect(json.loads(text))
     except json.JSONDecodeError:
-        observed["first_delivery_guidance"] = bool(re.search(
-            r"^3\. Todos: [^\n]*" + re.escape(first_delivery_guidance) + r"$",
-            text, re.MULTILINE,
-        ))
+        lines = text.split("\n")
+        for instruction in complete_guidance:
+            if any(line.startswith("3. Todos: ") and line.endswith(instruction) for line in lines) or any(
+                line == "goal_start_contract.planner.first_delivery_guidance:"
+                and following == instruction for line, following in zip(lines, lines[1:])
+            ):
+                guidance(instruction)
         # Existential across every rendered candidate: an earlier line whose purpose is
         # not exact must not mask a later complete instruction.
         rendered_candidates = re.finditer(

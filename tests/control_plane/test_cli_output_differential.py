@@ -67,7 +67,7 @@ def _receipt(*rows: dict[str, object]) -> dict[str, object]:
     ("quota_should_run", "json", "vision_cli_authoring", (3049, 94, 1807)),
     ("loopx_turn_plan", "json", "vision_cli_authoring", (237, 0, 237)),
     ("start_goal_guided", "json", "first_delivery_guidance", (2340, 0, 2340)),
-    ("bootstrap_command_pack", "json", "first_delivery_guidance", (2340, 0, 2340)),
+    ("bootstrap_command_pack", "json", "first_delivery_guidance", (2821, 0, 2821)),
     ("bootstrap_command_pack", "markdown", "first_delivery_guidance", (578, 0, 0)),
     ("start_goal_guided_command_pack_detail", "json", "first_delivery_guidance", (3496, 0, 3496)),
     ("bootstrap_command_pack_message_only", "markdown", "first_delivery_guidance", (578, 0, 0)),
@@ -102,6 +102,46 @@ def test_authoring_growth_is_bounded_one_time_and_surface_scoped(
     for metric in ("chars", "utf8_bytes", "lines", "compact_payload_chars"):
         inflated = {**candidate, metric: base[metric] + result["allowances"][metric] + 1}
         assert _compare_row(base, inflated)["failures"]
+
+
+@pytest.mark.parametrize("fmt,growth,lines", [("json", 481, 0), ("markdown", 801, 3)])
+def test_expanded_quality_guidance_upgrade_is_distinct_from_first_introduction(fmt, growth, lines):
+    from loopx.control_plane.testing.cli_output_differential import _compare_row
+
+    before = {"first_delivery_guidance": True, "expanded_first_delivery_guidance": False}
+    after = {"first_delivery_guidance": True, "expanded_first_delivery_guidance": True}
+    base = _row(row_id=f"surface/bootstrap_command_pack/small/{fmt}", format=fmt,
+                chars=1000, utf8_bytes=1000, lines=20, compact_payload_chars=800,
+                authoring_inputs=before)
+    candidate = {**base, "chars": 1000 + growth, "utf8_bytes": 1000 + growth,
+                 "lines": 20 + lines, "compact_payload_chars": 800 + (growth if fmt == "json" else 0),
+                 "authoring_inputs": after}
+    result = _compare_row(base, candidate)
+    assert not result["failures"] and result["review_signals"]
+    assert _compare_row({**base, "authoring_inputs": after}, candidate)["failures"]
+    assert _compare_row({**base, "authoring_inputs": {"first_delivery_guidance": True}}, candidate)["failures"]
+    introduction = _compare_row(
+        {**base, "authoring_inputs": {**before, "first_delivery_guidance": False}}, candidate)
+    assert introduction["review_signals"]
+    assert not any("upgraded" in signal for signal in introduction["review_signals"])
+    assert _compare_row(
+        {**base, "row_id": f"surface/status/small/{fmt}"},
+        {**candidate, "row_id": f"surface/status/small/{fmt}"},
+    )["failures"]
+    for metric in ("chars", "utf8_bytes", "lines", "compact_payload_chars"):
+        assert _compare_row(base, {**candidate, metric: base[metric] + result["allowances"][metric] + 1})["failures"]
+
+
+def test_expanded_quality_observation_requires_complete_owner_instruction():
+    from loopx.control_plane.goals.start_contract import _FIRST_DELIVERY_GUIDANCE
+    from loopx.control_plane.testing.cli_output_semantics import authoring_input_observations
+
+    text = json.dumps({"planner": {"first_delivery_guidance": _FIRST_DELIVERY_GUIDANCE}})
+    assert authoring_input_observations(text)["expanded_first_delivery_guidance"]
+    assert not authoring_input_observations(text.replace("strongest available starting point", "starting point"))[
+        "expanded_first_delivery_guidance"]
+    assert not authoring_input_observations(json.dumps({"note": _FIRST_DELIVERY_GUIDANCE}))[
+        "expanded_first_delivery_guidance"]
 
 
 @pytest.mark.parametrize("surface,fmt,clauses,growth", [

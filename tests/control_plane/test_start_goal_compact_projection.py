@@ -85,6 +85,31 @@ def _build(project: Path, *, include_detail: bool) -> dict[str, Any]:
     )
 
 
+def test_planning_guidance_is_shared_but_standalone_message_remains_complete(tmp_path: Path) -> None:
+    project = _write_connected_project(tmp_path)
+    compact = _build(project, include_detail=False)
+    detailed = _build(project, include_detail=True)
+    for payload, copies in ((compact, 1), (detailed, 2)):
+        pack = payload["command_pack"]
+        quality = pack["goal_start_contract"]["planner"]["first_delivery_guidance"]
+        assert json.dumps(payload).count(quality) == copies
+        assert "goal_start_contract.planner.first_delivery_guidance" in pack["commands"]["goal_start_plan_prompt"]
+        for step in payload["guided_transaction"]["ordered_steps"]:
+            if step.get("kind") == "agent_prompt":
+                assert "goal_start_contract.planner.first_delivery_guidance" in step["prompt"]
+    pack = detailed["command_pack"]
+    quality = pack["goal_start_contract"]["planner"]["first_delivery_guidance"]
+    assert pack["message"].count(quality) == 1
+    assert "existing acceptance, feedback and authority limits" in pack["message"]
+    assert "negative experiment can complete its own Todo" in pack["message"]
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        code = cli_main(["bootstrap-command-pack", "--project", str(project), "--goal-id", GOAL_ID,
+            "--agent-id", AGENT_ID, "--host-surface", "codex-app", "--goal-text", GOAL_TEXT, "--message-only"])
+    assert code == 0
+    assert output.getvalue().count(quality) == 1
+
+
 def _host_shadow_document(payload: dict[str, Any]) -> dict[str, Any]:
     command_pack = payload["command_pack"]
     transaction = payload["guided_transaction"]

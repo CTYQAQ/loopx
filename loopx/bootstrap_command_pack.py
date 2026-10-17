@@ -26,6 +26,7 @@ from .control_plane.goals.orphaned_goal_state import (
 from .control_plane.goals.start_contract import (
     build_goal_start_contract,
     build_goal_start_prompt,
+    render_goal_start_quality_message,
 )
 from .control_plane.goals.start_goal_todo_delta import (
     append_todo_delta_render_line,
@@ -892,6 +893,7 @@ def build_loopx_bootstrap_command_pack(
         goal_id=resolved_goal_id,
         agent_id=str(selected_agent_id) if selected_agent_id else None,
         fine_grained=fine_grained,
+        inline_first_delivery_guidance=False,
     )
     slash_command_catalog = build_slash_command_catalog(cli_bin=cli_bin)
 
@@ -2039,6 +2041,7 @@ Identity-aware choices:
 Rerun `{payload.get("canonical_cli_command")} --agent-id <registered-agent-id>`
 with the selected identity before continuing."""
     elif goal_text:
+        quality_block = render_goal_start_quality_message(goal_start_contract)
         action = f"""This is an explicit goal-start invocation. Connect project-local LoopX state if needed:
 
 ```bash
@@ -2048,7 +2051,7 @@ with the selected identity before continuing."""
 Then plan before writing todos. Preserve relative priority by write order:
 
 ````text
-{commands.get("goal_start_plan_prompt", "")}
+{quality_block}{commands.get("goal_start_plan_prompt", "")}
 ````
 
 Write the planned todos with `loopx todo add` in the exact planned order. Same-priority items use that write order as the tie-breaker.

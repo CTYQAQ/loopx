@@ -1186,30 +1186,44 @@ it does not grant execution quota, spending, or provider authority.
    or promotion thresholds stay fixed for that result; revised thresholds belong
    to a new qualification, never a relabeled historical pass.
 
-The initial-delivery guidance change measured the same 96-row fixture at
-`f6cf9583794eb8c4cca41fa832a1c2f150059583` and
-`da01f996c820aad3bae85268963e64c6bbb19d7c`. The complete instruction adds
-2,340 JSON characters to guided start/bootstrap, 3,496 to explicit command-pack
-detail, and 578 to bootstrap Markdown, with no added lines. Existing planner,
-plan-prompt, guided-transaction and message consumers retain their contracts;
-removing a copy requires a caller migration. The instruction preserves strong
-feasible first quality, coherent implementation/validation, full-cost comparison,
-bounded diagnostic probes and existing acceptance/feedback/authority limits.
-Truncating those obligations to fit the old differential is not lossless.
+Initial-delivery guidance originally appeared four times in guided JSON and six
+times with command-pack detail. The earlier 96-row comparison measured growth
+of 2,340 / 3,496 JSON characters and 578 Markdown characters. The revised
+consumer uses the complete shared planner field from repeated structured plan
+prompts. Standalone messages expand the full guidance locally: guided JSON now
+has one complete copy, or two with the independently usable detailed message.
+No instruction clause is removed to meet a byte ceiling.
 
-Only the observed absence-to-complete-guidance transition on those carriers gets
-2,400 / 3,600 / 600 character-and-byte allowances (60 / 104 / 22 headroom).
-The probe recognizes the complete frozen structured field or rendered Todo
-instruction, never a runtime permission or quality classification. Absolute
-ceilings, semantic fields, fixture scale, line limits and every other surface
-remain unchanged; an already-upgraded, missing or incomplete instruction gets no
-transition allowance. This qualifies the disclosed default guidance change,
-not a real model's adoption, benchmark improvement or additional execution quota.
+The expanded shared guidance is 1,238 bytes. Standalone rendering additionally
+needs its explicit field label, spacing and reference instruction. The bounded
+absence-to-complete-guidance allowance remains 2,400 / 3,600 JSON characters and
+bytes, and is 1,400 for Markdown with at most four additional lines. This
+one-time allowance applies only to the existing four carriers; absolute limits,
+fixture scale and later growth checks remain in force. Recognizing the complete
+frozen or current owner-provided instruction is an observation, not proof that
+arbitrary prose changes preserve semantics or that a model will adopt them.
 
-首次交付指引在同一 96 行负载上增加默认 JSON 2340、详情 JSON 3496、Markdown
-578 个字符，行数不变。保留现有消费者与完整质量、诊断和权限义务，仅对上述输出
-载体从缺失到完整指引的首次变化给予 2400/3600/600 的有界额度；绝对上限、语义、
-规模及后续增长检查不变。原失败保留；不据此声称模型采用、实验增益或额外执行权限。
+When the base already includes the original complete guidance, the expanded
+research-followthrough instruction is a separate observed upgrade, not another
+absence. The same 96-row workload measures standalone bootstrap growth of 481
+JSON characters and 801 Markdown characters plus three Markdown lines. Only
+those bootstrap carriers receive a one-time 512/832 character-and-byte allowance
+for the observed old-to-expanded transition. Absolute ceilings, other carriers,
+missing observations and later growth keep their existing checks. The extra
+probe flag is diagnostic evidence, not a runtime quality or permission rule.
+
+首次交付指引原先在普通/详情 JSON 中重复四/六次；既有 96 行对照保留原始
+2340/3496 JSON、578 Markdown 字符增长记录。结构化计划现引用同一 planner
+完整字段，独立消息就地展开全文，普通/详情 JSON 分别保留一/两份完整指引。
+扩展后的指引为 1238 字节；独立消息另需字段标签、引用指令与间隔。因此仅对既有
+四个载体的首次引入保留 JSON 2400/3600、Markdown 1400 字符及字节、最多四行
+的有界额度。绝对上限、负载规模、后续增长检查不变，不删除义务，也不据此声称
+模型采用、实验增益、语义等价或额外执行权限。
+
+基线已含原完整指引时，扩展研究复盘指引属于另一次明确升级，不再视为首次引入。
+同一 96 行负载的独立 bootstrap 消息实测增加 JSON 481、Markdown 801 字符及三行，
+仅对该明确升级给予 512/832 字符及字节额度。绝对上限、其他载体、缺失观测和后续
+增长仍受原检查约束；新增探针标记不是运行时质量或权限规则。
 
 The latest qualification pins true main `e47e4507a` and merged candidate
 `3955d1c8b` on the same public fixture, with explicit per-probe source imports.
