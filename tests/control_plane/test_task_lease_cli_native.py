@@ -95,7 +95,12 @@ def test_cli_envelope_keys_win_over_a_typed_exception_payload(monkeypatch) -> No
             "legacy_fallback_used": False,
         },
     )
-    assert _run_acquire_raising(monkeypatch, error) == {
+    payload = _run_acquire_raising(monkeypatch, error)
+    inspection = payload.pop("inspection")
+    assert inspection["execution_authority_granted"] is False
+    assert inspection["cli_args"] == ["--registry=/tmp/registry.json", "--format", "json",
+        "task-lease", "inspect", "--goal-id=cli-native-goal", "--todo-id=todo_cli_native"]
+    assert payload == {
         "ok": False,
         "schema_version": "task_lease_v0",
         "action": "acquire",
