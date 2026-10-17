@@ -36,6 +36,11 @@ function metricLabel(value: unknown, label: string): string {
 function timestamp(value: unknown, label: string): string {
   if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(value)
       || !Number.isFinite(Date.parse(value))) fail(`${label} must be a UTC timestamp`);
+  // Date.parse normalizes impossible calendar dates and 24:00 into another
+  // instant. Compare canonical milliseconds, accepting the declared precision
+  // without silently moving the provider's measurement window.
+  const canonical = value.slice(0, 19) + "." + (value.slice(19, -1).slice(1) || "").padEnd(3, "0") + "Z";
+  if (new Date(value).toISOString() !== canonical) fail(`${label} must be a UTC timestamp`);
   return value;
 }
 

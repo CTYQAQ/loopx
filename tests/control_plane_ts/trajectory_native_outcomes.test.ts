@@ -51,3 +51,23 @@ test("wrong source, duplicate results, old scope and invented retention cannot b
     (x:any)=>x.samples[0].value=Infinity,
   ]) {const x=capture();mutate(x);assert.throws(()=>project(x));}
 });
+test("UTC dates must name real calendar instants, preserving legal fractional seconds",()=>{
+  for (const date of ["2026-02-30T00:00:00Z", "2025-02-29T00:00:00Z",
+    "2026-04-31T00:00:00Z", "2026-01-01T24:00:00Z"]) {
+    for (const field of ["start", "end", "submitted_at", "observed_at"]) {
+      const raw = capture() as any;
+      if (field === "start" || field === "end") raw[field] = date;
+      else raw.samples[0][field] = date;
+      assert.throws(()=>project(raw), /UTC timestamp/, `${field}: ${date}`);
+    }
+  }
+  for (const fraction of ["", ".1", ".12", ".123"]) {
+    const raw = capture();
+    raw.start = `2024-02-29T00:00:00${fraction}Z`;
+    raw.end = "2024-03-01T00:00:00Z";
+    for (const sample of raw.samples) {
+      sample.submitted_at = sample.observed_at = raw.start;
+    }
+    assert.equal(project(raw).initial?.submitted_at, raw.start);
+  }
+});

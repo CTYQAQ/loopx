@@ -223,6 +223,8 @@ The provider-exported JSON has this local diagnostic contract:
 
 Every scope field must equal the registered assessment input. Source IDs and
 line ranges must belong to that input; measurement/candidate IDs are opaque.
+UTC timestamps must name real calendar instants (including leap-day validity),
+not dates that a JavaScript parser silently normalizes into another window.
 The source must contain provider-recorded released outcomes, not assessor
 ratings or hidden evaluator material. The input curator/provider remains
 responsible for the claim's truth and validity. `complete` declares prefix
