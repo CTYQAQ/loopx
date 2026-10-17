@@ -704,3 +704,40 @@ shadow outbox，并保留租约版本、generation、scope 及幂等回执；陈
 移除配置不会退役活跃 binding：启用 capture 及已有 binding 的恢复仍须持久准备
 并送达。本项只移除默认关闭时无用途的依赖，不改变 provider 默认值、不迁移 Goal、
 不删除受支持的 Markdown writer，也不授予删除 capture 历史和待处理 outbox 的权限。
+
+## Edit complete task requirements in the workbench
+
+For a local canonical Task with a recorded Agent owner, open its existing Task
+inspector and choose **Edit requirements**. The editor reads the entire original
+request, including text omitted from list previews. **Save requirements** is the
+owner's single write decision: the existing typed action prepares and applies
+the edit internally, then reads the exact Task back. It does not start or stop a
+process or grant execution authority. Existing completion and protected actions
+retain their separate review paths.
+
+This edits the Task's requirements prose. It preserves the admitted lease;
+repository, write-scope and capability declarations still use the separate
+work-requirement revision lifecycle above.
+
+The exact read supplies the existing canonical update basis (provider revision
+and registry fingerprint). A changed source refuses a new edit before writing;
+an intervening write after preparation still fails the native CAS. The draft is
+retained so the user can read current requirements, compare and save again. A
+lost successful response is reconciled through the original action journal, not
+by issuing another write. Readback failure stays unverified until the original
+result and exact source can be read.
+
+This local transport extends `todo.update` with an optional `review_basis` echo
+of `loopx_chat_canonical_update_basis_v0`. It is observation, not a lease or a new
+permission. The canonical Todo owner continues to decide actor, claim, lease,
+CAS and execution eligibility. Source-bound text uses the action journal's
+existing 8,000-character envelope; quick actions without the basis retain their
+400-character bound. Oversized requests remain readable and are never truncated
+into an edit. Legacy, remote, unidentified, unassigned and unavailable sources
+retain the read-only path. CLI behavior and Lark actions are unchanged.
+
+中文：在本机 canonical Task 的原详情中“修改要求”，完整原文直接进入编辑器，
+一次“保存要求”沿既有 typed action 内部准备、提交并精确读回；不要求填写租约或
+版本字段，也不新增确认页。要求改变可能使既有验收失效，不会启动或停止进程。
+来源变化时拒绝覆盖、保留草稿，可读取当前要求核对后再保存；响应丢失先对账原
+操作。只在完整来源和已记录负责人均可核实的任务开放编辑，其他来源仍可阅读。

@@ -110,6 +110,27 @@ def test_chat_uses_same_atomic_owner_and_refuses_changed_review_basis(journey, t
     assert cli("todo", "list")["todo"].get("priority") != "P2"
 
 
+def test_source_bound_chat_text_edit_preserves_its_original_lease(journey, tmp_path):
+    cli, todo_id, registry, runtime = journey
+    lease = cli("task-lease", "acquire", "--owner", "agent-a", "--idempotency-key", "original-editor-lease")["lease"]
+    service = ChatActionService(store=ChatActionStore(tmp_path / "actions"), registry_path=registry,
+        runtime_root_override=str(runtime))
+    text = "[P1] Preserve the full requirements. " + "A" * 900 + " FINAL_ACCEPTANCE: exact source."
+    proposal = service.preview({"action_kind": "todo.update", "summary": "Save complete requirements",
+        "idempotency_key": "source-bound-edit", "context": {"kind": "todo", "goal_id": "goal-a", "todo_id": todo_id},
+        "normalized_parameters": {"goal_id": "goal-a", "todo_id": todo_id, "agent_id": "agent-a",
+            "operation": "edit", "text": text, "review_basis": service._canonical_update_basis("goal-a")}})
+    assert cli("task-lease", "inspect")["lease"] == lease
+    assert service.apply(proposal["proposal_id"])["proposal"]["status"] == "applied"
+    # Requirements prose is the existing administrative copy edit. It must not
+    # impersonate a scope/repository revision or retire an admitted execution.
+    after = cli("task-lease", "inspect")
+    assert after["active"] and after["lease"] == lease
+    assert cli("todo", "list")["todo"]["text"] == text
+    service.apply(proposal["proposal_id"])
+    assert cli("task-lease", "inspect") == after
+
+
 @pytest.mark.parametrize("retained", ["active", "released"])
 def test_cli_revises_requirements_without_a_release_acquire_dead_end(journey, retained):
     cli, _, _, _ = journey
