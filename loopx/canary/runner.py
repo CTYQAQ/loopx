@@ -278,11 +278,14 @@ def _retire_fixture_runtimes(root: Path, *, timeout: float = 15) -> None:
                 continue
             if path.name != f"runtime-{info['fingerprint'][:16]}.json":
                 raise RuntimeError(f"invalid managed runtime fingerprint: {path.name}")
-            remaining = (deadline - time.monotonic()) / 2
+            # Ownership probe, shutdown request and observed exit share the
+            # existing cleanup deadline; the new proof cannot extend it.
+            remaining = (deadline - time.monotonic()) / 3
             if remaining <= 0:
                 raise RuntimeError("managed runtime cleanup deadline exceeded")
             result = _stop_effect_runtime(
                 path, info, timeout=min(5, remaining), wait_for_process_exit=True,
+                expected_info_path=path,
             )
             if result["status"] != "stopped":
                 raise RuntimeError(f"managed runtime still exiting: {path.name}")

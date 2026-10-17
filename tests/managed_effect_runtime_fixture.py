@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import tempfile
-from uuid import uuid4
 
 from loopx.control_plane import effect_runtime
 
@@ -33,7 +32,7 @@ def stop_disposable_effect_runtimes(
         return
     # pytest may remove passed tmp_path directories during fixture teardown.
     # Validate the captured bytes with the existing reader after monkeypatches
-    # are restored; the authenticated ping still verifies the exact live owner.
+    # are restored; the authenticated server must also confirm its own locator.
     with tempfile.TemporaryDirectory(prefix="loopx-test-runtime-cleanup-") as scratch:
         for locator, raw in records:
             validation_file = Path(scratch) / locator.name
@@ -42,17 +41,11 @@ def stop_disposable_effect_runtimes(
             if info is None or locator.name != f"runtime-{info['fingerprint'][:16]}.json":
                 continue
             try:
-                response = effect_runtime._request_with_info(
-                    info, request_id=uuid4().hex, method="runtime.ping", params={}, timeout=1,
+                result = effect_runtime._stop_effect_runtime(
+                    locator, info, timeout=5, wait_for_process_exit=True,
+                    expected_info_path=locator,
                 )
             except (OSError, RuntimeError):
                 # Corrupt, stale or rejected metadata cannot authorize shutdown.
                 continue
-            ping = response.get("result")
-            if (not isinstance(ping, dict) or ping.get("ready") is not True or ping.get("pid") != info["pid"]
-                    or ping.get("fingerprint") != info["fingerprint"]):
-                continue
-            result = effect_runtime._stop_effect_runtime(
-                locator, info, timeout=5, wait_for_process_exit=True,
-            )
             assert result["stopped"], f"Disposable runtime did not exit: {locator}"

@@ -617,12 +617,15 @@ def _stop_effect_runtime(
     *,
     timeout: float,
     wait_for_process_exit: bool = False,
+    expected_info_path: Path | None = None,
 ) -> dict[str, Any]:
     """Transport shutdown for a validated locator, optionally awaiting OS exit.
 
     Operator restart keeps its existing serving-locator turnover semantics.
     An isolated fixture instead needs the original process to stop writing
-    before deleting its namespace. TS still owns admission, drain and retirement.
+    before deleting its namespace. An optional expected locator also fences the
+    shutdown at the serving TS owner; copied metadata is not namespace ownership.
+    TS still owns admission, drain and retirement.
     """
     identity = runtime_identity_from_info(info)
     if info is None:
@@ -633,6 +636,21 @@ def _stop_effect_runtime(
             "previous_runtime_identity": identity,
             "info_path": str(info_path),
         }
+    params = {} if expected_info_path is None else {
+        "expected_info_path": str(expected_info_path.resolve()),
+    }
+    if expected_info_path is not None:
+        response = _request_with_info(
+            info, request_id=uuid.uuid4().hex, method="runtime.ping", params=params,
+            timeout=min(1, timeout),
+        )
+        ping = response.get("result")
+        if (not isinstance(ping, dict) or ping.get("ready") is not True
+                or ping.get("pid") != info.get("pid") or ping.get("fingerprint") != info.get("fingerprint")
+                or ping.get("owns_locator") is not True):
+            # Older runtimes can ignore unknown parameters. Require a positive
+            # serving-owner proof before sending any shutdown, even to them.
+            raise EffectRuntimeRejected("Runtime did not confirm the expected serving locator")
     pid = info.get("pid")
     serving_token = info.get("token")
     try:
@@ -640,7 +658,7 @@ def _stop_effect_runtime(
             info,
             request_id=uuid.uuid4().hex,
             method="runtime.shutdown",
-            params={},
+            params=params,
             timeout=timeout,
         )
     except (

@@ -54,7 +54,17 @@ function lazyHandler<Module>(
 
 export interface EffectRuntimeHandlerContext {
   fingerprint: string;
+  /** Canonical serving locator, captured before publication, never caller data. */
+  infoPath?: string;
   requestShutdown: () => void;
+}
+
+function runtimeLocatorMatch(
+  context: EffectRuntimeHandlerContext, params: JsonObject,
+): boolean | undefined {
+  if (!("expected_info_path" in params)) return undefined;
+  const expected = requiredString(params.expected_info_path, "expected_info_path");
+  return context.infoPath !== undefined && expected === context.infoPath;
 }
 
 function asObject(value: unknown): JsonObject {
@@ -248,11 +258,18 @@ export function createEffectRuntimeHandlers(
   return new Map<string, EffectRuntimeHandler>([
     [
       "runtime.ping",
-      () => ({ ready: true, pid: process.pid, fingerprint: context.fingerprint }),
+      (params) => {
+        const ownsLocator = runtimeLocatorMatch(context, params);
+        return { ready: true, pid: process.pid, fingerprint: context.fingerprint,
+          ...(ownsLocator === undefined ? {} : { owns_locator: ownsLocator }) };
+      },
     ],
     [
       "runtime.shutdown",
-      () => {
+      (params) => {
+        // A copied authentic locator can authenticate to a different namespace.
+        // Fence the effect too; an earlier ping is not shutdown authorization.
+        if (runtimeLocatorMatch(context, params) === false) return { stopped: false };
         context.requestShutdown();
         return { stopped: true };
       },

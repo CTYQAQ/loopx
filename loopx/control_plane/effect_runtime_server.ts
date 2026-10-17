@@ -1,11 +1,13 @@
 import { writeSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
-import { type FileHandle } from "node:fs/promises";
+import { realpath, type FileHandle } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 
 import type { JsonObject } from "./effect_program.ts";
 import {
   createEffectRuntimeHandlers,
   dispatchEffectRuntimeMethod,
+  type EffectRuntimeHandlerContext,
 } from "./effect_runtime_handlers.ts";
 import {
   EffectRuntimeRequestError,
@@ -117,12 +119,13 @@ let resolveDrain: (() => void) | undefined;
 let publicationComplete = false;
 let resolvePublication: () => void;
 const publicationReady = new Promise<void>((resolve) => { resolvePublication = resolve; });
-const handlers = createEffectRuntimeHandlers({
+const handlerContext: EffectRuntimeHandlerContext = {
   fingerprint,
   requestShutdown: () => {
     shutdownRequested = true;
   },
-});
+};
+const handlers = createEffectRuntimeHandlers(handlerContext);
 
 function resetIdleTimer(server: ReturnType<typeof createServer>): void {
   clearTimeout(idleTimer);
@@ -291,6 +294,9 @@ server.listen(0, "127.0.0.1", async () => {
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("invalid address");
+    // Resolve aliases while the private directory still exists. Keep this
+    // serving identity after pytest retention removes the original directory.
+    handlerContext.infoPath = join(await realpath(dirname(infoPath)), basename(infoPath));
     await withFileMutationLock(infoPath, async () => {
       await atomicWriteJson(infoPath, {
         schema_version: INFO_SCHEMA,

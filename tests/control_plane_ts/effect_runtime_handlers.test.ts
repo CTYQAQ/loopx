@@ -11,6 +11,55 @@ const handlers = createEffectRuntimeHandlers({
   requestShutdown: () => undefined,
 });
 
+test("runtime locator proof is opt-in and comes from the serving context", async () => {
+  const infoPath = "/disposable/serving/runtime.json";
+  const scoped = createEffectRuntimeHandlers({fingerprint: "fixture", infoPath, requestShutdown() {}});
+  assert.deepEqual(await dispatchEffectRuntimeMethod(scoped, "runtime.ping", {}),
+    {ready: true, pid: process.pid, fingerprint: "fixture"});
+  for (const expected of [infoPath, "/borrowed/runtime.json", `${infoPath}.copy`]) {
+    assert.deepEqual(await dispatchEffectRuntimeMethod(scoped, "runtime.ping", {
+      expected_info_path: expected, info_path: expected,
+    }), {ready: true, pid: process.pid, fingerprint: "fixture", owns_locator: expected === infoPath});
+  }
+  assert.equal((await dispatchEffectRuntimeMethod(handlers, "runtime.ping", {
+    expected_info_path: infoPath,
+  }) as {owns_locator: boolean}).owns_locator, false);
+});
+
+test("guarded shutdown checks ownership again and keeps ordinary shutdown unchanged", async () => {
+  let shutdowns = 0;
+  const infoPath = "/disposable/serving/runtime.json";
+  const scoped = createEffectRuntimeHandlers({fingerprint: "fixture", infoPath,
+    requestShutdown() { shutdowns++; }});
+  await dispatchEffectRuntimeMethod(scoped, "runtime.ping", {expected_info_path: infoPath});
+  assert.deepEqual(await dispatchEffectRuntimeMethod(scoped, "runtime.shutdown", {
+    expected_info_path: "/borrowed/runtime.json",
+  }), {stopped: false});
+  assert.equal(shutdowns, 0);
+  assert.deepEqual(await dispatchEffectRuntimeMethod(scoped, "runtime.shutdown", {
+    expected_info_path: infoPath,
+  }), {stopped: true});
+  assert.equal(shutdowns, 1);
+  assert.deepEqual(await dispatchEffectRuntimeMethod(scoped, "runtime.shutdown", {}), {stopped: true});
+  assert.equal(shutdowns, 2);
+  assert.deepEqual(await dispatchEffectRuntimeMethod(handlers, "runtime.shutdown", {
+    expected_info_path: infoPath,
+  }), {stopped: false});
+});
+
+test("an explicitly malformed locator guard never falls back to unguarded shutdown", async () => {
+  let shutdowns = 0;
+  const scoped = createEffectRuntimeHandlers({fingerprint: "fixture", infoPath: "/runtime.json",
+    requestShutdown() { shutdowns++; }});
+  for (const expected of [null, "", 12, {}, []]) {
+    for (const method of ["runtime.ping", "runtime.shutdown"]) {
+      await assert.rejects(dispatchEffectRuntimeMethod(scoped, method, {expected_info_path: expected}),
+        /expected_info_path must be a non-empty string/);
+    }
+  }
+  assert.equal(shutdowns, 0);
+});
+
 test("runtime boundary rejects incomplete settlement identity", async () => {
   await assert.rejects(
     dispatchEffectRuntimeMethod(handlers, "settlement.identity", {

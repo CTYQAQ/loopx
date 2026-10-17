@@ -124,6 +124,50 @@ def test_cleanup_preserves_foreign_namespace_and_rejects_wrong_pid(tmp_path, mon
             assert effect_runtime.restart_effect_runtime(wait_for_exit=True)["stopped"]
 
 
+@pytest.mark.parametrize("retention", ["all", "none"])
+def test_pytest_preserves_an_authentic_borrowed_locator(tmp_path, monkeypatch, retention):
+    """A valid copy proves identity, not that this test owns the server."""
+    repository = Path(__file__).resolve().parents[1]
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    probe = tmp_path / "test_borrowed_namespace.py"
+    with monkeypatch.context() as isolated:
+        isolated.setattr(effect_runtime.tempfile, "tempdir", str(foreign))
+        original = effect_runtime.effect_runtime_result("runtime.ping", {})
+        locator = effect_runtime._runtime_info_path(effect_runtime._runtime_fingerprint())
+        info = json.loads(locator.read_text(encoding="utf-8"))
+        probe.write_text(textwrap.dedent(f'''
+            import json, shutil
+            from pathlib import Path
+            from loopx.control_plane import effect_runtime
+
+            def test_copy_locator(tmp_path):
+                source = Path({str(locator)!r})
+                copy = tmp_path / source.parent.name / source.name
+                copy.parent.mkdir()
+                shutil.copyfile(source, copy)
+
+            def test_original_still_serves():
+                info = json.loads(Path({str(locator)!r}).read_text(encoding="utf-8"))
+                reply = effect_runtime._request_with_info(info, request_id="borrowed-check",
+                    method="runtime.ping", params={{}}, timeout=2)
+                assert reply["result"]["pid"] == {original["pid"]!r}
+        '''), encoding="utf-8")
+        environment = {**os.environ, "PYTHONPATH": os.pathsep.join([
+            str(repository / "tests"), str(repository),
+        ])}
+        try:
+            result = subprocess.run([
+                sys.executable, "-m", "pytest", "-q", "-p", "conftest",
+                "-o", f"tmp_path_retention_policy={retention}", str(probe),
+            ], cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=60)
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "2 passed" in result.stdout
+            assert not _has_exited(info["pid"]), "Cleanup stopped another namespace's runtime"
+        finally:
+            effect_runtime._stop_effect_runtime(locator, info, timeout=5, wait_for_process_exit=True)
+
+
 def test_cleanup_does_not_hide_an_unfinished_shutdown(tmp_path, monkeypatch):
     fingerprint = "a" * 64
     locator = tmp_path / "loopx-effect-runtime-fixture" / f"runtime-{fingerprint[:16]}.json"
@@ -132,9 +176,54 @@ def test_cleanup_does_not_hide_an_unfinished_shutdown(tmp_path, monkeypatch):
     monkeypatch.setattr(effect_runtime, "_read_info", lambda *_a, **_k: {
         "pid": 123, "fingerprint": fingerprint,
     })
-    monkeypatch.setattr(effect_runtime, "_request_with_info", lambda *_a, **_k: {
-        "result": {"ready": True, "pid": 123, "fingerprint": fingerprint},
-    })
     monkeypatch.setattr(effect_runtime, "_stop_effect_runtime", lambda *_a, **_k: {"stopped": False})
     with pytest.raises(AssertionError, match="Disposable runtime did not exit"):
         stop_disposable_effect_runtimes(tmp_path)
+
+
+def test_guarded_shutdown_preserves_the_foreign_server(tmp_path, monkeypatch):
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    borrowed = tmp_path / "borrowed" / "runtime.json"
+    with monkeypatch.context() as isolated:
+        isolated.setattr(effect_runtime.tempfile, "tempdir", str(foreign))
+        original = effect_runtime.effect_runtime_result("runtime.ping", {})
+        locator = effect_runtime._runtime_info_path(effect_runtime._runtime_fingerprint())
+        info = json.loads(locator.read_text(encoding="utf-8"))
+        try:
+            with pytest.raises(effect_runtime.EffectRuntimeRejected, match="expected serving locator"):
+                effect_runtime._stop_effect_runtime(
+                    borrowed, info, timeout=.1, wait_for_process_exit=True, expected_info_path=borrowed,
+                )
+            # The server independently fences shutdown after the handshake.
+            denied = effect_runtime._request_with_info(info, request_id="wrong-locator",
+                method="runtime.shutdown", params={"expected_info_path": str(borrowed.resolve())}, timeout=2)
+            assert denied["result"] == {"stopped": False}
+            reply = effect_runtime._request_with_info(info, request_id="still-foreign",
+                method="runtime.ping", params={}, timeout=2)
+            assert reply["result"] == original
+            stopped = effect_runtime._stop_effect_runtime(
+                locator, info, timeout=5, wait_for_process_exit=True, expected_info_path=locator,
+            )
+            assert stopped["stopped"] and _has_exited(info["pid"])
+        finally:
+            effect_runtime._stop_effect_runtime(locator, info, timeout=5, wait_for_process_exit=True)
+
+
+@pytest.mark.parametrize("proof", [None, False])
+def test_guarded_shutdown_sends_no_effect_without_positive_server_proof(tmp_path, monkeypatch, proof):
+    calls = []
+    info = {"pid": 123, "fingerprint": "fixture"}
+
+    def ping(_info, **request):
+        calls.append(request["method"])
+        result = {"ready": True, **info}
+        if proof is not None:
+            result["owns_locator"] = proof
+        return {"result": result}
+
+    monkeypatch.setattr(effect_runtime, "_request_with_info", ping)
+    with pytest.raises(effect_runtime.EffectRuntimeRejected, match="expected serving locator"):
+        effect_runtime._stop_effect_runtime(tmp_path / "runtime.json", info, timeout=.1,
+            expected_info_path=tmp_path / "runtime.json")
+    assert calls == ["runtime.ping"], "An unsupported or negative proof must never reach shutdown"

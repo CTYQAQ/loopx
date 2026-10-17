@@ -351,3 +351,42 @@ def test_fixture_retirement_does_not_follow_runtime_namespace_links(tmp_path, mo
     monkeypatch.setattr(effect_runtime, "_read_info", lambda *a, **kw: pytest.fail("followed external locator"))
     runner._retire_fixture_runtimes(root)
     assert locator.read_text() == "external runtime metadata"
+
+
+def test_smoke_refuses_a_copied_authentic_locator_and_retains_its_fixture(tmp_path, monkeypatch):
+    from loopx.control_plane import effect_runtime
+
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    marker = tmp_path / "owned-root.txt"
+    examples = tmp_path / "examples"
+    examples.mkdir()
+    retained = None
+    with monkeypatch.context() as isolated:
+        isolated.setattr(effect_runtime.tempfile, "tempdir", str(foreign))
+        original = effect_runtime.effect_runtime_result("runtime.ping", {})
+        locator = effect_runtime._runtime_info_path(effect_runtime._runtime_fingerprint())
+        info = json.loads(locator.read_text(encoding="utf-8"))
+        (examples / "borrow.py").write_text(
+            "import os,shutil\nfrom pathlib import Path\n"
+            f"source=Path({str(locator)!r})\n"
+            "root=Path(os.environ['TMPDIR'])\n"
+            "copy=root/source.parent.name/source.name\n"
+            "copy.parent.mkdir()\nshutil.copyfile(source,copy)\n"
+            f"Path({str(marker)!r}).write_text(str(root))\n"
+            "print('original smoke output')\n", encoding="utf-8",
+        )
+        isolated.setattr(runner, "REPO_ROOT", tmp_path)
+        try:
+            result = runner._run_check({"command": "python examples/borrow.py"}, timeout_seconds=5)
+            retained = Path(marker.read_text())
+            assert result["status"] == "failed" and not result["ok"]
+            assert result["returncode"] == 0 and "original smoke output" in result["stdout_tail"]
+            assert "expected serving locator" in result["reason"] and retained.is_dir()
+            response = effect_runtime._request_with_info(info, request_id="foreign-still-serving",
+                method="runtime.ping", params={}, timeout=2)
+            assert response["result"] == original
+        finally:
+            effect_runtime._stop_effect_runtime(locator, info, timeout=5, wait_for_process_exit=True)
+            if retained is not None and retained.exists():
+                shutil.rmtree(retained)
