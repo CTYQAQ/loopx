@@ -585,11 +585,11 @@ def test_receipt_case_collection_does_not_depend_on_the_collecting_process_clock
     )
     collections = []
     for index, clock in enumerate(("2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z")):
-        # Collection does not run autouse fixtures. Do not let a collector scan
-        # the parent worker's live default routes or share its Effect process.
-        home = tmp_path / f"collector-{index}" / "home"
-        temporary = home.parent / "temporary"
-        home.mkdir(parents=True)
+        # A collector must not observe routes created by its still-running
+        # parent test as writes to the collector's own default namespace.
+        home = tmp_path / f"collector-home-{index}"
+        temporary = tmp_path / f"collector-tmp-{index}"
+        home.mkdir()
         temporary.mkdir()
         result = subprocess.run(
             [sys.executable, "-m", "pytest", target, "--collect-only", "-q",
