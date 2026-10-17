@@ -1011,6 +1011,26 @@ returns. Preparation and context-reading cost belong in the comparison. Omit all
 restore flags for the unchanged cold entry; never reuse an ambiguous trial
 folder as a new attempt.
 
+Warm preparation carries the admitted continuation request on its existing Todo.
+Earlier Host deadlines and Host-budget closeout messages in retained history
+belong to the source phase; the receiver follows its current Goal and guard.
+Task-owned time constraints, native cooldowns, user gates and stop authority
+remain binding. Preparation reads the current claimed Todo and actual quota
+result before reporting `preparation_actionable=true` in the existing `checkpoint-context.json`
+receipt. Closed or unavailable work and a deadline that expires during readback
+fail before model execution; an old ready plan is not current admission. This
+readback neither grants execution nor qualifies subsequent research or recapture.
+It applies only to the existing explicitly admitted complete-checkpoint path;
+ordinary terminal archives are not converted into complete checkpoints.
+
+Warm 准备在既有 Todo 中传达本次已准入的继续请求：历史中的旧 Host 截止和预算收尾
+信息属于源阶段，目标阶段遵循当前 Goal 与 guard。题目时限、原生冷却、用户门槛及
+停止权限仍有效。准备步骤须读回当前 claimed Todo 和实际 quota 结果，才在既有
+`checkpoint-context.json` 回执中报告 `preparation_actionable=true`；工作已闭合、不可用或读回
+期间期限耗尽时，在模型执行前失败。旧 ready 计划不等于当前准入；此读回不授予
+执行权，也不认证后续研究或再次捕获，仅作用于显式准入的完整检查点路径。
+普通终态资料归档不会因此被升级为完整检查点。
+
 To test a new decision from the same pre-replan state, use
 `--restore-fresh-replan`. The point must contain a verified pending replan packet.
 The first destination model call starts a fresh native conversation, before

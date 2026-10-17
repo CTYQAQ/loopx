@@ -22,6 +22,18 @@ from benchmark.runtime.layout import _CODEX_HOME, _CONTROL, _SRC
 
 
 _CHECKPOINT_VERIFY_TIMEOUT_SECONDS = 60
+_PREPARATION_TASK = (
+    "Read the full retained checkpoint research and pending decision, verify the current code, "
+    "incumbent and remaining native opportunities. Do not modify candidates or submit during "
+    "this preparation. Settle actual findings under current authority, then complete the first "
+    "current replan before choosing a complete research experiment. "
+    "This receiver was explicitly admitted to continue the retained work. Earlier Host deadlines "
+    "and Host-budget closeout messages belong to the source phase; follow the current Goal and "
+    "guard rather than using those historical messages to close this continuation. The Host "
+    "enforces the admitted allowance externally. Original task time constraints, submission "
+    "cooldowns, user gates and stop authority remain binding. No additional time or authority "
+    "is granted by this instruction."
+)
 
 
 @dataclass(frozen=True)
@@ -287,7 +299,8 @@ def prepare_context(env: dict[str, str], declaration: dict) -> dict:
     _prepare_native_skills(Path(env["CODEX_HOME"]), Path(env["LOOPX_SHARED_SKILLS"]))
     def cli(*args):
         result = subprocess.run([*loopx_command(env), *args], env=env,
-            cwd=env["LOOPX_PROJECT"], text=True, capture_output=True, timeout=60, check=True)
+            cwd=env["LOOPX_PROJECT"], text=True, capture_output=True,
+            timeout=_phase_read_timeout(declaration, 60), check=True)
         value = json.loads(result.stdout)
         if value.get("ok") is not True:
             raise ValueError("Checkpoint destination operation failed: " + args[0])
@@ -297,11 +310,7 @@ def prepare_context(env: dict[str, str], declaration: dict) -> dict:
     # model/guard must inspect the retained evidence and settle this Todo.
     todo = cli("todo", "add", "--goal-id", goal, "--role", "agent", "--claimed-by", agent,
         "--operation-id", "checkpoint-preparation", "--required-capability", "shell",
-        "--task-class", "advancement_task", "--text",
-        "Read the full retained checkpoint research and pending decision, verify the current code, "
-        "incumbent and remaining native opportunities. Do not modify candidates or submit during "
-        "this preparation. Settle actual findings under current authority, then complete the first "
-        "current replan before choosing a complete research experiment.")["todo_id"]
+        "--task-class", "advancement_task", "--text", _PREPARATION_TASK)["todo_id"]
     key = "checkpoint-preparation"
     lease = cli("task-lease", "acquire", "--goal-id", goal, "--todo-id", todo,
                 "--owner", agent, "--idempotency-key", key)["lease"]
@@ -315,9 +324,28 @@ def prepare_context(env: dict[str, str], declaration: dict) -> dict:
     cli("task-lease", "release", "--goal-id", goal, "--todo-id", todo,
         "--owner", agent, "--idempotency-key", key, "--expected-version", str(lease["version"]))
     cli("configure-goal", "--goal-id", goal, "--execution-replan-after-turns", "1", "--execute")
+    _read_preparation(cli, goal, agent, todo, declaration)
     return {"session": native, "context": context, "preparation_todo_id": todo,
-            "model_calls": 0, "research_continuation_qualified": False}
+            "preparation_actionable": True, "model_calls": 0,
+            "research_continuation_qualified": False}
 
+
+
+def _read_preparation(cli, goal, agent, todo, declaration):
+    """Read current owner facts; a saved plan alone cannot admit continuation."""
+    _phase_read_timeout(declaration, 60)
+    preparation = cli("todo", "list", "--goal-id", goal, "--todo-id", todo)["todo"]
+    if preparation.get("status") != "open" or preparation.get("claimed_by") != agent:
+        raise ValueError("Warm preparation Todo is not open under the destination agent")
+    guard = cli("quota", "should-run", "--goal-id", goal, "--agent-id", agent,
+        "--available-capability", "shell", "--available-capability", "filesystem_write")
+    channel = (guard.get("interaction_contract") or {}).get("agent_channel") or {}
+    selected = guard.get("selected_todo") or {}
+    pending_review = guard.get("autonomous_replan_obligation") or {}
+    if (guard.get("should_run") is not True or channel.get("delivery_allowed") is not True or
+            not (selected.get("todo_id") == todo or pending_review.get("required") is True)):
+        raise ValueError("Warm continuation has no actionable current preparation or review")
+    _phase_read_timeout(declaration, 60)
 
 
 def finish_preparation(env: dict[str, str]) -> dict:
