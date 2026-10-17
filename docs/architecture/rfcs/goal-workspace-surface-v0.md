@@ -715,10 +715,14 @@ qualify the complete interactive history journey.
 **Checkpoint 2026-10-17 (V12 fixed-pack workspace integration, proposed).**
 The packaged workspace connects the registered-source producer to an explicit
 analysis action, cancellation, retry and cited result reading. Reading or
-refreshing an existing result never requests execution. The first result level
-separates original-objective utility testing from useful diagnostics and
-evidence adoption; the remaining judgments, exact source lines and analysis
-usage are optional details. Disposable real-HTTP/process checks cover duplicate
+refreshing an existing result never requests execution. All six analyzer-defined
+process judgments are primary: goal alignment, benefit testing, discrimination,
+information gain, evidence adoption and avoidable repetition. Each shows its
+producer-owned yes/eligible, no and unknown counts; zero eligibility is N/A.
+One optional disclosure reveals the episode, reason and citation; the shared
+reader opens original source lines. Method, result identity and scope remain
+inspectable. Usage and cost are secondary. Utility testing does not imply positive
+utility, and finding repetition is not a positive result; there is no total score. Disposable real-HTTP/process checks cover duplicate
 requests, cancellation, failed retry, owner isolation and changed sources;
 packaged browser checks cover selection races, reload, keyboard and narrow
 screens. A separately authorized real model journey exercises the same entry

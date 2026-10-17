@@ -262,6 +262,15 @@ is introduced.
 ## Goal workspace reader
 
 The Goal overview offers **Deep analysis** beside the recorded Explore history.
+The primary summary displays the existing six process judgments, each with
+its yes/eligible, no and unknown counts. An eligible denominator of zero is
+N/A, and missing analysis stays unanalysed. One metric disclosure shows the
+bound episode, explanation and citations; original source reads reuse the
+same reader as detailed analysis. Coverage and missing-data bounds come from
+the assessment owner, not a frontend score. Avoidable repetition has the
+opposite interpretation to a useful positive observation. Costs are optional
+secondary context. These are not native outcome magnitudes or a total score.
+
 Choose a registered source, inspect its fixed scope and model request, then
 explicitly run or retry analysis. Reading, refreshing, switching sources and
 following citations never launches a job. Running work can be cancelled;
