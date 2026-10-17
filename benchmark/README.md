@@ -1023,6 +1023,18 @@ readback neither grants execution nor qualifies subsequent research or recapture
 It applies only to the existing explicitly admitted complete-checkpoint path;
 ordinary terminal archives are not converted into complete checkpoints.
 
+The receiver brackets the guard with the exact preparation Todo's canonical
+authority revision. Completion, transfer or another canonical edit during that
+observation rejects readiness; a later required review cannot revive an earlier
+open snapshot. The existing context receipt includes `preparation_readback` with
+that revision, the selected Todo and current replan identity, so an operator can
+inspect what was actually observed instead of relying on a readiness boolean.
+This is a bounded observation, not an execution lease; the worker must still use
+fresh ordinary admission. A rejected attempt retains its context, cadence-one
+preparation and owed review for inspection rather than silently resetting them.
+Cross-version partial receivers and actual model/research adoption retain their
+separate qualification boundaries.
+
 Warm 准备在既有 Todo 中传达本次已准入的继续请求：历史中的旧 Host 截止和预算收尾
 信息属于源阶段，目标阶段遵循当前 Goal 与 guard。题目时限、原生冷却、用户门槛及
 停止权限仍有效。准备步骤须读回当前 claimed Todo 和实际 quota 结果，才在既有
@@ -1030,6 +1042,13 @@ Warm 准备在既有 Todo 中传达本次已准入的继续请求：历史中的
 期间期限耗尽时，在模型执行前失败。旧 ready 计划不等于当前准入；此读回不授予
 执行权，也不认证后续研究或再次捕获，仅作用于显式准入的完整检查点路径。
 普通终态资料归档不会因此被升级为完整检查点。
+
+接收端用准确准备 Todo 的规范权威修订号夹住 guard 读取；期间完成、转交或其他规范
+修改都会拒绝 ready，后来的 required review 不能复活较早的 open 快照。既有上下文
+回执的 `preparation_readback` 返回该修订、当前选中 Todo 与 replan 身份，便于检查
+实际观察依据；它不是执行租约，worker 仍须重新走普通准入。拒绝的接收端保留上下文、
+cadence-one 准备和欠下的复盘供检查，不默默重置；跨版本部分接收端与真实模型/研究采用
+仍需各自资格化。
 
 To test a new decision from the same pre-replan state, use
 `--restore-fresh-replan`. The point must contain a verified pending replan packet.

@@ -39,8 +39,12 @@ def test_current_preparation_readback_is_idempotent_and_respects_user_gate(tmp_p
     declaration = {"deadline_epoch": deadline}
     state = project / "ACTIVE_GOAL_STATE.md"
     state_before = state.read_bytes()
-    _read_preparation(call, GOAL, AGENT, todo, declaration)
-    _read_preparation(call, GOAL, AGENT, todo, declaration)
+    readback = _read_preparation(call, GOAL, AGENT, todo, declaration)
+    repeated = _read_preparation(call, GOAL, AGENT, todo, declaration)
+    assert readback == repeated
+    assert readback["preparation_todo_id"] == todo
+    assert readback["authority_read"]["provider_revision"]
+    assert readback["selected_todo_id"] == todo or readback["current_replan_required"]
     assert state.read_bytes() == state_before
     assert declaration["deadline_epoch"] == deadline
     listed = call("todo", "list", "--goal-id", GOAL, "--todo-id", todo)["todo"]
@@ -60,6 +64,37 @@ def test_expired_preparation_does_not_read_or_renew_a_phase():
     with pytest.raises(ValueError, match="expired"):
         _read_preparation(lambda *args: calls.append(args), "goal", "agent", "todo", declaration)
     assert calls == [] and declaration == {"deadline_epoch": 1}
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("boundary", ["before_guard", "after_guard"])
+@pytest.mark.parametrize("change", ["complete", "transfer"])
+def test_changed_preparation_cannot_borrow_an_unrelated_current_review(
+    tmp_path, monkeypatch, provider, boundary, change,
+):
+    call, _, _ = _fixture(tmp_path, monkeypatch, provider, future_monitor=False)
+    todo = call("todo", "add", "--goal-id", GOAL, "--role", "agent", "--claimed-by", AGENT,
+        "--text", _PREPARATION_TASK, "--task-class", "advancement_task")["todo_id"]
+    changed = False
+
+    def interleaved(*args):
+        nonlocal changed
+        result = call(*args)
+        trigger = ("todo", "list") if boundary == "before_guard" else ("quota", "should-run")
+        if not changed and args[:2] == trigger:
+            changed = True
+            if change == "complete":
+                call("todo", "complete", "--goal-id", GOAL, "--agent-id", AGENT, "--todo-id", todo)
+            else:
+                call("todo", "update", "--goal-id", GOAL, "--agent-id", AGENT, "--todo-id", todo,
+                     "--claimed-by", "different-agent")
+        return result
+
+    with pytest.raises(ValueError, match="preparation.*changed|not open"):
+        _read_preparation(interleaved, GOAL, AGENT, todo, {"deadline_epoch": int(time.time()) + 600})
+    assert changed
+    final = call("todo", "list", "--goal-id", GOAL, "--todo-id", todo)["todo"]
+    assert final["status"] == "done" if change == "complete" else final["claimed_by"] == "different-agent"
 
 
 @pytest.mark.parametrize("todo", [

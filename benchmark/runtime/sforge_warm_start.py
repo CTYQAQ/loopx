@@ -324,8 +324,9 @@ def prepare_context(env: dict[str, str], declaration: dict) -> dict:
     cli("task-lease", "release", "--goal-id", goal, "--todo-id", todo,
         "--owner", agent, "--idempotency-key", key, "--expected-version", str(lease["version"]))
     cli("configure-goal", "--goal-id", goal, "--execution-replan-after-turns", "1", "--execute")
-    _read_preparation(cli, goal, agent, todo, declaration)
+    readback = _read_preparation(cli, goal, agent, todo, declaration)
     return {"session": native, "context": context, "preparation_todo_id": todo,
+            "preparation_readback": readback,
             "preparation_actionable": True, "model_calls": 0,
             "research_continuation_qualified": False}
 
@@ -334,7 +335,8 @@ def prepare_context(env: dict[str, str], declaration: dict) -> dict:
 def _read_preparation(cli, goal, agent, todo, declaration):
     """Read current owner facts; a saved plan alone cannot admit continuation."""
     _phase_read_timeout(declaration, 60)
-    preparation = cli("todo", "list", "--goal-id", goal, "--todo-id", todo)["todo"]
+    before = cli("todo", "list", "--goal-id", goal, "--todo-id", todo)
+    preparation = before["todo"]
     if preparation.get("status") != "open" or preparation.get("claimed_by") != agent:
         raise ValueError("Warm preparation Todo is not open under the destination agent")
     guard = cli("quota", "should-run", "--goal-id", goal, "--agent-id", agent,
@@ -345,7 +347,22 @@ def _read_preparation(cli, goal, agent, todo, declaration):
     if (guard.get("should_run") is not True or channel.get("delivery_allowed") is not True or
             not (selected.get("todo_id") == todo or pending_review.get("required") is True)):
         raise ValueError("Warm continuation has no actionable current preparation or review")
+    # The guard can legitimately require a review after this Todo completes.
+    # That review cannot make an older open/owned preparation snapshot current.
+    # Bracket it with the existing canonical read revision; do not invent a
+    # ready receipt, retry budget, or permission from imported history.
+    after = cli("todo", "list", "--goal-id", goal, "--todo-id", todo)
+    revision = (before.get("authority_read") or {}).get("provider_revision")
+    current = after["todo"]
+    if (not isinstance(revision, str) or not revision
+            or (after.get("authority_read") or {}).get("provider_revision") != revision
+            or current.get("status") != "open" or current.get("claimed_by") != agent):
+        raise ValueError("Warm preparation state changed during current readiness readback; inspect this receiver")
     _phase_read_timeout(declaration, 60)
+    return {"authority_read": after["authority_read"], "preparation_todo_id": todo,
+            "selected_todo_id": selected.get("todo_id"),
+            "current_replan_obligation_id": pending_review.get("obligation_id"),
+            "current_replan_required": pending_review.get("required") is True}
 
 
 def finish_preparation(env: dict[str, str]) -> dict:
