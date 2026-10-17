@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import {ArrowUpRight, LoaderCircle, RefreshCw, Sparkles, X} from "lucide-react";
-import type {AssessmentCitation, TrajectoryEpisode, TrajectoryMetric} from "../../../../../../loopx/control_plane/capabilities/trajectory_assessment_types.js";
-import {ResearchProgress, type ResearchProgressPack} from "./goal-research-progress";
+import type {AssessmentCitation, TrajectoryEpisode} from "../../../../../../loopx/control_plane/capabilities/trajectory_assessment_types.js";
+import {ResearchProgress, metricCopy, verdictLabel, type ResearchProgressPack} from "./goal-research-progress";
 import {requestJson} from "../../data/chat";
 import "./goal-research-analysis.css";
 
@@ -24,6 +24,12 @@ const locationFor = (goal: string) => {
 };
 
 export function useResearchAnalysis(goalId: string, active: boolean, zh: boolean) {
+  const [citation, setCitation] = useState<Citation | null>(null);
+  const [citationError, setCitationError] = useState("");
+  const [citationBusy, setCitationBusy] = useState(false);
+  const citeGeneration = useRef(0);
+  const sourcePanel = useRef<HTMLElement>(null);
+  const sourceTrigger = useRef<HTMLButtonElement | null>(null);
   const [location, setLocation] = useState(() => locationFor(goalId));
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState("");
@@ -57,7 +63,7 @@ export function useResearchAnalysis(goalId: string, active: boolean, zh: boolean
     setLocation(locationFor(goalId)); setSnapshot(null); setError(""); setReadError(""); setPending(false);
     const pop = () => setLocation(locationFor(goalId));
     window.addEventListener("popstate", pop);
-    return () => {generation.current++; window.removeEventListener("popstate", pop);};
+    return () => {generation.current++; citeGeneration.current++; window.removeEventListener("popstate", pop);};
   }, [goalId]);
   useEffect(() => {
     if (!active) return;
@@ -66,6 +72,8 @@ export function useResearchAnalysis(goalId: string, active: boolean, zh: boolean
     return () => controller.abort();
   }, [active, read, location.packId]);
   const pack = snapshot?.pack ?? null;
+  useEffect(() => {citeGeneration.current++; setCitation(null); setCitationError(""); setCitationBusy(false);}, [goalId, snapshot?.pack?.pack_id, snapshot?.pack?.analysis_key]);
+
   // A pending request is observed here. A persisted running receipt alone is
   // not proof that the model is currently executing; old receipts stop polling.
   const recordedRunning = pack?.job?.status === "running";
@@ -86,7 +94,8 @@ export function useResearchAnalysis(goalId: string, active: boolean, zh: boolean
     if (scope.current.packId !== nextPack) {
       generation.current++; readSequence.current++; submitting.current = false;
       setPending(false); setCancelPending(false);
-      setSnapshot(previous => previous ? {...previous, pack: null} : null);
+      if (pack?.pack_id !== nextPack) {citeGeneration.current++; setCitation(null); setCitationError(""); setCitationBusy(false);}
+      setSnapshot(previous => previous?.pack?.pack_id === nextPack ? previous : previous ? {...previous, pack: null} : null);
       scope.current = {goalId, packId: nextPack};
     }
     const url = new URL(window.location.href);
@@ -121,8 +130,20 @@ export function useResearchAnalysis(goalId: string, active: boolean, zh: boolean
     } catch (e) {if (current === generation.current) setError(errorText(e));}
     finally {if (current === generation.current) setCancelPending(false);}
   };
-  return {goalId, zh, location, snapshot, pack, readError, error: error || readError, loading, pending, cancelPending, recordedRunning, panel, trigger, read, show, execute, cancel,
-    close: () => {navigate(false); requestAnimationFrame(() => trigger.current?.focus());}, select: (id: string) => navigate(location.open, id)};
+  const readCitation = async (c: AssessmentCitation, origin?: HTMLButtonElement) => {
+    const p = pack;
+    if (!p) return;
+    if (origin) sourceTrigger.current = origin;
+    show();
+    const current = ++citeGeneration.current; setCitationBusy(true); setCitationError("");
+    const query = new URLSearchParams({goal_id: goalId, pack_id: p.pack_id, analysis_key: p.analysis_key, source_id: c.source_id, first_line: String(c.first_line), last_line: String(c.last_line)});
+    try {const value = await requestJson<Citation>(`${endpoint}/citation?${query}`); if (current === citeGeneration.current) {setCitation(value); requestAnimationFrame(() => {sourcePanel.current?.focus({preventScroll: true}); sourcePanel.current?.scrollIntoView({block: "nearest"});});}}
+    catch (e) {if (current === citeGeneration.current) setCitationError(errorText(e));}
+    finally {if (current === citeGeneration.current) setCitationBusy(false);}
+  };
+  const closeCitation = () => {citeGeneration.current++; setCitation(null); setCitationError(""); setCitationBusy(false); requestAnimationFrame(() => sourceTrigger.current?.focus());};
+  return {citation, citationBusy, citationError, sourcePanel, readCitation, closeCitation, goalId, zh, location, snapshot, pack, readError, error: error || readError, loading, pending, cancelPending, recordedRunning, panel, trigger, read, show, execute, cancel,
+    close: () => {citeGeneration.current++; setCitation(null); setCitationError(""); setCitationBusy(false); navigate(false); requestAnimationFrame(() => trigger.current?.focus());}, select: (id: string) => navigate(location.open, id)};
 }
 type Controller = ReturnType<typeof useResearchAnalysis>;
 
@@ -158,32 +179,10 @@ export function ResearchAnalysisScope({analysis: a}: {analysis: Controller}) {
 export function ResearchProgressSummary({analysis: a}: {analysis: Controller}) {
   const packs = a.snapshot?.catalog.packs ?? [];
   if (!a.pack && !packs.length) return null;
-  return <ResearchProgress pack={a.pack} packs={packs} selectedId={a.location.packId ?? a.snapshot?.catalog.default_pack_id ?? ""} error={a.readError} zh={a.zh} onSelect={a.select}/>;
-}
-
-const metricCopy: Record<TrajectoryMetric, [string, string, string, string]> = {
-  goal_alignment: ["目标关联", "Goal alignment", "干预是否关联原目标的真实瓶颈", "Does the intervention address a bottleneck of the original objective?"],
-  benefit_test: ["收益检验", "Benefit test", "是否真正检验原目标收益，而非只完成前置诊断", "Was original-objective utility tested, beyond diagnostic prerequisites?"],
-  discrimination: ["判别实验", "Discrimination", "实验是否区分了竞争解释", "Did the experiment distinguish competing explanations?"],
-  information_gain: ["新增信息", "New information", "是否解决了与决策有关的新不确定性", "Did evidence resolve a new decision-relevant uncertainty?"],
-  evidence_adoption: ["证据采用", "Evidence adoption", "后续实际行动是否采用了适用证据", "Did subsequent actions demonstrably use applicable evidence?"],
-  redundancy: ["无益重复", "Avoidable repetition", "是否重复已有结论，且无新信息或合理复验目的", "Was settled work repeated without new information or justified replication?"],
-};
-function verdictLabel(metric: TrajectoryMetric, verdict: string, zh: boolean) {
-  if (verdict === "unknown") return zh ? "证据不足" : "Unknown";
-  if (metric === "redundancy") return verdict === "yes" ? (zh ? "发现无益重复" : "Repetition found") : (zh ? "未见无益重复" : "No repetition found");
-  if (metric === "benefit_test") return verdict === "yes" ? (zh ? "已做收益检验" : "Utility tested") : (zh ? "尚未检验收益" : "Utility not tested");
-  return verdict === "yes" ? (zh ? "有依据" : "Supported") : (zh ? "未建立" : "Not established");
+  return <ResearchProgress pack={a.pack} packs={packs} selectedId={a.location.packId ?? a.snapshot?.catalog.default_pack_id ?? ""} error={a.readError} zh={a.zh} onSelect={a.select} onCitation={a.readCitation}/>;
 }
 
 export function ResearchAnalysisPanel({analysis: a}: {analysis: Controller}) {
-  const [citation, setCitation] = useState<Citation | null>(null);
-  const [citationError, setCitationError] = useState("");
-  const [citationBusy, setCitationBusy] = useState(false);
-  const citeGeneration = useRef(0);
-  const sourcePanel = useRef<HTMLElement>(null);
-  const sourceTrigger = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {citeGeneration.current++; setCitation(null); setCitationError("");}, [a.goalId, a.pack?.pack_id, a.pack?.analysis_key, a.location.open]);
   if (!a.location.open) return null;
   const zh = a.zh, p = a.pack, result = p?.result;
   const failed = p?.job?.status === "failed" || p?.job?.status === "cancelled";
@@ -193,16 +192,7 @@ export function ResearchAnalysisPanel({analysis: a}: {analysis: Controller}) {
     : benefit?.unknown ? (zh ? "原目标收益的检验情况仍未知" : "Original-objective utility testing remains unknown")
       : benefit?.yes ? (zh ? "模型记录了收益检验；这不等于收益为正" : "The model identified a utility test; this does not imply positive utility")
         : (zh ? "此方法未覆盖原目标收益检验" : "This method does not cover original-objective utility testing");
-  const readCitation = async (c: AssessmentCitation) => {
-    if (!p) return;
-    const current = ++citeGeneration.current; setCitationBusy(true); setCitationError("");
-    const query = new URLSearchParams({goal_id: a.goalId, pack_id: p.pack_id, analysis_key: p.analysis_key, source_id: c.source_id, first_line: String(c.first_line), last_line: String(c.last_line)});
-    try {const value = await requestJson<Citation>(`${endpoint}/citation?${query}`); if (current === citeGeneration.current) {setCitation(value); requestAnimationFrame(() => {sourcePanel.current?.focus({preventScroll: true}); sourcePanel.current?.scrollIntoView({block: "nearest"});});}}
-    catch (e) {if (current === citeGeneration.current) setCitationError(errorText(e));}
-    finally {if (current === citeGeneration.current) setCitationBusy(false);}
-  };
-  const closeCitation = () => {setCitation(null); requestAnimationFrame(() => sourceTrigger.current?.focus());};
-  const citationButtons = (citations: AssessmentCitation[]) => <div className="analysis-citations">{citations.map(c => <button type="button" key={`${c.source_id}:${c.first_line}:${c.last_line}`} onClick={event => {sourceTrigger.current = event.currentTarget; void readCitation(c);}}><ArrowUpRight size={13} aria-hidden/>{c.source_id} · {zh ? "行" : "lines"} {c.first_line}–{c.last_line}</button>)}</div>;
+  const citationButtons = (citations: AssessmentCitation[]) => <div className="analysis-citations">{citations.map(c => <button type="button" key={`${c.source_id}:${c.first_line}:${c.last_line}`} onClick={event => {void a.readCitation(c, event.currentTarget);}}><ArrowUpRight size={13} aria-hidden/>{c.source_id} · {zh ? "行" : "lines"} {c.first_line}–{c.last_line}</button>)}</div>;
   return <div className="research-analysis" ref={a.panel} tabIndex={-1} role="region" aria-label={zh ? "轨迹深度分析" : "Trajectory analysis"} onKeyDown={event => {if (event.key === "Escape") {event.stopPropagation(); a.close();}}}>
     <header><div><h3>{zh ? "轨迹深度分析" : "Trajectory analysis"}</h3><p>{p?.title ?? (zh ? "只分析已授权的固定轨迹，不改变研究历史。" : "Analyze an authorized fixed trajectory without changing its history.")}</p></div><div className="analysis-header-actions">{result ? <button type="button" onClick={() => void a.read().catch(() => undefined)} aria-label={zh ? "刷新分析结果" : "Refresh analysis result"}><RefreshCw size={15} aria-hidden/></button> : null}<button type="button" onClick={a.close} aria-label={zh ? "关闭分析" : "Close analysis"}><X size={16} aria-hidden/></button></div></header>
     {a.error ? <p className="analysis-error" role="alert">{a.error} <button type="button" onClick={() => void a.read().catch(() => undefined)}>{zh ? "重试读取" : "Retry reading"}</button></p> : null}
@@ -229,9 +219,9 @@ export function ResearchAnalysisPanel({analysis: a}: {analysis: Controller}) {
           const label = metricCopy[row.metric];
           return <details key={row.metric}><summary><strong>{label?.[zh ? 0 : 1] ?? row.metric}</strong><span>{verdictLabel(row.metric, row.verdict, zh)}</span></summary><p className="analysis-question">{label?.[zh ? 2 : 3]}</p><p>{row.reason}</p>{citationButtons(row.citations)}</details>;
         })}</div></details></section>)}
-        {citationBusy ? <p role="status">{zh ? "正在读取引用原文…" : "Reading cited source…"}</p> : null}
-        {citationError ? <p className="analysis-error" role="alert">{citationError}</p> : null}
-        {citation ? <section className="analysis-source" ref={sourcePanel} tabIndex={-1} aria-label={zh ? "引用原文" : "Cited original"} onKeyDown={event => {if (event.key === "Escape") {event.stopPropagation(); closeCitation();}}}><header><h4>{zh ? "引用原文" : "Cited original"}</h4><button type="button" onClick={closeCitation} aria-label={zh ? "关闭原文" : "Close source"}><X size={14} aria-hidden/></button></header><p>{citation.artifact} · {zh ? "行" : "lines"} {citation.first_line}–{citation.last_line}</p><pre>{citation.text}</pre></section> : null}
+        {a.citationBusy ? <p role="status">{zh ? "正在读取引用原文…" : "Reading cited source…"}</p> : null}
+        {a.citationError ? <p className="analysis-error" role="alert">{a.citationError}</p> : null}
+        {a.citation ? <section className="analysis-source" ref={a.sourcePanel} tabIndex={-1} aria-label={zh ? "引用原文" : "Cited original"} onKeyDown={event => {if (event.key === "Escape") {event.stopPropagation(); a.closeCitation();}}}><header><h4>{zh ? "引用原文" : "Cited original"}</h4><button type="button" onClick={a.closeCitation} aria-label={zh ? "关闭原文" : "Close source"}><X size={14} aria-hidden/></button></header><p>{a.citation.artifact} · {zh ? "行" : "lines"} {a.citation.first_line}–{a.citation.last_line}</p><pre>{a.citation.text}</pre></section> : null}
         <details className="analysis-method"><summary>{zh ? "来源、方法、覆盖与分析成本" : "Sources, method, coverage and analysis cost"}</summary><p>{p.objective}</p><dl><dt>{zh ? "来源范围" : "Source scope"}</dt><dd>{p.scope.case_id} · {p.scope.run_id}<br/>{p.scope.window}</dd><dt>{zh ? "方法" : "Method"}</dt><dd>{result.method_version} · {zh ? "模型判断未校准" : "Uncalibrated model judgment"}</dd><dt>{zh ? "模型设置" : "Requested model"}</dt><dd>{p.config.model} / {p.config.effort} / {p.config.service_tier} · {zh ? "实际服务档位" : "Served tier"}: {p.job?.served_service_tier ?? (zh ? "未知" : "unknown")}</dd><dt>{zh ? "分析用量" : "Analysis usage"}</dt><dd>{p.job?.analysis_wall_seconds == null ? "—" : `${p.job.analysis_wall_seconds.toFixed(1)}s`} · {zh ? "输入" : "input"} {p.job?.usage?.input_tokens?.toLocaleString() ?? "—"} / {zh ? "输出" : "output"} {p.job?.usage?.output_tokens?.toLocaleString() ?? "—"} tokens · {zh ? "金额未采集，推理 token 已包含于输出" : "Dollar cost unmeasured; reasoning tokens are included in output"}</dd><dt>{zh ? "覆盖" : "Coverage"}</dt><dd>{p.episode_count} {zh ? "个固定片段" : "fixed episodes"} · {p.source_count} {zh ? "份来源" : "sources"} · {zh ? "总体片段数" : "Population"}: {p.selection.population_episodes ?? (zh ? "未知" : "unknown")}</dd><dt>{zh ? "取样规则" : "Selection"}</dt><dd>{p.selection.rule}</dd><dt>{zh ? "版本" : "Revision"}</dt><dd>{p.scope.revision}</dd></dl><ul>{result.limitations.map((text, i) => <li key={i}>{text}</li>)}</ul><p>{zh ? "引用行存在不等于解释正确；本页不提供独立科学校准结论。" : "A valid citation range does not establish entailment or independent scientific calibration."}</p></details>
       </> : null}
     </> : null}
