@@ -1,0 +1,22 @@
+.research-progress { margin-block: 16px; padding-block: 16px; border-block: 1px solid var(--pw-line); color: var(--pw-text); min-width: 0; overflow-wrap: anywhere; }
+.research-progress > header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.research-progress h3 { margin: 0; font-size: var(--text-body); font-weight: 600; }
+.research-progress label { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--text-caption); }
+.research-progress select { min-width: 0; max-width: 400px; min-height: 44px; border: 1px solid var(--pw-line); border-radius: 6px; padding: 8px; background: var(--pw-bg); color: var(--pw-text); font: inherit; }
+.research-progress p, .research-progress small { color: var(--pw-muted); font-size: var(--text-caption); line-height: var(--leading-prose); }
+.research-progress-values { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-block: 16px; }
+.research-progress-values > div { min-width: 0; }
+.research-progress-values dt { font-size: var(--text-caption); color: var(--pw-muted); }
+.research-progress-values dd { margin: 4px 0; font-size: var(--text-heading); font-weight: 600; font-variant-numeric: tabular-nums; }
+.research-progress-window { margin-bottom: 12px; }
+.research-progress-warning { border-inline-start: 2px solid var(--pw-caution); padding-inline-start: 12px; }
+.research-progress summary { min-height: 44px; padding-block: 12px; cursor: pointer; font-size: var(--text-caption); }
+.research-progress-basis > dl { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 16px; font-size: var(--text-caption); }
+.research-progress-basis dt { color: var(--pw-muted); }
+.research-progress-basis dd { margin: 0; }
+.research-progress-basis code { font: inherit; font-family: var(--font-mono); }
+.research-process-counts table { width: 100%; border-collapse: collapse; text-align: start; font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+.research-process-counts th, .research-process-counts td { padding: 8px; border-block-end: 1px solid var(--pw-line); text-align: start; }
+.research-process-counts th { font-weight: 500; }
+.research-process-counts td { white-space: nowrap; }
+@media (max-width: 640px) { .research-progress > header { flex-direction: column; gap: 8px; } .research-progress label { flex-direction: column; align-items: stretch; width: 100%; } .research-progress select { max-width: 100%; } .research-progress-values { grid-template-columns: repeat(2, minmax(0, 1fr)); } .research-progress-basis > dl { grid-template-columns: 1fr; gap: 4px; } .research-progress-basis dd { margin-bottom: 8px; } .research-process-counts th, .research-process-counts td { padding: 8px 4px; } }
