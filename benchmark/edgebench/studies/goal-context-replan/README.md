@@ -189,9 +189,45 @@ components without their separate comparisons.
 
 ## Remaining author work
 
-The proposed guidance and experiment are reviewable here. The packet prototype,
-real receiver/model qualification, frozen run manifests and empirical comparison
-remain unfinished. Keep this as a Draft while that author work remains; review,
-merge, installation and scientific acceptance are separate. The bounded
-future-facing improvement is to reuse existing read models across the study,
-not add an unused runtime abstraction before the hypothesis is tested.
+An initial disposable, **offline** packet-composition probe now uses real
+isolated File/SQLite CLI output. It reuses the existing TypeScript
+`checkpointArtifacts` pre-decision selector and `validateReplanContext`; it does
+not reproduce their admission rules. The unmodified ordinary UTF-8 packet is
+bound to its digest, Goal, Agent, Turn and obligation. G0C0 preserves every byte;
+the other three cells append only the declared G instruction and/or C index.
+Each index value carries a JSON pointer into that same packet. No source read,
+model summary, relevance ranking or missing-fact repair occurs in composition.
+
+The probe verifies unchanged complete input, identical C additions across G
+conditions, reference/value equality and explicit missing coverage. Twelve
+negative inputs per store cover changed digest/identity, inconsistent context,
+missing Goal, malformed evidence, non-replan and uncommitted boundaries.
+Contradictory observations and truncated coverage remain visible. For these
+synthetic fixtures, G adds 197 UTF-8 bytes and C adds approximately 4.3 KB.
+These are packet-size observations, not token, latency or utility measurements.
+The disposable composer is not installed in the runner or published as a new
+runtime API; its fixtures and outputs are not benchmark results.
+
+One transport constraint is now explicit: with stride off, the ordinary context
+does not supply the stride-only structured decision-followthrough view. The
+first C index must preserve that unknown rather than enable stride or fetch
+another history. It also cannot infer a candidate/incumbent association from
+free-text summaries. This limits the first C treatment to the facts actually
+delivered, rather than the fuller desired context list above.
+
+The next author step is a real receiver transport prototype. Compose from the
+**destination's current ordinary replan input**, retaining its current identity
+and obligations. A captured source packet is historical evidence, never a
+replacement for destination admission or executable source commands. Bind the
+sealed source and current destination separately, and verify the actual model
+request plus preparation/replan/writeback through the ordinary receiver before
+launching the late-point comparison. The offline selector check establishes
+neither complete checkpoint recovery nor this receiver journey.
+
+Real receiver/model qualification, frozen late-point manifests and empirical
+continuation comparisons remain unfinished. Keep this as a Draft while that
+author work remains; review, merge, installation and scientific acceptance are
+separate. The bounded future-facing pass reuses existing typed readers and
+pre-decision selection; a production abstraction or configuration is deferred
+until an actual receiver callsite is qualified. Current donors and the primary
+retained/fresh study remain unchanged.

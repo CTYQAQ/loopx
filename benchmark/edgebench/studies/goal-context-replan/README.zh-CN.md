@@ -133,6 +133,31 @@ Goal horizon 开、stride 关、TurnEnvelope 关，不注入宿主截止时间�
 
 ## 尚未完成的作者工作
 
-本次提供可讨论的候选指导和实验协议。packet 原型、真实 receiver/模型资格、冻结运行清单与实证仍未完成。
+初步可丢弃的 **离线** packet 组合原型已使用真实隔离 File/SQLite CLI 输出。
+它复用现有 TypeScript `checkpointArtifacts` 决策前选择和 `validateReplanContext`，
+不复制准入规则。普通 UTF-8 packet 原文绑定 digest、Goal、Agent、Turn 与 obligation。
+G0C0 逐字节保持原输入，其他三格只追加声明的 G 指令和/或 C 索引；
+每个索引值都带同一 packet 内的 JSON pointer。组合过程不额外读源、不调用模型摘要、
+不排序相关性，也不补齐缺失事实。
+
+原型核查完整普通输入不变、两个 G 条件下的 C 追加内容相同、引用与原值一致，以及缺项明确可见。
+每种存储各有十二个负输入，覆盖 digest/身份变化、上下文身份不一致、Goal 缺失、证据格式错误、
+非 replan 与未提交边界；矛盾观察和截断覆盖均保留。
+这些合成夹具中，G 增加 197 个 UTF-8 字节，C 约增加 4.3 KB；
+这是 packet 大小观察，不是 token、延迟或效果测量。
+可丢弃 composer 未安装到 runner，也不是新增运行时 API；夹具与输出不是 benchmark 结果。
+
+由此明确一个传输限制：stride 关闭时，普通 context 不提供 stride 专属的结构化决策后续执行视图。
+第一轮 C 索引须保留 unknown，不能为此开启 stride 或额外取历史；
+也不能从自由文本摘要推断候选/incumbent 关联。
+因此第一轮 C 仅组织实际交付事实，不冒充已经提供上文所列的全部理想上下文。
+
+下一步作者工作是真实 receiver 传输原型：从 **目标端当前的普通 replan 输入** 组合，
+保留目标端当前身份与义务。捕获的源 packet 是历史证据，不能替代目标端准入或作为源端可执行命令。
+分别绑定封存来源与当前目标端，在启动晚期点比较前核查真实模型请求及普通 receiver 的
+preparation/replan/writeback。离线 selector 检查不等于完整 checkpoint 恢复，也不等于这条接收链路。
+
+真实 receiver/模型资格、冻结晚期运行清单与实证接续比较仍未完成。
 这些作者工作完成前保持 Draft；review、merge、安装与科学验收分开。
-面向后续的有界改进是复用已有只读模型，不在检验假设前增加没有调用方的运行时抽象。
+本次面向后续的有界改进复用既有类型化 reader 和决策前选择；
+生产抽象或配置等真实 receiver 调用点验证后再考虑。当前 donor 与主 retained/fresh 研究保持原样。
