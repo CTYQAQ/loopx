@@ -444,9 +444,17 @@ Windows 文件锁只在已观察到争用后，对独占创建返回的 `EPERM` 
 初次权限拒绝、创建后的错误和其它平台仍直接失败；持续拒绝保留原错误。
 故障注入验证重试边界，原生 Windows 运行仍须单独验收。
 
-Smoke cleanup owns every valid runtime locator in its newly created private
-temporary namespace, including runtimes loaded by temporary base checkouts.
-It uses the existing authenticated shutdown protocol, then observes actual
+Test teardown and smoke cleanup require the authenticated server to confirm its
+exact canonical serving locator. A valid locator copied into a disposable
+directory proves server identity, not ownership of its namespace. The internal
+`expected_info_path` request opts into this proof before shutdown and fences the
+shutdown again at the TypeScript owner. Ordinary ping, shutdown and operator
+restart requests retain their existing behavior. Missing proof, including from
+an older runtime that ignores the parameter, never authorizes shutdown. Pytest
+ignores borrowed or unproven locators; smoke cleanup reports failure and retains
+the fixture for inspection, rather than treating legacy cleanup as qualified.
+Owned source revisions, including copied packages, still use authenticated
+shutdown and observe actual
 process exit before deleting the namespace; serving-locator turnover alone
 does not establish that Node has finished its exit-time cache writes. Namespace
 and locator symlinks are not followed. A cleanup failure retains the fixture
@@ -454,8 +462,13 @@ and reports a failed check with the original command output. Operator restart
 keeps its existing serving-handoff semantics. This fixture repair does not
 qualify native intermittent failures or sustained operation.
 
-Smoke 清理覆盖新建私有临时目录中所有合法 runtime locator，包括临时基线 checkout
-启动的进程。它复用既有认证 shutdown，等实际进程退出后再删目录；定位文件退休不代表
+测试 teardown 与 smoke 清理要求认证服务端确认精确的规范化服务定位路径。合法定位
+文件被复制到临时目录，只证明服务身份，不证明目录归属。内部 `expected_info_path`
+请求在 shutdown 前取得证明，并由 TypeScript owner 在关闭时再次校验；普通 ping、
+shutdown 和操作员 restart 沿用既有行为。缺失证明时，包括旧 runtime 忽略该参数，
+均不发送关闭请求。Pytest 忽略借用或未证明的定位记录；smoke 报告失败并保留目录，
+不把旧版本清理视为已验收。属于该目录的源码及复制包进程仍复用既有认证 shutdown，
+等实际进程退出后再删目录；定位文件退休不代表
 Node 的退出缓存写入已经结束。清理不跟随 namespace 或 locator 符号链接；无法证明
 退出时保留 fixture，以失败结果报告并保留原命令输出。操作员 restart 仍沿用既有服务
 交接语义；该 fixture 修复不认证原生间歇故障或持续运行。
