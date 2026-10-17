@@ -1,6 +1,6 @@
 import {useDeliveryReview} from "./delivery-review-state";
 import {useGoalWorkspaceDigest} from "./goal-masthead";
-import { goalCreateRequest } from "./goal-create-request";
+import { goalCreateRequest, goalCreationAgentId } from "./goal-create-request";
 import { todoCompletionPreviewFeedback, todoCompletionProofRequired } from "./todo-completion-feedback";
 import { readSteeringRequest, retainSteeringRequest, retireSteeringRequest } from "./steering-recovery";
 import { useConversationInputState } from "./use-conversation-input-state";
@@ -27,6 +27,7 @@ import {
   fetchGoalChannelTargets,
   fetchLarkConnections,
   fetchLoopXMode,
+  loadTypedAction,
   previewTypedAction,
   setupGoalChannel,
   stewardPrompts,
@@ -36,8 +37,7 @@ import {
   type LarkGoalConnection,
   type ManagerChannelBinding,
   type ManagerRuntimeSessionReadback,
-  type TypedActionProposal,
-} from "../../data/chat";
+  type TypedActionProposal, agentBackendLabel } from "../../data/chat";
 import { useTypedActionReadback, useTypedActionProposalReadback } from "../../data/use-typed-action-readback";
 
 import { ChannelHeader } from "./channel-header";
@@ -818,6 +818,7 @@ function workspaceProposal(proposal: TypedActionProposal, t: WorkspaceTranslate)
       ? t("proposal.impact.protected")
       : "",
     previewId: proposal.proposal_id,
+    persisted: true,
     regeneratedFrom: proposal.regenerated_from,
     lifecycleOperation,
     gate: proposal.gate ? {
@@ -1040,6 +1041,7 @@ export function PersonalWorkspacePage({
   const selectedGoalId = controlledGoalId === undefined ? localGoalId : controlledGoalId;
   const actionReadback = useTypedActionReadback(readOnly, selectedGoalId);
   const selectedAgentId = controlledAgentId ?? localAgentId;
+  const goalAgentId = goalCreationAgentId(selectedAgentId, agents);
   // Only execution runtimes count: the read-only status projection answers
   // questions but runs nothing, and the loading placeholder is not a fact.
   const runtimeReadiness = useMemo(() => deriveRuntimeReadiness(agents
@@ -1080,14 +1082,14 @@ export function PersonalWorkspacePage({
     // Source message + reviewed contents survive retry without merging distinct requests.
     if (!edit && !draft.question && draft.completion_criteria.trim()) {
       const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(
-        JSON.stringify([draftId, draft, selectedAgentId, locale])));
+        JSON.stringify([draftId, draft, goalAgentId, locale])));
       const operationId = Array.from(new Uint8Array(bytes), value => value.toString(16).padStart(2, "0")).join("");
       await createPreview(goalCreateRequest({ objective: draft.objective,
         completion: draft.completion_criteria, boundary: draft.execution_boundary,
-        permission: "read_only", agentId: selectedAgentId, contextGoalId: null, operationId }, t));
+        permission: "read_only", agentId: goalAgentId, contextGoalId: null, operationId }, t));
       return;
     }
-    setActionDraft({ kind: "goal", goalId: null, goalTitle: "", agentId: selectedAgentId,
+    setActionDraft({ kind: "goal", goalId: null, goalTitle: "", agentId: goalAgentId,
       text: draft.objective, completionCriteria: draft.completion_criteria,
       executionBoundary: draft.execution_boundary, permission: "read_only" });
   }
@@ -1471,7 +1473,7 @@ export function PersonalWorkspacePage({
 
   const creationProposalId = drawerSelection?.kind === "proposal"
     && drawerSelection.item.actionKind === "goal.create"
-    && !drawerSelection.item.previewId.startsWith("workspace-choice-")
+    && drawerSelection.item.persisted !== false
       ? drawerSelection.item.previewId : null;
   const proposalReadback = useTypedActionProposalReadback(readOnly, creationProposalId);
   useEffect(() => {
@@ -1614,6 +1616,24 @@ export function PersonalWorkspacePage({
       const gateKind = String(rawGate.kind ?? "workspace_selection_required");
       const requiresAgentBinding = gateKind === "agent_binding_required"
         || gateKind === "agent_identity_selection_required";
+      // An unavailable first Agent is told in the owner's language from the
+      // service's typed facts (which Agent, the catalog's own reason), never
+      // from its protocol sentence; the form and its draft stay available.
+      const agentGate = gateKind === "agent_unavailable" ? (() => {
+        const agent = agentBackendLabel(String(rawGate.agent_id ?? "codex"));
+        const reasonCode = String(rawGate.unavailable_reason ?? "");
+        const reason = reasonCode === "executable_not_found" && typeof rawGate.executable === "string"
+          ? t("proposal.agentGate.reason.executable_not_found", { executable: rawGate.executable })
+          : reasonCode === "api_key_not_set" && typeof rawGate.environment_variable === "string"
+            ? t("proposal.agentGate.reason.api_key_not_set", { variable: rawGate.environment_variable })
+            : rawGate.registered === false ? t("proposal.agentGate.reason.unregistered") : t("proposal.agentGate.reason.unavailable");
+        return {
+          title: t("proposal.agentGate.title", { agent }),
+          summary: t("proposal.agentGate.summary", { reason }),
+          nextAction: t("proposal.agentGate.nextAction", { agent }),
+          impact: t("proposal.agentGate.impact"),
+        };
+      })() : null;
       local = {
         actionKind: request.actionKind,
         fields: workspaceCandidates.map((candidate) => ({
@@ -1623,16 +1643,17 @@ export function PersonalWorkspacePage({
         })),
         gate: {
           kind: gateKind,
-          nextAction: typeof rawGate.next_action === "string" ? rawGate.next_action : undefined,
-          summary: String(rawGate.summary ?? t("proposal.workspaceGate.defaultSummary")),
+          nextAction: agentGate ? agentGate.nextAction : typeof rawGate.next_action === "string" ? rawGate.next_action : undefined,
+          summary: agentGate ? agentGate.summary : String(rawGate.summary ?? t("proposal.workspaceGate.defaultSummary")),
         },
-        impact: requiresAgentBinding
+        impact: agentGate ? `${agentGate.summary} ${agentGate.impact}` : requiresAgentBinding
           ? t("proposal.workspaceGate.agentImpact")
           : t("proposal.workspaceGate.selectionImpact"),
         previewId: `workspace-choice-${Date.now().toString(36)}`,
+        persisted: false,
         sourceRequest: request,
         status: "gated",
-        title: requiresAgentBinding ? t("proposal.workspaceGate.agentTitle") : t("proposal.workspaceGate.selectionTitle"),
+        title: agentGate ? agentGate.title : requiresAgentBinding ? t("proposal.workspaceGate.agentTitle") : t("proposal.workspaceGate.selectionTitle"),
         workspaceCandidates,
       };
     }
@@ -1643,7 +1664,7 @@ export function PersonalWorkspacePage({
   }
 
   function requestGoalCreate() {
-    setActionDraft({ kind: "goal", goalId: null, goalTitle: "", agentId: selectedAgentId });
+    setActionDraft({ kind: "goal", goalId: null, goalTitle: "", agentId: goalAgentId });
   }
 
   /** `keepGoalSelected` reads the result back on the Goal page instead of returning to the directory. */
@@ -1820,13 +1841,17 @@ export function PersonalWorkspacePage({
     options: {
       keepGoalSelected?: boolean;
       lifecycleProjection?: GoalLifecycleProjection;
-      presentation?: "drawer" | "feedback";
+      presentation?: "drawer" | "feedback" | "inline";
     } = {},
   ) {
-    if (proposal.reviewPlan && !proposal.reviewPlan.canApply) return;
+    if (proposal.reviewPlan && !proposal.reviewPlan.canApply) return proposal;
     if (proposal.actionKind === "team.plan" && proposal.status === "error"
-      && !proposal.reviewPlan?.retryOriginal) return;
-    const showDrawer = options.presentation !== "feedback";
+      && !proposal.reviewPlan?.retryOriginal) return proposal;
+    const matchesTodoTarget = (observed: TypedActionProposal) => proposal.actionKind !== "todo.update" || (
+      observed.normalized_parameters.goal_id === proposal.goalId
+      && (!proposal.sourceRequest || observed.normalized_parameters.todo_id === proposal.sourceRequest.normalizedParameters.todo_id)
+    );
+    const showDrawer = options.presentation !== "feedback" && options.presentation !== "inline";
     const inferredLifecycleChange = proposal.actionKind === "goal.lifecycle"
       && proposal.goalId
       && (proposal.lifecycleOperation === "stop" || proposal.lifecycleOperation === "resume")
@@ -1865,11 +1890,12 @@ export function PersonalWorkspacePage({
         if (proposal.actionKind === "todo.update") {
           void reconcileStatus(proposal.goalId ? [proposal.goalId] : undefined);
         }
-        return;
+        return applied;
       }
       const result = await applyTypedAction(proposal.previewId);
       if (result.proposal.proposal_id !== proposal.previewId
         || result.proposal.action_kind !== proposal.actionKind
+        || !matchesTodoTarget(result.proposal)
         || (proposal.actionKind === "goal.lifecycle" && (
           result.proposal.normalized_parameters.goal_id !== proposal.goalId
           || lifecycleOperationFor(result.proposal) !== proposal.lifecycleOperation
@@ -1884,7 +1910,7 @@ export function PersonalWorkspacePage({
         if (lifecycleChange) {
           callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
         }
-        setSelection({ item: applied, kind: "proposal" });
+        if (options.presentation !== "inline") setSelection({ item: applied, kind: "proposal" });
         setActionFeedback(
           result.proposal.status === "stale"
             ? t("feedback.stale")
@@ -1892,7 +1918,7 @@ export function PersonalWorkspacePage({
               ? t("proposal.teamPlan.retryUnavailable")
             : t(`actionReview.${applied.reviewPlan!.reason}`),
         );
-        return;
+        return applied;
       }
       setActionFeedback(t("feedback.completed", { title: applied.title }));
       // Keep the success receipt visible for reviewed actions. Direct actions
@@ -1909,6 +1935,7 @@ export function PersonalWorkspacePage({
       if (applied.actionKind === "goal.lifecycle" || applied.actionKind === "gate.resolve" || applied.actionKind === "todo.update") {
         void reconcileStatus(applied.goalId ? [applied.goalId] : undefined);
       }
+      return applied;
     } catch (error) {
       if (lifecycleChange) {
         callbacks.onGoalActivationStateChange?.(lifecycleChange.goalId, lifecycleChange.previous);
@@ -1935,13 +1962,13 @@ export function PersonalWorkspacePage({
         setProposals((current) => ({ ...current, [proposal.previewId]: gated }));
         // A newly discovered authority gate always deserves review, including
         // when the action started on the direct path.
-        setSelection({ item: gated, kind: "proposal" });
+        if (options.presentation !== "inline") setSelection({ item: gated, kind: "proposal" });
         setActionFeedback(t("feedback.gateRequired", { summary: gated.gate.summary }));
         if (proposal.actionKind === "goal.create" && proposal.goalId) {
           callbacks.onRefresh?.();
           selectGoal(proposal.goalId);
         }
-        return;
+        return gated;
       }
       const stale = error instanceof ChatApiError && isStaleActionFailure(error.payload);
       const readbackMismatch = error instanceof ChatApiError && error.payload.error_code === "action_response_mismatch";
@@ -1950,24 +1977,25 @@ export function PersonalWorkspacePage({
       const returned = error instanceof ChatApiError
         ? typedActionProposalSchema.safeParse(error.payload.proposal) : null;
       let stored = returned?.success ? returned.data : undefined;
-      if (!stored && ["team.plan", "goal.create"].includes(proposal.actionKind) && !readbackMismatch) {
+      if (!stored && ["team.plan", "goal.create", "todo.update"].includes(proposal.actionKind) && !readbackMismatch) {
         const readback = await actionReadback.refetch();
         // Query errors retain cached data; it cannot certify this attempt.
         if (readback.isSuccess) stored = readback.data?.find(item => item.proposal_id === proposal.previewId);
       }
       if (stored?.proposal_id === proposal.previewId && stored.action_kind === proposal.actionKind
-        && (!["team.plan", "goal.create"].includes(proposal.actionKind) || stored.normalized_parameters.goal_id === proposal.goalId)) {
+        && matchesTodoTarget(stored)
+        && (!["team.plan", "goal.create", "todo.update"].includes(proposal.actionKind) || stored.normalized_parameters.goal_id === proposal.goalId)) {
         await actionReadback.acceptProposal(stored);
         const observed = workspaceProposal(stored, t);
         const reconciled = { ...observed, errorMessage: observed.status === "error"
           ? error instanceof Error ? error.message : String(error) : undefined };
         setProposals(current => ({ ...current, [proposal.previewId]: reconciled }));
-        setSelection({ item: reconciled, kind: "proposal" });
+        if (options.presentation !== "inline") setSelection({ item: reconciled, kind: "proposal" });
         if (observed.reviewPlan?.creationProgress?.goalId) void callbacks.onRefresh?.();
         setActionFeedback(stored.status === "stale" ? t("feedback.stale")
           : observed.reviewPlan?.interaction === "completed" ? t("feedback.completed", { title: observed.title })
           : t("feedback.executionFailed", { error: error instanceof Error ? error.message : String(error) }));
-        return;
+        return reconciled;
       }
       const failed = {
         ...proposal,
@@ -1978,8 +2006,9 @@ export function PersonalWorkspacePage({
         status: (stale ? "stale" : "error") as "stale" | "error",
       };
       setProposals((current) => ({ ...current, [proposal.previewId]: failed }));
-      setSelection({ item: failed, kind: "proposal" });
+      if (options.presentation !== "inline") setSelection({ item: failed, kind: "proposal" });
       setActionFeedback(t("feedback.executionFailed", { error: failed.errorMessage }));
+      return failed;
     }
   }
 
@@ -2016,7 +2045,30 @@ export function PersonalWorkspacePage({
       else setSelectedGoalTab("files");
       callbacks.onOpenOutput?.(output);
     },
-    onApplyProposal: applyProposal,
+    onApplyProposal: async proposal => { await applyProposal(proposal); },
+    onSaveTodoRequirements: async (todo, text, basis, retry) => {
+      if (retry?.status === "applied") return retry;
+      let original = retry;
+      if (retry) {
+        const stored = await loadTypedAction(retry.previewId);
+        if (stored.action_kind !== "todo.update" || stored.normalized_parameters.goal_id !== todo.goalId
+          || stored.normalized_parameters.todo_id !== (todo.sourceTodoId ?? todo.todoId)
+          || stored.normalized_parameters.text !== text) {
+          throw new ChatApiError(t("actionReview.targetChanged"), {error_code: "action_response_mismatch"});
+        }
+        await actionReadback.acceptProposal(stored);
+        original = {...workspaceProposal(stored, t), sourceRequest: retry.sourceRequest};
+        if (original.status === "applied") return original;
+      }
+      const proposal = original ?? await createPreview({actionKind: "todo.update",
+        context: {goal_id: todo.goalId, kind: "todo", todo_id: todo.sourceTodoId ?? todo.todoId},
+        idempotencyKey: `workspace-todo-requirements-${todo.todoId}-${Date.now().toString(36)}`,
+        normalizedParameters: {goal_id: todo.goalId, todo_id: todo.sourceTodoId ?? todo.todoId,
+          ...(todo.claimedBy ? {agent_id: todo.claimedBy} : {}), operation: "edit", text, review_basis: basis},
+        summary: t("drawer.requirementsSave"),
+      }, {select: false});
+      return applyProposal(proposal, {presentation: "inline"});
+    },
     onExplainDecision: callbacks.onExplainDecision ?? ((attention) => draftAttentionMessage(attention, "explain")),
     onReplyToAttention: callbacks.onReplyToAttention ?? draftAttentionMessage,
     onCancelProposal: async (proposal) => {
@@ -2037,6 +2089,17 @@ export function PersonalWorkspacePage({
       }
     },
     onTransitionProposal: async (proposal, transition) => {
+      if (proposal.persisted === false) {
+        if (transition === "regenerate" && proposal.sourceRequest) {
+          await createPreview(proposal.sourceRequest);
+          setProposals((current) => {
+            const next = { ...current };
+            delete next[proposal.previewId];
+            return next;
+          });
+        }
+        return;
+      }
       const result = await transitionTypedAction(proposal.previewId, transition);
       await actionReadback.acceptProposal(result, transition === "regenerate" ? proposal.previewId : undefined);
       const transitioned = workspaceProposal(result, t);
@@ -2500,7 +2563,8 @@ export function PersonalWorkspacePage({
         todoReadbackUnavailable={drawerSelection.kind === "todo" && !workspaceGoals.some((goal) =>
           goal.goalId === drawerSelection.item.goalId && !goal.loadState && (drawerSelection.item.detailMode !== undefined || drawerSelection.item.done
             || goal.agentTodos.some((todo) => todo.todoId === drawerSelection.item.todoId)))}
-        proposalReadbackUnavailable={creationProposalId ? proposalReadback.isError || !proposalReadback.data
+        proposalReadbackUnavailable={drawerSelection.kind === "proposal" && drawerSelection.item.persisted === false ? false
+          : creationProposalId ? proposalReadback.isError || !proposalReadback.data
           : actionReadback.isError || !actionReadback.data
             || (drawerSelection.kind === "proposal" && !actionReadback.data.some(proposal => proposal.proposal_id === drawerSelection.item.previewId))}
         proposalReadbackFetching={creationProposalId ? proposalReadback.isFetching : actionReadback.isFetching}

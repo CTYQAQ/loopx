@@ -56,6 +56,30 @@ Lark queued notices describe the observed queue state without claiming that an
 earlier request is running: the first Turn can also await its native claim.
 Recovery retains an already persisted notice's exact text and provider intent.
 
+The existing four-slot reply pool wakes after private admission returns and
+after a local Turn worker exits, including preparation failure. These in-process
+Event hints carry no content or delivery authority and perform no provider IO;
+the scanner still reads the canonical journals and rechecks the source and Core.
+It clears the hint before discovery so arrivals during a scan remain visible to
+the following wait. Shutdown wakes that wait and unregisters the runtime hint.
+The one-second recovery poll, bounded pool, request fairness and thirty-second
+owner-notification cadence remain; custom controllers without the hook still poll.
+An occupied worker may still defer a request until a later scan. No completed-
+Future callback repeatedly reschedules unfinished work. File/Core and native
+protocol fixtures qualify this scheduling path separately from installed service,
+provider latency, complete stop acknowledgement and first-visible Web results.
+
+Native Lark sends and receipt recovery use one operation-bound source verifier
+for the current App, exact profile/chat/message and Core grant, as existing
+reply edits already do. The observed Bot name must match the Inbox metadata;
+a rename still holds the first send while metadata refreshes. The verifier
+joins source reads and rechecks the exact binding before returning. A lost
+readback retains the same attempt and re-verifies without resending. No identity
+or grant is cached across operations, and legacy membership-only callbacks
+retain separate sender authentication. File/Core fixtures qualify this transport
+transaction, including late revocation; they do not qualify installed provider
+latency, the complete stop SLA or first-visible Web results.
+
 The packaged settings journey, source revocation/recovery, duplicate events,
 native queue/stop and two-App isolation have synthetic-provider regression and
 browser coverage. A native Codex source canary separately qualifies distinct
@@ -71,6 +95,11 @@ a stored App identity retain their original profile-hash consumer lease. Request
 without private bindings do not add provider authentication; configured aliases
 reuse one request-scoped verified identity observation. Lark HTTP composition
 resides in the extension, while the typed binding owner remains provider-neutral.
+
+Binding resolution rereads the exact grant after provider identity observation.
+Revoking or replacing that binding during the observation rejects the request;
+an unrelated binding edit does not invalidate it. The typed owner still checks
+the current context, with no identity cache shared across verification calls.
 
 The same Settings read model includes Core bindings for locally installed
 conversation transports. Listener status comes from the exact host-composed
@@ -112,12 +141,29 @@ target that topic. Admission feedback, streamed posts, terminal edits and receip
 recovery use the existing delivery path with `source_thread` placement. A revoked
 binding or unreadable source prevents later result delivery.
 
+A completed, target-frozen stop on a locally enabled group binding reads its two
+original provider messages while Core freshly resolves the binding and App
+identity. Both readonly observations must finish successfully before source,
+ancestry and root-mention validation can authorize delivery. Only that invocation
+reuses the verified identity; no observation is persisted or reused by a later
+verification. Changed bindings discard the buffered message observation; ordinary
+input, private conversations and unknown stop scope keep their existing paths.
+
 When an ordinary Codex topic has no active Turn, `/stop` also covers background
 commands left by completed Turns in that same canonical Session, even after a
 later answer. Core freezes the original Session and canonical candidate Turn
 identities in the existing request journal **before** native inventory or
 transport resume can fail. Native observation may only narrow that frozen set;
 a retry cannot add later completed/active Turns or switch to a newer Session.
+The existing Lark listener returns after this durable freeze; its existing reply
+workers recover the prepared request to observe and cancel native background
+commands. Prepared recovery uses admission's fresh authority check inside both
+the request and source-route fences, without a duplicate provider probe before
+waiting for those fences. Revocation while waiting prevents control and delivery.
+Slow or unavailable native control therefore does not hold inbound
+admission. This is scheduling only: it introduces no queue or completion state,
+does not defer an active Turn's exact interrupt, and sends no successful stop
+reply until native control and the original delivery checks have succeeded.
 A recovered legacy request without a recorded target has unknown original scope;
 Core rejects retargeting and preserves it unconfirmed. A fresh stop is a separate
 user request, never an automatic replacement for the unknown one.

@@ -40,6 +40,23 @@ provider 读回确认回复；发生没有 receipt 的不确定写入时不盲�
 飞书排队提示只表达已观测的队列状态，不断言已有前一条请求正在运行：首个 Turn
 也可能等待原生 claim。恢复继续使用已持久化提示的原文与 provider intent。
 
+私聊受理返回及本地 Turn worker 退出（含准备失败）时，唤醒既有四槽回复池。
+进程内 Event 只作提示，不携带内容或投递权限，也不执行 provider IO；扫描仍读取
+canonical journal，并重新核验来源与 Core。扫描前清除提示，避免扫描期间到达的
+信号在随后等待时丢失；关闭服务会唤醒等待并注销 runtime 提示。保留一秒恢复轮询、
+工作池上限、请求公平性和三十秒 owner 通知节奏；没有 hook 的自定义 controller
+继续轮询。工作槽被占用时，请求仍可能延至后续扫描；不通过已完成 Future 的回调
+反复重排尚未完成的工作。File/Core 与原生协议 fixture 单独验证这一调度路径，
+不替代安装态服务、provider 延迟、完整停止回执及 Web 首次可见结果的验收。
+
+原生 Lark 新发送和回执恢复在单次操作内，由同一来源校验核验当前 App、确切
+profile/chat/message 及 Core grant，与既有回复编辑路径一致。观测到的 Bot 名称
+必须匹配 Inbox 元数据；改名时仍先停止发送，刷新元数据后再继续。校验等待全部
+来源读取完成，并在返回前重读确切绑定。丢失读回保留同一 attempt，重新校验但不
+重复发送。操作之间不缓存身份或 grant；旧 membership-only callback 继续独立验证
+发送身份。File/Core fixture 验证这一传输事务及读取期间撤权，不认证安装态 provider
+延迟、完整停止 SLA 或 Web 首次可见结果。
+
 源码 canary 已验证打包页面的桌面/窄屏、撤权拒绝与恢复、慢会话期间另一 App 完成、
 后续消息持久排队、exact stop，以及重启后原会话恢复和已确认回复不重复发送。
 这些是合成 provider/协议验收；真实原生 Codex 另行验证独立线程与上下文隔离。
@@ -50,6 +67,9 @@ provider 读回确认回复；发生没有 receipt 的不确定写入时不盲�
 的旧群聊 profile 保留原 profile-hash 监听锁键。没有私聊绑定时不增加鉴权；有绑定
 时，同一请求内的别名检查与连接共用一次已验证身份观测。飞书 HTTP 组合位于
 extension，typed binding owner 继续保持 provider-neutral。
+
+绑定解析在 provider 身份观测后重读确切授权。观测期间撤销或替换该绑定会拒绝请求；
+其它绑定的修改不使当前绑定失效。typed owner 仍检查当前上下文，不跨次缓存身份核验。
 
 同一设置读模型也展示本机已安装 transport 的 Core binding。监听状态取确切宿主组合
 provider 的可选 `health_snapshot()`，返回仅含状态的观测；默认 profile 使用已有
@@ -80,6 +100,21 @@ listener、队列或模型 runner。一个 App 仍只有一个 binding owner，�
 使用独立 Session。status、stop、new 只作用于当前话题。受理反馈、流式消息、最终
 编辑和回执恢复复用现有投递路径，使用 `source_thread` 落点。解绑或原消息不可读后，
 即使执行完成，也不得继续发送结果。
+
+本机群绑定仍启用且 Core 已完成、固定原目标的停止请求，可在 Core 重新核验绑定和
+App 身份时，并行读取两条原 provider 消息。两项只读观测全部成功后，仍须核对来源、
+关联关系和根消息提及，才能投递；仅该次校验复用身份观测，不持久化或跨次复用。
+绑定发生变化时丢弃预读消息；普通输入、本人私聊和未知停止范围保持原路径。
+
+普通 Codex 话题空闲时，`/stop` 也覆盖同一原生 Session 中已完成 Turn 遗留的后台命令。
+Core 先在原请求日志固定 Session 与候选 Turn，原 listener 随即继续受理消息；现有
+回复工作池再恢复这条 prepared 请求，读取原生命令清单并取消原目标。恢复只能缩小
+固定候选，不能追停后来的 Turn 或新 Session。prepared 恢复复用受理路径在原请求与
+来源路由锁内的新鲜授权核验，不在等待锁前重复探测 provider；等待期间撤权即阻止
+控制和投递。慢速或失败的原生控制不阻塞入站，
+也不提前回复“已停止”；没有固定目标的旧请求保持未知，活跃 Turn 仍沿原确切中断路径。
+这只调整现有 IO 调度，不新增队列、消费者或完成状态；实际安装、停止时延与完整社区
+准出仍需分别验收。
 
 群上下文强制使用 `workspace_only`，不受本人私聊 `host_default` 影响。只保留选定
 工作区的读写 grant，不提供个人 portfolio、直连 Agent 选择、全局 skills、MCP、

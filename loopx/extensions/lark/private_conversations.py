@@ -121,8 +121,28 @@ class LarkPrivateConversations:
         messages = {item["message_id"]: item for item in items}
         return messages[message_id], messages[root_id]
 
+    def _completed_stop_root(self, record: Mapping[str, Any], binding: Mapping[str, Any]) -> str | None:
+        """Read scheduling only; fresh Core resolution still owns authorization."""
+        event = record["event"]
+        root = str(event.get("root_id") or event["message_id"])
+        path = self.core.root / f"{record['request_ref']}.json"
+        native = _read_json(path) if path.exists() else {}
+        if (binding.get("enabled") is True and binding.get("audience") == "group"
+                and binding.get("binding_id") == record["binding_id"]
+                and binding.get("transport_ref") == record["profile"]
+                and root != event["message_id"] and native.get("command") == "stop"
+                and native.get("status") == "command_completed" and native.get("target_recorded") is True
+                and native.get("binding_id") == record["binding_id"]
+                and native.get("source") == record["source"] == lark_private_source(
+                    provider_ref=binding["provider_ref"], event=event)
+                and identity_ref(binding["provider_ref"], event["message_id"])
+                == record["request_ref"] == native.get("request_ref")):
+            return root
+        return None
+
     def _source_message(self, record: dict[str, Any], *, selected: dict[str, Any] | None = None,
-                        render_content: bool = True) -> Mapping[str, Any] | None:
+                        render_content: bool = True,
+                        sender_identity: dict[str, str] | None = None) -> Mapping[str, Any] | None:
         """Read the exact source under this App, then recheck the Core audience.
 
         A p2p source read proves the destination without requiring group-member
@@ -132,8 +152,31 @@ class LarkPrivateConversations:
         result: Mapping[str, Any]
         message: Mapping[str, Any] | None
         try:
+            prefetched = None
+            read_binding: Mapping[str, Any] | None = None
             if selected is None:
-                selected = self.bindings.resolve(binding_id=record["binding_id"], **record["source"])
+                # Only an existing, locally enabled binding and a completed,
+                # target-frozen Core stop can schedule these original two IDs.
+                # Buffer readonly IO while Core freshly verifies identity and
+                # authority; neither result is usable until both have joined.
+                if not render_content:
+                    read_binding = next((row for row in self.bindings.read()["bindings"]
+                                         if row.get("binding_id") == record["binding_id"]), {})
+                root = self._completed_stop_root(record, read_binding) if read_binding else None
+                if root:
+                    with ThreadPoolExecutor(max_workers=1) as reads:
+                        envelopes = reads.submit(self._completed_stop_sources,
+                                                 record["profile"], event["message_id"], root)
+                        selected = self.bindings.resolve(binding_id=record["binding_id"],
+                                                         include_observation=True, **record["source"])
+                        prefetched = envelopes.result()
+                    current = next((row for row in self.bindings.read()["bindings"]
+                                    if row.get("binding_id") == record["binding_id"]), None)
+                    if current != read_binding or current != selected["binding"]:
+                        return None  # Revocation/replacement while reads ran is not a delivery grant.
+                else:
+                    selected = self.bindings.resolve(binding_id=record["binding_id"],
+                                                     include_observation=sender_identity is not None, **record["source"])
             native_path = self.core.root / f"{record['request_ref']}.json"
             native = _read_json(native_path) if native_path.exists() else {}
             if native.get("agent_target"):
@@ -144,7 +187,11 @@ class LarkPrivateConversations:
                           "--as", "bot", "--no-reactions", "--format", "json"]))
 
             group = selected["binding"].get("audience") == "group"
-            observation = None
+            # Resolve has just verified this App for this invocation. Reuse
+            # that observation for mention checks, never across verifications.
+            observation = selected.get("observation")
+            if sender_identity is not None and observation is not None:
+                sender_identity["bot_display_name"] = str(observation.get("bot_display_name") or "")
             stop_root: Mapping[str, Any] | None = None
             completed_stop = False
             if group:
@@ -155,7 +202,6 @@ class LarkPrivateConversations:
                     # Admission already verified this exact App. Reuse only
                     # that call's ephemeral observation; Core still rechecks
                     # under its fences, and outbound verification stays fresh.
-                    observation = selected.get("observation")
                     # An untrusted event hint only changes read scheduling.
                     # Only authenticated provider text can select a control;
                     # ordinary input still needs its display projection.
@@ -188,25 +234,24 @@ class LarkPrivateConversations:
                     # Only batch IDs already fixed by a target-frozen Core stop.
                     # The current binding above still authorizes this read.
                     # Event hints alone keep the source-first lookup.
-                    completed_stop = (root_id != event["message_id"]
-                        and native.get("command") == "stop" and native.get("status") == "command_completed"
-                        and native.get("target_recorded") is True
-                        and native.get("binding_id") == record["binding_id"]
-                        and native.get("source") == record["source"] == lark_private_source(
-                            provider_ref=selected["binding"]["provider_ref"], event=event)
-                        and identity_ref(selected["binding"]["provider_ref"], event["message_id"])
-                        == record["request_ref"] == native.get("request_ref"))
-                    # Delivery still needs both fresh observations. Their IO
-                    # is independent; join it before checking ancestry and @.
+                    completed_stop = self._completed_stop_root(record, selected["binding"]) == root_id
+                    # Delivery reuses only its own binding observation. An
+                    # explicitly supplied selection without one still needs a
+                    # fresh identity; join that read before ancestry and @.
                     def sources() -> tuple[Mapping[str, Any] | None, Mapping[str, Any] | None]:
                         if completed_stop:
+                            if prefetched is not None and read_binding == selected["binding"]:
+                                return prefetched
                             return self._completed_stop_sources(record["profile"], event["message_id"], root_id)
                         return self._group_source_message(record["profile"], event["message_id"]), None
 
-                    with ThreadPoolExecutor(max_workers=2) as reads:
-                        envelopes = reads.submit(sources)
-                        identity = reads.submit(self.bindings.observe, record["profile"])
-                        (canonical, stop_root), observation = envelopes.result(), identity.result()
+                    if observation is not None:
+                        canonical, stop_root = sources()
+                    else:
+                        with ThreadPoolExecutor(max_workers=2) as reads:
+                            envelopes = reads.submit(sources)
+                            identity = reads.submit(self.bindings.observe, record["profile"])
+                            (canonical, stop_root), observation = envelopes.result(), identity.result()
                     result, message = {"returncode": 0 if canonical else 1}, canonical
             else:
                 result = rendered()
@@ -261,13 +306,34 @@ class LarkPrivateConversations:
                         message["_command_input"] = self._group_text_command_input(message, observation)
                         if not message["_command_input"]:
                             return None  # A display rendering cannot supply missing canonical text.
+                # Outbound source reads must join before consuming this
+                # operation's proof. Admission retains Core's fenced rejection
+                # and its existing response when a binding changes mid-read.
+                if not render_content:
+                    current = next((row for row in self.bindings.read()["bindings"]
+                                    if row.get("binding_id") == record["binding_id"]), None)
+                    if current != selected["binding"]:
+                        return None
+                if sender_identity is not None:
+                    if observation is None:
+                        return None
                 return message
         except (KeyError, ValueError, OSError):
             pass
         return None
 
-    def _source_verified(self, record: dict[str, Any]) -> bool:
-        return self._source_message(record, render_content=False) is not None
+    def _source_verified(self, record: dict[str, Any], *, sender_identity: dict[str, str] | None = None) -> bool:
+        return self._source_message(record, render_content=False, sender_identity=sender_identity) is not None
+
+    def _source_authority(self, record: dict[str, Any], profile: str, chat_id: str,
+                          message_id: str) -> tuple[str | None, bool]:
+        """Verify one exact outbound operation; retain no identity or grant."""
+        if (profile != record["profile"] or chat_id != record["event"]["chat_id"]
+                or message_id != record["event"]["message_id"]):
+            return None, False
+        identity: dict[str, str] = {}
+        verified = self._source_verified(record, sender_identity=identity)
+        return identity.get("bot_display_name"), verified
 
     @staticmethod
     def _group_text_command_input(message: Mapping[str, Any], observation: Mapping[str, Any]) -> str | None:
@@ -332,7 +398,8 @@ class LarkPrivateConversations:
             raise ValueError("private source could not be captured")
         return path
 
-    def admit(self, profile: str, event: dict[str, Any]) -> dict[str, Any]:
+    def admit(self, profile: str, event: dict[str, Any], *,
+              defer_background_stop: bool = False) -> dict[str, Any]:
         try:
             binding = self._binding(profile)
             source = lark_private_source(provider_ref=binding["provider_ref"], event=event)
@@ -425,7 +492,8 @@ class LarkPrivateConversations:
                 command = "unsupported"
             try:
                 admitted = self.core.admit(binding_id=binding["binding_id"], source=source,
-                    request_ref=request, message=text, command=command, attachments=attachments)
+                    request_ref=request, message=text, command=command, attachments=attachments,
+                    defer_background_stop=defer_background_stop)
             except ValueError:
                 record.update(status="rejected", response=("群助手仅处理当前项目和话题，不能选择个人 Agent 会话；/status 查看状态，/help 查看用法。" if binding.get("audience") == "group" else "操作或原授权不可用；Agent 请先用 /agents 查看确切命令，/project 返回项目对话。新委托请使用 /delegate --tokens N 具体目标，确认或取消请使用原预览中的完整命令。"))
                 _atomic_write_json(path, record)
@@ -436,7 +504,10 @@ class LarkPrivateConversations:
                 record.update(status="rejected", response="队列已满，本条没有被受理；请稍后重试。")
                 _atomic_write_json(path, record)
                 return {"status": "queue_rejected"}
-            record.update(status=admitted["status"], session_id=admitted["session_id"],
+            # Keep the existing recoverable capture until Core has performed
+            # the frozen stop. Older transport readers can recover it too.
+            record.update(status="captured" if admitted["status"] == "prepared" else admitted["status"],
+                          session_id=admitted["session_id"],
                           turn_id=admitted["turn_id"], response=admitted.get("response"), response_code=admitted.get("response_code"))
             _atomic_write_json(path, record)
             status = "durably_accepted" if admitted["status"] == "accepted" else (
@@ -523,7 +594,7 @@ class LarkPrivateConversations:
         kwargs = dict(project=self.runtime_root, config_path=config,
             message_id=record["event"]["message_id"], text=text, runner=self._reply_runner,
             finalize_reactions=phase not in {"admission", "progress"} and not (phase == "terminal" and record.get("commission_resources")),
-            source_membership_verifier=lambda: self._source_verified(record))
+            source_authority_verifier=lambda profile, chat, message: self._source_authority(record, profile, chat, message))
         progress = record["deliveries"].get("progress") or {}
         stream = record.get("stream") or {}
         edit = phase_state.get("edit_from")
@@ -619,7 +690,8 @@ class LarkPrivateConversations:
             message_id=record["event"]["message_id"], text=text,
             previous_text=_presentation_text(stream.get("confirmed_text") or progress["text"]),
             attempt=stream.get("confirmed_attempt") or progress["attempt"],
-            runner=self._reply_runner, source_membership_verifier=lambda: self._source_verified(record),
+            runner=self._reply_runner,
+            source_authority_verifier=lambda profile, chat, message: self._source_authority(record, profile, chat, message),
             before_send=before_send, delivery_attempt_recorder=lambda value: confirmed.update(value))
         stream["blocker"] = result.get("blocker")
         if result.get("blocker") == "provider_update_edit_limit":
@@ -765,6 +837,23 @@ class LarkPrivateConversations:
             # read its result before retrying admission from a stale snapshot.
             with exclusive_file_lock(path, operation="capture_private_chat_request"):
                 row = _read_json(path)
+                native_path = self.core.root / f"{row['request_ref']}.json"
+                if row["status"] == "captured" and native_path.exists():
+                    native = self.core.read_request(row["request_ref"])
+                    if (native.get("command") == "stop" and native.get("target_recorded") is True
+                            and all(native.get(key) == row.get(key)
+                                    for key in ("request_ref", "binding_id", "source"))):
+                        # This source was already admitted and target-frozen.
+                        # Core revalidates recovery; delivery below re-reads the
+                        # provider source. No second content admission is needed.
+                        self.core.recover(request_ref=row["request_ref"])
+                        native = self.core.read_request(row["request_ref"])
+                        if native["status"] == "prepared":
+                            return 0
+                        if native["status"] == "command_completed":
+                            row.update(**{key: native.get(key) for key in
+                                ("status", "session_id", "turn_id", "response", "response_code")})
+                            _atomic_write_json(path, row)
             if row["status"] == "captured":
                 self.admit(row["profile"], row["event"])
                 row = _read_json(path)
