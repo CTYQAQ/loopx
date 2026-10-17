@@ -19,7 +19,7 @@ from loopx.chat_actions import ChatActionService
 from loopx.cli_commands.goal_channel_operation import (
     GoalChannelOperationContext,
     _prepare_goal_channel_operation,
-    _safe_validation_reason,
+    _validation_reason_code,
     run_goal_channel_operation,
 )
 from loopx.control_plane.collaboration.operation_handoff import agent_operation_action
@@ -2408,24 +2408,85 @@ def test_receipt_treats_post_send_failure_as_unknown_write(
     assert any("+messages-send" in call for call in calls)
 
 
-def test_safe_validation_reason_keeps_actionable_code_messages() -> None:
-    """A rejected prepare must surface its real reason, not a generic line."""
+def test_validation_reason_code_publishes_only_fixed_codes() -> None:
+    """A rejected prepare must surface a typed reason, never free text."""
 
     assert (
-        _safe_validation_reason(ValueError("operation executor binding is invalid"))
-        == "operation executor binding is invalid"
+        _validation_reason_code(ValueError("operation executor binding is invalid"))
+        == "operation_executor_binding_invalid"
     )
     assert (
-        _safe_validation_reason(
-            ValueError("operation payload_digest does not match payload")
-        )
-        == "operation payload_digest does not match payload"
+        _validation_reason_code(ValueError("operation payload_digest does not match payload"))
+        == "operation_payload_digest_mismatch"
     )
-    # Anything that could carry a private path or control characters collapses
-    # to the exception class instead of reaching the operator packet.
+    # Unknown text - including anything request-derived - falls back.
     assert (
-        _safe_validation_reason(ValueError("private detail: /home/operator/secret"))
-        == "ValueError"
+        _validation_reason_code(ValueError("private detail: /home/operator/secret"))
+        == "unclassified_validation_error"
     )
-    assert _safe_validation_reason(ValueError("line\nbreak")) == "ValueError"
-    assert _safe_validation_reason(ValueError("")) == "ValueError"
+    assert (
+        _validation_reason_code(ValueError("asset=SYNTH request text"))
+        == "unclassified_validation_error"
+    )
+    assert _validation_reason_code(ValueError("")) == "unclassified_validation_error"
+
+
+def test_prepare_operation_publishes_a_typed_validation_reason(tmp_path: Path) -> None:
+    """The CLI packet carries a fixed code and no request-derived text."""
+
+    store, registry, runtime, channel, _target = _fixture(tmp_path)
+    payload = {"schema_version": "synthetic_payload_v0", "marker": "synthetic-only"}
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "loopx_operation_request_v0",
+                "goal_id": GOAL_ID,
+                "agent_id": AGENT_ID,
+                "domain": "finance",
+                "operation_kind": "finance.order.simulate",
+                "operation_schema": "synthetic_payload_v0",
+                "payload_ref": "private-input:synthetic-only",
+                "payload": payload,
+                # Deliberately wrong: the normalizer rejects this digest.
+                "payload_digest": "0" * 64,
+                "projection": {
+                    "schema_version": "loopx_operation_projection_v0",
+                    "title": "Synthetic validation fixture",
+                    "subtitle": "Synthetic fixture · no venue call",
+                    "focus": "Reason-code regression",
+                    "fields": [{"label": "Order", "value": "synthetic"}],
+                    "warning": "Synthetic only.",
+                    "simulated": True,
+                },
+                "destination_account_ref": "account:simulation",
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=30)
+                ).isoformat(),
+                "authorized_principals": [f"lark:{OPERATOR_ID}"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = Namespace(
+        goal_channel_command="prepare-operation",
+        goal_id=GOAL_ID,
+        agent_id=AGENT_ID,
+        summary="Synthetic reason-code fixture",
+        idempotency_key="validation-reason-code-fixture",
+        request_json=str(request_path),
+        execute=False,
+        target_path=None,
+    )
+    packet = run_goal_channel_operation(
+        args,
+        context=GoalChannelOperationContext(runtime, registry, runtime, channel),
+    )
+    assert packet["ok"] is False
+    assert packet["blocker"] == "invalid_configuration"
+    assert packet["details"] == {
+        "validation_reason_code": "operation_payload_digest_mismatch"
+    }
+    rendered = json.dumps(packet)
+    assert "does not match payload" not in rendered
+    assert "synthetic-only" not in rendered
