@@ -45,13 +45,14 @@ def _owner(runtime_root: Path, owner_goal_id: str) -> Path:
 
 
 def _pack_id(owner_goal_id: str, record: dict) -> str:
-    return _digest(
-        {
-            "owner_goal_id": owner_goal_id,
-            "analysis_key": record["analysis_key"],
-            "title": record["title"],
-        }
-    )
+    identity = {
+        "owner_goal_id": owner_goal_id,
+        "analysis_key": record["analysis_key"],
+        "title": record["title"],
+    }
+    if "solver_usage" in record:
+        identity["solver_usage"] = record["solver_usage"]
+    return _digest(identity)
 
 
 def _prepared(record: dict) -> dict:
@@ -62,18 +63,8 @@ def _prepared(record: dict) -> dict:
 
 
 def _verify_sources(record: dict) -> None:
-    root = Path(record["source_root"]).resolve(strict=True)
     for source in record["input"]["sources"]:
-        relative = PurePosixPath(source["artifact"])
-        if (
-            relative.is_absolute()
-            or ".." in relative.parts
-            or "\\" in source["artifact"]
-        ):
-            raise PackUnavailable("invalid_source_path")
-        path = (root / str(relative)).resolve(strict=True)
-        if not path.is_relative_to(root) or not path.is_file():
-            raise PackUnavailable("invalid_source_path")
+        path = _source_path(Path(record["source_root"]), source["artifact"])
         data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != source["artifact_sha256"]:
             raise PackUnavailable("source_changed")
@@ -82,6 +73,97 @@ def _verify_sources(record: dict) -> None:
         count = len(source["text"].split("\n"))
         if "\n".join(lines[start : start + count]) != source["text"]:
             raise PackUnavailable("excerpt_mismatch")
+
+
+def _source_path(source_root: Path, artifact: str) -> Path:
+    relative = PurePosixPath(artifact)
+    if relative.is_absolute() or ".." in relative.parts or "\\" in artifact:
+        raise PackUnavailable("invalid_source_path")
+    root = source_root.resolve(strict=True)
+    path = (root / str(relative)).resolve(strict=True)
+    if not path.is_relative_to(root) or not path.is_file():
+        raise PackUnavailable("invalid_source_path")
+    return path
+
+
+def _usage_capture(source_root: Path, artifact: str, session_id: str) -> dict:
+    data = _source_path(source_root, artifact).read_bytes()
+    events = []
+    # Transport only the provider's counter/lifecycle fields, not model text,
+    # account metadata or tool outputs. TS owns all accounting decisions.
+    for line_number, line in enumerate(data.decode("utf-8").splitlines(), 1):
+        event = json.loads(line)
+        if not isinstance(event, dict):
+            raise ValueError("Usage capture contains a non-object event")
+        payload = event.get("payload") or {}
+        if not isinstance(payload, dict):
+            raise ValueError("Usage capture contains a non-object payload")
+        if event.get("type") == "session_meta":
+            payload = {k: payload[k] for k in ("id", "forked_from_id") if k in payload}
+        elif event.get("type") == "event_msg" and payload.get("type") in {
+            "task_started",
+            "task_complete",
+            "token_count",
+        }:
+            payload = {
+                k: payload[k] for k in ("type", "turn_id", "info") if k in payload
+            }
+            if isinstance(payload.get("info"), dict):
+                payload["info"] = {
+                    name: {
+                        key: value[key]
+                        for key in (
+                            "input_tokens",
+                            "cached_input_tokens",
+                            "output_tokens",
+                        )
+                        if key in value
+                    }
+                    if isinstance(value, dict)
+                    else value
+                    for name in ("total_token_usage", "last_token_usage")
+                    if (value := payload["info"].get(name)) is not None
+                }
+        else:
+            continue
+        events.append(
+            {
+                "line": line_number,
+                "type": event["type"],
+                "timestamp": event.get("timestamp"),
+                "payload": payload,
+            }
+        )
+    projection = effect_runtime_result(
+        "benchmark.trajectory.codex-usage",
+        {"events": events, "session_id": session_id},
+        large_local_snapshot=True,
+    )
+    return {
+        "artifact": artifact,
+        "artifact_sha256": hashlib.sha256(data).hexdigest(),
+        "projection": projection,
+    }
+
+
+def _usage_view(record: dict) -> dict | None:
+    captured = record.get("solver_usage")
+    if captured is None:
+        return None
+    reason = None
+    try:
+        data = _source_path(
+            Path(record["source_root"]), captured["artifact"]
+        ).read_bytes()
+        if hashlib.sha256(data).hexdigest() != captured["artifact_sha256"]:
+            reason = "source_changed"
+    except (OSError, ValueError):
+        reason = "source_unavailable"
+    return {
+        **captured,
+        "applicability": "historical" if reason else "current",
+        "reason_code": reason,
+    }
 
 
 def _index(owner: Path) -> dict:
@@ -141,6 +223,7 @@ def _summary(record: dict, reason: str | None) -> dict:
         "config": record["config"],
         "availability": "unavailable" if reason else "available",
         "reason_code": reason,
+        **({"solver_usage": _usage_view(record)} if "solver_usage" in record else {}),
     }
 
 
@@ -152,6 +235,8 @@ def register_pack(
     source_root: Path,
     title: str,
     config: dict | None = None,
+    usage_jsonl: str | None = None,
+    usage_session_id: str | None = None,
 ) -> dict:
     """Trusted operator only; no HTTP/renderer path-registration endpoint."""
     if not title.strip():
@@ -173,6 +258,14 @@ def register_pack(
         },
     }
     _verify_sources(record)
+    if (usage_jsonl is None) != (usage_session_id is None):
+        raise ValueError(
+            "Usage capture and expected session identity must be supplied together"
+        )
+    if usage_jsonl is not None:
+        record["solver_usage"] = _usage_capture(
+            source_root, usage_jsonl, usage_session_id
+        )
     owner = _owner(runtime_root, owner_goal_id)
     (owner / "packs").mkdir(parents=True, exist_ok=True, mode=0o700)
     pack_id = _pack_id(owner_goal_id, record)
