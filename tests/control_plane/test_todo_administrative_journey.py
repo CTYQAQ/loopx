@@ -80,7 +80,9 @@ def test_cli_copy_pause_resume_defer_without_lease_bookkeeping(journey):
 
 def test_chat_uses_same_atomic_owner_and_refuses_changed_review_basis(journey, tmp_path):
     cli, todo_id, registry, runtime = journey
+    cli("todo", "update", "--agent-id", "agent-a", "--task-repository", "git:github.com/example/original")
     cli("task-lease", "acquire", "--owner", "agent-a", "--idempotency-key", "chat-execution")
+    cli("todo", "update", "--agent-id", "agent-a", "--task-repository", "git:github.com/example/revised")
     cli("todo", "update", "--agent-id", "agent-a", "--note", "Original task context")
     service = ChatActionService(store=ChatActionStore(tmp_path / "actions"), registry_path=registry,
         runtime_root_override=str(runtime))
@@ -146,6 +148,23 @@ def test_cli_repository_revision_preserves_frozen_history_and_acquires_the_new_i
     cli("todo", "update", "--agent-id", "agent-a", "--task-repository", "git:github.com/example/revised")
     retained = cli("task-lease", "inspect")["lease"]
     assert retained["status"] == "released" and retained["write_repository"] == "git:github.com/example/original"
+    # Correcting a declaration must leave ordinary task management usable.
+    # None of these operations starts a new execution or rewrites its history.
+    for args in [
+        ("--note", "Continue after the repository correction"),
+        ("--required-write-scope", "tests/**"),
+        ("--status", "blocked", "--reason", "Owner paused"),
+        ("--status", "open", "--reason", "Owner resumed"),
+        ("--status", "deferred", "--reason", "Wait", "--resume-when", "resume_at:2099-01-01T00:00:00Z"),
+        ("--status", "open", "--reason", "Resume deferred work"),
+        ("--task-repository", "git:github.com/example/corrected"),
+    ]:
+        assert cli("todo", "update", "--agent-id", "agent-a", *args)["ok"]
+        assert cli("task-lease", "inspect")["lease"] == retained
+    refused = cli("todo", "update", "--agent-id", "agent-a", "--note", "Old proof cannot execute",
+        "--task-lease-idempotency-key", "original", "--task-lease-expected-version", str(lease["version"]), ok=False)
+    assert refused["ok"] is False
+    assert cli("task-lease", "inspect")["lease"] == retained
     fresh = cli("task-lease", "acquire", "--owner", "agent-a", "--idempotency-key", "revised")["lease"]
     assert fresh["version"] == lease["version"] + 1
-    assert fresh["write_repository"] == "git:github.com/example/revised"
+    assert fresh["write_repository"] == "git:github.com/example/corrected"

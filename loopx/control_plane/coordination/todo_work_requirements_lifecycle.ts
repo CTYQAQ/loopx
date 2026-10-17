@@ -4,7 +4,7 @@ import type {JsonObject} from "../effect_program.ts";
 import {TODO_WORK_REQUIREMENT_FIELDS} from "../todos/work_requirements.ts";
 import {leaseIsActive, leaseVersion, leaseEpoch} from "../work_items/task_lease_acquire.ts";
 import {releasedTaskLeaseRecord} from "../work_items/task_lease_lifecycle_decision.ts";
-import {leaseRepositoryRejection} from "../work_items/task_lease_repository.ts";
+import {ownerAdministrativeRepositoryRejection} from "../work_items/task_lease_repository.ts";
 import {canonicalAuthoritySha256} from "./authority_store_codec.ts";
 import type {CoordinationProjectionMutation} from "./coordination_projection.ts";
 import {canonicalTaskLease} from "./task_lease_state.ts";
@@ -34,7 +34,7 @@ export function workRequirementsRevisionRejection(todo: JsonObject, input: Coord
   if (retained === undefined) return null;
   const lease = canonicalTaskLease(retained, input.goal_id, input.todo_id);
   leaseIsActive(lease, input.now); // Validate the stored clock even for administrative intent.
-  const repository = leaseRepositoryRejection(todo, lease);
+  const repository = ownerAdministrativeRepositoryRejection(todo, lease, input.actor_agent_id);
   if (repository !== null) return {code: repository, reason: "Inspect the divergent execution repository before revising work"};
   if (lease.owner !== input.actor_agent_id) return {code: "lease_owner_mismatch",
     reason: "Only the current owner may retire its retained execution while revising work requirements"};

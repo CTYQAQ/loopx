@@ -172,6 +172,82 @@ for (const provider of ["file", "sqlite", "postgresql"] as const) {
     assert.equal(changed.status, "applied", JSON.stringify(changed));
     assert.equal(((await head(store)).head.leases as JsonObject[])[0]!.status, "released");
   });
+  test(`${provider}: repository correction preserves history and subsequent owner administration`, options, async t => {
+    const {store, input, lease} = await fixture(t, provider);
+    const correction = {...input, operation_id: "repository-correction", patch: {},
+      planning_intent: {task_repository: "git:github.com/example/revised"}};
+    assert.equal((await executeCoordinationTodoUpdate(store, correction)).status, "applied");
+    const retired = (await head(store)).head.leases;
+    assert.deepEqual((retired as JsonObject[])[0], {...lease, status: "released",
+      released_at: NOW.toISOString().replace(".000Z", "Z"), updated_at: NOW.toISOString().replace(".000Z", "Z")});
+    const steps = [
+      {patch: {note: "Continue administration"}, planning_intent: {}},
+      {patch: {}, planning_intent: {required_write_scopes: ["tests/**"]}},
+      {patch: {}, planning_intent: {status: "blocked", reason: "Pause"}},
+      {patch: {}, planning_intent: {status: "open", reason: "Resume"}},
+      {patch: {}, planning_intent: {status: "deferred", reason: "Wait", resume_when: "resume_at:2099-01-01T00:00:00Z"}},
+      {patch: {}, planning_intent: {status: "open", reason: "Resume deferred work"}},
+      {patch: {}, planning_intent: {task_repository: "git:github.com/example/corrected"}},
+    ];
+    for (const [index, step] of steps.entries()) {
+      const request = {...input, ...step, operation_id: `continue-${index}`};
+      const before = await head(store);
+      assert.equal((await executeCoordinationTodoUpdate(store, {...request, dry_run: true})).status, "planned");
+      assert.deepEqual(await head(store), before);
+      const result = await executeCoordinationTodoUpdate(store, request);
+      assert.equal(result.status, "applied", JSON.stringify(result));
+      const after = await head(store);
+      assert.deepEqual(after.head.leases, retired);
+      assert.equal((await executeCoordinationTodoUpdate(store, request)).status, "replayed");
+      assert.deepEqual(await head(store), after);
+      for (const proof of [
+        {lease_idempotency_key: "execution", lease_expected_version: 7},
+        {lease_idempotency_key: "execution"},
+      ]) {
+        const refused = await executeCoordinationTodoUpdate(store, {...request, ...proof, operation_id: `old-proof-${index}`});
+        assert.equal(refused.status, "failed", JSON.stringify(refused));
+        assert.deepEqual(await head(store), after);
+      }
+    }
+    const final = (await head(store)).head.todos as JsonObject[];
+    assert.equal(final[0]!.task_repository, "git:github.com/example/corrected");
+    assert.equal(final[0]!.status, "open");
+    assert.equal(final[0]!.claimed_by, "agent-a");
+    assert.equal(final[0]!.completion_validation_required, true);
+    // Retrying the original correction reports history without undoing later work.
+    const beforeReplay = await head(store);
+    assert.equal((await executeCoordinationTodoUpdate(store, correction)).status, "replayed");
+    assert.deepEqual(await head(store), beforeReplay);
+  });
+  for (const boundary of ["active", "expired", "foreign", "corrupt", "excluded", "bound"] as const) {
+    test(`${provider}: released-history recovery cannot hide ${boundary} repository constraints`, options, async t => {
+      const {store, input, todo} = await fixture(t, provider,
+        boundary === "active" || boundary === "expired" ? boundary : "released");
+      const seeded = await head(store);
+      const current = {...todo, task_repository: "git:github.com/example/revised",
+        ...(boundary === "excluded" ? {excluded_agents: ["agent-a"]} : {}),
+        ...(boundary === "bound" ? {bound_agent: "agent-b"} : {})};
+      const leases = (seeded.head.leases as JsonObject[]).map(lease => ({...lease,
+        ...(boundary === "foreign" ? {owner: "agent-b"} : {}),
+        ...(boundary === "corrupt" ? {write_repository: "https://github.com/example/project.git"} : {})}));
+      assert.equal((await store.commitAuthority({operation_id: "retained-repository-state",
+        expected_provider_revision: seeded.provider_revision, events: [], receipts: [],
+        next_projection: {...seeded.head, todos: [current], leases,
+          todo_read_model: coordinationTodoReadModel([current], TODO_DOMAIN_READ_RECORD_SCHEMA)}})).status, "applied");
+      const before = await head(store);
+      for (const [index, step] of [
+        {patch: {note: "Cannot bypass holder"}, planning_intent: {}},
+        {patch: {}, planning_intent: {required_write_scopes: ["tests/**"]}},
+        {patch: {}, planning_intent: {status: "blocked", reason: "Pause"}},
+        {patch: {}, planning_intent: {status: "deferred", reason: "Wait", resume_when: "resume_at:2099-01-01T00:00:00Z"}},
+      ].entries()) {
+        const request = {...input, ...step, operation_id: `refuse-${index}`};
+        assert.equal((await executeCoordinationTodoUpdate(store, request)).status, "failed");
+        assert.deepEqual(await head(store), before);
+        assert.equal((await store.readReceipt(request.operation_id)).status, "missing");
+      }
+    });
+  }
   test(`${provider}: requirement edits cannot heal stale proof, combine status/ownership, or bypass CAS`, options, async t => {
     const {store, input} = await fixture(t, provider);
     const revision = {...input, planning_intent: {required_capabilities: ["filesystem_write"]}};
