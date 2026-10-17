@@ -245,28 +245,35 @@ def _operation_error_packet(
     return packet
 
 
-def _safe_validation_reason(exc: BaseException) -> str:
-    """Return the operator-actionable validation reason without private paths.
+#: Fixed, public-safe validation reasons the typed-operation owner can raise.
+#: The packet publishes the typed code, never the free-text exception, so no
+#: request-derived value can leak through this diagnostic field.
+_VALIDATION_REASON_CODES = {
+    "operation executor binding is invalid": "operation_executor_binding_invalid",
+    "operation payload_digest does not match payload": "operation_payload_digest_mismatch",
+    "operation projection fields are unavailable": "operation_projection_fields_unavailable",
+    "operation projection is unavailable": "operation_projection_unavailable",
+    "operation review plan is unavailable": "operation_review_plan_unavailable",
+    "operation review frame is unavailable": "operation_review_frame_unavailable",
+    "typed operation proposal is unavailable": "typed_operation_proposal_unavailable",
+    "operation request JSON must be an object": "operation_request_not_an_object",
+    "the preparing Agent must be registered for this Goal": "preparing_agent_unregistered",
+}
+_UNCLASSIFIED_VALIDATION_REASON = "unclassified_validation_error"
 
-    The typed-operation normalizer and proposal helpers raise code-authored
-    ValueErrors ("operation payload_digest does not match payload", "operation
-    executor binding is invalid", ...). Collapsing every one of them into
-    "the Goal Channel configuration is invalid" hides the real cause from the
-    operator and from the agent. Keep the message when it is clearly a
-    code-authored phrase, and fall back to the exception class otherwise.
+
+def _validation_reason_code(exc: BaseException) -> str:
+    """Map a code-authored validator message to a fixed public-safe code.
+
+    Collapsing every ValueError into "the Goal Channel configuration is
+    invalid" hides the real cause from the operator and from the agent, while
+    echoing the message would publish request-derived text. Publish a typed
+    code from a fixed allowlist and fall back for anything unknown.
     """
 
-    text = str(exc).strip()
-    if (
-        not text
-        or len(text) > 240
-        or "/" in text
-        or "\\" in text
-        or "~" in text
-        or any(ord(character) < 32 for character in text)
-    ):
-        return type(exc).__name__
-    return text
+    return _VALIDATION_REASON_CODES.get(
+        str(exc).strip(), _UNCLASSIFIED_VALIDATION_REASON
+    )
 
 
 def run_goal_channel_operation(
@@ -378,12 +385,13 @@ def run_goal_channel_operation(
         )
     except ValueError as exc:
         # Keep the compatibility blocker, but never discard the real reason the
-        # typed-operation owner rejected this request.
+        # typed-operation owner rejected this request. Only a fixed, public-safe
+        # code is published; the message itself may carry request-derived text.
         return _operation_error_packet(
             request=request,
             blocker="invalid_configuration",
             summary="the Goal Channel configuration is invalid",
-            details={"validation_reason": _safe_validation_reason(exc)},
+            details={"validation_reason_code": _validation_reason_code(exc)},
         )
     except Exception:
         return _operation_error_packet(
