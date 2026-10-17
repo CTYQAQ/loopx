@@ -56,8 +56,7 @@ export function TaskRequest({todo, local, onSave}: {todo: WorkspaceTodo; local: 
     setSaving(true); setFailure(null); setSaved(false);
     try {
       const text = draft.text.replace(/\s+/gu, " ").trim();
-      const proposal = await onSave(todo, text, draft.basis,
-        pending?.status === "applied" || pending?.reviewPlan?.retryOriginal || pending?.reviewPlan?.canApply ? pending : undefined);
+      const proposal = await onSave(todo, text, draft.basis, pending ?? undefined);
       if (!mounted.current) return;
       setPending(proposal);
       if (proposal.status !== "applied" || proposal.reviewPlan?.interaction !== "completed") {
@@ -90,7 +89,7 @@ export function TaskRequest({todo, local, onSave}: {todo: WorkspaceTodo; local: 
         onChange={event => {setDraft({...draft, text: event.target.value}); setPending(null); setSaved(false);}} /></label>
       <p>{t("drawer.requirementsEffect")}</p>
       <div><button className="personal-primary-action" type="submit" disabled={saving || !editable || !draft.text.trim() || draft.text.length > 8000}>
-        {t(saving ? "drawer.requirementsSaving" : pending?.status === "applied" ? "drawer.requirementsReadback" : "drawer.requirementsSave")}</button>
+        {t(saving ? "drawer.requirementsSaving" : pending?.status === "applied" || pending?.status === "error" ? "drawer.requirementsReadback" : "drawer.requirementsSave")}</button>
         <button className="personal-secondary-action" type="button" disabled={saving} onClick={() => {setDraft(null); setPending(null); setFailure(null);}}>{t("common.cancel")}</button></div>
       {draft.text.length > 8000 ? <p role="alert">{t("drawer.requirementsTooLong")}</p> : null}
       {failure ? <div role="alert"><p>{failure}</p><button className="personal-secondary-action" type="button" disabled={saving} onClick={() => {

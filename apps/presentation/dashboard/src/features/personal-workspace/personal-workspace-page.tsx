@@ -27,6 +27,7 @@ import {
   fetchGoalChannelTargets,
   fetchLarkConnections,
   fetchLoopXMode,
+  loadTypedAction,
   previewTypedAction,
   setupGoalChannel,
   stewardPrompts,
@@ -2047,7 +2048,19 @@ export function PersonalWorkspacePage({
     onApplyProposal: async proposal => { await applyProposal(proposal); },
     onSaveTodoRequirements: async (todo, text, basis, retry) => {
       if (retry?.status === "applied") return retry;
-      const proposal = retry ?? await createPreview({actionKind: "todo.update",
+      let original = retry;
+      if (retry) {
+        const stored = await loadTypedAction(retry.previewId);
+        if (stored.action_kind !== "todo.update" || stored.normalized_parameters.goal_id !== todo.goalId
+          || stored.normalized_parameters.todo_id !== (todo.sourceTodoId ?? todo.todoId)
+          || stored.normalized_parameters.text !== text) {
+          throw new ChatApiError(t("actionReview.targetChanged"), {error_code: "action_response_mismatch"});
+        }
+        await actionReadback.acceptProposal(stored);
+        original = {...workspaceProposal(stored, t), sourceRequest: retry.sourceRequest};
+        if (original.status === "applied") return original;
+      }
+      const proposal = original ?? await createPreview({actionKind: "todo.update",
         context: {goal_id: todo.goalId, kind: "todo", todo_id: todo.sourceTodoId ?? todo.todoId},
         idempotencyKey: `workspace-todo-requirements-${todo.todoId}-${Date.now().toString(36)}`,
         normalizedParameters: {goal_id: todo.goalId, todo_id: todo.sourceTodoId ?? todo.todoId,

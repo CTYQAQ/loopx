@@ -228,6 +228,31 @@ export const taskInspectorReturnScenario = {
       assert.equal(applyCount, 3, "A lost successful reply is reconciled from the original journal without a second apply");
       assert.equal((await read()).text, afterConflict + " Recover the original committed response.");
 
+      // If both the apply reply and journal read are lost, retain the original
+      // proposal. Retrying during the outage must never create/apply anew.
+      const beforeOutage = (await read()).text;
+      await drawer.getByRole("button", {name:"修改要求",exact:true}).click();
+      const outageDraft = beforeOutage + " Retain the operation throughout an outage.";
+      await field.fill(outageDraft);
+      loseResponse = true;
+      let journalUnavailable = true;
+      await page.route("**/api/actions**", async route => {
+        if (journalUnavailable && route.request().method() === "GET") return route.abort("failed");
+        return route.fallback();
+      });
+      await drawer.getByRole("button", {name:"保存要求",exact:true}).click();
+      await drawer.getByRole("alert").waitFor();
+      assert.equal(applyCount, 4);
+      assert.equal((await read()).text, outageDraft);
+      await drawer.getByRole("button", {name:"重试读回",exact:true}).click();
+      await drawer.getByRole("button", {name:"重试读回",exact:true}).waitFor({state:"visible"});
+      assert.equal(await field.inputValue(), outageDraft);
+      assert.equal(applyCount, 4, "An unavailable original journal must not trigger another apply");
+      journalUnavailable = false;
+      await drawer.getByRole("button", {name:"重试读回",exact:true}).click();
+      await drawer.getByRole("status").filter({hasText:"要求已保存并读回"}).waitFor();
+      assert.equal(applyCount, 4, "Reconnect reads the original committed receipt without a new operation");
+
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
       assert.equal(editing.api.turnRequests.length, 0);
       assert.ok(editing.errors.every(error => /status of 400|net::ERR_FAILED/.test(error)), editing.errors.join(" | "));
