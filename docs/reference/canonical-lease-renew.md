@@ -488,6 +488,11 @@ acquire a fresh generation with a new idempotency key and explicitly requested
 scopes before executing. Acquisition still checks the current Todo, repository,
 workspace, Goal policy and competing holders. Repository revisions preserve the
 old grant's frozen repository; the next grant binds the revised identity.
+That released history does not block the same claim owner's subsequent notes,
+pause/resume or further requirement/repository corrections without execution
+proof. These operations retain the entire old grant unchanged. An unreleased
+divergent grant, foreign retained holder, malformed repository or explicit old
+proof still rejects; the exception never applies to execution admission.
 
 This corrects the former default rejection of every retained requirement edit;
 it is limited to the existing hard-lease owner update path. Foreign retained
@@ -505,6 +510,9 @@ reason and evidence may accompany it. Soft-claim behavior is unchanged.
 预览、提交和重放的 `work_requirements_transition` 显示修改字段与租约结果；
 相同声明不会结束现有授权。真正修改后，必须用新幂等 key、明确写入范围重新
 申请租约；仓库修订只影响下一次授权，不改写旧授权的仓库身份。
+已释放的旧仓库历史不再阻断同一 claim owner 不带执行 proof 的后续备注、暂停/恢复、
+范围修订及再次纠正仓库；这些操作完整保留旧授权。未释放但仓库不符的授权、他人保留
+的租约、损坏仓库与显式旧 proof 仍被拒绝，此例外不用于执行准入。
 他人保留的租约、排除/绑定限制、归档/完成、provider 与 registry 冲突仍被拒绝；
 显式 proof 必须精确对应当前有效代际，陈旧、不完整、过期或已释放 proof 不会
 被自动替换。状态、归属、验证和依赖转换不能混在本次修订里；可附带普通正文、
