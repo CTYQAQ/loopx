@@ -14,25 +14,32 @@ function analysisReadback(selected = "a") {
   const scope = {goal_id: "synthetic-solver", case_id: "synthetic-case", run_id: "synthetic-run", revision: "fixed", window: "fixed synthetic sample"};
   const selection = {rule: "Synthetic purpose sample", population_episodes: null, exhaustive: false};
   const config = {model: "fixture", effort: "max", service_tier: "unknown"};
-  const packs = ["a", "b", "c"].map(id => ({pack_id: id.repeat(64), title: `Synthetic analysis ${id.toUpperCase()}`, scope, selection, config,
+  const packs = ["a", "b", "c", "d"].map(id => ({pack_id: id.repeat(64), title: `Synthetic analysis ${id.toUpperCase()}`, scope, selection, config,
     episode_count: id === "c" ? 1 : 2, source_count: 1, analysis_key: (id === "c" ? "e" : "c").repeat(64), method_version: "research-episodes-v2", availability: "available", reason_code: null}));
-  return {ok: true, catalog: {availability: "available", reason_code: null, default_pack_id: packs[0].pack_id, packs}, pack: {
-    ...packs[selected === "c" ? 2 : selected === "b" ? 1 : 0], objective: "Measure actual utility", applicability: "current",
+  const snapshot = {ok: true, catalog: {availability: "available", reason_code: null, default_pack_id: packs[0].pack_id, packs}, pack: {
+    ...packs[selected === "d" ? 3 : selected === "c" ? 2 : selected === "b" ? 1 : 0], objective: "Measure actual utility", applicability: "current",
     ...(selected === "c" ? {} : {solver_usage: {artifact: "capture.jsonl", artifact_sha256: "d".repeat(64), applicability: selected === "b" ? "historical" : "current", reason_code: selected === "b" ? "source_changed" : null,
       projection: {session_id: "synthetic-session", method: "codex_complete_session_counters_v1", start: "2026-01-01T00:00:00Z", end: "2026-01-01T00:01:01Z", completed_turns: 1, counter_observations: 1,
         input_tokens: 1100, cached_input_tokens: 1000, uncached_input_tokens: 100, output_tokens: 20, elapsed_seconds: 61, turn_elapsed_seconds: 61,
         turns: [{turn_id: "synthetic-turn", start: "2026-01-01T00:00:00Z", end: "2026-01-01T00:01:01Z", first_line: 2, last_line: 3, elapsed_seconds: 61, usage: {input_tokens: 1100, cached_input_tokens: 1000, uncached_input_tokens: 100, output_tokens: 20}}], limitations: []}}}),
     episodes: selected === "c" ? [{id: "episode", question: "Is this experiment discriminative?", source_ids: ["source"], eligible_metrics: ["discrimination"]}]
-      : [{id: "episode", question: "Does a useful diagnosis prove original-objective utility?", source_ids: ["source"], eligible_metrics: ["benefit_test", "evidence_adoption"]}, {id: "uncertain", question: "Was the later decision informed by this evidence?", source_ids: ["source"], eligible_metrics: ["evidence_adoption"]}],
+      : [{id: "episode", question: "Does a useful diagnosis prove original-objective utility?", source_ids: ["source"], eligible_metrics: ["goal_alignment", "benefit_test", "discrimination", "information_gain", "evidence_adoption", "redundancy"]}, {id: "uncertain", question: "Was the later decision informed by this evidence?", source_ids: ["source"], eligible_metrics: ["evidence_adoption"]}],
     job: {status: "succeeded", analysis_wall_seconds: null, usage: null},
     result: {schema_version: "trajectory_assessment_v1", method_version: "research-episodes-v2", analysis_key: (selected === "c" ? "e" : "c").repeat(64), scope, selection,
       calibration: "uncalibrated_model", evidence_manifest: [{id: "source", artifact: "facts.txt", artifact_sha256: "f".repeat(64), first_line: 1}], limitations: ["Synthetic presentation fixture; not a scientific result"],
       metrics: [...(selected === "c" ? [{metric: "benefit_test", yes: 0, no: 0, unknown: 0, eligible: 0, assessed_fraction: null, missing_data_bounds: null}, {metric: "discrimination", yes: 0, no: 0, unknown: 1, eligible: 1, assessed_fraction: 0, missing_data_bounds: [0, 1]}]
         : [{metric: "benefit_test", yes: 0, no: 1, unknown: 0, eligible: 1, assessed_fraction: 1, missing_data_bounds: [0, 0]}, {metric: "evidence_adoption", yes: 1, no: 0, unknown: 1, eligible: 2, assessed_fraction: .5, missing_data_bounds: [.5, 1]}]),
-        ...["goal_alignment", "information_gain", "redundancy", selected === "c" ? "evidence_adoption" : "discrimination"].map(metric => ({metric, yes: 0, no: 0, unknown: 0, eligible: 0, assessed_fraction: null, missing_data_bounds: null}))],
+        ...["goal_alignment", "information_gain", "redundancy", selected === "c" ? "evidence_adoption" : "discrimination"].map(metric => selected === "c" ? ({metric, yes: 0, no: 0, unknown: 0, eligible: 0, assessed_fraction: null, missing_data_bounds: null}) : ({metric, yes: metric === "redundancy" ? 0 : 1, no: metric === "redundancy" ? 1 : 0, unknown: 0, eligible: 1, assessed_fraction: 1, missing_data_bounds: metric === "redundancy" ? [0, 0] : [1, 1]}))],
       assessments: selected === "c" ? [{episode_id: "episode", metric: "discrimination", verdict: "unknown", reason: "Available evidence cannot separate the explanations.", citations: []}]
-        : [{episode_id: "episode", metric: "benefit_test", verdict: "no", reason: "The diagnostic changed, but original-objective utility was not tested.", citations: []}, {episode_id: "episode", metric: "evidence_adoption", verdict: "yes", reason: "A later decision explicitly used this evidence.", citations: []}, {episode_id: "uncertain", metric: "evidence_adoption", verdict: "unknown", reason: "The later decision is not observed.", citations: []}]},
+        : [{episode_id: "episode", metric: "benefit_test", verdict: "no", reason: "The diagnostic changed, but original-objective utility was not tested.", citations: [{source_id: "source", first_line: 1, last_line: 2}]}, {episode_id: "episode", metric: "evidence_adoption", verdict: "yes", reason: "A later decision explicitly used this evidence.", citations: [{source_id: "source", first_line: 1, last_line: 2}]}, {episode_id: "uncertain", metric: "evidence_adoption", verdict: "unknown", reason: "The later decision is not observed.", citations: []}, ...[
+          {metric: 'goal_alignment', verdict: 'yes', reason: 'Synthetic evidence ties the intervention to the stated bottleneck.'},
+          {metric: 'discrimination', verdict: 'yes', reason: 'Synthetic control separates the competing explanations.'},
+          {metric: 'information_gain', verdict: 'yes', reason: 'Synthetic evidence resolves the declared uncertainty.'},
+          {metric: 'redundancy', verdict: 'no', reason: 'Synthetic evidence records a new question rather than repeating a settled result.'}
+        ].map(item => ({...item, episode_id: 'episode', citations: [{source_id: 'source', first_line: 1, last_line: 2}]}))]},
   }};
+  if (selected === "d") {snapshot.pack.result = null; snapshot.pack.job = null;}
+  return snapshot;
 }
 
 async function startHistoryOwner(fixture) {
@@ -80,7 +87,12 @@ export const researchHistoryScenario = {
           if (route.request().method() !== "GET") {analysisWrites++; return route.fulfill({status: 403, json: {error: "Read-only presentation fixture"}});}
           if (!analysisFixture) return route.fulfill({json: {ok: true, catalog: {availability: "unavailable", reason_code: "no_available_pack", default_pack_id: null, packs: []}, pack: null}});
           const query = new URL(route.request().url()).searchParams;
-          const selected = ["b", "c"].find(id => query.get("pack_id") === id.repeat(64)) ?? "a";
+          if (new URL(route.request().url()).pathname.endsWith('/citation')) return route.fulfill({json: {
+            source_id: 'source', first_line: 1, last_line: 2, artifact: 'facts.txt', applicability: 'current',
+            text: 'Synthetic original evidence.\nDiagnostic measurements do not test native utility.'
+          }});
+
+          const selected = ["b", "c", "d"].find(id => query.get("pack_id") === id.repeat(64)) ?? "a";
           if (holdOldAnalysis && selected === "a") {slowStarted(); await new Promise(resolve => {releaseOld = resolve;});}
           await route.fulfill({json: analysisReadback(selected)});
           if (holdOldAnalysis && selected === "a") oldDelivered();
@@ -285,19 +297,36 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await page.reload({waitUntil: "networkidle"});
       const progress = history.getByRole("region", {name: "长程效果与用量", exact: true});
       await progress.locator(".research-progress-scope").filter({hasText: "Synthetic analysis A"}).waitFor();
+      const effects = progress.locator('.research-effect-metrics');
+      await effects.waitFor();
+      assert.equal(await effects.locator('details').count(), 6, 'All six analyzer metrics are primary without opening analysis or cost details');
+      assert.equal(await progress.locator('.research-usage').evaluate(e => e.open), false, 'Cost is secondary by default');
+      const benefitMetric = effects.locator('[data-metric="benefit_test"]');
+      assert.match(await benefitMetric.innerText(), /0 \/ 1/);
+      assert.match(await benefitMetric.innerText(), /尚未检验收益/);
+      await benefitMetric.locator('summary').click();
+      assert.match(await benefitMetric.innerText(), /original-objective utility was not tested/);
+      assert.match(await effects.locator('[data-metric="evidence_adoption"]').innerText(), /未知 1/);
+
+      assert.equal(await history.getByRole("region", {name: "轨迹深度分析", exact: true}).count(), 0, "Expanding existing effects never opens or executes model analysis");
+      await benefitMetric.getByRole('button', {name: /source.*行 1–2/}).click();
+      const citedOriginal = history.getByRole('region', {name: '引用原文', exact: true});
+      await citedOriginal.waitFor();
+      assert.match(await citedOriginal.innerText(), /Diagnostic measurements do not test native utility/);
+      await citedOriginal.press('Escape');
+      await history.getByRole('button', {name: '关闭分析', exact: true}).click();
+      await progress.locator('.research-usage > summary').click();
       assert.equal(await progress.getByText("100", {exact: true}).count(), 1, "Uncached input is shown without charging cache twice");
-      await progress.locator(".research-progress-basis > summary").click();
       assert.match(await progress.innerText(), /1,?100.*1,?000/s);
-      await progress.locator(".research-progress-basis > summary").click();
-      assert.match(await progress.innerText(), /原生评分|native scores/i);
-      await progress.locator(".research-process-counts > summary").click();
+      await progress.locator('.research-usage > summary').click();
+      await benefitMetric.locator('summary').click();
       assert.match(await progress.innerText(), /0 \/ 1/);
       assert.match(await progress.innerText(), /1 \/ 2/);
       await page.setViewportSize({width:1280,height:900});
       await page.evaluate(() => {for (const e of document.querySelectorAll('*')) if(e.scrollTop) e.scrollTop=0;});
       await page.screenshot({path: resolve(outputDir, "research-analysis-first-screen.png"), animations: "disabled"});
       await progress.screenshot({path: resolve(outputDir, "research-analysis-summary.png"), animations: "disabled"});
-      assert.equal(await history.getByRole("region", {name: "轨迹深度分析", exact: true}).count(), 0, "Opening factual counts does not open or execute model analysis");
+
       await history.getByRole("button", {name: "查看分析", exact: true}).click();
       const analysis = history.getByRole("region", {name: "轨迹深度分析", exact: true});
       await analysis.locator("header p").first().filter({hasText: /^Synthetic analysis A$/}).waitFor();
@@ -315,7 +344,7 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       releaseOld(); await delivered; holdOldAnalysis = false;
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       assert.equal(await analysis.locator("header p").first().textContent(), "Synthetic analysis B", "A delayed same-Goal read cannot undo a pack selection");
-      assert.match(await progress.innerText(), /历史捕获值|historical/i);
+      assert.match(await progress.innerText(), /历史捕获|historical/i);
       await page.reload({waitUntil: "networkidle"});
       await analysis.locator("header p").first().filter({hasText: /^Synthetic analysis B$/}).waitFor();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
@@ -328,11 +357,16 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await progress.locator(".research-progress-scope").filter({hasText: "Synthetic analysis C"}).waitFor();
       assert.match(await progress.innerText(), /尚无完整用量捕获|No complete usage/);
       assert.equal(await analysis.count(), 0, "Changing a factual scope preserves the closed analysis panel");
-      if (!await progress.locator(".research-process-counts").evaluate(details => details.open)) await progress.locator(".research-process-counts > summary").click();
       assert.match(await progress.innerText(), /不适用|N\/A/);
       assert.doesNotMatch(await progress.innerText(), /0%/);
       await history.getByRole("button", {name: "查看分析", exact: true}).click();
       await analysis.locator("header p").first().filter({hasText: /^Synthetic analysis C$/}).waitFor();
+      await analysis.press('Escape');
+      await progress.getByRole('combobox').selectOption('d'.repeat(64));
+      await progress.locator('.research-progress-scope').filter({hasText:'Synthetic analysis D'}).waitFor();
+      assert.match(await progress.innerText(), /此范围尚无分析器判读/);
+      assert.equal(await progress.locator('.research-effect-metrics').count(), 0, 'An unanalysed cost pack never borrows another pack’s judgments');
+      assert.equal(await analysis.count(), 0, 'Choosing an unanalysed source never requests analysis');
       // Analysis sources do not require an Explore log. The real read-only
       // backend must keep their measurements discoverable with zero events.
       const emptyFixture = resolve(temporary, "empty.json");
@@ -341,7 +375,7 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       const previousOwner = owner; owner = emptyOwner; await previousOwner.close();
       await page.reload({waitUntil: "networkidle"});
       await history.getByRole("status").filter({hasText: "0 / 0"}).waitFor();
-      await progress.locator(".research-progress-scope").filter({hasText: "Synthetic analysis C"}).waitFor();
+      await progress.locator(".research-progress-scope").filter({hasText: "Synthetic analysis D"}).waitFor();
       assert.equal(analysisWrites, 0, "Cached, reload, switch and keyboard reading never request execution");
       assert.equal(api.turnRequests.length, 0, "Reading the graph cannot start an Agent");
       return {note: "Three unchanged real checkpoint histories through production HTTP + packaged UI; per-Goal complete pagination, genuine negative evidence, no invented edges, reload/back/forward, mobile and failed refresh. Separate synthetic coincident-target regression; no benchmark qualification or model dispatch.",
