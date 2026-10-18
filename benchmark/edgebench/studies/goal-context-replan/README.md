@@ -155,37 +155,172 @@ tail grading. Record sequence/shared-host effects. Reusing an earlier control
 requires its preregistered protocol and source/window equivalence, not a similar
 label or favorable score. This document launches no jobs.
 
+## Program sequence and the outcome-refinement candidate
+
+Keep the existing retained/fresh comparison first, then the single opt-in stride
+study, then G/C. Necessary correctness repairs and new FROM-ZERO late-checkpoint
+production precede all three. Qualification of an upgraded receiver cannot turn
+an older donor into a new cold start. Record the donor, receiver, runner, native
+evaluator and actual installed sources independently.
+
+| Stage | Entry and useful exit | Capacity and accounting |
+|---|---|---|
+| Reliability and new late points | Qualify the ordinary installed receiver and its continuation; select the first chronologically eligible complete natural pre-replan point from the admitted FROM-ZERO source. Preserve failed captures and premature exits. | Read actual active workers, paired free slots, source age and absolute deadline from the private manifest. A merge or an empty slot is not experiment admission. |
+| Primary retained/fresh | Restore the same immutable research state, Goal, incumbent and native cursor; vary only whether the due replan uses retained or fresh session context. Continue through released feedback and the next executed decision. | Drain a replaced donor only when its qualified replacement is ready. Preserve original opportunities, accepted-submission cooldown and cumulative ceiling. |
+| Existing stride | Qualify actual adoption of the single declared grow/switch/verify strategy, the ensuing complete experiment and the next evidence-informed decision. | Release paired slots from preceding work; do not combine stride changes with G/C or treat a declaration as execution. |
+| G/C | Qualify the actual current client/receiver, freeze packets, episode/rubric definitions and matched windows, then execute the declared factorial or a prospectively narrowed comparison. | Keep the four-cell design above. Stage only when source and comparable windows remain qualified; a narrower pair cannot retrospectively become the factorial. |
+| Outcome refinement, lower priority | Resolve overlap with G/C and independently qualify an isolatable functional difference before considering a matched comparison. | No automatic extra cells, doubled factorial or renewed budget. Insufficient compatible source, slots or original remaining time leaves a candidate pending. |
+
+Where a 36h cumulative ceiling is authorized, remaining time is at most
+`36h - source age - subsequent setup/wait/recovery elapsed`, measured on the
+owning absolute clock. A point captured at 9h or 13.5h therefore leaves at most
+27h or 22.5h before those later costs. These are upper bounds, not allocations.
+Model inputs still receive no host deadline or persistent runtime guidance.
+
+[PR #6784](https://github.com/loopx-project/loopx/pull/6784), inspected at
+`a1e9cee8ae9959eeacfc2bb14053446d02cc4afe`, is a lower-priority candidate:
+original-intent/cumulative-requirement preservation, per-requirement evidence
+review and uncovered-gap planning. Its default workflow has no overall enabled
+switch; optional executable checks are an evidence path, not a control for the
+whole intervention. The inspected proposal is not live-model or efficacy proof.
+
+A possible counterfactual is one qualified common base Q versus Q plus only
+the isolated outcome-refinement difference, with all necessary common fixes.
+Verify ordinary installation and state compatibility before preregistration.
+Restore the same immutable pre-new-write point into separate states; never feed
+newer requirement-state writes back into an incompatible older binary. Do not
+invent a disabled configuration, second Goal store or selectable policy version.
+If the difference cannot be isolated, retain engineering characterization only.
+
+G tests an additional review instruction; C organizes already-delivered facts;
+outcome refinement also changes structured requirement maintenance/review.
+Merge equivalent questions instead of duplicating cells. For partial overlap,
+hold G/C, stride and fresh reconstruction fixed and name the incremental package.
+If outcome refinement becomes the common base, later G/C estimates are increments
+on that base, not evidence of outcome refinement's own effect.
+
 ## Measurement and decision
 
-Use the existing [measurement and episode
-contract](../../../../docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md#6-measurement-model):
+Reuse the [measurement and episode contract](../../../../docs/architecture/rfcs/long-horizon-harness-benchmark-research-program-v0.md#6-measurement-model)
+and the shipped [trajectory-assessment owner](../../../../docs/reference/trajectory-assessment.md).
+Use the chain **delivery → actual adoption → research evidence/decision →
+adopted candidate → native outcome and cost** to explain a comparison. This is
+an evidence chain to investigate, not an automatically inferred causal graph.
 
-- **Native outcome:** valid best and final result, native sub-scores and
-  time/cost to a predeclared material threshold. Keep quality and resource
-  penalties distinct. An absent submission is unmeasured, not a measured
-  zero gain.
-- **Actual research:** independently assess goal relevance, experimental
-  discrimination, new information, applicable evidence adoption and uninformative
-  repetition. Trace the claim to code/input/result and the next executed action.
-  A justified continuation or informative negative result can be useful.
-- **Complete cost and coverage:** source cost once at study level, per-arm
-  inherited age, setup, marginal replan and continuation costs; cached/uncached
-  input, output, tools, control, evaluation, recovery and measured attention.
-  Retain unknown/unallocated cost; use interval unions for concurrent wall time.
+### Freeze episodes, eligibility and coverage
 
-Freeze episode boundaries/rubric before inspecting arm labels and gains. Use
-independent blinded assessment and report disagreement/unknowns before promoting
-model-judge ratios to a scientific metric. A purpose-selected checkpoint cannot
-estimate whole-run useful-exploration coverage. Compare G1C0−G0C0,
-G0C1−G0C0 and the interaction using the actual matched units; correlated tasks,
-repeated inputs and overlapping windows are not independent samples.
+A research episode spans a question/competing explanation, intervention,
+observation and subsequent decision, potentially across Turns. Freeze its start,
+end rule, prior-evidence scope, eligibility and observation window before judging
+arm labels or gains. Unfinished episodes stay visible and right-censored where
+appropriate. Calls, Turns, screenshots, graph nodes and repeated inputs are not
+independent episodes. Overlapping episodes share dependencies and costs.
 
-No default promotion follows from a better-looking plan. Require real adoption
-and native outcome/full-cost evidence across qualified late cases. Preserve
-regressions and stop/revise on treatment leakage, incomplete recovery or an
-ineffective high-cost intervention. Low scores or an unchanged method alone
-are not stopping rules. If only the combined arm works, do not credit both
-components without their separate comparisons.
+The curator declares episode eligibility before model execution. Report the
+selection rule, known population or unknown population, exhaustive flag, omitted
+material and excluded no-follow-up opportunities. A purposive debugging sample
+or `exhaustive=false` cannot yield a whole-run rate. Never let the model remove
+difficult cases or silently repair a denominator after seeing its labels.
+
+### Existing six process judgments
+
+All six reuse the existing TypeScript vocabulary and reducer. They remain
+`uncalibrated_model`; this study introduces neither a second scorer nor a
+weighted progress total. For each row, report yes/no/unknown/eligible. The
+denominator and endpoint differ by metric, even on the same episode pack.
+
+| Metric and decision question | Eligible denominator and window | Supporting evidence and interpretation |
+|---|---|---|
+| `goal_alignment`: does executed work address the original objective's limiting component? | Predeclared eligible executed episodes in the fixed window. | Original objective/priorities plus executed code/input and a justified bottleneck link. Restating the Goal is insufficient; a small improvement can be aligned. |
+| `benefit_test`: was claimed utility actually tested? | Eligible completed episodes. | Native evaluation or an independently justified task-representative proxy on the objective path. A valid negative test can be yes; prerequisite-only correctness is no, not worthless. Unknown proxy representativeness stays unknown. |
+| `discrimination`: were competing explanations distinguished? | Predeclared completed experiments. | Frozen alternatives, intervention, controls, validity and observation. Invalid experiments are no; missing validity is unknown. Passing unrelated checks or one favorable proxy is insufficient. |
+| `information_gain`: was a relevant unresolved uncertainty resolved? | Predeclared eligible episodes with their available prior-evidence scope. | Prior evidence, new observation and the uncertainty it resolves. Useful negatives count; noisy unresolved results and missing prior coverage remain unknown. |
+| `evidence_adoption`: did applicable feedback inform later action? | Applicable-evidence episodes with a real subsequent action opportunity before the cutoff; explicitly exclude no-opportunity cases. | Released feedback, availability time and source-bound later code, experiment or deliberately retained artifact. Citation/Todo alone is insufficient. Missing linkage stays unknown. |
+| `redundancy`: was the same question/intervention/input repeated without a useful reason? | Assessable eligible episodes under the frozen prior-evidence scope. | Method/input identity plus prior result, later execution and replication/noise/recovery rationale. Here yes indicates a problem. Necessary verification and legitimate replication are not automatically redundant. |
+
+For every row, `eligible = yes + no + unknown` and
+`assessed_fraction = (yes + no) / eligible`. Keep unknowns in the denominator.
+`[yes / eligible, (yes + unknown) / eligible]` bounds missing labels in this
+sample; it is not a confidence interval, calibration or population estimate.
+An eligible count of zero is N/A. An adverse-direction redundancy verdict must
+not be displayed as useful progress. Numerical summaries do not certify that
+cited lines entail a model's judgment.
+
+### Facts beside the six judgments
+
+These are existing fact readbacks, calculations from bound evidence, or proposed
+study diagnostics as marked below. They are not additional model-score fields.
+
+| Mechanism or outcome | Fixed unit, denominator/window and unknown rule | Source, association and current availability |
+|---|---|---|
+| Treatment delivery and use | Attempted due-replan inputs; distinguish delivered, undelivered and unknown. Separately inspect subsequent actual use. | Exact client-visible input/response, packet digest, Goal/Turn/obligation and following action. The prototype qualifies framing; an output file is not proof of receipt, and receipt is not use. Current real receiver/model journey remains pending. |
+| Feedback response lag | Applicable released feedback with a qualifying subsequent action: action time minus feedback-available time. Censor no action at the fixed endpoint; missing timestamps are unknown. | Native delivery and solver action timestamps, with version-bound evidence. Do not measure from submission or infer adoption from adjacency. Derivable where both events and their relationship are qualified; no generic all-run reducer is claimed here. |
+| Proxy-to-native transfer and retention | Proxy-improved candidates with eligible completed valid native follow-up: count improved/unchanged/regressed against the fixed anchor. Show no-follow-up candidates separately. | Same candidate source/input, representative-proxy basis, native scorer/conditions and actual retain/reject readback. Proposed study reduction; a staged candidate, next working tree and saved incumbent remain distinct. |
+| Native initial/window-best/retained/latest-valid/final | Fixed starting incumbent and common elapsed window; preserve submission order, metric direction and valid/invalid/missing distinctions. Final remains pending while running. Threshold time/cost is censored when unreached. | Existing native projection supplies bounded first/best/retained/final-valid facts when its coverage permits. A complete prefix is needed for submission-one initial; capture-final-valid is not study-final. Retention is provider-selected, not mathematical best. Matched windows/threshold costs still need study qualification. |
+| Operational loss and checkpoint utility | Separate failures/attempts for wake, replan, capture and restore; then qualified restore-and-continue points/attempted points. Preserve every failed admitted arm. | Existing receipts, source manifests and actual continuation. File presence does not prove completeness; exit zero can still be premature host termination. Recovery cost is separate from scientific strategy quality. Cross-stage study reduction remains to be qualified. |
+| Complete cost | Per-arm continuation plus study-level source cost once; fixed observation window with unknown/unallocated intervals visible. | Solver, analysis-job, native, setup/restore/retry and operator evidence retain separate owners. Complete-session usage projection exists; donor-plus-continuation, shared-host, price and full-study totals are not automatically available. |
+
+Difference cumulative usage only within its qualified session history; subtract
+an inherited baseline once and retain resets/gaps as unsupported. Reprocessing
+inherited context is new cost. Cached input is part of input; reasoning may
+already be part of output. Concurrent wall time uses interval unions. Separate
+analyzer development/maintenance cost from every analysis invocation, including
+failures and retries; include both in the corresponding full-study accounting.
+Unknown prices, human attention or intervals do not become invented dollars,
+savings or a waste percentage. An entire work Turn is not pure replan overhead.
+
+### Analyzer qualification and example design
+
+Before scientific G/C comparison, curate existing authorized positive,
+negative, unchanged, unadopted, missing-coverage and operational-failure cases.
+Keep raw trajectories and exact case readbacks private. The following are
+reusable **diagnostic designs**, not G/C treatment results or fixed model labels:
+
+| Case design | Trace to verify | Discriminating interpretation |
+|---|---|---|
+| Evidence was captured but a bounded index was mistaken for the whole history | Checkpoint/report digest → visible projection and omissions → repeated method → corrective audit → next executed action and its cost. | Separates file loss from retrieval/coverage interpretation. A later correction may adopt useful negative evidence; not all corrective-Turn cost is waste. |
+| Local improvement fails native evaluation | Proxy conditions → exact evaluated source → released native regression → actual incumbent restoration → next experiment. | Benefit testing and useful information can coexist with no native improvement. Preserve positive controls and timing/quality decomposition; do not attribute the whole result to one changed module. |
+| A promising local candidate is deliberately not submitted | Complete diagnostic evidence, including negative controls → rejection/retained artifact → real next action. | No native follow-up is missing measurement, not zero. Evidence adoption needs the later opportunity and action; hypothetical saved evaluation cost is unknown. |
+| A valid positive candidate and a premature-exit counterexample | Bind the positive candidate archive to native feedback and actual retention; separately bind automatic wait/resume ownership to the terminal worker trace. | Positive native transfer does not prove component-level causality. Premature host exit belongs to operational loss, not a valid strategy negative or a reset evaluation opportunity. |
+
+First review episode boundaries and eligibility independently without arm labels
+or outcome magnitudes, then audit citation entailment and alternative readings.
+Use an independent blind rater, report agreement/disagreement on shared eligible
+pairs and coverage of unknowns, and reserve held-out cases for calibration.
+Freeze the revised evidence packs, rubric/method and analysis configuration
+before comparing arms. Until actual calibration, retain `uncalibrated_model`.
+
+The production owner already binds normalized complete input, rubric/method,
+model, effort and requested tier into the analysis key; registration verifies
+source hashes/excerpts, and the reducer requires each eligible pair exactly
+once. Reuse it. A changed method/input/configuration creates a new applicable
+key/pack; keep old outputs historical and never change standards for only one
+arm. Range validation is not semantic entailment; automatic episode discovery,
+whole-run coverage, causal adoption links and evaluator calibration remain
+gaps. Improve the evidence/curation method first; propose a bounded owner change
+only for a demonstrated missing production contract.
+
+Evidence curation, source/hash checks and blind-method preparation can proceed
+offline alongside donor capture. An analysis preview, status read or fact graph
+uses no extra model call. Paid analysis needs existing explicit admission,
+source/configuration qualification and cancel/retry ownership. Record every
+analysis attempt separately. Warm receiver and frozen late-point continuation
+qualification precede scientific comparison; old-source synthetic success
+cannot substitute. No analysis finding is sent back to a frozen solver. Feeding
+analysis back would be another prospectively declared intervention.
+
+Compare G1C0−G0C0, G0C1−G0C0 and the interaction only using actually matched
+units. Correlated episodes, repeated inputs and overlapping windows are not
+independent samples. Do not allocate native gains across episodes or report an
+uncalibrated combined score. A justified continuation can be useful; more pivots
+or reviews are not inherently better.
+
+No default promotion follows from a better-looking plan. Require actual
+adoption, native outcome and complete-cost evidence across qualified late cases.
+Preserve regressions; stop/revise for treatment leakage, incomplete recovery or
+an ineffective high-cost intervention, not low score or unchanged method alone.
+If only the combined arm works, do not credit both components without separate
+comparisons. Publication and a successful analysis job do not close the study.
 
 ## Remaining author work
 
