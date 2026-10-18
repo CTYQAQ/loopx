@@ -1582,6 +1582,14 @@ def test_default_turn_cli_rejects_stopped_source_behind_stale_global_mirror(
     mirror.write_text(json.dumps(mirrored))
     original_mirror = mirror.read_bytes()
     executable, native_log = _fake_codex(tmp_path)
+    native_launch = tmp_path / "native-launch.txt"
+    native_source = executable.read_text()
+    assert "args = sys.argv[1:]" in native_source
+    executable.write_text(native_source.replace(
+        "args = sys.argv[1:]",
+        f"pathlib.Path({str(native_launch)!r}).write_text('started\\n')\nargs = sys.argv[1:]",
+        1,
+    ))
     monkeypatch.setenv("FAKE_CODEX_LOG", str(native_log))
     original_prompt = codex_cli._prompt
     stopped = []
@@ -1614,9 +1622,12 @@ def test_default_turn_cli_rejects_stopped_source_behind_stale_global_mirror(
             "--validation-command-json", json.dumps([sys.executable, "-c", "pass"]), "--execute",
         ])
     payload = json.loads(output.getvalue())
-    assert stopped and not native_log.exists(), payload
+    # Independent process and model-boundary markers prove this rejection did
+    # not dispatch. The public error remains conservative because the same
+    # rejection type can also arise after a Host result has already arrived.
+    assert stopped and not native_launch.exists() and not native_log.exists(), payload
     assert code == 1 and "goal_stopped" in json.dumps(payload), payload
-    assert payload["effects"]["host_invoked"] is False
+    assert payload["effects"]["host_invoked"] is not True
     assert not _session_files(runtime)
     index = runtime / "goals/loopx-turn-fixture/runs/index.jsonl"
     assert not index.exists() or "quota_slot_spent" not in index.read_text()
