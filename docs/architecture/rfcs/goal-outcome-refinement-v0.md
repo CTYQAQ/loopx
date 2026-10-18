@@ -122,6 +122,28 @@ Replan should use evidence to choose the next useful action or justify continuin
 it; neither a gap nor a review mandates a direction change. No new scheduler,
 periodic audit, quota debit or outcome-driven root stop is introduced.
 
+## Simplify the default path
+
+There is no Goal-acceptance enable switch in the new authoring path. Requirements,
+milestone evidence review and uncovered-work replanning are always available.
+Retain the legacy persisted/wire `enabled` field only for compatibility with
+configured command checks: changing its default would revive disabled commands
+and completion constraints. Ordinary readback describes requirements, reviews
+and configured checks instead of reporting that Goal acceptance is disabled.
+
+An existing outcome update needs only its ID, source and changed fields. The
+owner resolves its immutable objective/Agent and retained requirements/work;
+creation still requires an explicit objective and owner. A milestone review can
+therefore accompany the existing writeback without repeating those declarations.
+
+For executable checks, accept `{outcome_id, criteria: [{id, validation_argv, ...}]}`.
+The typed owner resolves requirement descriptions, objective and linked work from
+that outcome. The prepared proposal shows the resolved snapshot and commands;
+apply resolves them again and rejects changed requirements/work before execution.
+The snapshot supports review and does not become a second requirement authority.
+Legacy standalone check documents remain supported. There is no implicit command
+execution, new permission or root completion decision.
+
 ## Open-ended research and no premature stop
 
 Supporting outcomes are subordinate to the original research objective. A local
