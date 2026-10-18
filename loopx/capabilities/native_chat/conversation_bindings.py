@@ -7,6 +7,7 @@ This file stores no conversation text and creates no Goal or model thread.
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 import uuid
@@ -178,7 +179,8 @@ class ChatConversationBindings:
     def resolve(self, *, binding_id: str, source_ref: str, sender_ref: str,
                 private_human_message: bool, session_context: dict[str, Any] | None = None,
                 group_ref: str | None = None, topic_ref: str | None = None,
-                group_human_message: bool = False, include_observation: bool = False) -> dict[str, Any]:
+                group_human_message: bool = False, include_observation: bool = False,
+                origin: str | None = None) -> dict[str, Any]:
         current = self.read()
         row = next((item for item in current.get("bindings", []) if item.get("binding_id") == binding_id), None)
         if row is None:
@@ -191,14 +193,9 @@ class ChatConversationBindings:
         if next((item for item in current.get("bindings", [])
                  if item.get("binding_id") == binding_id), None) != row:
             raise ValueError("conversation binding changed during identity verification")
-        registry_scope = {}
-        if row.get("goal_scope") == "all_registered":
-            registry_scope["available_goal_ids"] = self.goal_scope_ids(row)
-        selected = self._core("collaboration.conversation.bound_context", {
-            "current": current, "binding_id": binding_id, "source_ref": source_ref, "sender_ref": sender_ref,
-            "private_human_message": private_human_message, "observation": observation,
-            "available_projects": self.projects.available(),
-            **registry_scope,
+        selected = self._resolve_observed(current, row, observation, {
+            "source_ref": source_ref, "sender_ref": sender_ref, "private_human_message": private_human_message,
+            **({"origin": origin} if origin is not None else {}),
             **({"session_context": session_context} if session_context is not None else {}),
             **({"group_ref": group_ref, "topic_ref": topic_ref,
                 "group_human_message": group_human_message} if group_ref is not None or topic_ref is not None or group_human_message else {}),
@@ -207,6 +204,30 @@ class ChatConversationBindings:
         # outside the persisted context and opt-in; it is never a cached grant
         # or a substitute for the next admission/delivery owner's fresh check.
         return {**selected, "observation": observation} if include_observation else selected
+
+    def _resolve_observed(self, current, row, observation, source):
+        return self._core("collaboration.conversation.bound_context", {
+            "current": current, "binding_id": row["binding_id"], "observation": observation,
+            "available_projects": self.projects.available(), **source,
+            **({"available_goal_ids": self.goal_scope_ids(row)} if row.get("goal_scope") == "all_registered" else {}),
+        })
+
+    @contextmanager
+    def local_input(self, saved: dict[str, Any]):
+        """Observe outside the publication fence, then retain it through enqueue.
+
+        This is the existing loopback operator's continuation of a private
+        binding. Saved fields select an identity; only fresh Core checks grant it.
+        """
+        source = {"source_ref": saved["source_ref"], "sender_ref": saved["operator_ref"],
+                  "private_human_message": False, "origin": "web", "session_context": saved}
+        observed = self.resolve(binding_id=saved["binding_id"], include_observation=True, **source)
+        with exclusive_file_lock(self.path, operation="admit_local_bound_input"):
+            current = self.read()
+            if next((row for row in current.get("bindings", [])
+                     if row.get("binding_id") == saved["binding_id"]), None) != observed["binding"]:
+                raise ValueError("conversation binding changed before input admission")
+            yield self._resolve_observed(current, observed["binding"], observed["observation"], source)
 
     def goal_scope_ids(self, binding: dict[str, Any]) -> list[str]:
         if binding.get("goal_scope") != "all_registered":

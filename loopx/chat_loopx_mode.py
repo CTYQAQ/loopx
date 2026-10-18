@@ -649,10 +649,27 @@ class ChatLoopXMode:
             created=created, woken_at=now,
         )
 
-    def recover(self, session_id, adapter):
+    @staticmethod
+    def observe_recovery(
+        adapter: Any,
+        goal_commit: Callable[[], Any],
+    ) -> dict[str, Any]:
+        # Reject a known-stale identity before pausing the native transport.
+        # Provider reads remain outside the short commit guard.
+        with goal_commit():
+            pass
         driver = CodexGoalDriver(adapter.session)
         driver.pause()
-        self.store.update_session(session_id, native_goal=driver.compact(driver.read()))
+        return driver.compact(driver.read())
+
+    def commit_recovery(
+        self,
+        session_id: str,
+        native_goal: dict[str, Any] | None,
+    ) -> None:
+        if native_goal is None:
+            return
+        self.store.update_session(session_id, native_goal=native_goal)
         for row in self.store.loopx_ingress(session_id):
             if row["status"] == "delivering":
                 self.store.update_ingress_receipt(session_id, row["client_ingress_id"], status="uncertain")
@@ -1121,7 +1138,8 @@ def pump_delegation_wakes(
 class DelegationWakeService:
     """Cheap local pump hosted by the existing Chat server, beside the return service."""
 
-    def __init__(self, controller, *, goal_context=None, interval=WAKE_INTERVAL_SECONDS):
+    def __init__(self, controller: Any, *, goal_context: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+                 interval: float = WAKE_INTERVAL_SECONDS) -> None:
         self.controller = controller
         self.goal_context = goal_context
         self.interval = interval
@@ -1130,7 +1148,7 @@ class DelegationWakeService:
             target=self.run, daemon=True, name="loopx-delegation-wakes"
         )
 
-    def start(self):
+    def start(self) -> DelegationWakeService:
         self.thread.start()
         return self
 
@@ -1146,6 +1164,6 @@ class DelegationWakeService:
                 _LOG.warning("Delegation wake receipts unavailable; retrying")
             self.stop.wait(self.interval)
 
-    def close(self):
+    def close(self) -> None:
         self.stop.set()
         self.thread.join(timeout=3)

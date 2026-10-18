@@ -88,7 +88,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
     {notice ? <p role="status">{notice}</p> : null}</>;
   const readOnly = !canManage;
   const criterionText = (item: typeof criteria[number]) => item.oracle
-    ? ({current: zh ? "当前版本已核对" : "Current versions checked", recorded: zh ? "历史结果，当前版本未核对" : "Recorded; current versions not checked", stale: zh ? "来源或版本已变化，请重新检查" : "Source or versions changed; check again", failed: zh ? "检查失败；修复交付物后可再次检查" : "Checks failed; repair the delivery before checking again", unverified: zh ? "尚未检查" : "Not checked", unavailable: zh ? "证据不可用" : "Evidence unavailable"})[fresh ? item.oracle.state : "recorded"]
+    ? copy.oracleState[fresh ? item.oracle.state : "recorded"]
     : fresh ? copy.verificationState[item.state] : copy.retained;
   const advancedConfiguration = management || enabled ? <details className="delivery-check-advanced"><summary>{zh ? "高级配置与诊断" : "Advanced configuration and diagnostics"}</summary>
         <p>{copy.guidance}</p>
@@ -148,11 +148,11 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   </> : null;
   return <section className={`delivery-acceptance-contract${overview ? " is-overview" : ""}`} aria-label={copy.title} aria-busy={busy}>
     <div className="delivery-acceptance-content">
-      <header className="delivery-check-heading"><div>{!overview || plan ? <h3>{copy.title}</h3> : null}
+      {!overview || plan || enabled ? <header className="delivery-check-heading"><div>{!overview || plan ? <h3>{copy.title}</h3> : null}
         <p className={overview && (plan || enabled) ? "goal-overview-objective" : undefined}>{plan ? plan.document.objective : enabled ? contract.objective : (zh ? "Agent 准备检查方案后，可在这里检查交付物。" : "Check the delivery here once the Agent prepares a plan.")}</p>{plan ? <p>{zh ? "将保存这份方案、更新相关任务的验收关联，并在本机运行以下检查。准备方案本身不会执行命令。" : "This saves the plan, updates its task associations and runs the following checks locally. Preparation itself executes no commands."}</p> : null}</div>
         {canManage && fresh && (plan || enabled) ? <button className={`delivery-check-primary${plan ? " is-prepared" : ""}`} type="button" disabled={busy || !!error}
           onClick={() => void operate(plan ? "adopt" : "verify")}>{busy ? (zh ? "正在检查…" : "Checking…") : plan ? (zh ? "采用并检查" : "Use plan and check") : (zh ? "检查交付" : "Check delivery")}</button> : null}
-      </header>
+      </header> : null}
       {overview && !enabled && !plan ? children : null}
       {plan ? <div className="delivery-check-plan">
         <p>{plan.document.scope.kind === "all_advancement" ? copy.allWork

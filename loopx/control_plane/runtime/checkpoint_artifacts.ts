@@ -16,10 +16,28 @@ import {normalizeHeartbeatReplanObligationId, normalizeHeartbeatTodoId} from "..
 import {EffectRuntimeConflictError, EffectRuntimeRequestError} from "../effect_runtime_errors.ts";
 import {EffectiveAction} from "../quota/effective_action.generated.ts";
 import {BARE_SHA256_PATTERN} from "../content_digest.ts";
+import {checkpointRetentionPlan} from "./checkpoint_retention.ts";
 
 const SCHEMA = "loopx_checkpoint_artifact_set_v0";
 type Component = {id: string; source_path: string};
 type Member = {path: string; kind: "file" | "directory"; mode: number; size?: number; sha256?: string};
+
+// Keep independent member IO bounded, including on failure: staging cleanup
+// must not race copies or flushes that are still running after a rejection.
+async function mapMembers<T, R>(items: T[], visit: (item: T) => Promise<R>): Promise<R[]> {
+  const result = new Array<R>(items.length);
+  let next = 0, failed = false;
+  let failure: unknown;
+  await Promise.all(Array.from({length: Math.min(8, items.length)}, async () => {
+    while (!failed && next < items.length) {
+      const index = next++;
+      try {result[index] = await visit(items[index]);}
+      catch (error) {if (!failed) {failed = true; failure = error;}}
+    }
+  }));
+  if (failed) throw failure;
+  return result;
+}
 
 function absolute(value: unknown, label: string): string {
   const path = requireNonEmptyString(value, label);
@@ -61,21 +79,41 @@ async function members(root: string, sourceObservation: boolean): Promise<Member
   await physical(root);
   const output: Member[] = [];
   async function visit(path: string, name: string): Promise<void> {
-    const stat = await lstat(path);
-    if (stat.isSymbolicLink()) throw new Error("checkpoint source contains a symlink");
-    // SQLite's reader index and an empty WAL contain no committed data. A
-    // read-only backup can create either on a closed WAL database. Exclude
-    // only these recognized sidecars, not a nonempty WAL or an explicitly
-    // requested standalone file. Artifact verification excludes nothing.
-    if (sourceObservation && name !== "" && stat.isFile() &&
-        (await sqliteSidecar(path, ["-shm"]) ||
-         (stat.size === 0 && await sqliteSidecar(path, ["-wal"])))) return;
-    if (stat.isDirectory()) {
-      output.push({path: name, kind: "directory", mode: stat.mode & 0o777});
-      for (const child of (await readdir(path)).sort()) await visit(join(path, child), name ? `${name}/${child}` : child);
-    } else if (stat.isFile()) {
-      output.push({path: name, kind: "file", mode: stat.mode & 0o777, size: stat.size, sha256: await digest(path)});
-    } else throw new Error("checkpoint source contains an unsupported file type");
+    type Node = {member?: Member; children: Node[]};
+    const tree: Node = {children: []};
+    let frontier = [{path, name, node: tree}];
+    while (frontier.length) {
+      frontier = (await mapMembers(frontier, async entry => {
+        const {path, name, node} = entry, stat = await lstat(path);
+        if (stat.isSymbolicLink()) throw new Error("checkpoint source contains a symlink");
+        // SQLite's reader index and an empty WAL contain no committed data. A
+        // read-only backup can create either on a closed WAL database. Exclude
+        // only these recognized sidecars, not a nonempty WAL or an explicitly
+        // requested standalone file. Artifact verification excludes nothing.
+        if (sourceObservation && name !== "" && stat.isFile() &&
+            (await sqliteSidecar(path, ["-shm"]) ||
+             (stat.size === 0 && await sqliteSidecar(path, ["-wal"])))) return [];
+        if (stat.isDirectory()) {
+          node.member = {path: name, kind: "directory", mode: stat.mode & 0o777};
+          return (await readdir(path)).sort().map(child => {
+            const childNode: Node = {children: []};
+            node.children.push(childNode);
+            return {path: join(path, child), name: name ? `${name}/${child}` : child, node: childNode};
+          });
+        }
+        if (!stat.isFile()) throw new Error("checkpoint source contains an unsupported file type");
+        node.member = {path: name, kind: "file", mode: stat.mode & 0o777, size: stat.size, sha256: await digest(path)};
+        return [];
+      })).flat();
+    }
+    // Traversal concurrency cannot change the existing depth-first manifest
+    // order (which differs from sorting complete relative path strings).
+    const pending = [tree];
+    while (pending.length) {
+      const node = pending.pop()!;
+      if (node.member) output.push(node.member);
+      for (let i = node.children.length - 1; i >= 0; i--) pending.push(node.children[i]);
+    }
   }
   await visit(root, "");
   if ((await lstat(root)).isFile() && await sqliteFile(root)) {
@@ -137,28 +175,27 @@ async function flushCopiedFile(path: string): Promise<void> {
   }
 }
 async function copyComponent(source: string, destination: string, snapshotDatabases = true): Promise<void> {
-  const stat = await lstat(source);
-  if (stat.isSymbolicLink()) throw new Error("checkpoint source became a symlink");
-  if (stat.isDirectory()) {
-    await mkdir(destination, {mode: 0o700});
-    const children = (await readdir(source)).sort();
-    const databases = new Set<string>();
-    for (const child of snapshotDatabases ? children : []) {
-      const path = join(source, child);
-      if ((await lstat(path)).isFile()) {
-        if (await sqliteFile(path)) databases.add(child);
+  let frontier = [{source, destination, nested: false}];
+  while (frontier.length) {
+    frontier = (await mapMembers(frontier, async entry => {
+      const {source, destination, nested} = entry, stat = await lstat(source);
+      if (stat.isSymbolicLink()) throw new Error("checkpoint source became a symlink");
+      // An explicitly selected standalone sidecar remains a byte artifact.
+      // Directory participants seal their databases through the existing WAL
+      // snapshot owner rather than copying those databases' live sidecars.
+      if (snapshotDatabases && nested && await sqliteSidecar(source, ["-wal", "-shm", "-journal"])) return [];
+      if (stat.isDirectory()) {
+        await mkdir(destination, {mode: 0o700});
+        return (await readdir(source)).sort().map(child => ({source: join(source, child),
+          destination: join(destination, child), nested: true}));
       }
-    }
-    for (const child of children) {
-      if (["-wal", "-shm", "-journal"].some(suffix => child.endsWith(suffix) && databases.has(child.slice(0, -suffix.length)))) continue;
-      await copyComponent(join(source, child), join(destination, child), snapshotDatabases);
-    }
-  } else if (stat.isFile()) {
-    // SQLite's existing physical snapshot owner seals committed WAL contents.
-    if (snapshotDatabases && await sqliteFile(source)) await snapshotSqliteDatabase(source, destination);
-    else await copyFile(source, destination);
-    await flushCopiedFile(destination);
-  } else throw new Error("checkpoint source contains an unsupported file type");
+      if (!stat.isFile()) throw new Error("checkpoint source contains an unsupported file type");
+      if (snapshotDatabases && await sqliteFile(source)) await snapshotSqliteDatabase(source, destination);
+      else await copyFile(source, destination);
+      await flushCopiedFile(destination);
+      return [];
+    })).flat();
+  }
 }
 function manifestBody(raw: unknown): JsonObject {
   const value = requireJsonObject(raw, "checkpoint manifest");
@@ -192,6 +229,52 @@ async function verify(root: string, expected: unknown): Promise<JsonObject> {
 const ADMITTED_RECEIPT_STATUSES: ReadonlySet<string> = new Set(["committed", "replayed", "upgraded"]);
 export async function checkpointArtifacts(value: unknown): Promise<JsonObject> {
   const request = requireJsonObject(value, "checkpoint artifacts request");
+  if (request.action === "retention_plan") {
+    if (!hasExactAuthorityKeys(request, ["action", "input"])) throw new Error("invalid checkpoint retention request");
+    return checkpointRetentionPlan(request.input);
+  }
+  if (request.action === "retention_inventory") {
+    if (!hasExactAuthorityKeys(request, ["action", "bank"])) throw new Error("invalid checkpoint inventory request");
+    const bank = absolute(request.bank, "checkpoint bank");
+    await physical(bank);
+    const points: JsonObject[] = [], incomplete: string[] = [];
+    for (const name of (await readdir(bank)).sort()) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(name)) continue;
+      const root = join(bank, name), info = await lstat(root);
+      if (info.isSymbolicLink()) throw new Error("checkpoint bank contains a symlink");
+      if (!info.isDirectory()) continue;
+      const path = join(root, "checkpoint.json");
+      try {await lstat(path);} catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        incomplete.push(name); continue;
+      }
+      await physical(path);
+      const text = await readFile(path, "utf8"), manifest = manifestBody(JSON.parse(text));
+      if ((await readdir(root)).sort().join(",") !== "checkpoint.json,components") {
+        throw new Error("checkpoint retention found unexpected point members");
+      }
+      await physical(join(root, "components"));
+      const declared = components(manifest.components).map(c => c.id).sort();
+      if ((await readdir(join(root, "components"))).sort().join(",") !== declared.join(",")) {
+        throw new Error("checkpoint retention found undeclared components");
+      }
+      const witness = requireJsonObject(manifest.artifact_witness, "checkpoint artifact witness");
+      let bytes = Buffer.byteLength(text);
+      for (const members of Object.values(witness)) {
+        if (!Array.isArray(members)) throw new Error("invalid checkpoint artifact inventory");
+        for (const member of members) {
+          const row = requireJsonObject(member, "checkpoint member");
+          if (row.kind === "file") {
+            if (typeof row.size !== "number" || !Number.isSafeInteger(row.size) || row.size < 0) throw new Error("invalid checkpoint member size");
+            bytes += row.size;
+          }
+        }
+      }
+      points.push({id: name, sha256: manifest.sha256, sealed_at: (await lstat(path)).mtimeMs / 1000, bytes});
+    }
+    // Metadata-only inventory: this is not member verification or admission.
+    return {points, incomplete, integrity_verified: false, execution_authority_granted: false};
+  }
   if (request.action === "restore_capture") {
     if (!hasExactAuthorityKeys(request, ["action", "checkpoint_sha256", "goal_id", "agent_id", "current_obligation_id", "review",
         ...(request.include_review_basis === undefined ? [] : ["include_review_basis"])]) ||
@@ -357,15 +440,17 @@ export async function checkpointArtifacts(value: unknown): Promise<JsonObject> {
     // that could otherwise escape a before/after comparison. SQLite is sealed
     // by its existing snapshot owner and has a separate physical witness.
     for (const c of sources) {
-      for (const member of before[c.id] as Member[]) {
-        if (member.kind !== "file") continue;
-        const source = (await lstat(c.source_path)).isDirectory() ? join(c.source_path, member.path) : c.source_path + member.path;
-        if (await sqliteFile(source) || (member.path !== "" && await sqliteSidecar(source, ["-wal", "-shm", "-journal"]))) continue;
-        const copied = (artifacts[c.id] as Member[]).find(m => m.path === member.path && m.kind === "file");
+      const directory = (await lstat(c.source_path)).isDirectory();
+      const copiedMembers = new Map((artifacts[c.id] as Member[]).filter(m => m.kind === "file").map(m => [m.path, m]));
+      await mapMembers(before[c.id] as Member[], async member => {
+        if (member.kind !== "file") return;
+        const source = directory ? join(c.source_path, member.path) : c.source_path + member.path;
+        if (await sqliteFile(source) || (member.path !== "" && await sqliteSidecar(source, ["-wal", "-shm", "-journal"]))) return;
+        const copied = copiedMembers.get(member.path);
         if (!copied || copied.sha256 !== member.sha256 || copied.size !== member.size || copied.mode !== member.mode) {
           throw new Error("checkpoint copied bytes do not match the reviewed source");
         }
-      }
+      });
     }
     const body: JsonObject = {schema_version: SCHEMA, components: sources, point_metadata: requireJsonObject(request.point_metadata, "checkpoint point metadata"),
       source_witness: before, artifact_witness: artifacts, research_point_qualified: false,

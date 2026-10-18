@@ -7,7 +7,7 @@ export const statusSourceCatalogStorageKey = "loopx-status-source-catalog-v1";
 export type StatusSource = {
   hostAlias?: string;
   id: string;
-  kind: "local" | "ssh_tunnel";
+  kind: "local" | "ssh_tunnel" | "runtime";
   label: string;
   readOnly: boolean;
   statusUrl: string;
@@ -19,6 +19,24 @@ export type StatusSourceCatalog = {
 };
 
 export type StatusSourceStorage = Pick<Storage, "getItem" | "setItem">;
+
+/** Runtime choices describe physical readers, not new execution Goals. */
+export function runtimeStatusSourceCatalog(
+  entries: {id: string; label: string; status_url: string}[] | undefined,
+  currentUrl: string,
+  baseHref: string,
+): StatusSourceCatalog | null {
+  if (!entries?.length || entries.length > 12) return null;
+  const sources: StatusSource[] = [];
+  for (const entry of entries) {
+    const resolved = normalizedTunnelUrl(entry.status_url, baseHref);
+    if (!("url" in resolved) || sources.some((s) => s.id === entry.id || s.statusUrl === resolved.url)) return null;
+    sources.push({id: entry.id, label: entry.label, kind: "runtime", readOnly: true, statusUrl: resolved.url});
+  }
+  const current = new URL(currentUrl, baseHref).toString();
+  // A source cannot replace the selected origin with an unrelated catalog.
+  return sources.some((s) => s.statusUrl === current) ? {schemaVersion: 1, sources} : null;
+}
 
 export const localStatusSource: StatusSource = {
   id: "local",

@@ -287,6 +287,13 @@ export function resolveBoundConversation(params: JsonObject): JsonObject {
   observed(row, params.observation);
   const source = ref(params.source_ref, "source conversation identity");
   const group = row.audience === "group";
+  // The local operator may continue an existing private Session. This is a
+  // distinct host-observed origin, never a fabricated provider human event.
+  const local = params.origin === "web";
+  if (params.origin !== undefined && !local) throw new EffectRuntimeRequestError("unsupported bound input origin");
+  if (local && (group || params.session_context === undefined || params.private_human_message !== false)) {
+    throw new EffectRuntimeRequestError("local input requires an existing private bound Session");
+  }
   let topic: JsonObject = {};
   if (group) {
     const groupRef = ref(params.group_ref, "group reference"), topicRef = ref(params.topic_ref, "topic reference");
@@ -296,7 +303,7 @@ export function resolveBoundConversation(params: JsonObject): JsonObject {
       throw new EffectRuntimeRequestError("message audience is outside the binding grant");
     }
     topic = {group_ref: groupRef, topic_ref: topicRef, filesystem_scope: "workspace_only"};
-  } else if (params.sender_ref !== row.operator_ref || params.private_human_message !== true
+  } else if (params.sender_ref !== row.operator_ref || params.private_human_message !== !local
       || params.group_ref !== undefined || params.topic_ref !== undefined || params.group_human_message === true) {
     throw new EffectRuntimeRequestError("message audience is outside the binding grant");
   }

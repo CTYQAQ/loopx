@@ -210,19 +210,28 @@ The [existing behavior findings/report](../../../reference/benchmark-behavior-fi
 support exploratory observations and interpretations, not scientific scoring.
 The toolkit's compact native Goal lifecycle summary is not a full history graph
 or quality assessment; the experiment board still owns native results and
-comparability. A unified deep-research evaluation service, product assessment
-schema and calibrated model rubric are not implemented. Initial integration
-can consume permitted versioned research analysis artifacts, without relabeling
-these existing producers as the missing service.
+comparability. The current toolkit supplies versioned
+`trajectory_assessment_input_v1` / `trajectory_assessment_v1` artifacts and their
+store; the Goal reader exposes six uncalibrated judgments and bound citations.
+This bounded integration is not a unified scientific evaluation service or a
+calibrated model rubric. It cannot establish native utility or causal benefit.
 
-Before runtime integration, inventory the existing producer and reconcile source
+When extending integration, inventory the existing producer and reconcile source
 snapshot/revisions, requested and observed time coverage, episode/event/artifact
 bindings, permitted audience, input digest, method/code revision, model/configuration
 only if used, qualification, actual cost,
 counterevidence, uncertainty, abstention and result identity. This is an interface
-requirement, not a claim that a schema or calibrated evaluator already exists.
+requirement, not scientific evaluator qualification.
 Observations, Agent interpretations, independent checks and actual adoption retain
 separate provenance. Unqualified model confidence is not a scientific probability.
+
+Keep explicit episode eligibility distinct from judgment uncertainty. Unknown
+eligible episodes remain in the supplied denominator; explicitly ineligible
+episodes do not become no or unknown. Show any declared exclusions beside the
+metric and identify the affected episodes in the same optional detail. Missing
+episode metadata or the difference between sample size and denominator cannot
+establish an exclusion. The reader formats the producer's eligibility and counts;
+it never recalculates scientific eligibility or the metric.
 
 Retain a generated result's historical input basis. New inputs or method make its current
 applicability unestablished; a new assessment cannot silently overwrite it. Keep
@@ -286,6 +295,23 @@ rubric, independent coding and held-out calibration. This note supplies no weigh
 thresholds, automatic interventions or new experiment authorization.
 
 ## Source, access and recovery
+
+Research and experiments use the existing Goal workspace. Within one status
+source, the registry's declared `parent_goal_id` organizes a recursive sidebar:
+children start folded and the selected Goal's ancestors reopen on reload or
+browser Back. Goal ordering moves siblings only; it never changes parentage.
+Orphans and cyclic ancestry remain visible with an unresolved-parent indicator.
+
+Selecting a parent exposes **Only this Goal and its children**. It opens the same
+frontend with a shareable `rootGoalId` display scope; **All Goals** returns to the
+current source's full workspace. A second frontend window can open that URL
+without copying, moving or rebinding live Goals. An unavailable root shows a
+retryable gap, without substituting unrelated Goals. The grouping conveys no
+Agent assignment, dependency, access, budget or lifecycle inheritance; each
+Goal retains its own execution state and acceptance. Child counts do not settle
+the parent's outcome. This same-source view does not itself connect experiment
+instances held in other registries or runtimes; their source-qualified read
+bridge remains a separate integration boundary.
 
 An inline evidence detail needs the producing owner, source identity/revision,
 artifact version, observation/check time, freshness/coverage, explicit relationship
