@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import { BARE_SHA256_PATTERN } from "../content_digest.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { optionalNonEmptyString, requireJsonObject, requireNonEmptyString } from "../runtime_decode.ts";
 import { visionAuthoringContract } from "../goals/vision_checkpoint.ts";
@@ -348,7 +349,7 @@ function acknowledgeVisionEvidence(request: JsonObject): JsonObject {
           !outcomes.some(outcome => (outcome === "new_runnable_successor" || outcome === "new_concrete_blocker") &&
             satisfying.includes(outcome))) return false;
       if (formalObligation && gap.source === "goal_acceptance_contract" &&
-          /^[a-f0-9]{64}$/.test(gap.frontier_revision)) return true;
+          BARE_SHA256_PATTERN.test(gap.frontier_revision)) return true;
     }
     const observedAt = timestamp(gap.generated_at ?? (gap.kind === "vision_outcome_checkpoint_required" &&
       gap.source === "recent_completed_advancement_todo" ? gap.completed_at : null));
