@@ -5,10 +5,10 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { launchBrowser, loadPlaywright } from "./dashboard-browser-smoke-support.mjs";
-import { resolveTestPython } from "../scripts/test-python.mjs";
+import { launchBrowser, loadPlaywright } from "../dashboard-browser-smoke-support.mjs";
+import { resolveTestPython } from "../../scripts/test-python.mjs";
 
-const root = resolve(import.meta.dirname, "..");
+const root = resolve(import.meta.dirname, "../..");
 const output = resolve(root, "output/playwright/runtime-source-workspace");
 const temporary = await mkdtemp(resolve(tmpdir(), "loopx-runtime-reader-"));
 const failFile = resolve(temporary, "unavailable");
@@ -76,6 +76,10 @@ try {
     await page.getByLabel("研究历程", {exact:true}).getByRole("button", {name:"关系图",exact:true}).click();
     await page.locator(".research-history-node").filter({hasText:"Fresh route 0"}).waitFor();
     assert.equal(await page.locator(".research-history-node").filter({hasText:"Retained route"}).count(),0);
+    await page.goBack();
+    await page.getByRole("heading",{name:"Retained research",exact:true}).waitFor();
+    await page.goForward();
+    await page.getByRole("heading",{name:"Fresh research",exact:true}).waitFor();
     await page.reload();
     await page.locator(".research-history-coverage").filter({hasText:"92 / 92"}).waitFor();
     await writeFile(failFile, "unavailable");

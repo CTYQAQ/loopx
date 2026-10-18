@@ -13,7 +13,11 @@ each entry names `id`, `label`, the full pinned `container_id`, the original
 `goal_id`, absolute `registry`, `runtime_root`, `cli`, `python` paths and the
 source's executable `path` (PATH). The startup JSON returns working preview
 URLs and the existing source selector offers the prepared readers. Keep these
-manifests and actual source captures private. Build Chat first or supply
+manifests and actual source captures private. Before staging or updating the PR,
+compare every source, validation script and visual-evidence path with the
+selected Todo's declared write scopes; place presentation evidence inside the
+existing authorized surface rather than assuming all docs/examples are covered.
+Build Chat first or supply
 `--assets-dir`; stop the adapter to remove its temporary readers.
 
 These are read transports, not connected execution Goals or a second registry.
