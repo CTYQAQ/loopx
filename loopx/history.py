@@ -20,8 +20,10 @@ from .control_plane.goals.activation import (
     normalize_goal_activation_state,
 )
 from .control_plane.goals.legacy_event_source import LEGACY_TODO_EVENT_SOURCE_FIELDS
+from .control_plane.goals.path_resolution import resolve_goal_local_path
 from .control_plane.progress_scope import AGENT_LANE_PROGRESS_SCOPE
 from .control_plane.quota.monitor_poll import QUOTA_MONITOR_POLL_CLASSIFICATION
+from .control_plane.quota.host_poll_receipts import read_host_worker_observations
 from .control_plane.quota.ledger_readback import (
     QUOTA_SLOT_SPENT_CLASSIFICATION,
     QUOTA_SLOT_VOIDED_CLASSIFICATION,
@@ -458,6 +460,10 @@ def collect_history(
             **goal_parent_fields(meta),
             "activation_state": activation_state.value,
             "registry_goal_digest": registry_goal_digests.get(current_goal_id),
+            "host_worker_observations": read_host_worker_observations(
+                meta, resolve_goal_local_path(meta.get("state_file"), meta, fallback_base=registry_path.parent),
+                registry_goal_digest=registry_goal_digests[current_goal_id], runtime_root=runtime_root,
+            ) if registry_member else None,
             "display_name": meta.get("display_name") if registry_member else None,
             "domain": meta.get("domain"),
             "status": meta.get("status") if registry_member else "legacy-runtime",

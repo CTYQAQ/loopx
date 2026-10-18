@@ -15,15 +15,16 @@ from __future__ import annotations
 from .effective_action import EffectiveAction
 
 import json
-import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ...file_lock import exclusive_file_lock, write_json_atomic
+
 HOST_POLL_RECEIPT_SCHEMA_VERSION = "loopx_host_poll_receipt_v0"
 HOST_POLL_RECEIPT_DIRNAME = ".loopx-host-poll-receipts"
 HOST_POLL_STALE_MINUTES = 240
+_UNCHANGED_WORKER_OBSERVATION = object()
 
 
 def _receipt_dir_for_goal(goal: dict[str, Any], state_path: Path | None) -> Path | None:
@@ -51,17 +52,31 @@ def record_host_poll_receipt(
     decision: dict[str, Any],
     poll_count: int | None = None,
     now: datetime | None = None,
+    worker_observation: object = _UNCHANGED_WORKER_OBSERVATION,
 ) -> dict[str, Any] | None:
     """Write or refresh the host poll receipt for one goal.
 
-    `expected_continuation` is derived from the decision: only validated
-    terminal no-follow-up marks the loop as expected to stop. Returns the
-    written receipt or None when the goal state path is unknown.
+    `expected_continuation` describes the driver. A validated terminal decision
+    or its explicit paused/unknown report can end that driver's polling; the
+    latter never certifies Goal completion. Ordinary polls retain the worker's
+    latest observation until that worker explicitly clears it.
     """
 
     path = receipt_path_for_goal(goal, state_path)
     if path is None:
         return None
+    with exclusive_file_lock(path, agent_id=agent_id, operation="host_poll_receipt"):
+        return _record_host_poll_receipt(
+            goal, path, agent_id=agent_id, decision=decision,
+            poll_count=poll_count, now=now, worker_observation=worker_observation,
+        )
+
+
+def _record_host_poll_receipt(
+    goal: dict[str, Any], path: Path, *, agent_id: str | None,
+    decision: dict[str, Any], poll_count: int | None, now: datetime | None,
+    worker_observation: object,
+) -> dict[str, Any]:
     current = read_host_poll_receipt(path)
     previous_count = current.get("poll_count") if isinstance(current, dict) else None
     count = (
@@ -86,24 +101,86 @@ def record_host_poll_receipt(
         "expected_continuation": not terminal,
         "last_decision_action": str(decision.get("effective_action") or ""),
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(
-        dir=str(path.parent),
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(receipt, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, path)
-    finally:
-        try:
-            os.unlink(temporary)
-        except FileNotFoundError:
-            pass
+    stored_observations = (current or {}).get("worker_observations", {})
+    # An ordinary liveness poll cannot erase a damaged worker observation.
+    # Keep it visibly unreadable until the source is repaired. Nor should a
+    # malformed optional observation prevent the quota decision from returning.
+    if not isinstance(stored_observations, dict):
+        receipt["worker_observations"] = stored_observations
+        write_json_atomic(path, receipt, mode=0o600, fsync_directory=True)
+        return receipt
+    observations = dict(stored_observations)
+    if worker_observation is None:
+        observations.pop(str(agent_id or ""), None)
+    elif worker_observation is not _UNCHANGED_WORKER_OBSERVATION:
+        if not isinstance(worker_observation, dict) or not agent_id:
+            raise ValueError("worker observation requires a scoped Agent")
+        observations[agent_id] = {**worker_observation, "agent_id": agent_id,
+                                  "observed_at": receipt["last_poll_at"]}
+    if observations:
+        receipt["worker_observations"] = observations
+        own_observation = observations.get(str(agent_id or ""))
+        if isinstance(own_observation, dict) and own_observation.get("status") in (
+            "replan_paused", "replan_outcome_unknown",
+        ):
+            receipt["expected_continuation"] = False
+    write_json_atomic(path, receipt, mode=0o600, fsync_directory=True)
     return receipt
+
+
+def read_host_worker_observations(
+    goal: dict[str, Any], state_path: Path | None, *,
+    registry_goal_digest: str, runtime_root: Path,
+) -> dict[str, Any] | None:
+    """Read driver observations without making them Goal execution authority.
+
+    The caller supplies its actual registry Goal and runtime. A stale scope,
+    corrupt receipt or missing fields cannot reuse another Goal's last state.
+    Paths and registry witnesses are only association checks, never UI fields.
+    """
+    observation = read_host_poll_receipt_observation(
+        receipt_path_for_goal(goal, state_path), expected_goal_id=str(goal.get("id") or ""),
+    )
+    source = {"goal_id": str(goal.get("id") or "")}
+    if observation["read_status"] == "missing":
+        return None
+    if observation["read_status"] != "read":
+        return {**source, "read_status": "unreadable", "rows": []}
+    receipt = observation["receipt"]
+    if "worker_observations" not in receipt:
+        return None
+    workers = receipt["worker_observations"]
+    if not isinstance(workers, dict):
+        return {**source, "read_status": "unreadable", "rows": []}
+    if not workers:
+        return None
+    rows = []
+    stale = False
+    for agent, row in workers.items():
+        if (not isinstance(agent, str) or not agent or not isinstance(row, dict)
+                or row.get("agent_id") != agent
+                or not isinstance(row.get("status"), str)
+                or row["status"] not in {"replan_paused", "replan_outcome_unknown"}
+                or not isinstance(row.get("obligation_id"), str)
+                or not row["obligation_id"]
+                or (row.get("turn_instance_id") is not None
+                    and not isinstance(row["turn_instance_id"], str))
+                or not isinstance(row.get("observed_at"), str)):
+            return {**source, "read_status": "unreadable", "rows": []}
+        try:
+            timestamp = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                raise ValueError("observation requires a timezone")
+        except ValueError:
+            return {**source, "read_status": "unreadable", "rows": []}
+        if (row.get("registry_goal_digest") != registry_goal_digest
+                or row.get("runtime_root") != str(runtime_root.resolve())):
+            stale = True
+            continue
+        rows.append({key: row.get(key) for key in (
+            "agent_id", "status", "obligation_id", "turn_instance_id", "observed_at",
+        )})
+    return {**source, "read_status": "stale" if stale else "read", "rows": rows}
 
 
 def read_host_poll_receipt(path: Path | None) -> dict[str, Any] | None:
@@ -132,7 +209,7 @@ def read_host_poll_receipt_observation(
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {"read_status": "missing", "receipt": None}
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {"read_status": "unreadable", "receipt": None}
     if not isinstance(payload, dict):
         return {"read_status": "unreadable", "receipt": None}
