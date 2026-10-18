@@ -81,11 +81,10 @@ provider failure. A stable operation ID recovers a lost reply; conflicting retri
 stale revisions, another Goal instance and another Agent's mutation are rejected.
 No existing Goal acquires outcomes or changed scheduling merely by upgrading.
 
-The acceptance readback includes declared outcomes even when executable checks
-are disabled. Default outcome maintenance and evidence review have no enable
-switch. The legacy `enabled` field controls only configured check commands; it
-does not disable requirements, review or gap projection. A refinement cannot
-submit independent passing evidence, execute commands or change Goal lifecycle.
+The acceptance readback includes declared outcomes without requiring executable
+checks. All Goals share default outcome maintenance, evidence review and gap
+projection; the current state and readback have no enable switch. A refinement
+cannot submit independent passing evidence, execute commands or change Goal lifecycle.
 
 At a meaningful delivery/experiment milestone, the Agent compares the artifact
 with every retained requirement and records `met`, `unmet` or `uncertain`, with
@@ -124,12 +123,19 @@ periodic audit, quota debit or outcome-driven root stop is introduced.
 
 ## Simplify the default path
 
-There is no Goal-acceptance enable switch in the new authoring path. Requirements,
-milestone evidence review and uncovered-work replanning are always available.
-Retain the legacy persisted/wire `enabled` field only for compatibility with
-configured command checks: changing its default would revive disabled commands
-and completion constraints. Ordinary readback describes requirements, reviews
-and configured checks instead of reporting that Goal acceptance is disabled.
+Every Goal uses the same default loop: retained requirements → evidence review →
+replan when useful work is uncovered → subsequent execution. Delete the overall
+`enabled` switch, not merely change its default or hide it in the UI. The current
+storage and readback have no such field. Executable checks are one evidence path;
+when no check configuration exists, the same requirements/review/replan loop runs.
+
+Upgrade decoding maps previous state into this one model. There is no old-Goal
+cohort or activation step. Existing command configuration, exact Goal lifetime,
+work bindings and evidence keep their meaning; previously removed checks are
+represented as absent configuration. Removing checks retains a revision fence
+and immutable history, so an obsolete reviewed proposal cannot silently apply
+after configuration changes. Older receipts remain replayable without executing
+commands. Default maintenance adds neither command execution nor root stop rules.
 
 An existing outcome update needs only its ID, source and changed fields. The
 owner resolves its immutable objective/Agent and retained requirements/work;

@@ -20,7 +20,8 @@ original Goal too. Only if this basis is absent or stale, use the bound route:
 loopx --format json goal-acceptance inspect --goal-id <goal>
 ```
 
-Reuse the matching outcome ID, original objective and owner. Add stable IDs for
+Reuse the matching outcome ID. Creation needs its original objective and owner;
+updates need only the ID, source and changed fields. Add stable IDs for
 new requirements and link real existing advancement Todos; normal Todo admission
 creates missing work. Omitted earlier requirements/work links remain. Changing
 an existing requirement description fails: conflicting intent needs explicit
@@ -57,7 +58,7 @@ replace them. Reuse the revision from inline context when still current:
 ```
 
 Use actual declarations, not the example claims. At a later milestone, the
-refinement may add `review` and leave `requirements` empty; all existing
+refinement needs only `outcome_id`, `source` and `review`; all existing
 requirements still need review:
 
 ```json
@@ -91,9 +92,15 @@ review actual evidence. Replan may justify continuing the current direction;
 never force a direction change or close the root Goal because a local outcome
 is met. Do not manufacture work merely to spend the budget.
 
-Default maintenance/review has no feature switch. Legacy acceptance `enabled`
-only governs configured executable checks; existing `prepare`, owner apply and
-`verify` preserve their authority. Recording already-authorized requirements
+All Goals use default maintenance/review; no `enabled` switch or activation step
+exists. Executable checks are optional evidence providers. When needed, prepare
+`{"outcome_id":"product-tour","criteria":[{"id":"tour-opening","validation_argv":["python3","check.py"]}]}`
+with `goal-acceptance prepare` or native `prepare_check`. Use a real authorized
+checker. The typed owner resolves retained objective/descriptions/work and shows
+them in the reviewable plan; adoption rejects material source changes. Do not
+copy a second set of requirements. Prepare once when a checker becomes useful,
+not every milestone; use existing owner apply and `verify` authority. Removing
+check configuration (`clear-checks`) leaves the default feedback loop available. Recording already-authorized requirements
 needs no repeated permission. Ask only for missing consequential intent or
 expanded authority. This is an Agent bridge, not universal message interception:
 upgrade workflow skills and reload heartbeat/task context to receive the new
