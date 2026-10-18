@@ -6,6 +6,24 @@ validation only; resolving a source merge followed by a build produces one
 coherent HTML/JavaScript/CSS set. Do not concatenate competing HTML entrypoints or
 asset-retention manifests when resolving an older PR.
 
+For owner-authorized reads of existing container runtimes, the presentation
+adapter `python -m loopx.presentation.runtime_workspace --sources <manifest>`
+serves the packaged Goal workspace directly. The Agent prepares the manifest:
+each entry names `id`, `label`, the full pinned `container_id`, the original
+`goal_id`, absolute `registry`, `runtime_root`, `cli`, `python` paths and the
+source's executable `path` (PATH). The startup JSON returns working preview
+URLs and the existing source selector offers the prepared readers. Keep these
+manifests and actual source captures private. Build Chat first or supply
+`--assets-dir`; stop the adapter to remove its temporary readers.
+
+These are read transports, not connected execution Goals or a second registry.
+The native status and complete validated Explore history stay scoped to the
+physical source, including identical Goal ids in different containers. An
+unavailable container fails visibly without replacement; refreshing retries.
+All mutation endpoints are denied. A read-only source does not imply an
+analysis pack, model execution, adoption or validated benefit; analysis remains
+unavailable until its existing owner binds the appropriate source pack.
+
 ## Task-first delivery / 从用户任务开始
 
 Use the existing task/PR delivery brief, not a second checklist or approval form.

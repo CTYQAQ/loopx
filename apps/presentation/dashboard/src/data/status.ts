@@ -849,6 +849,12 @@ export const localDashboardApiSchema = z.object({
   configure_goal_dry_run_url: z.string().optional().nullable(),
   configure_goal_apply_url: z.string().optional().nullable(),
   control_plane_write_enabled: z.boolean().optional().default(false),
+  // Ephemeral, owner-prepared read sources; never execution registry entries.
+  read_only_sources: z.array(z.object({
+    id: z.string().min(1).max(96),
+    label: z.string().min(1).max(48),
+    status_url: z.string().min(1),
+  })).max(12).optional(),
 }).optional().nullable();
 
 // Core keeps the presentation status contract provider-neutral. A ready/

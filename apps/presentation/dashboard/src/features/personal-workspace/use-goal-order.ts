@@ -3,7 +3,7 @@ import { decodeGoalOrder, goalOrderStorageKey, moveGoal, orderedGoals } from "./
 import type { WorkspaceGoal } from "./personal-workspace-model";
 
 // The sidebar is keyed by source, so neither gestures nor preferences cross machines.
-export function useGoalOrder(goals: WorkspaceGoal[], source: string, canMove = (_from: string, _to: string) => true) {
+export function useGoalOrder(goals: WorkspaceGoal[], source: string, canMove = (_from: string, _to: string) => true, browserOnly = false) {
   const key = goalOrderStorageKey(source);
   const [order, setOrder] = useState(() => {
     try { return decodeGoalOrder(localStorage.getItem(key)); } catch { return []; }
@@ -13,6 +13,14 @@ export function useGoalOrder(goals: WorkspaceGoal[], source: string, canMove = (
   const saver = useRef<((next: string[]) => void) | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   useEffect(() => {
+    if (browserOnly) {
+      setSaveFailed(false);
+      saver.current = (next) => {
+        try { localStorage.setItem(key, JSON.stringify(next)); setSaveFailed(false); }
+        catch { setSaveFailed(true); }
+      };
+      return () => { saver.current = null; };
+    }
     let disposed = false;
     let loaded = false;
     let queue = Promise.resolve();
@@ -60,7 +68,7 @@ export function useGoalOrder(goals: WorkspaceGoal[], source: string, canMove = (
       else setSaveFailed(false);
     }).catch(() => { if (!disposed) setSaveFailed(true); });
     return () => { disposed = true; saver.current = null; };
-  }, [key, source]);
+  }, [key, source, browserOnly]);
   const [lastMoved, setLastMoved] = useState<{ title: string; position: number } | null>(null);
   const [target, setTarget] = useState<{ id: string; after: boolean } | null>(null);
   const gesture = useRef<{ id: string; x: number; y: number; dragging: boolean } | null>(null);

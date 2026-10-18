@@ -189,6 +189,7 @@ import {
   localStatusSource,
   activeStatusSourceForUrl,
   removeStatusSource,
+  runtimeStatusSourceCatalog,
   saveStatusSourceCatalog,
   type StatusSource,
 } from "../data/status-source-catalog";
@@ -3290,9 +3291,14 @@ export function DashboardPage() {
     : "";
   const activeStatusRequestUrl = requestedStatusUrl ?? routeStatusRequestUrl;
   const loadedStatusUrl = source.kind === "url" ? source.label : defaultGlobalStatusUrl;
+  const effectiveSourceCatalog = runtimeStatusSourceCatalog(
+    payload.local_dashboard_api?.read_only_sources,
+    loadedStatusUrl,
+    window.location.href,
+  ) ?? statusSourceCatalog;
   const requestFailed = Boolean(loadError && requestedStatusUrl);
   const activeStatusSource: StatusSource = activeStatusSourceForUrl(
-    statusSourceCatalog,
+    effectiveSourceCatalog,
     requestedStatusUrl,
     loadedStatusUrl,
     window.location.href,
@@ -3538,13 +3544,13 @@ export function DashboardPage() {
       if (activeStatusSource.id === sourceId) selectStatusSource(localStatusSource);
     },
     onSelect: (sourceId) => {
-      const nextSource = statusSourceCatalog.sources.find((candidate) => candidate.id === sourceId);
+      const nextSource = effectiveSourceCatalog.sources.find((candidate) => candidate.id === sourceId);
       if (!nextSource) return;
       selectStatusSource(nextSource, { ensureTunnel: nextSource.kind === "ssh_tunnel" });
     },
     sources: activeStatusSource.id === "temporary"
-      ? [...statusSourceCatalog.sources, activeStatusSource]
-      : statusSourceCatalog.sources,
+      ? [...effectiveSourceCatalog.sources, activeStatusSource]
+      : effectiveSourceCatalog.sources,
   };
 
   useEffect(() => {

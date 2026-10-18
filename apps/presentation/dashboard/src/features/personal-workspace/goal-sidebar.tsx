@@ -56,7 +56,7 @@ export function GoalSidebar({
   const [sorting, setSorting] = useState(false);
   const tree = useMemo(() => goalHierarchy(goals), [goals]);
   const siblings = (from: string, to: string) => tree.parents.get(from) === tree.parents.get(to);
-  const ordering = useGoalOrder(goals.filter((goal) => goal.activationState !== "stopped"), statusSourceControl?.activeSource.statusUrl ?? "/status.json", siblings);
+  const ordering = useGoalOrder(goals.filter((goal) => goal.activationState !== "stopped"), statusSourceControl?.activeSource.statusUrl ?? "/status.json", siblings, statusSourceControl?.activeSource.kind === "runtime");
   const activeGoals = ordering.sorted;
   const stoppedGoals = goals.filter((goal) => goal.activationState === "stopped");
   const siblingGroups = new Map<string | null, WorkspaceGoal[]>();
