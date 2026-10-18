@@ -190,7 +190,10 @@ export async function refineGoalAcceptanceOutcome(store: AuthorityStore, value: 
   const next: JsonObject = {...head.head, goal_outcomes: state};
   // Bind a first exact-lifetime declaration to the same lifecycle owner as checks.
   if (goalRef !== null && readGoalAcceptanceLifecycle(head.head, goalId) === null) {
-    next.goal_acceptance_lifecycle = {schema_version: GOAL_ACCEPTANCE_LIFECYCLE_SCHEMA, state: "active", goal_ref: goalRef};
+    const plan = planLifecycleTransition(head.head, goalId, {kind: "bind_existing", goal_ref: goalRef});
+    if (plan.kind === "failure") return source(store, failure(plan.reason_code, plan.reason));
+    next.goal_acceptance_lifecycle = plan.lifecycle;
+    if (plan.kind === "commit" && plan.acceptance !== null) next.goal_acceptance = plan.acceptance;
   }
   const result = {goal_id: goalId, operation_id: request.operation_id, goal_acceptance_contract: projectGoalAcceptance(next, goalId)};
   if (request.dry_run === true) return source(store, {status: "planned", changed: false, dry_run: true, provider_revision: head.provider_revision, ...result});

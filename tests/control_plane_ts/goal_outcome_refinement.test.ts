@@ -8,7 +8,7 @@ import {FileAuthorityStore} from "../../loopx/control_plane/coordination/file_au
 import {SqliteAuthorityStore} from "../../loopx/control_plane/coordination/sqlite_authority_store.ts";
 import {authorityProjectionFixture} from "./authority_projection_fixture.ts";
 import {refineGoalOutcome, projectGoalOutcomes} from "../../loopx/control_plane/goals/outcome_requirements.ts";
-import {refineGoalAcceptanceOutcome, inspectGoalAcceptance} from "../../loopx/control_plane/goals/acceptance_authority.ts";
+import {refineGoalAcceptanceOutcome, inspectGoalAcceptance, configureGoalAcceptance} from "../../loopx/control_plane/goals/acceptance_authority.ts";
 import {observeAcceptanceOracles} from "../../loopx/control_plane/goals/acceptance_oracle.ts";
 import {projectGoalAcceptance} from "../../loopx/control_plane/goals/acceptance_contract.ts";
 
@@ -80,6 +80,28 @@ for (const provider of ["file", "sqlite"] as const) test(`${provider}: native CA
   const read = await inspectGoalAcceptance(open(), goal);
   assert.equal(((read.goal_acceptance_contract as JsonObject).outcome_requirements as JsonObject).revision, 1);
   if (committed.status === "loaded") assert.deepEqual(committed.head.root_commitments, loaded.head.root_commitments);
+});
+
+for (const provider of ["file", "sqlite"] as const) test(`${provider}: first exact-lifetime outcome preserves legacy acceptance atomically`, async t => {
+  const root = await mkdtemp(join(tmpdir(), "outcome-lifetime-")); t.after(() => rm(root, {recursive: true, force: true}));
+  const store = provider === "file" ? new FileAuthorityStore(root, goal) : new SqliteAuthorityStore(root, goal);
+  await store.commitAuthority({operation_id: "seed", expected_provider_revision: null, next_projection: fixture(), events: [], receipts: []});
+  const basis = await inspectGoalAcceptance(store, goal);
+  const configured = await configureGoalAcceptance(store, {goal_id: goal, actor_agent_id: null, operation_id: "legacy-check",
+    expected_provider_revision: basis.provider_revision, document: {scope: {kind: "selected_work", todo_ids: ["todo_tour"]},
+      objective: "Deliver the tour", non_goals: [], criteria: [{id: "opening", description: "Keep the opening", validation_argv: ["true"]}],
+      bindings: [{todo_id: "todo_tour", criterion_ids: ["opening"]}]}});
+  assert.equal(configured.status, "applied");
+  const before = await inspectGoalAcceptance(store, goal);
+  const request = {goal_id: goal, goal_ref: goalRef, actor_agent_id: "author", operation_id: "first-exact",
+    expected_provider_revision: before.provider_revision, refinement: patch()};
+  assert.equal((await refineGoalAcceptanceOutcome(store, request)).status, "applied");
+  const after = (await inspectGoalAcceptance(store, goal, undefined, goalRef)).goal_acceptance_contract as JsonObject;
+  const {outcome_requirements, lifecycle_state, goal_ref, ...checks} = after;
+  assert.deepEqual(checks, before.goal_acceptance_contract);
+  assert.equal((outcome_requirements as JsonObject).current_lifetime, true);
+  assert.deepEqual(goal_ref, goalRef); assert.equal(lifecycle_state, "active");
+  assert.equal((await refineGoalAcceptanceOutcome(store, request)).status, "replayed");
 });
 
 
