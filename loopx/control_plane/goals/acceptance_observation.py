@@ -208,7 +208,7 @@ def build_goal_acceptance_observation(
         item.get("goal_acceptance_contract"), asset.get("goal_acceptance_contract"),
         _dict(item.get("agent_todos")).get("goal_acceptance_contract"),
         _dict(asset.get("agent_todos")).get("goal_acceptance_contract"),
-    ) if isinstance(candidate, dict) and candidate.get("enabled") is True), None)
+    ) if isinstance(candidate, dict) and (candidate.get("enabled") is True or candidate.get("outcome_requirements"))), None)
     return {
         "schema_version": GOAL_ACCEPTANCE_OBSERVATION_SCHEMA_VERSION,
         "goal_id": goal_id,

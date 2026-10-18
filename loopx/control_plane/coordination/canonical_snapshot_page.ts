@@ -104,7 +104,7 @@ export async function readCanonicalSnapshotFromStore(value: unknown, store: Auth
   const leaseIds = leases?.lease_todo_ids.slice(leaseStart, leaseStart + CANONICAL_SNAPSHOT_PAGE_ITEMS - todoIds.length) ?? [];
   const guards = acceptance.enabled === true ? projectGoalAcceptanceWorkGuards(head.head, goal, todoIds) : {};
   const metadata = {todo_read_model: readModel,
-    ...(acceptance.enabled === true ? {goal_acceptance_contract: acceptance} : {}),
+    ...(acceptance.enabled === true || acceptance.outcome_requirements ? {goal_acceptance_contract: acceptance} : {}),
     ...(leases === null ? {} : {handoff_mode: head.head.handoff_mode ?? "legacy"}),
     ...(readback === null ? {} : {projection_readback: confirmProjectionReadback(readback, head.provider_revision)})};
   function page(size: number): JsonObject {

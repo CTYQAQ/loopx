@@ -6,9 +6,21 @@ export const oracleEvidenceSchema = z.object({source_id: z.string(), source_dige
   input_versions: z.array(z.object({ref: z.string(), sha256: z.string()})),
   output_versions: z.array(z.object({ref: z.string(), sha256: z.string()}))});
 export type OracleEvidence = z.infer<typeof oracleEvidenceSchema>;
+export const outcomeRequirementsSchema = z.object({schema_version: z.literal("loopx_goal_outcomes_v0"),
+  revision: z.number().int().positive(), current_lifetime: z.boolean(), execution_authority_granted: z.literal(false), goal_completion_assessed: z.literal(false),
+  outcomes: z.array(z.object({id: z.string(), owner_agent_id: z.string(), objective: z.string(), revision: z.number().int().positive(),
+    requirements: z.array(z.object({id: z.string(), description: z.string(),
+      agent_review: z.object({id: z.string(), conclusion: z.enum(["met", "unmet", "uncertain"]), evidence_refs: z.array(z.string()), note: z.string(), basis_current: z.boolean(), independently_verified: z.literal(false)}).optional(),
+      planning_satisfied: z.boolean(), status: z.enum(["unverified", "stale", "failed", "partial", "accepted", "held"])})),
+    todo_ids: z.array(z.string()), sources: z.array(z.object({ref: z.string(), summary: z.string()})),
+    work: z.array(z.object({todo_id: z.string(), status: z.string()})),
+  })),
+});
+export type OutcomeRequirements = z.infer<typeof outcomeRequirementsSchema>;
 export const goalAcceptanceContractSchema = z.discriminatedUnion("enabled", [
-  z.object({ enabled: z.literal(false) }),
+  z.object({ enabled: z.literal(false), outcome_requirements: outcomeRequirementsSchema.optional() }),
   z.object({
+    outcome_requirements: outcomeRequirementsSchema.optional(),
     enabled: z.literal(true), revision: z.number().int().positive(), digest: z.string().min(1), objective: z.string(),
     scope: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("all_advancement") }).strict(),

@@ -109,6 +109,23 @@ def transition_goal_acceptance_lifecycle(
     )
 
 
+def refine_goal_outcome(
+    *, registry_path: Path, goal_id: str, refinement: dict[str, Any],
+    expected_provider_revision: str, operation_id: str, agent_id: str | None = None,
+    runtime_root: str | None = None, execute: bool = False,
+) -> dict[str, Any]:
+    """Record scoped planning intent, never configure validators or attest success."""
+    route = _routing(registry_path, goal_id, runtime_root, agent_id)
+    goal = load_goal_from_registry(registry_path, goal_id)
+    if refinement.get("owner_agent_id") not in registered_agent_ids_for_goal(goal):
+        raise ValueError("Outcome owner must be a registered Agent")
+    if goal.get("status") not in {"active", "ready"}:
+        raise ValueError("Outcome refinement requires an active Goal")
+    return _result("goal.acceptance.refine", {**route, "actor_agent_id": agent_id,
+        "expected_provider_revision": expected_provider_revision, "operation_id": operation_id,
+        "refinement": refinement, "dry_run": not execute}, timeout=CANONICAL_AUTHORITY_WRITE_TIMEOUT_SECONDS)
+
+
 def inspect_goal_acceptance(
     *,
     registry_path: Path,

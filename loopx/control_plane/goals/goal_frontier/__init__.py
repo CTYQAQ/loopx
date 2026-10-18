@@ -60,6 +60,7 @@ from . import outcome_continuity
 from .acceptance import (
     GOAL_ACCEPTANCE_HOLD_TRIGGERS,
     acceptance_gaps_from_held_goal_binding,
+    acceptance_gaps_from_outcomes,
 )
 from ...work_items.replan_semantics_codec import project_replan_semantics
 from ...work_items.replan_history_codec import project_replan_history
@@ -1182,6 +1183,8 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                             "completed_todo_ids",
                             "vision_todo_ids",
                             "frontier_revision",
+                            "outcome_id",
+                            "requirement_ids",
                             "reason_code",
                             "component_checks",
                             "resolution_hint",
@@ -1544,6 +1547,7 @@ def build_goal_frontier_projection_context_from_status(
                 ),
             )
         )
+        + acceptance_gaps_from_outcomes(agent_todo_summary, agent_id=agent_id)
         + acceptance_gaps_from_held_goal_binding(
             agent_todo_summary, agent_todo_source_items, agent_id=agent_id,
         )

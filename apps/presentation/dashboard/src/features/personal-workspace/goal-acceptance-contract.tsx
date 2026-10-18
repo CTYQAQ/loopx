@@ -1,3 +1,4 @@
+import {GoalOutcomeRequirements} from "./goal-outcome-requirements";
 import {useEffect, useRef, useState, type ReactNode} from "react";
 import {CircleCheck, CircleDashed, CircleX} from "lucide-react";
 import {useQuery, useQueryClient} from "@tanstack/react-query";
@@ -81,10 +82,13 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
     } finally {if (token === generation.current) {flight.current = false; setBusy(false);}}
   }
   const unavailable = read.isError || actions.isError || !!error;
-  if (!management && !enabled && !plan && !unavailable) return <>{children}
+  const outcomes = contract?.outcome_requirements ? <GoalOutcomeRequirements goalId={goalId} declaration={contract.outcome_requirements}
+    fresh={!!fresh} canManage={canManage} providerRevision={fresh ? read.data!.provider_revision : null}
+    onRefresh={async () => {await read.refetch();}}/> : null;
+  if (!management && !enabled && !plan && !unavailable) return <>{children}{outcomes}
     {overview ? <p className="goal-overview-note">{contract?.enabled === false
-      ? (zh ? "验收标准未配置（可选）。" : "Acceptance criteria are not configured (optional).")
-      : (zh ? "此来源未提供验收标准（可选）。" : "This source has not provided acceptance criteria (optional).")}</p> : null}
+      ? (zh ? "自动检查命令未配置（可选）。" : "Automated check commands are not configured (optional).")
+      : (zh ? "此来源未提供自动检查命令（可选）。" : "This source has not provided automated check commands (optional).")}</p> : null}
     {notice ? <p role="status">{notice}</p> : null}</>;
   const readOnly = !canManage;
   const criterionText = (item: typeof criteria[number]) => item.oracle
@@ -148,6 +152,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   </> : null;
   return <section className={`delivery-acceptance-contract${overview ? " is-overview" : ""}`} aria-label={copy.title} aria-busy={busy}>
     <div className="delivery-acceptance-content">
+      {outcomes}
       {!overview || plan || enabled ? <header className="delivery-check-heading"><div>{!overview || plan ? <h3>{copy.title}</h3> : null}
         <p className={overview && (plan || enabled) ? "goal-overview-objective" : undefined}>{plan ? plan.document.objective : enabled ? contract.objective : (zh ? "Agent 准备检查方案后，可在这里检查交付物。" : "Check the delivery here once the Agent prepares a plan.")}</p>{plan ? <p>{zh ? "将保存这份方案、更新相关任务的验收关联，并在本机运行以下检查。准备方案本身不会执行命令。" : "This saves the plan, updates its task associations and runs the following checks locally. Preparation itself executes no commands."}</p> : null}</div>
         {canManage && fresh && (plan || enabled) ? <button className={`delivery-check-primary${plan ? " is-prepared" : ""}`} type="button" disabled={busy || !!error}

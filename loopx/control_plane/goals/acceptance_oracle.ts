@@ -5,6 +5,8 @@ import type {JsonObject} from "../effect_program.ts";
 import {AuthorityStoreProtocolError, canonicalAuthorityObject, canonicalAuthoritySha256} from "../coordination/authority_store_codec.ts";
 import {BARE_SHA256_PATTERN} from "../content_digest.ts";
 
+import {observeOutcomeRequirements} from "./outcome_requirements.ts";
+
 export type AcceptanceOracleState = "unverified" | "recorded" | "current" | "stale" | "failed" | "unavailable";
 
 function requireThat(value: unknown, message: string): asserts value {
@@ -113,7 +115,7 @@ export function observeAcceptanceOracles(params: JsonObject): JsonObject {
   requireThat(Array.isArray(contract.criteria) && Array.isArray(params.observations), "oracle observations required");
   const receipt = contract.verification as JsonObject | null;
   const results = receipt?.results as JsonObject[] | undefined;
-  return {...contract, criteria: (contract.criteria as JsonObject[]).map(criterion => {
+  const observed = {...contract, criteria: (contract.criteria as JsonObject[]).map(criterion => {
     if (!criterion.oracle) return criterion;
     const oracle = criterion.oracle as JsonObject;
     if (oracle.state !== "recorded") return criterion;
@@ -126,6 +128,8 @@ export function observeAcceptanceOracles(params: JsonObject): JsonObject {
     }
     return {...criterion, oracle: {...oracle, state}};
   })};
+  return contract.outcome_requirements ? {...observed,
+    outcome_requirements: observeOutcomeRequirements(contract.outcome_requirements as JsonObject, observed)} : observed;
 }
 
 export function planAcceptanceOracle(params: JsonObject): JsonObject {

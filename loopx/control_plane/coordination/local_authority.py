@@ -427,7 +427,7 @@ def canonical_todo_summary_fields(
         )
         if summary:
             if role == "agent":
-                if goal_acceptance_contract and goal_acceptance_contract.get("enabled") is True:
+                if goal_acceptance_contract and (goal_acceptance_contract.get("enabled") is True or goal_acceptance_contract.get("outcome_requirements")):
                     summary["goal_acceptance_contract"] = goal_acceptance_contract
                 archived_done = count_advancement_todos(
                     [

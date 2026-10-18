@@ -85,3 +85,11 @@ def acceptance_gaps_from_held_goal_binding(
         if len(gaps) == 3:
             break
     return gaps
+
+
+def acceptance_gaps_from_outcomes(agent_todo_summary: dict[str, Any] | None, *, agent_id: str | None) -> list[dict[str, Any]]:
+    """Transport the typed owner's scoped coverage gaps to existing replan."""
+    contract = (agent_todo_summary or {}).get("goal_acceptance_contract") or {}
+    declarations = contract.get("outcome_requirements") or {}
+    return [dict(gap) for gap in declarations.get("acceptance_gaps", [])
+        if isinstance(gap, dict) and agent_id and gap.get("agent_id") == agent_id]

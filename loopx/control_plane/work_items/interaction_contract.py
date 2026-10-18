@@ -1108,6 +1108,7 @@ def _interaction_reads_and_arbitration(
         "goal_id": payload.get("goal_id"),
         "goal_state_file": payload.get("goal_state_file"),
         "goal_acceptance_enabled": acceptance.get("enabled") is True,
+        "goal_outcomes_present": bool(acceptance.get("outcome_requirements")),
         "selected_todo": {"todo_id": selected.get("todo_id")},
         "task_orchestration_contract": {field: orchestration.get(field)
             for field in ("schema_version", "mode", "primary_todo_id")},
