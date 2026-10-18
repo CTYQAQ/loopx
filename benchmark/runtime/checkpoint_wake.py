@@ -194,7 +194,9 @@ class CheckpointWake:
                 raise subprocess.TimeoutExpired("checkpoint source wake", timeout)
             command = native_command(self.env, execution, "execute", wake, session_wake)
             continuation = None
-            with child_process(command, env=self.env, stdout=stdout, stderr=stderr) as process:
+            with child_process(command, env=self.env, stdout=stdout, stderr=stderr,
+                               goal_admission=session_wake.admission if session_wake is not None else None) as process:
+                self.receipt["host_invoked"] = True
                 process.stdin.write(body)
                 process.stdin.close()
                 while process.poll() is None:

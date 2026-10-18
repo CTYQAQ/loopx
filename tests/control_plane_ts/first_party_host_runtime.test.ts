@@ -41,6 +41,34 @@ test("non-source profiles preserve legacy behavior without decoding strict facts
   );
 });
 
+test("legacy Host launch requires the original live registry witness without inventing a GoalRef", () => {
+  const witness = {path: "/fixture/registry.json", sha256: "a".repeat(64)};
+  const launch = {
+    profile_id: null, operation: "launch", goal_id: "release", registry_path: witness.path,
+    planned_registry_witness: witness, registry_witness: witness,
+    authority: {kind: "present", goal_id: "release", registration_status: "active", activation_state: "active"},
+  };
+  assert.deepEqual(decideFirstPartyHostRuntime(launch), {kind: "legacy"});
+  for (const [authority, code] of [
+    [{kind: "absent"}, "goal_not_registered"],
+    [{kind: "unavailable"}, "goal_authority_unavailable"],
+    [{...launch.authority, activation_state: "stopped"}, "goal_stopped"],
+    [{...launch.authority, activation_state: "invalid"}, "goal_authority_unavailable"],
+    [{...launch.authority, registration_status: "retired"}, "goal_not_registered"],
+    [{...launch.authority, goal_id: "other"}, "goal_authority_unavailable"],
+  ] as const) {
+    assert.deepEqual(decideFirstPartyHostRuntime({...launch, authority}), {kind: "reject", code});
+  }
+  for (const changed of [{...witness, sha256: "b".repeat(64)}, {...witness, path: "/other/registry.json"}]) {
+    assert.deepEqual(decideFirstPartyHostRuntime({...launch, registry_witness: changed}),
+      {kind: "reject", code: "stale_goal_authority"});
+  }
+  for (const missing of [null, {}, {...witness, sha256: "not-a-digest"}]) {
+    assert.deepEqual(decideFirstPartyHostRuntime({...launch, planned_registry_witness: missing}),
+      {kind: "reject", code: "goal_authority_unavailable"});
+  }
+});
+
 test("current exact GoalRef admits each host runtime checkpoint", () => {
   assert.deepEqual(decideFirstPartyHostRuntime(facts("select_state")), {
     kind: "start_new",

@@ -10,7 +10,7 @@ import signal
 import subprocess
 import time
 import uuid
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -91,21 +91,28 @@ def heartbeat_body(env: dict[str, str], turn_id: str, *, native_goal: bool,
 
 
 @contextmanager
-def child_process(command: list[str], *, env: dict[str, str], stdout, stderr):
-    process = subprocess.Popen(
-        command,
-        cwd=env["LOOPX_PROJECT"],
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=stdout,
-        stderr=stderr,
-        text=True,
-        start_new_session=True,
-    )
+def child_process(command: list[str], *, env: dict[str, str], stdout, stderr,
+                  goal_admission=None):
+    process = None
     try:
+        # Session selection may precede rendering/capture. Serialize only actual
+        # launch with the existing Goal lifetime owner, never the whole model run.
+        with (goal_admission.launch_lifetime(operation="codex_agent_host_launch")
+              if goal_admission is not None else nullcontext()):
+            process = subprocess.Popen(
+                command,
+                cwd=env["LOOPX_PROJECT"],
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=stdout,
+                stderr=stderr,
+                text=True,
+                start_new_session=True,
+            )
         yield process
     finally:
-        _reap_child_process(process)
+        if process is not None:
+            _reap_child_process(process)
 
 
 def _reap_child_process(process):
@@ -430,6 +437,7 @@ def run_once(env: dict[str, str]) -> dict:
             from benchmark.runtime.sessions import BenchmarkSessionWake
 
             session_wake = BenchmarkSessionWake(env, execution, receipt)
+            receipt["host_invoked"] = False
             if stage == "execute" and execution.mode == "heartbeat" and env.get("LOOPX_WARM_START"):
                 from benchmark.runtime.checkpoint_session_refresh import prepare_session_refresh
 
@@ -473,7 +481,10 @@ def run_once(env: dict[str, str]) -> dict:
                             execution, body, wake, session_wake, stdout, stderr, timeout)
                         receipt["ok"] = receipt["return_code"] == 0
                     else:
-                        with child_process(command, env=env, stdout=stdout, stderr=stderr) as process:
+                        with child_process(command, env=env, stdout=stdout, stderr=stderr,
+                                goal_admission=session_wake.admission if session_wake is not None else None) as process:
+                            if session_wake is not None:
+                                receipt["host_invoked"] = True
                             process.communicate(input=body, timeout=timeout)
                             receipt["return_code"] = process.returncode
                             receipt["ok"] = process.returncode == 0
@@ -511,7 +522,7 @@ def run_once(env: dict[str, str]) -> dict:
     finally:
         checkpoint_context.close()
         try:
-            if session_wake is not None:
+            if session_wake is not None and receipt.get("host_invoked") is True:
                 session_wake.observe(wake / "stdout.jsonl")
         except BaseException as exc:
             receipt.update(ok=False, **_error_tail(exc))
