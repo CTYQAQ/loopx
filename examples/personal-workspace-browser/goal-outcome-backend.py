@@ -1,6 +1,7 @@
 """Real disposable SQLite/packaged UI journey; no model or live Goal writes.
 
-Run with an empty fixture directory and a free loopback port. The ordinary
+Run with an empty fixture directory and a free loopback port. Pass
+--without-check-plan to exercise default review and failed-read recovery. The ordinary
 Agent refinement uses the same native CLI as an external host after upgrade.
 """
 import json
@@ -72,7 +73,8 @@ path.write_text(json.dumps({"outcome_id": "product-tour", "criteria": [
     {"id": "tour-opening", "validation_argv": ["python3", "check-tour.py", "opening"]},
     {"id": "tour-order", "validation_argv": ["python3", "check-tour.py", "order"]},
 ]}))
-cli("prepare", "--agent-id", "author", "--document", str(path), "--operation-id", "check-plan", "--execute")
+if "--without-check-plan" not in sys.argv[3:]:
+    cli("prepare", "--agent-id", "author", "--document", str(path), "--operation-id", "check-plan", "--execute")
 
 print(json.dumps({"ready": True, "port": int(sys.argv[2]), "registry": str(registry), "runtime": str(runtime)}), flush=True)
 serve_chat(registry_path=registry, runtime_root_override=runtime, scan_roots=[project],

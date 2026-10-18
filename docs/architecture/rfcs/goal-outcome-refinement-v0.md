@@ -228,6 +228,15 @@ Use disposable public-safe File and SQLite Goals, never active operational state
 7. Exercise the packaged Goal UI against the real backend: read, refine, reload,
    stale-write recovery, desktop/narrow view. Verify absent-outcome behavior parity.
 
+The same-Goal form retains unsent text and the original pending operation through
+failed refreshes, including a committed write whose reply and reconciliation read
+are lost. Retained data is not fresh write authority. After reading successfully,
+retry reuses the complete operation and cannot append a duplicate requirement;
+explicit rebase requires a current revision and preserves the requirement identity.
+Run `node examples/personal-workspace-browser/goal-outcome-recovery.mjs` after the
+normal Chat build for this targeted packaged regression. It uses disposable
+SQLite/HTTP/CLI authority and injects transport failures, not fabricated commits.
+
 These checks establish product semantics and recovery. Live-model recognition,
 installed host adoption and comparative quality/attention gains remain unproven
 until separately measured; test counts and a merged PR are not those outcomes.

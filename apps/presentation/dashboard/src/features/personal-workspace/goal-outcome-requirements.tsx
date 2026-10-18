@@ -69,7 +69,7 @@ function Outcome({goalId, outcome, fresh, canManage, revision, onRefresh, zh}: {
           <textarea value={text} maxLength={512} disabled={busy || !!pending} onChange={event => setText(event.target.value)}/></label>
         <button type="submit" disabled={busy || !fresh || !text.trim()}>{zh ? "保留要求" : "Retain requirement"}</button>
         <button type="button" disabled={busy} onClick={() => void onRefresh()}>{zh ? "刷新结果" : "Refresh result"}</button>
-        {pending && !busy ? <button type="button" onClick={() => {setPending({...pending, operation_id: `outcome-ui:${crypto.randomUUID()}`, expected_provider_revision: revision}); setNotice("");}}>{zh ? "按当前版本重新准备" : "Rebase on current version"}</button> : null}
+        {pending && !busy ? <button type="button" disabled={!fresh || !revision} onClick={() => {setPending({...pending, operation_id: `outcome-ui:${crypto.randomUUID()}`, expected_provider_revision: revision}); setNotice("");}}>{zh ? "按当前版本重新准备" : "Rebase on current version"}</button> : null}
       </form>
     </details> : null}
     {notice ? <p role="status">{notice}</p> : null}
