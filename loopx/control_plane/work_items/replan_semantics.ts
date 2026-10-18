@@ -27,6 +27,7 @@ const VISION_TRIGGERS = new Set([
   "vision_acceptance_gap", "vision_checkpoint_missing", "vision_outcome_checkpoint_required",
   "vision_successor_required", "required_agent_vision_missing",
 ]);
+const ACCEPTANCE_HOLD_TRIGGERS = new Set(["goal_acceptance_stale", "goal_acceptance_unbound"]);
 const EXTERNAL_REVIEW_TRIGGERS = new Set(["external_progress_review_drift"]);
 export const FRESH_PATH_DISPOSITIONS = new Set(["continue", "no_change", "replan"]);
 const PROGRESS_CLI_ARGS = "--progress-result-class <advanced|blocked|exploration_exhausted|no_followup> --progress-surface-id <surface-id> --progress-hypothesis-id <hypothesis-id> --progress-probe-kind <probe-kind> --progress-evidence-id <evidence-id>";
@@ -259,7 +260,7 @@ function preserveReceiptBoundObligation(request: JsonObject): JsonObject {
 /** One outcome policy for host projection and write-time discharge. */
 export function requiredSemanticOutcomes(obligation: JsonObject): SemanticOutcome[] {
   const kinds = triggerKinds(obligation);
-  const acceptanceHold = kinds.some(kind => kind === "goal_acceptance_stale" || kind === "goal_acceptance_unbound");
+  const acceptanceHold = kinds.some(kind => ACCEPTANCE_HOLD_TRIGGERS.has(kind));
   const declared = strings(obligation.satisfying_semantic_outcomes);
   if (declared.length) {
     if (declared.some(value => !KNOWN_OUTCOMES.has(value))) {
@@ -319,8 +320,10 @@ function writebackProjection(required: SemanticOutcome[], externalReview: boolea
 }
 
 /** Vision gaps use their durable run or completed-chain source timestamp.
- * A patch label proves no relationship to a later run; equal timestamps cover
- * the atomic writeback without granting a permanent waiver for new gaps.
+ * Canonical acceptance holds instead have exact owner-revision checkpoints:
+ * a formal accepted obligation covers that same hold after a display edit.
+ * Other later evidence, a different checkpoint and legacy ACKs retain their
+ * source freshness requirements.
  */
 function acknowledgeVisionEvidence(request: JsonObject): JsonObject {
   if (!Array.isArray(request.acceptance_gaps)) {
@@ -331,15 +334,30 @@ function acknowledgeVisionEvidence(request: JsonObject): JsonObject {
   const timestamp = (value: unknown): bigint | null => typeof value === "string" &&
     /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? parseTodoTimestampMicros(value) : null;
   const acknowledgedAt = timestamp(ack.generated_at);
+  const outcomes = strings(delta.outcomes);
+  const satisfying = strings(delta.satisfying_outcomes);
+  const checkpoints = Array.isArray(delta.trigger_checkpoints) ? delta.trigger_checkpoints.map(object) : [];
+  const formalObligation = typeof delta.obligation_id === "string" && /^replan-[a-f0-9]{16}$/.test(delta.obligation_id);
   const gaps = request.acceptance_gaps.map(value => {
     const gap = object(value);
-    return timestamp(gap.generated_at ?? (gap.kind === "vision_outcome_checkpoint_required" &&
+    if (ACCEPTANCE_HOLD_TRIGGERS.has(String(gap.kind ?? ""))) {
+      if (!strings(delta.trigger_kinds).includes(String(gap.kind)) ||
+          typeof gap.frontier_revision !== "string" || !gap.frontier_revision ||
+          !checkpoints.some(checkpoint => checkpoint.kind === gap.kind &&
+            checkpoint.frontier_revision === gap.frontier_revision) ||
+          !outcomes.some(outcome => (outcome === "new_runnable_successor" || outcome === "new_concrete_blocker") &&
+            satisfying.includes(outcome))) return false;
+      if (formalObligation && gap.source === "goal_acceptance_contract" &&
+          /^[a-f0-9]{64}$/.test(gap.frontier_revision)) return true;
+    }
+    const observedAt = timestamp(gap.generated_at ?? (gap.kind === "vision_outcome_checkpoint_required" &&
       gap.source === "recent_completed_advancement_todo" ? gap.completed_at : null));
+    return observedAt !== null && acknowledgedAt !== null && observedAt <= acknowledgedAt;
   });
   return {acknowledged: ack.recorded === true && delta.accepted === true &&
-    strings(delta.outcomes).some(outcome => VISION_OUTCOMES.some(known => known === outcome)) &&
+    outcomes.some(outcome => VISION_OUTCOMES.some(known => known === outcome)) &&
     acknowledgedAt !== null &&
-    gaps.length > 0 && gaps.every(time => time !== null && time <= acknowledgedAt)};
+    gaps.length > 0 && gaps.every(covered => covered)};
 }
 
 export function projectReplanWriteback(value: unknown): JsonObject {

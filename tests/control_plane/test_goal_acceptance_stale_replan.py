@@ -171,3 +171,41 @@ def test_hold_checkpoints_survive_crowded_vision_trigger_projection():
     assert len(obligation["triggers"]) == 3
     assert obligation["triggers"][0]["kind"] == "goal_acceptance_stale"
     assert obligation["triggers"][0]["frontier_revision"] == holds[0]["frontier_revision"]
+
+
+@pytest.mark.parametrize("state", ["stale", "unbound"])
+def test_accepted_hold_checkpoint_survives_only_display_or_note_updates(state):
+    summary = _summary()
+    contract = summary["goal_acceptance_contract"]
+    contract.update(revision=1, digest="a" * 64)
+    contract["tasks"][0]["state"] = state
+    source = _source()
+    gaps = acceptance_gaps_from_held_goal_binding(summary, source, agent_id="agent-a")
+    kind = f"goal_acceptance_{state}"
+    ack = {
+        "generated_at": "2026-09-23T08:03:00Z", "recorded": True,
+        "semantic_delta": {
+            "accepted": True, "outcomes": ["new_concrete_blocker"],
+            "obligation_id": "replan-1111111111111111",
+            "trigger_kinds": [kind], "satisfying_outcomes": ["new_concrete_blocker"],
+            "trigger_checkpoints": [{"kind": kind, "frontier_revision": gaps[0]["frontier_revision"]}],
+        },
+    }
+
+    def derive(current):
+        return derive_goal_frontier_replan_obligation_from_summaries(
+            user_todo_summary={"open_count": 0}, agent_todo_summary=summary,
+            work_lane_contract=None, agent_id="agent-a", existing_replan_obligation=None,
+            acceptance_gaps=current, latest_replan_ack=ack,
+        )
+
+    assert derive(gaps) is None
+    source[0].update(text="Same held operation, renamed", priority="P3",
+                     note="A rewritten description of the existing hold", updated_at="2026-09-23T08:04:00Z")
+    renamed = acceptance_gaps_from_held_goal_binding(summary, source, agent_id="agent-a")
+    assert renamed[0]["frontier_revision"] == gaps[0]["frontier_revision"]
+    assert derive(renamed) is None
+    contract.update(revision=2, digest="b" * 64)
+    revised = acceptance_gaps_from_held_goal_binding(summary, source, agent_id="agent-a")
+    assert revised[0]["frontier_revision"] != gaps[0]["frontier_revision"]
+    assert derive(revised) is not None

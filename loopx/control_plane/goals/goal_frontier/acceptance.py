@@ -53,8 +53,12 @@ def acceptance_gaps_from_held_goal_binding(
         state = held_states[todo_id]
         kind = f"goal_acceptance_{state}"
         generated_at = item.get("updated_at") or item.get("created_at")
+        # The hold belongs to an owner-confirmed contract revision. Editing
+        # unconfirmed work, its display text or a review note does not create
+        # another owner-review opportunity. The current timestamp remains
+        # useful readback, but only a real contract revision changes this basis.
         frontier_revision = hashlib.sha256(json.dumps(
-            [todo_id, generated_at, contract.get("digest"), contract.get("revision"), state],
+            [todo_id, contract.get("digest"), contract.get("revision"), state],
             ensure_ascii=True, separators=(",", ":"), default=str,
         ).encode("utf-8")).hexdigest()
         gap = {

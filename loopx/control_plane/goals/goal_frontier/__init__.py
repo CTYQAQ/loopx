@@ -860,55 +860,10 @@ def _vision_gap_acknowledged(
     acceptance_gaps: list[dict[str, Any]],
     latest_replan_ack: dict[str, Any] | None,
 ) -> bool:
-    """Keep exact acceptance holds; delegate vision ACK freshness to TS."""
+    """Delegate exact acceptance holds and ordinary evidence freshness to TS."""
 
     if not acceptance_gaps or not isinstance(latest_replan_ack, dict):
         return False
-    # A persisted Goal Acceptance drift is an independent Todo event and also
-    # requires exact semantic checkpoints, beyond ordinary evidence freshness.
-    held_bindings = [
-        gap for gap in acceptance_gaps
-        if gap.get("kind") in GOAL_ACCEPTANCE_HOLD_TRIGGERS
-    ]
-    if held_bindings:
-        semantic_delta = latest_replan_ack.get("semantic_delta")
-        satisfying_outcomes = (
-            semantic_delta.get("satisfying_outcomes")
-            if isinstance(semantic_delta, dict)
-            and isinstance(semantic_delta.get("satisfying_outcomes"), list)
-            else []
-        )
-        recorded_checkpoints = (
-            semantic_delta.get("trigger_checkpoints")
-            if isinstance(semantic_delta, dict)
-            and isinstance(semantic_delta.get("trigger_checkpoints"), list)
-            else []
-        )
-        exact_hold_checkpoints = all(
-            any(
-                isinstance(checkpoint, dict)
-                and checkpoint.get("kind") == gap.get("kind")
-                and checkpoint.get("frontier_revision") == gap.get("frontier_revision")
-                for checkpoint in recorded_checkpoints
-            )
-            for gap in held_bindings
-        )
-        if (
-            not _replan_evidence_acknowledged(
-                held_bindings, latest_replan_ack, time_key="generated_at",
-            )
-            or not isinstance(semantic_delta, dict)
-            or latest_replan_ack.get("recorded") is not True
-            or semantic_delta.get("accepted") is not True
-            or not all(gap.get("kind") in (semantic_delta.get("trigger_kinds") or [])
-                       for gap in held_bindings)
-            or not exact_hold_checkpoints
-            or not any(
-                outcome in {"new_runnable_successor", "new_concrete_blocker"}
-                for outcome in satisfying_outcomes if isinstance(outcome, str)
-            )
-        ):
-            return False
     return project_replan_semantics({
         "operation": "vision_ack",
         "acceptance_gaps": acceptance_gaps,

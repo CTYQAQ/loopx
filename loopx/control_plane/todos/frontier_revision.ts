@@ -9,7 +9,8 @@ import { requireJsonObject, requireBoolean, requireNonEmptyString, requireString
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { parseTodoTimestampMicros } from "../runtime_timestamp.ts";
 import { normalizeTodoAgent, stripPythonWhitespace } from "../coordination/todo_agents.ts";
-import { AuthorityStoreProtocolError } from "../coordination/authority_store_codec.ts";
+import { AuthorityStoreProtocolError, canonicalAuthorityObject,
+  canonicalAuthoritySha256 } from "../coordination/authority_store_codec.ts";
 import {claimAllowsAgent} from "./agent_scope.ts";
 
 const REVISION = "todo_frontier_revision_v0";
@@ -152,8 +153,17 @@ function checkpoint(rows: Row[] | null, agent: string | null, unclaimedOnly = fa
   // real change to the measured chain but not to this agent's own work basis,
   // so the ACK fence also carries an identity over the rows this agent owns.
   const owned = agent === null ? [] : selected.filter(row => row.claim === agent);
-  const ownedDigest = owned.length === 0 ? null : createHash("sha256")
-    .update(`[${owned.map(row => row.serialized).join(",")}]`).digest("hex").slice(0, 24);
+  // Rewriting an existing task's name or priority cannot buy another semantic
+  // review. Keep those bytes in the full frontier revision above for freshness,
+  // while the owned replan basis follows the existing work structure. A new
+  // task/target/dependency still changes this identity; score improvement is
+  // deliberately not part of it. Text changes retain their separate acceptance
+  // binding guard and do not themselves confer new work authorization.
+  const ownedDigest = owned.length === 0 ? null : canonicalAuthoritySha256(owned.map(row => {
+    const work = canonicalAuthorityObject(JSON.parse(row.serialized), "frontier work");
+    const {title: _title, text: _text, priority: _priority, ...basis} = work;
+    return basis;
+  })).slice(0, 24);
   return {complete: true, frontier_revision: `${REVISION}:${digest.slice(0, 24)}`,
     frontier_updated_at: updated,
     frontier_owned_identity: ownedDigest === null ? null : `${REVISION}:owned:${ownedDigest}`};

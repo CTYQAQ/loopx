@@ -403,6 +403,41 @@ test("vision ACK compares strict calendar timestamps at microsecond precision", 
   }
 });
 
+test("a formal acceptance-hold ACK covers its exact owner basis after display updates", () => {
+  for (const kind of ["goal_acceptance_stale", "goal_acceptance_unbound"]) {
+    const revision = "a".repeat(64);
+    const gap = {kind, source: "goal_acceptance_contract", frontier_revision: revision,
+      generated_at: "2026-09-23T08:04:00Z"};
+    const delta = {accepted: true, obligation_id: "replan-1111111111111111",
+      outcomes: ["new_concrete_blocker"], satisfying_outcomes: ["new_concrete_blocker"],
+      trigger_kinds: [kind], trigger_checkpoints: [{kind, frontier_revision: revision}]};
+    const ack = {recorded: true, generated_at: "2026-09-23T08:03:00Z", semantic_delta: delta};
+    const request = {operation: "vision_ack", acceptance_gaps: [gap], ack};
+    assert.equal(projectReplanSemantics(request).acknowledged, true);
+    for (const changed of [
+      {...gap, frontier_revision: "b".repeat(64)},
+      {...gap, kind: "vision_acceptance_gap"},
+      {...gap, source: "unconfirmed_display"},
+    ]) assert.equal(projectReplanSemantics({...request, acceptance_gaps: [changed]}).acknowledged, false);
+    for (const changed of [
+      {recorded: false}, {generated_at: "2026-02-30T08:03:00Z"}, {generated_at: "2026-09-23T08:03:00"},
+      {semantic_delta: {...delta, accepted: false}}, {semantic_delta: {...delta, outcomes: []}},
+      {semantic_delta: {...delta, satisfying_outcomes: []}},
+      {semantic_delta: {...delta, trigger_kinds: ["vision_acceptance_gap"]}},
+      {semantic_delta: {...delta, trigger_checkpoints: [{kind, frontier_revision: "other"}]}},
+      {semantic_delta: {...delta, obligation_id: null}},
+    ]) assert.equal(projectReplanSemantics({...request, ack: {...ack, ...changed}}).acknowledged, false);
+    // A newly observed independent gap still requires its own current evidence.
+    assert.equal(projectReplanSemantics({...request,
+      acceptance_gaps: [gap, {kind: "vision_acceptance_gap", generated_at: gap.generated_at}]}).acknowledged, false);
+    assert.equal(projectReplanSemantics({...request,
+      acceptance_gaps: [gap, {kind: "vision_acceptance_gap", generated_at: ack.generated_at}]}).acknowledged, true);
+    // Historical ACKs without an obligation identity retain their old freshness rule.
+    assert.equal(projectReplanSemantics({...request, acceptance_gaps: [{...gap, generated_at: ack.generated_at}],
+      ack: {...ack, semantic_delta: {...delta, obligation_id: null}}}).acknowledged, true);
+  }
+});
+
 
 test("canonical no-follow-up restores only its exact admitted review and still owes Vision", () => {
   const id = "replan-1111111111111111", agent = "synthetic-agent";

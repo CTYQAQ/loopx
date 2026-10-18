@@ -112,9 +112,19 @@ def _terminal_todo_source_contract(
         "user_todos": user_status,
         "agent_todos": agent_status,
     }
+    acceptance = (agent_todo_summary or {}).get("goal_acceptance_contract")
+    acceptance_confirmed = True
+    if isinstance(acceptance, dict) and acceptance.get("enabled") is True:
+        # Todo completion runs only that Todo's criteria. The typed acceptance
+        # owner separately qualifies the current contract and complete work
+        # basis; a local pass/no-follow-up cannot manufacture that receipt.
+        status = acceptance.get("status")
+        source_completeness["goal_acceptance"] = status
+        acceptance_confirmed = status == "accepted"
     return (
         source_completeness,
-        user_status == agent_status == "valid" and (user_intent or agent_intent),
+        user_status == agent_status == "valid" and (user_intent or agent_intent)
+        and acceptance_confirmed,
     )
 
 
@@ -177,4 +187,5 @@ def goal_frontier_is_terminal_no_followup(*, projection: dict[str, Any] | None) 
         and completeness.get("schema_version") == GOAL_TERMINAL_SOURCE_COMPLETENESS_SCHEMA_VERSION
         and completeness.get("user_todos") == "valid"
         and completeness.get("agent_todos") == "valid"
+        and completeness.get("goal_acceptance", "accepted") == "accepted"
     )
