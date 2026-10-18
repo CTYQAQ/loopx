@@ -2,7 +2,7 @@ from __future__ import annotations
 from .effective_action import EffectiveAction
 from ..effect_runtime import effect_runtime_result
 from .effect_program import ReceiptBoundReplayPhase
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -87,6 +87,7 @@ from ..scheduler.execution_context import (
 from ..scheduler.external_evidence_observation import (
     build_external_evidence_observation_obligation,
 )
+from ..scheduler.arbitration import SchedulerArbitration
 from ..scheduler.scheduler_hint import build_scheduler_hint
 from ..scheduler.state import (
     load_app_automation_scheduler_state,
@@ -120,7 +121,7 @@ from ..work_items.action_selection_contract import (
 )
 from ..work_items.goal_route_hint import build_goal_route_hint
 from ..work_items.interaction_contract import (
-    build_interaction_contract,
+    _build_interaction_contract_projection,
     unadmitted_action_selection,
     finalize_user_gate_notification_cooldown,
 )
@@ -196,7 +197,7 @@ def _compact_autonomous_candidate_context(
 
 
 def _scheduler_hint(
-    payload: dict[str, Any], *, include_detail: bool = False,
+    payload: dict[str, Any], *, arbitration: SchedulerArbitration | None = None, include_detail: bool = False,
     codex_app_scheduler_state: dict[str, Any] | None = None, available_capabilities: Any = None, codex_app_current_rrule: Any = None,
     codex_app_automation_id: Any = None,
     scheduler_execution_context: Mapping[str, Any] | SchedulerExecutionContextResolution | None = None,
@@ -204,7 +205,7 @@ def _scheduler_hint(
     return build_scheduler_hint(
         payload,
         user_action_required=_user_channel_action_required(payload),
-        agent_scope_frontier_actions=[action.value for action in AgentScopeFrontierAction],
+        arbitration=arbitration,
         include_detail=include_detail,
         codex_app_scheduler_state=codex_app_scheduler_state,
         available_capabilities=available_capabilities, codex_app_current_rrule=codex_app_current_rrule,
@@ -219,6 +220,7 @@ def _load_app_automation_scheduler_state(
     goal_id: str,
     agent_id: str | None,
     surface: str,
+    read_observer: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any] | None:
     raw_runtime_root = status_payload.get("runtime_root")
     safe_agent_id = normalize_todo_claimed_by(agent_id)
@@ -229,6 +231,7 @@ def _load_app_automation_scheduler_state(
         goal_id=goal_id,
         agent_id=safe_agent_id,
         surface=surface,
+        read_observer=read_observer,
     )
 
 
@@ -1628,6 +1631,9 @@ def _build_quota_should_run_payload(
     include_agent_todo_detail: bool = False,
     runtime_root: str | Path | None = None,
     goal_ref: Mapping[str, object] | None = None,
+    scheduler_state_read_observer: (
+        Callable[[Mapping[str, Any]], None] | None
+    ) = None,
 ) -> dict[str, Any]:
     if prepared.receipt_bound_replay_phase is ReceiptBoundReplayPhase.SETTLED:
         payload = _build_settled_quota_payload(prepared, route)
@@ -1650,8 +1656,8 @@ def _build_quota_should_run_payload(
         resolved_scheduler_context=prepared.resolved_scheduler_context,
     )
     payload["automation_liveness"] = build_automation_liveness(payload)
-    payload["interaction_contract"] = build_interaction_contract(
-        payload,
+    payload["interaction_contract"], arbitration = _build_interaction_contract_projection(
+        payload, agent_scope_frontier_actions=[action.value for action in AgentScopeFrontierAction],
         available_capabilities=prepared.runtime_available_capabilities,
         scheduler_execution_context=prepared.resolved_scheduler_context,
         turn_instance_id=turn_instance_id,
@@ -1659,7 +1665,7 @@ def _build_quota_should_run_payload(
         registry_path=prepared.status_payload.get("registry"),
     )
     payload["scheduler_hint"] = _scheduler_hint(
-        payload,
+        payload, arbitration=arbitration,
         include_detail=prepared.include_scheduler_detail,
         available_capabilities=prepared.runtime_available_capabilities,
         codex_app_scheduler_state=(
@@ -1669,6 +1675,7 @@ def _build_quota_should_run_payload(
                 agent_id=quota_decision_agent_id(payload)
                 or prepared.requested_agent_id,
                 surface=prepared.resolved_scheduler_context.context.host_surface.value,
+                read_observer=scheduler_state_read_observer,
             )
             if prepared.resolved_scheduler_context.ok
             and prepared.resolved_scheduler_context.context is not None
