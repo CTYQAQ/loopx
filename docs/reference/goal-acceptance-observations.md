@@ -73,6 +73,29 @@ plus `node examples/dashboard-goal-acceptance-browser-smoke.mjs`. The browser
 check consumes real status collection over a disposable synthetic Goal; set
 `LOOPX_GOAL_ACCEPTANCE_PACKAGED=1` after the Dashboard build to check shipped assets.
 
+## Default supporting outcomes
+
+Goal Overview shows supporting outcomes recorded by a bound Agent: original
+objective, cumulative requirements, linked work, sources and separate Agent
+review/check results. The local owner can **Add a requirement** and read the
+canonical result. Refresh a stale view before rebasing; an unconfirmed write
+retains its operation for retry. No model starts and no check command runs.
+
+Outcome maintenance and evidence review are default, without a feature switch.
+The `enabled` field below governs executable checks only. An Agent review does
+not certify independent acceptance or complete the root Goal; requirements/work
+changes invalidate its basis and artifact edits require another review. Other
+runnable research and original budget/stop conditions retain precedence.
+See the [Agent workflow](../../skills/loopx-project/references/outcome-refinement.md)
+for inline context, one-call writeback and upgrade/adoption limits.
+
+中文：Goal 概览显示 Agent 登记的支撑成果：原始目的、累计要求、关联工作、来源，
+并区分 Agent 自查与独立检查。所有者可原地补充要求并读取原生结果；过期视图先
+刷新再重基，未确认写入保留原操作重试。不启动模型或执行检查命令。默认维护和
+有据自查没有开关，下文 `enabled` 只管理可执行检查。自查不代表独立验收或根
+Goal 完成；要求／工作变化使依据过期，产物修改后须重新核对。既有可执行研究及
+原始预算／停止条件保持权威。
+
 ## Owner-authorized contract (v0)
 
 An owner can opt an existing registered Goal into a versioned acceptance contract.

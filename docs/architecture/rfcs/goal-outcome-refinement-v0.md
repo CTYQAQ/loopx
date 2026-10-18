@@ -1,6 +1,6 @@
 # RFC: Persistent Goal outcome refinement (v0)
 
-- Status: Proposed; implementation and installed adoption are separate checkpoints.
+- Status: Implementation proposed; installed/model adoption and comparative benefit remain unqualified.
 - Owner: Core Goal acceptance and work planning (S3/R4), with S1/S5 callers.
 - Language mirror: [中文](goal-outcome-refinement-v0.zh-CN.md).
 - Existing contract: [shared Goal alignment](shared-goal-alignment-and-governed-amendment-v0.md#37-current-work-and-goal-requirements).
@@ -31,10 +31,10 @@ Current owners solve adjacent problems:
 ## Decision
 
 Add structured supporting outcomes inside the existing canonical Goal authority,
-owned beside acceptance. Each outcome has a stable ID, responsible Agent, original
+owned by acceptance. Each outcome has a stable ID, responsible Agent, original
 objective, cumulative requirement IDs/descriptions, linked existing Todos and
-bounded source references. This is a planning declaration, not a new independent
-Goal, scheduler, capability, acceptance verdict or permission envelope.
+bounded source references. This is a planning declaration and default evidence review, not a new independent
+Goal, scheduler, capability, independent acceptance verdict or permission envelope.
 
 The original Goal and its root commitments remain untouched. An outcome's original
 objective and existing requirement descriptions cannot be overwritten by the
@@ -54,7 +54,8 @@ promote every message, housekeeping action or intermediate step.
 The bound Agent distinguishes a direct human request from heartbeat instructions,
 quoted documents, tool results and peer messages using the actual host context.
 No substring classifier infers user authority or importance. Before continuing a
-material new deliverable or correction, the Agent reads existing outcomes,
+material new deliverable or correction, the Agent reuses inline outcome context
+(or inspects it only when missing),
 refines the matching outcome and links work through normal Todo operations.
 It retains previously stated requirements and records the latest source reference.
 If a reliable host message ID is unavailable, use a stable local opaque evidence
@@ -81,20 +82,70 @@ stale revisions, another Goal instance and another Agent's mutation are rejected
 No existing Goal acquires outcomes or changed scheduling merely by upgrading.
 
 The acceptance readback includes declared outcomes even when executable checks
-are disabled. It retains every requirement and work link across focus switches
-and restarts. Matched current acceptance criteria can provide check evidence;
-unconfigured, mismatched, stale and failed checks stay distinguishable. No caller
-can submit a passing result through refinement, and all Todos being done cannot
-mark an outcome accepted. The existing acceptance owner remains the only verifier.
-The outcome objective is subordinate to the original Goal, never its replacement.
+are disabled. Default outcome maintenance and evidence review have no enable
+switch. The legacy `enabled` field controls only configured check commands; it
+does not disable requirements, review or gap projection. A refinement cannot
+submit independent passing evidence, execute commands or change Goal lifecycle.
 
-The normal admitted-work source list reads this same complete declaration before
-work. Missing coverage remains visible for planning; an empty Todo frontier must
-not erase an unresolved outcome. Replan and work selection continue through the
-existing owners, with unresolved requirement identities carried as evidence.
-An outcome record alone does not prove that a model read it, changed its action
-or produced a better deliverable. The decisive replay must demonstrate retained
-requirements influencing subsequent work and independently check the artifact.
+At a meaningful delivery/experiment milestone, the Agent compares the artifact
+with every retained requirement and records `met`, `unmet` or `uncertain`, with
+reasoning and evidence references. This default self-assessment can settle a
+planning gap for an unconfigured requirement. It remains visibly separate from
+independent verification and owner approval. A configured criterion cannot be
+bypassed by self-assessment; matching current checks and work coverage still
+supply its result. Todo closure alone supplies neither result.
+
+Review binds the cumulative requirements and linked work declarations. Changing
+these invalidates its basis. Evidence references are Agent assertions: v0 does
+not resolve or fingerprint the cited artifacts, so editing an artifact requires
+another review. Do not call a retained reference proof of freshness or quality.
+
+The existing admitted-work context carries the complete outcome declaration;
+when inline content is present, no duplicate acceptance inspection is required.
+Changes can accompany ordinary `refresh-state --goal-outcome-update-json`, or one
+native `refine_outcome` call. Unchanged work needs no extra call, round trip or
+review record. This is sequential composition: refinement commits before the
+normal writeback. If writeback fails, its returned refinement receipt identifies
+what committed; retry the identical operation rather than assuming rollback.
+
+| Event | Default action | Existing mechanism |
+| --- | --- | --- |
+| Material direct-user deliverable/correction | Add to the matching outcome, retaining prior intent | Host context + native refinement or skill/CLI bridge |
+| Resume, focus switch, replan | Reuse full requirements, then choose work | Shared work context; missing-source required read only |
+| Meaningful artifact/experiment milestone | Review all retained requirements against actual evidence | One refinement, optionally batched with normal writeback |
+| Unmet/unreviewed outcome without linked active/waiting work | Carry a typed gap into planning | Existing frontier replan, only when no runnable advancement wins |
+| No relevant change | Continue work without another protocol exchange | Existing admission and writeback |
+
+An open/blocked/deferred linked Todo retains its existing owner and wait rules.
+Other runnable work is not preempted merely because a new outcome gap exists.
+Replan should use evidence to choose the next useful action or justify continuing
+it; neither a gap nor a review mandates a direction change. No new scheduler,
+periodic audit, quota debit or outcome-driven root stop is introduced.
+
+## Open-ended research and no premature stop
+
+Supporting outcomes are subordinate to the original research objective. A local
+hypothesis review, successful experiment, all local requirements being met, or a
+short plateau cannot stand in for root continuation/budget/stop criteria. This
+change never writes `achieved`, `no_followup`, budget or terminal state. Existing
+valid stop and wait conditions still apply; it neither forces budget exhaustion
+nor invents filler work. An unresolved requirement can remain uncertain while
+useful authorized research continues.
+
+Future EdgeBench qualification follows the [existing measurement contract](long-horizon-harness-benchmark-research-program-v0.md#6-measurement-model):
+use matched task/model/reasoning, source and checkpoint, scorer, feedback access
+and total budget. Preserve late-stage/common-window comparisons and valid,
+invalid and missing distinctions. Compare task-native final/best outcomes,
+total model/tool/CLI cost, latency, human intervention, unused budget reasons,
+and premature-terminal/harness-conflict rates. Include protocol context and
+review cost; a better local score cannot excuse worse final outcomes or early
+stopping. Use solver-visible evidence during work and hidden evaluation only at
+the permitted terminal phase. Do not launch or alter an experiment from this RFC.
+
+The acceptance target is effectiveness and complete-cost efficiency at least
+baseline, with no premature-stop regression. Deterministic continuation parity
+is a prerequisite, not proof of live-model noninferiority. Actual model adoption,
+artifact quality and matched benchmark benefit remain qualification work.
 
 ## Product journey and delivery slice
 
@@ -112,6 +163,23 @@ external-host skill guidance, negative cases and packaged backend readback.
 It does not upgrade the current installation, modify another chat's live work,
 merge the PR or launch a paid model experiment.
 
+## Cost and bounded refactoring
+
+The heartbeat rule grows by 523 characters; every previous clause is retained.
+On the same supported scoped fixture, compact guidance grows from 7,286 to
+7,809 characters including the existing Reward Memory allowance; the ordinary
+thin fixture grows from 3,147 to 3,670. Presentation regression ceilings become
+7,200 compact and 3,700 thin, keeping the separate 640-character allowance.
+These are measured context costs, not an efficiency claim or a runtime budget
+increase. Unchanged work adds no Agent CLI interaction, but outcome-bearing
+context still has read/projection and token costs that benchmarks must include.
+
+The existing acceptance work digest is extracted unchanged for both acceptance
+and review-basis invalidation, avoiding a second work-identity policy or circular
+owner import. Larger Goal migration/supersession work is deliberately deferred.
+The provider is the existing canonical authority (File/SQLite qualified here),
+builtin Core origin, with no new public capability or Python decision owner.
+
 ## Decisive acceptance
 
 Use disposable public-safe File and SQLite Goals, never active operational state.
@@ -122,11 +190,14 @@ Use disposable public-safe File and SQLite Goals, never active operational state
 3. Restart the caller and switch work. The normal admitted-work reads still show
    both requirements and the original source lineage.
 4. Finish the linked Todo with one requirement unmet. Readback must not accept the
-   outcome; continuation still exposes the gap. Existing acceptance verification,
-   not a model's claim, supplies any later passing evidence.
+   outcome; continuation still exposes the gap. Default evidence review can settle planning only; independent acceptance
+   supplies any later passing check evidence.
 5. Reject lost requirements, changed text under an old ID, foreign-Agent changes,
    nonexistent work, stale CAS and conflicting retries. Exact replay writes once.
-6. Exercise the packaged Goal UI against the real backend: read, refine, reload,
+6. Compare runnable-research admission before/after missing, uncertain, unmet and
+   met supporting outcomes. Keep root state, quota/stop decisions and the next
+   runnable action unchanged; test blocked/deferred waits separately.
+7. Exercise the packaged Goal UI against the real backend: read, refine, reload,
    stale-write recovery, desktop/narrow view. Verify absent-outcome behavior parity.
 
 These checks establish product semantics and recovery. Live-model recognition,
