@@ -215,19 +215,48 @@ another history. It also cannot infer a candidate/incumbent association from
 free-text summaries. This limits the first C treatment to the facts actually
 delivered, rather than the fuller desired context list above.
 
-The next author step is a real receiver transport prototype. Compose from the
-**destination's current ordinary replan input**, retaining its current identity
-and obligations. A captured source packet is historical evidence, never a
-replacement for destination admission or executable source commands. Bind the
-sealed source and current destination separately, and verify the actual model
-request plus preparation/replan/writeback through the ordinary receiver before
-launching the late-point comparison. The offline selector check establishes
-neither complete checkpoint recovery nor this receiver journey.
+A disposable CLI transport prototype now preserves one valid JSON response. It invokes the
+real destination CLI once, retains every original response member and its raw
+digest, then composes a separate study-local advisory from that same response.
+G0C0 and disabled calls retain exact byte parity. G/C do not replace the current
+Goal, commands, Turn or obligation. The C index preserves the original kernel
+projection envelope, including freshness alerts and omitted coverage; an adapter
+must not restamp retained facts as a fresh source read. The plain-text fragments
+above remain offline characterization, not a production JSON serializer.
 
-Real receiver/model qualification, frozen late-point manifests and empirical
+Real isolated File/SQLite CLI checks cover this framing, unchanged original
+values, identical C across G, ordinary/error parity, wrong destination, and a
+lost-display retry of the same committed guard without another debit. A
+composition failure preserves the already committed raw response and records
+missing treatment; it must not silently certify delivery or rerun an effect.
+The complete caller checkout and actual interpreter must be source-qualified;
+matching a few unchanged owner files cannot qualify a newer CLI entrypoint.
+
+Advisory delivery and checkpoint capture have different lifetimes. The existing
+restore barrier correctly prevents another capture before the initial restored
+review and native cursor are accepted. A first replan may occur inside model
+preparation, while that capture gate is closed. G/C delivery must therefore
+observe the current due-replan input independently, without opening the capture
+gate or enabling TurnEnvelope. Common fresh reconstruction already asks the
+agent to read the original objective, failed alternatives and retained best;
+G estimates additional global reflection beyond that shared baseline.
+
+Bind the sealed source, current destination response and advisory separately.
+A source packet remains historical evidence, never destination admission or
+executable source commands. Model-consumer qualification must trace the actual
+client-visible tool response, evidence-linked replan/writeback and subsequent
+useful artifact, rather than infer receipt from a file labelled model-visible.
+Retain startup/recovery failures and their complete cost. Synthetic engineering
+journeys qualify transport only; they do not qualify native checkpoint recovery,
+benchmark evidence adoption or G/C scientific benefit.
+
+Real warm-receiver qualification, frozen late-point manifests and empirical
 continuation comparisons remain unfinished. Keep this as a Draft while that
 author work remains; review, merge, installation and scientific acceptance are
 separate. The bounded future-facing pass reuses existing typed readers and
-pre-decision selection; a production abstraction or configuration is deferred
-until an actual receiver callsite is qualified. Current donors and the primary
-retained/fresh study remain unchanged.
+pre-decision selection; no production abstraction, runtime option or frontend
+control is supplied. Current donors and the primary retained/fresh study remain
+unchanged. Do not borrow an existing fresh arm as an unplanned G0C0 control or
+start four extra cells without four available slots and the original remaining
+cumulative budget. Freeze any narrower comparison prospectively; it does not
+retroactively complete the proposed factorial.

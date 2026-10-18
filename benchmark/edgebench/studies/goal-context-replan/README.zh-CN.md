@@ -152,12 +152,30 @@ G0C0 逐字节保持原输入，其他三格只追加声明的 G 指令和/或 C
 也不能从自由文本摘要推断候选/incumbent 关联。
 因此第一轮 C 仅组织实际交付事实，不冒充已经提供上文所列的全部理想上下文。
 
-下一步作者工作是真实 receiver 传输原型：从 **目标端当前的普通 replan 输入** 组合，
-保留目标端当前身份与义务。捕获的源 packet 是历史证据，不能替代目标端准入或作为源端可执行命令。
-分别绑定封存来源与当前目标端，在启动晚期点比较前核查真实模型请求及普通 receiver 的
-preparation/replan/writeback。离线 selector 检查不等于完整 checkpoint 恢复，也不等于这条接收链路。
+可丢弃 CLI 传输原型现已保留单个有效 JSON 响应：真实目标端 CLI 只执行一次，
+保留全部原响应成员和原文 digest，再从同一响应组合独立的 study 局部提示。
+G0C0 与关闭状态逐字节不变；G/C 不替换当前 Goal、命令、Turn 或 obligation。
+C 索引保留原 kernel projection envelope 的新鲜度告警与省略覆盖；
+adapter 不能把保留事实重新标成刚读到的源。上面的纯文本片段仍只作离线表征，不能作为生产 JSON serializer。
 
-真实 receiver/模型资格、冻结晚期运行清单与实证接续比较仍未完成。
+真实隔离 File/SQLite CLI 已检查这种 framing、原值不变、两个 G 条件下的 C 相同、
+普通/错误响应原字节、错误目标端，以及丢失显示后按同一已提交 guard 重试且不新增扣账。
+组合失败应保留已提交的原始响应并记录未投递处理，不能悄悄认证成功或重跑 effect。
+必须资格化完整调用端 checkout 与真实解释器；少数 owner 文件相同，不能证明较新 CLI 入口已经通过。
+
+提示投递与 checkpoint 捕获的生命周期不同。初始恢复 review 和 native cursor 尚未被接受时，
+既有恢复门应继续阻止再次捕获；首次 replan 也可能发生在模型 preparation 内，此时捕获门仍关闭。
+因此 G/C 必须独立观察当前待决 replan 输入，不能为了投递而开放捕获门或启用 TurnEnvelope。
+公共 fresh 重建指令已经要求回读原目标、失败备选和保留 best；G 测的是在此共同基线上增加全局反思。
+
+分别绑定封存来源、当前目标端响应和局部提示。源 packet 仍是历史证据，不能替代目标端准入，
+也不能作为源端可执行命令。模型消费者资格须沿实际 client 可见的工具响应、证据关联的
+replan/writeback 和随后有用产物读回，不能因为某文件命名为 model-visible 就推断模型已收到。
+启动和恢复失败及其完整成本均保留。合成工程链路只资格化传输，不能认证 native checkpoint 恢复、
+benchmark 证据采用或 G/C 科学收益。
+
+真实 warm receiver 资格、冻结晚期运行清单与实证接续比较仍未完成。
 这些作者工作完成前保持 Draft；review、merge、安装与科学验收分开。
-本次面向后续的有界改进复用既有类型化 reader 和决策前选择；
-生产抽象或配置等真实 receiver 调用点验证后再考虑。当前 donor 与主 retained/fresh 研究保持原样。
+本次有界改进复用既有类型化 reader 和决策前选择；未提供生产抽象、运行时开关或前端控制。
+当前 donor 与主 retained/fresh 研究保持原样。不能临时借既有 fresh 臂充当 G0C0，
+也不能在没有四个可用槽位和原累计预算余量时加起四格。较小比较须事先单独声明，不能回填成完整 factorial。
