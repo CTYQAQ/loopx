@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from ..capabilities.explore.result_log import validate_explore_result_event
 from ..chat_completed_todos import CompletedTodoPages
 from ..status_server import cors_response_headers, is_loopback_host, is_loopback_origin
+from .chat_bundle import validate_bundle
 from .explore_results_api import explore_history_rows
 
 
@@ -226,10 +227,16 @@ class RuntimeWorkspaceHandler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sources", type=Path, required=True, help="Owner-prepared container source manifest")
-    parser.add_argument("--assets-dir", type=Path, default=Path(__file__).resolve().parents[1] / "web" / "chat")
+    parser.add_argument("--assets-dir", type=Path, help="Explicit custom/prototype assets, as in loopx chat")
     parser.add_argument("--port", type=int, default=0, help="First loopback port; default allocates temporary ports")
     args = parser.parse_args()
-    if not (args.assets_dir / "index.html").is_file():
+    assets = (args.assets_dir or Path(__file__).resolve().parents[1] / "web" / "chat").expanduser().resolve()
+    if args.assets_dir is None:
+        try:
+            validate_bundle(assets, source_root=Path(__file__).resolve().parents[2])
+        except RuntimeError as exc:
+            parser.error(str(exc))
+    if not (assets / "index.html").is_file():
         parser.error("Build the packaged Chat assets first or supply --assets-dir")
     raw = json.loads(args.sources.read_text())
     if not isinstance(raw, list) or not 1 <= len(raw) <= 12:
@@ -239,7 +246,7 @@ def main():
         parser.error("Choose unprivileged ports for all readers")
     if len({s.id for s in sources}) != len(sources):
         parser.error("Source ids must be unique")
-    servers = [RuntimeWorkspaceServer(source, args.assets_dir, port=args.port + i if args.port else 0)
+    servers = [RuntimeWorkspaceServer(source, assets, port=args.port + i if args.port else 0)
                for i, source in enumerate(sources)]
     catalog = [{"id": s.source.id, "label": s.source.label, "status_url": s.status_url} for s in servers]
     threads = []

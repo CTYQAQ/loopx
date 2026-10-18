@@ -10,6 +10,7 @@ import pytest
 
 from loopx.capabilities.explore.result_log import build_explore_node_event
 from loopx.presentation.runtime_workspace import ContainerSource, RuntimeWorkspaceServer
+from loopx.presentation.runtime_workspace import main as runtime_workspace_main
 
 
 class Source:
@@ -125,3 +126,17 @@ def test_manifest_requires_physical_identity():
         registry="/registry", runtime_root="/runtime", cli="/cli", python="/python", path="/bin")
     with pytest.raises(ValueError, match="pinned container"):
         ContainerSource.parse(raw)
+
+
+def test_default_entry_rejects_stale_bundle_before_opening_sources(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr("sys.argv", ["runtime-workspace", "--sources", str(tmp_path / "unused.json")])
+
+    def invalid_bundle(_assets, *, source_root):
+        assert (source_root / "apps/presentation/dashboard/package.json").is_file()
+        raise RuntimeError("stale or invalid: rebuild the chat bundle")
+
+    monkeypatch.setattr("loopx.presentation.runtime_workspace.validate_bundle", invalid_bundle)
+    with pytest.raises(SystemExit) as stopped:
+        runtime_workspace_main()
+    assert stopped.value.code == 2
+    assert "rebuild the chat bundle" in capsys.readouterr().err
