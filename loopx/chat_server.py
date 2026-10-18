@@ -825,21 +825,30 @@ class ChatRequestHandler(
         except (ValueError, TypeError, OverflowError) as exc:
             self._send_error(str(exc), turn_replay_safe=True, delivery_state="not_delivered")
             return
+        bound = session.get("steward_context") or session.get("project_context") or {}
+        bound_input = bound.get("audience") in {"bound_owner", "bound_group"}
         try:
-            context = self._session_context(session)
-            runtime_objective = str(context["objective"] or context["title"])
+            # Bound local input resolves its context in the source admission
+            # owner, once, outside the grant fence. Do not repeat provider IO
+            # here or pass an unverified saved workspace as caller authority.
+            context = None if bound_input else self._session_context(session)
+            runtime_objective = str(context["objective"] or context["title"]) if context else ""
         except (ValueError, KeyError) as exc:
             # No Turn has been admitted when its owning context cannot resolve.
             self._send_error(str(exc), turn_replay_safe=True, delivery_state="not_delivered")
             return
         try:
-            if body.get("delivery") == "queue":
+            # Existing private bound Sessions share their canonical queue after
+            # fresh local-source admission. The body cannot assert an origin,
+            # provider principal or a broader local-owner conversation scope.
+            if body.get("delivery") == "queue" or bound_input:
                 turn, created = self.server.runtime_controller.enqueue_turn(
                     session_id=session_id, client_turn_id=client_turn_id,
                     message=message, attachments=attachments,
-                    work_dir=cast(Path, context["project"]), objective=runtime_objective, origin="web",
+                    work_dir=cast(Path, context["project"]) if context else None, objective=runtime_objective, origin="web",
                 )
             else:
+                assert context is not None
                 turn, created = self.server.runtime_controller.submit_turn(
                     session_id=session_id, client_turn_id=client_turn_id,
                     message=message, attachments=attachments,
@@ -908,6 +917,10 @@ class ChatRequestHandler(
             return
         except KeyError:
             self._send_error("chat session was not found", status=404, session_invalidated=True)
+            return
+        except ValueError as exc:
+            self._send_error(str(exc), **({"delivery_state": "not_delivered", "turn_replay_safe": True}
+                                          if bound_input else {}))
             return
         except Exception as exc:  # noqa: BLE001 - compact local validation error.
             self._send_error(str(exc))

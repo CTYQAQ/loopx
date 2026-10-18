@@ -1347,54 +1347,17 @@ class ChatRuntimeController:
         client_turn_id: str,
         message: str,
         attachments: list[AttachmentPayload] | None = None,
-        work_dir: Path,
+        work_dir: Path | None,
         objective: str,
         origin: str = "external",
         external_agent_target: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Persist a bounded same-Session Turn and dispatch it in FIFO order."""
 
-        session = self.store.load_session(session_id)
-        if session is None or session.get("status") == "closed":
-            raise KeyError("chat session was not found")
-        if session.get("steward_context") is not None:
-            if origin not in {"lark", "external"}:
-                raise ValueError("bound steward Chat requires its external source admission")
-            self.project_contexts.session_context(session)
-        if session.get("project_context") is not None:
-            if conversation_scope(session, origin=origin)["kind"] != "project_workspace":
-                raise ValueError("project grant does not authorize this external audience or source")
-            context = self.project_contexts.session_context(session)
-            project_context_policy.validate_project_executor_scope(str(session["agent_id"]), session["project_context"], self.capabilities)
-            work_dir, objective = context["project"], context["objective"]
-        if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
-            if attachments:
-                raise ValueError("attached host session queue does not yet accept attachments")
-            turn, created = enqueue_attached_agent_turn(
-                store=self.store,
-                registry_path=self.registry_path,
-                session_id=session_id,
-                client_turn_id=client_turn_id,
-                message=message,
-                origin=origin,
-                external_agent_target=external_agent_target,
-            )
-        else:
-            if external_agent_target is not None:
-                raise ValueError("Agent target requires its original attached Session")
-            turn, created = self.store.create_queued_turn(
-                session_id,
-                client_turn_id=client_turn_id,
-                message=message,
-                attachments=attachments,
-                origin=origin,
-            )
-            self.resume_session_queue(
-                session_id=session_id,
-                work_dir=work_dir,
-                objective=objective,
-            )
-        return turn, created
+        from .capabilities.native_chat.queued_admission import enqueue_turn
+        return enqueue_turn(self, session_id=session_id, client_turn_id=client_turn_id,
+            message=message, attachments=attachments, work_dir=work_dir, objective=objective,
+            origin=origin, external_agent_target=external_agent_target)
 
     def resume_session_queue(
         self,

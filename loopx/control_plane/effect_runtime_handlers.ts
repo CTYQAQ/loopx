@@ -621,6 +621,7 @@ export function createEffectRuntimeHandlers(
     ["collaboration.conversation.agent_target", lazyHandler(() => import("./collaboration/conversation_binding.ts"), ({resolveConversationAgentTarget}) => resolveConversationAgentTarget)],
     ["collaboration.peer.context_access", lazyHandler(() => import("./collaboration/peer_context.ts"), ({requirePeerContextAccess}) => requirePeerContextAccess)],
     ["collaboration.source.recipients", lazyHandler(() => import("./collaboration/source_grants.ts"), ({resolveSourceRecipients}) => resolveSourceRecipients)],
+    ["collaboration.source.ingress", lazyHandler(() => import("./collaboration/source_grants.ts"), ({validateSourceIngress}) => validateSourceIngress)],
     ["collaboration.source.execution_bindings", lazyHandler(() => import("./collaboration/source_grants.ts"), ({sourceExecutionBindings}) => sourceExecutionBindings)],
     ["collaboration.source.configure_recipient", lazyHandler(() => import("./collaboration/source_grants.ts"), ({configureSourceRecipient}) => configureSourceRecipient)],
     ["collaboration.source.configure_scope", lazyHandler(() => import("./collaboration/source_grants.ts"), ({configureSourceScope}) => configureSourceScope)],
