@@ -1,39 +1,93 @@
 """Disposable real worker/CLI authority for the packaged dashboard smoke."""
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+import argparse
+from contextlib import ExitStack, redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
 import shlex
 import signal
 import sys
-
-import pytest
+import tempfile
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+
+GOAL = "successor-review-fixture"
+AGENT = "fixture-agent"
+
+
+def _write_authority(root: Path) -> tuple[Path, Path]:
+    """Prepare the same canonical File scenario without importing test modules."""
+    from canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    from loopx.control_plane.goals.goal_vision import compact_goal_vision_packet, normalize_goal_vision_packet
+    from loopx.control_plane.status.autonomous_replan_projection import AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD
+
+    project, runtime = root / "project", root / "runtime"
+    project.mkdir()
+    state = project / "ACTIVE_GOAL_STATE.md"
+    state.write_text("---\nstatus: active\n---\n\n# Synthetic Goal\n\n## Objective\nDeliver the independently accepted source outcome.\n\n## Agent Todo\n")
+    index = runtime / "goals" / GOAL / "runs" / "index.jsonl"
+    index.parent.mkdir(parents=True)
+    evidence = index.parent / "synthetic-artifact.json"
+    report = index.parent / "synthetic-artifact.md"
+    evidence.write_text(json.dumps({"ok": True, "fixture": "public-safe-replan"}))
+    report.write_text("# Synthetic source audit\n")
+    runs = [dict(classification="evidence_validated", agent_id=AGENT,
+        generated_at=f"2026-08-01T00:{i:02d}:00Z", json_path=str(evidence), markdown_path=str(report))
+        for i in reversed(range(AUTONOMOUS_REPLAN_PERIODIC_RUN_THRESHOLD))]
+    runs[0]["agent_vision"] = compact_goal_vision_packet(normalize_goal_vision_packet({
+        "goal_id": GOAL, "agent_id": AGENT, "state": "vision_drift_detected",
+        "vision_patch": {"acceptance_summary": "Independently validate a source artifact.",
+                         "advancement_policy": "repeat_until_closed"},
+    }, goal_id=GOAL, agent_id=AGENT))
+    index.write_text("".join(json.dumps(row) + "\n" for row in reversed(runs)))
+    (root / "registry.json").write_text(json.dumps({"common_runtime_root": str(runtime), "goals": [{
+        "id": GOAL, "status": "active", "repo": str(project), "state_file": state.name,
+        "domain": "synthetic-replan",
+        "adapter": {"kind": "fixture_connected_delivery_v0", "status": "connected-delivery"},
+        "quota": {"compute": 1.0, "window_hours": 24},
+        "coordination": {"agent_model": "peer_v1", "registered_agents": [AGENT, "different-agent"]},
+    }]}))
+    initialize_canonical_authority(runtime, GOAL, build_todo_runtime_shadow_projection(
+        goal_id=GOAL, todos=[], handoff_mode="soft_claim", leases=[],
+    ), state_path=state, provider="file")
+    return runtime, index
+
+
+def _unexpected_timer(_seconds: float) -> None:
+    raise AssertionError("unexpected timer")
 
 
 def serve(root: Path, mode: str) -> None:
     if mode not in {"paused", "unknown"}:
         raise ValueError("unknown smoke mode")
-    patch = pytest.MonkeyPatch()
     # This helper also runs directly from the browser smoke, outside pytest's
     # autouse fixtures. Resolve default device settings inside its disposable
     # home before importing any runtime owner, as the live readiness smoke does.
     isolated_home = root / "home"
     isolated_home.mkdir()
-    patch.setenv("HOME", str(isolated_home))
-    patch.setenv("USERPROFILE", str(isolated_home))
-    patch.delenv("CODEX_HOME", raising=False)
-    from test_external_scheduler_worker import _args, worker
-    from test_replan_successor_guard_reentry import AGENT, GOAL, _fixture
-    from managed_effect_runtime_fixture import stop_disposable_effect_runtimes
-    from loopx.chat_server import ChatHTTPServer, default_chat_assets_dir, serve_chat
-    from loopx.control_plane.quota.host_poll_receipts import receipt_path_for_goal
+    with ExitStack() as cleanup:
+        cleanup.enter_context(patch.dict(os.environ, {
+            "HOME": str(isolated_home), "USERPROFILE": str(isolated_home),
+            "TMPDIR": str(root), "TEMP": str(root), "TMP": str(root), "LOOPX_USAGE_PING": "0",
+        }))
+        cleanup.enter_context(patch.object(tempfile, "tempdir", str(root)))
+        for variable in ("CODEX_HOME", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+            os.environ.pop(variable, None)
+        import external_scheduler_worker as worker
+        from managed_effect_runtime_fixture import stop_disposable_effect_runtimes
+        from loopx.chat_server import ChatHTTPServer, default_chat_assets_dir, serve_chat
+        from loopx.control_plane.quota.host_poll_receipts import receipt_path_for_goal
 
-    try:
-        _, runtime, index = _fixture(root, patch, "file", future_monitor=False)
+        # Source changes can create several runtime fingerprints. Retire all
+        # verified owners before restoring the environment or removing the root.
+        cleanup.callback(stop_disposable_effect_runtimes, root)
+        runtime, index = _write_authority(root)
         before = index.read_bytes()
         host = root / "controlled_host.py"
         dispatches = root / "dispatches.json"
@@ -45,13 +99,13 @@ def serve(root: Path, mode: str) -> None:
             "print('Controlled model boundary: one request; no semantic delta.')\n"
             "raise SystemExit(int(sys.argv[2]))\n"
         )
-        args = _args(fake_cli=Path(sys.executable).parent / "loopx", state_file=root / "worker.json",
+        args = argparse.Namespace(cli_bin=str(Path(sys.executable).parent / "loopx"),
+            registry=str(root / "registry.json"), runtime_root=str(runtime), runtime_profile="generic_cli",
+            goal_id=GOAL, agent_id=AGENT, state_file=str(root / "worker.json"),
             wake_cmd=shlex.join([sys.executable, str(host), str(dispatches), "1" if mode == "unknown" else "0"]),
-            quota_timeout_seconds=60, wake_timeout_seconds=15)
-        args.registry, args.runtime_root = str(root / "registry.json"), str(runtime)
-        args.goal_id, args.agent_id, args.once = GOAL, AGENT, mode == "unknown"
+            once=mode == "unknown", error_backoff_seconds=5.0, quota_timeout_seconds=60, wake_timeout_seconds=15)
         with redirect_stdout(io.StringIO()):
-            returned = worker.run_worker(args, sleep=lambda _: pytest.fail("unexpected timer"))
+            returned = worker.run_worker(args, sleep=_unexpected_timer)
         assert returned == (1 if mode == "unknown" else 0)
         assert json.loads(dispatches.read_text()) == 1
         assert index.read_bytes() == before
@@ -69,9 +123,7 @@ def serve(root: Path, mode: str) -> None:
                     file=output, flush=True)
                 return super().serve_forever(poll_interval)
 
-        patch.setattr("loopx.chat_server.ChatHTTPServer", ObservableChatServer)
-        for variable in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
-            patch.delenv(variable, raising=False)
+        cleanup.enter_context(patch("loopx.chat_server.ChatHTTPServer", ObservableChatServer))
 
         def terminate(*_):
             raise SystemExit(0)
@@ -82,12 +134,6 @@ def serve(root: Path, mode: str) -> None:
                 scan_roots=[root / "project"], goal_id=GOAL, host="127.0.0.1", port=0,
                 codex_bin=str(root / "no-provider-codex"), claude_bin=str(root / "no-provider-claude"),
                 kiro_cli_bin=str(root / "no-provider-kiro"), assets_dir=default_chat_assets_dir(), open_browser=False)
-    finally:
-        # Source changes during a local run can create more than one runtime
-        # fingerprint. Retire every verified owner in this private namespace
-        # before the Node harness removes it, not only the latest fingerprint.
-        stop_disposable_effect_runtimes(root)
-        patch.undo()
 
 
 if __name__ == "__main__":
