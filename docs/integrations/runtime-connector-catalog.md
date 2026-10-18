@@ -84,12 +84,76 @@ observe-only polls retain their interval, and failed wakes retain error backoff.
 Commands that finish without more useful work may opt into
 `--wake-stop-exit-code <1..255>`: that explicit child exit ends the worker
 normally, without Todo completion or quota spend. Omit the option to preserve
-ordinary nonzero-exit failure/backoff behavior. Timeout and output-limit
-failures cannot be converted into a normal stop by this option. The caller owns
+ordinary nonzero-exit failure/backoff behavior outside automatic replan. Timeout
+and output-limit failures cannot be converted into a normal stop by this option. The caller owns
 the meaning of its chosen code; the generic worker does not parse provider
 receipts or infer work completion from stdout.
 Stop signals and subprocess cleanup keep their existing behavior. This adapter
 does not override admission or reinterpret task eligibility.
+
+The same configured worker state route now has one live consumer and retains
+automatic replan dispatch attempts across restarts. A successful child exit
+does not resolve the original replan obligation: if fresh Core admission still
+names that obligation, the worker reports `replan_paused`, leaves the Goal
+incomplete, and does not dispatch another semantic review. Cadence resets,
+new observation contexts and intervening independent work do not erase the
+attempt. Original Todo lifecycle and receipt-bound settlement remain under
+their existing owners; they are not another semantic replan opportunity.
+
+An interrupted, timed-out or otherwise failed replan is retained as
+`replan_outcome_unknown`. A new obligation ID cannot make that original work
+safe to repeat. When the original admission actually supplied a settlement
+identity and the configured Host preserved it, the worker reads that exact
+Turn through the existing settlement owner. Only verified complete settlement
+permits further current work. Pending recovery stays on its original identity.
+An opaque unbound shell command supplies no such proof; use its original Host
+recovery and preserve the worker state. The worker does not infer a Turn from
+stdout or the latest log row, and deleting the state is not a recovery method.
+
+The existing host-poll receipt also publishes the worker's last paused or
+unknown observation in the Goal overview. It identifies the original Agent and
+obligation, retains a real Turn only when supplied by admission, and links to
+the Goal's tasks and dependencies. This observation is readback, not current
+admission or proof that a provider stopped charging. The page explicitly keeps
+complete costs unknown. A missing, corrupt or differently scoped association
+cannot display the old operation as current. Reading the observation and
+opening tasks do not dispatch work; the existing Stop control still uses the
+Goal lifecycle owner.
+
+Scope includes the registry, runtime, Goal and Agent. Exact GoalRef is retained
+when supplied; executable legacy Goals keep their existing alias scope.
+Missing or newly supplied lifecycle metadata cannot reset an old attempt.
+Legacy alias reuse has no exact recreation guarantee. State corruption or
+write failure refuses a new wake. Separate state routes and distributed Hosts
+still require their existing shared execution/lease authority; the local lock
+is not a distributed exactly-once guarantee.
+
+This is a dispatch brake on existing replan work, not a new review model or
+provider budget. The configured Host still owns provider retries and token
+limits; `--wake-timeout-seconds` bounds this worker's process only when supplied,
+and the process output byte limit is not a token allowance. Unknown in-flight
+provider usage remains unknown. Ordinary admitted long work can use successive
+wakes, and a real negative experiment remains evidence for the original owner.
+
+First-party Codex CLI and benchmark Hosts also recheck their captured Goal
+authority at the actual process-launch boundary, including checkpoint resumes.
+The existing authority writer lock covers launch only and is released before
+the model runs. A Goal stopped after session selection therefore cannot start
+a new Host or replace its saved session with an empty, unlaunched result.
+
+Source-session admission retains its exact Goal lifetime checks. Executable
+legacy registries instead compare their original registry byte witness under
+the existing registry writer lock and verify the Goal is still active. A
+changed registry requires a fresh plan, including when an unrelated registry
+configuration change invalidated the old witness. When a legacy global
+projection declares its source registry, launch checks both the original source
+and the projection in the existing source-then-projection writer-lock order.
+A committed source stop still rejects launch if projection synchronization
+failed and left an active mirror. Missing or cyclic source routes cannot grant
+launch permission. This conservative check does
+not create an exact Goal instance identity: byte-identical legacy replacement
+remains indistinguishable. Generic shell commands still require their own Host
+to provide an equivalent launch boundary.
 
 ## External Tool Extension Candidates
 

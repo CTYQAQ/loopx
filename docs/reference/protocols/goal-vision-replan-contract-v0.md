@@ -1110,6 +1110,46 @@ choose the explicit terminal lane semantics `retired`, `superseded`, or
 vision. This keeps stage completion from silently terminating a long-horizon
 goal.
 
+### Current acceptance scope and stopping
+
+When the existing Goal acceptance contract is enabled, a Todo's successful
+completion and `no_followup` do not supply the separate Goal verification
+receipt. Derived Goal terminal closure requires the acceptance owner's current
+`accepted` projection as well as the original complete, empty frontier and
+canonical closure intent. The projection validates the contract, owner revision,
+work digest and actual validator results. Present malformed canonical acceptance
+state fails the typed read; it cannot become the legacy absent-contract path.
+
+`selected_work` acceptance covers exactly its configured work. Other requested
+stages remain independently executable, and an accepted local scope cannot hide
+their outstanding requirements. Only an authorized owner configuration can
+revise the contract's scope; a stage summary, changed title or failed experiment
+does not do so. A bounded research criterion may accept a finite result and its
+explicit unproved claims. If the original criterion requires a proof, that same
+finite evidence leaves the requirement unproven; Core adds no universal proof
+judge or automatic weakening of the criterion.
+
+Once an enabled contract has concrete work or a verification attempt, no
+selected or independently executable work, no due
+Monitor and no new admitted obligation, quota does not turn its generic fallback
+recommendation into another model delivery. Preserve the current result and
+contract for `loopx goal-acceptance inspect`, then verify or repair that existing
+requirement. This pause does not declare the whole Goal achieved. Original
+receipt recovery, actual independent work and inbox delivery retain their
+existing admission paths.
+
+A new `all_advancement` contract with no work and no verification attempt keeps
+the ordinary initial-planning route. Declaring requirements before planning
+must not disable that first step; creating a plan or Todo still grants no
+missing acceptance association.
+
+启用原有 Goal acceptance 合同后，Todo 的局部通过与 `no_followup` 不替代独立的
+Goal 验证回执。终态还要求原完整 frontier 已闭合；`selected_work` 的通过只说明
+所选工作通过，不能遮蔽其他已请求阶段。只有真实 owner 合同修订可以变更要求。
+有限研究结果可以按原有限范围标准合理停止并保留未证明结论；原要求为证明时，
+相同有限证据不能被改称证明。没有可执行工作和新义务时，保持结果与合同供原入口
+核对，不因空的普通建议再启动模型，也不把暂停宣称为整个 Goal 达成。
+
 ### Exact blocked-successor wait
 
 An open agent vision can wait when every causal Todo binding of its ordinary
@@ -1121,6 +1161,29 @@ another uncovered binding. When there is no other selectable advancement, quota/
 `resume_condition`, and `automatic_resume=true`. The ordinary
 `vision_acceptance_gap` is deferred while that read model is active, so the
 agent can remain quiet instead of inventing duplicate successor work.
+
+For a single exact successor without a bound heartbeat Turn, the scheduler can
+keep inexpensive source rechecks alive beyond the unchanged-poll limit when
+the resume owner supplies positive pending evidence. Alongside the existing
+clock-backed `resume_at` case, `todo_done` requires an identified, unarchived
+source of the supported task class that is still open or deferred.
+`monitor_changed` requires the exact open Monitor, the successor's matching
+generation baseline, and a current generation that has not advanced. The
+Monitor source must also carry a valid next-due time, the runtime clock
+observation, and explicit expiry evidence: either no expiry or an expiry later
+than both the observation and the next due time. These source facts are
+projected before compaction, including explicit null values that distinguish
+known absence of expiry or archival from missing evidence.
+
+This quiet path grants no delivery or spend. Missing sources, incomplete proof,
+an unscheduled or expired Monitor, and an existing Turn or settlement binding
+retain their original supervision. Supplying a new Turn id to a quota command
+is a bound operation, not an unbound scheduler recheck. Monitor-only waits keep
+their existing schedule-based cadence caps; when a Monitor becomes due, fresh
+quota admission must select its work before quiet waiting. A material poll then
+advances the original generation fence so the successor can resume. Goal stop,
+user gates and independently runnable advancement retain their existing
+priority.
 
 This is a read model, not a stored vision or todo lifecycle state. When the
 condition becomes ready, normal open-todo or deferred-successor routing resumes
@@ -1232,6 +1295,18 @@ checkpoint for diagnostics and historical ACK matching. Owned material changes
 still rearm. Timestamp/evidence bookkeeping does not. Existing accepted ACKs
 remain readable, including predecessor recovery for historical open-count
 obligations; an outstanding pre-upgrade Turn should refresh its guard.
+
+The owned identity excludes only display `title`/`text` and `priority` from the
+existing serialized work basis. These edits still change the full frontier
+freshness revision, while a new owned task, target or dependency changes the
+review basis. Actual negative experiments remain material history even when
+their score does not improve. For an unconfirmed acceptance association, its
+hold checkpoint binds the Todo, contract revision/digest and hold state. A
+formal accepted ACK for that exact checkpoint survives later display/note
+timestamps and event IDs. A different owner revision, Todo or hold checkpoint
+does not match it. Other newly observed vision/evidence gaps still require
+their original strict timestamp coverage; legacy ACKs without an exact
+obligation identity retain that freshness requirement.
 
 长链触发范围修正：Agent lane 只在自己已认领的开放推进任务达到 15 项时触发；
 持续监控和共享未认领任务不计入该阈值，移除原 20 项已认领开放任务的触发分支。
@@ -1482,8 +1557,16 @@ the existing public contract. This is deterministic policy; no observer model,
 new capability, provider selection, or additional permission is introduced.
 
 History is newest first. Agent scoping precedes an accepted replan ACK cutoff;
-a peer ACK cannot clear another lane. The three existing neutral accounting
-classifications are transparent. A valid logical turn id is counted once per
+a peer ACK cannot clear another lane. Neutral accounting classifications and
+canonical `replan_noop` / `repair_noop` observations are transparent. An
+unsuccessful review cannot count as new work, rotate its periodic obligation
+window, create a typed-progress repetition from its own repeated observations,
+or expire a still-applicable legacy ACK. The existing lane history producer
+skips those exact neutral classifications before applying its bounded decision
+window; hundreds of no-op observations cannot evict the work that made review
+due. Accepted ACKs remain window boundaries even if their display classification
+is neutral. The separate Goal-wide recent-history display retains its requested
+limit and includes recent neutral observations. A valid logical turn id is counted once per
 agent, including an id carried by settlement identity. Missing, malformed, or
 conflicting historical ids remain separate rows; the reader does not invent an
 identity. Unknown material work still breaks an established progress streak.
@@ -1495,6 +1578,9 @@ lane. Trigger precedence remains progress, Monitor, then periodic review.
 No-change `quota_monitor_poll` receipts do not advance the periodic material-turn
 counter; a poll with an explicit material transition does. Monitor repetition
 and persisted streak checks still inspect their own poll evidence.
+Accepted negative experiments remain work even when the result does not improve
+an objective; the no-op distinction uses canonical writeback classifications,
+not result prose, score trends or process exit codes.
 Accepted ACKs reset the historical window; clearing another frontier obligation
 still requires its existing typed semantic outcome and revision rules. A future
 blocking Monitor suppresses premature wait replanning only while its schedule
