@@ -284,6 +284,7 @@ class FirstPartyHostGoalAdmission:
         registry_path: Path,
         goal_id: str,
         planned_goal_ref: object | None,
+        capture_launch_authority: bool = True,
     ) -> FirstPartyHostGoalAdmission:
         requested_registry = registry_path.expanduser().resolve()
         require_goal_id(goal_id)
@@ -295,7 +296,7 @@ class FirstPartyHostGoalAdmission:
                 load_project_registry(requested_registry).get("profile_id")
                 == SOURCE_SESSION_PROFILE_ID
             )
-            if not source_profile:
+            if not source_profile and capture_launch_authority:
                 with project_registry_transaction(
                     requested_registry, operation="first_party_host_launch_capture",
                 ) as transaction:
