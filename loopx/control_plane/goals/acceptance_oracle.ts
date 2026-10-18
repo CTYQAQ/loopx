@@ -1,3 +1,4 @@
+import {configuredGoalChecks} from "./acceptance_contract.ts";
 /** Optional provenance for an owner-pinned checker, never an Agent's verdict.
  * The local host executes the configured checker and observes file bytes. This
  * does not authenticate a remote reviewer or attest unpinned dependencies. */
@@ -111,7 +112,7 @@ export function projectAcceptanceOracle(criterion: JsonObject, result: JsonObjec
  * changes canonical acceptance/completion. Unavailable facts are not success. */
 export function observeAcceptanceOracles(params: JsonObject): JsonObject {
   const contract = canonicalAuthorityObject(params.contract, "acceptance projection");
-  if (contract.enabled !== true) return contract;
+  if (!configuredGoalChecks(contract)) return contract;
   requireThat(Array.isArray(contract.criteria) && Array.isArray(params.observations), "oracle observations required");
   const receipt = contract.verification as JsonObject | null;
   const results = receipt?.results as JsonObject[] | undefined;

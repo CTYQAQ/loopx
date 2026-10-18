@@ -56,7 +56,7 @@ try {
     await page.route("**/api/actions?*", route => route.fulfill({json: {ok: true, schema_version: "loopx_chat_action_list_v1", proposals: []}}));
     await page.route("**/api/chat/goal-acceptance?*", route => route.fulfill({status: authorityStatus, json: {
       ok: true, goal_id: response.acceptance.goal_id, provider_revision: "fixture:current",
-      goal_acceptance_contract: response.acceptance.goal_acceptance_contract ?? {enabled: false},
+      goal_acceptance_contract: response.acceptance.goal_acceptance_contract ?? {},
     }}));
     await page.goto(`http://127.0.0.1:${port}/${packaged ? "chat/" : ""}?statusUrl=/status.json`, { waitUntil: "networkidle" });
     const navigation = page.getByRole("button", { name: locale === "en" ? "Open Goal navigation" : "打开 Goal 导航" });
@@ -176,8 +176,8 @@ try {
     await page.waitForFunction(() => !document.querySelector(".delivery-review-toolbar button")?.disabled);
     await section.getByText(locale === "en" ? /Retained snapshot/ : /当前保留旧快照/).first().waitFor();
     assert.equal(await section.getByText("other-goal", { exact: true }).count(), 0);
-    await refreshSnapshot({ enabled: false });
-    assert.equal(await section.count(), 0, "Disabling removes the previous enabled readback");
+    await refreshSnapshot({});
+    assert.equal(await section.count(), 0, "Removing checks removes the previous command readback");
     assert.deepEqual(writes, [], "Reading and exporting must not write state");
     assert.deepEqual(errors, []);
     await page.close();

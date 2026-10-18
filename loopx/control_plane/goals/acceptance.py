@@ -117,7 +117,7 @@ def refine_goal_outcome(
     """Record scoped planning intent, never configure validators or attest success."""
     route = _routing(registry_path, goal_id, runtime_root, agent_id)
     goal = load_goal_from_registry(registry_path, goal_id)
-    if refinement.get("owner_agent_id") not in registered_agent_ids_for_goal(goal):
+    if "owner_agent_id" in refinement and refinement["owner_agent_id"] not in registered_agent_ids_for_goal(goal):
         raise ValueError("Outcome owner must be a registered Agent")
     if goal.get("status") not in {"active", "ready"}:
         raise ValueError("Outcome refinement requires an active Goal")
@@ -228,7 +228,7 @@ def validate_goal_task_acceptance(
     route = {**_routing(registry_path, goal_id, runtime_root, agent_id), "todo_id": todo_id}
     basis = _result(_INSPECT_METHOD, route).get("completion_requirements")
     if not isinstance(basis, dict) or not basis.get("criteria"):
-        raise ValueError("delegated task requires enabled owner-bound acceptance")
+        raise ValueError("delegated task requires configured owner-bound checks")
     results = run_goal_acceptance_effects(
         effects=_criterion_effects(basis["criteria"]),
         registry_path=registry_path, goal_id=goal_id,
@@ -249,7 +249,6 @@ def configure_goal_acceptance(
     agent_id: str | None = None,
     operation_id: str | None = None,
     execute: bool = False,
-    disable: bool = False,
     review_context_digest: str | None = None,
 ) -> dict[str, Any]:
     """Explicit local-owner configuration; Agent tool callers have no writer."""
@@ -261,7 +260,6 @@ def configure_goal_acceptance(
             "actor_agent_id": agent_id,
             "expected_provider_revision": expected_provider_revision,
             "document": document,
-            "disable": disable,
             "dry_run": not execute,
             "operation_id": operation_id or f"goal-acceptance:{uuid4().hex}",
             **({"review_context_digest": review_context_digest} if review_context_digest is not None else {}),
@@ -443,7 +441,7 @@ def verify_goal_acceptance(
         raise ValueError("Acceptance changed; reload the current contract before checking.")
     contract = basis.get("contract")
     if contract is None:
-        raise ValueError("Goal acceptance is not enabled")
+        raise ValueError("No executable checks are configured")
     if not isinstance(contract, dict):
         raise TypeError("Goal acceptance contract shape is invalid")
     criteria = contract.get("criteria")

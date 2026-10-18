@@ -23,7 +23,7 @@ function patch(extra: JsonObject = {}): JsonObject {return {outcome_id: "tour", 
 
 test("refinement retains original intent, accumulates requirements and cannot invent success", () => {
   const original = fixture();
-  assert.deepEqual(projectGoalAcceptance(original, goal), {enabled: false});
+  assert.deepEqual(projectGoalAcceptance(original, goal), {});
   const state = refineGoalOutcome(original, goal, null, "author", patch());
   const head = {...original, goal_outcomes: state};
   const next = refineGoalOutcome(head, goal, null, "author", patch({requirements: [{id: "order", description: "Show delegation before the task board"}],
@@ -37,7 +37,7 @@ test("refinement retains original intent, accumulates requirements and cannot in
   assert.equal(((projection.outcome_requirements as JsonObject).acceptance_gaps as JsonObject[])[0].agent_id, "author");
   for (const status of ["open", "blocked", "deferred"]) {
     const waiting = authorityProjectionFixture(goal, [{todo_id: "todo_tour", role: "agent", text: "Produce the presentation", task_class: "advancement_task", claimed_by: "author", archive_state: "active", status, done: status === "deferred"}], [], "native", {goal_outcomes: next});
-    assert.deepEqual(projectGoalOutcomes(waiting, goal, {enabled: false})!.acceptance_gaps, [], "real waits remain with their Todo owner");
+    assert.deepEqual(projectGoalOutcomes(waiting, goal, {})!.acceptance_gaps, [], "real waits remain with their Todo owner");
   }
   assert.ok((outcomes[0].requirements as JsonObject[]).every(r => r.status === "unverified"), "a done Todo is not accepted requirements");
   for (const bad of [patch({objective: "Replace the original intent"}), patch({owner_agent_id: "other"}),
@@ -130,7 +130,7 @@ test("default Agent review closes planning gaps without claiming independent acc
     assert.throws(() => refineGoalOutcome(first, goal, null, "author", patch({requirements: [], review})));
   }
   const reviewed = {...original, goal_outcomes: refineGoalOutcome(first, goal, null, "author", patch({requirements: [], review: [item], source: {ref: "artifact:review", summary: "Reviewed the produced artifact"}}))};
-  const read = projectGoalOutcomes(reviewed, goal, {enabled: false})!;
+  const read = projectGoalOutcomes(reviewed, goal, {})!;
   assert.deepEqual(read.acceptance_gaps, []);
   const row = ((read.outcomes as JsonObject[])[0].requirements as JsonObject[])[0];
   assert.equal(row.status, "unverified");
@@ -139,7 +139,99 @@ test("default Agent review closes planning gaps without claiming independent acc
   const failed = projectGoalOutcomes(reviewed, goal, {enabled: true, status: "failed", criteria: [{id: "opening", description: "Keep the opening"}], tasks: []})!;
   assert.equal((failed.acceptance_gaps as unknown[]).length, 1, "self-assessment never bypasses a configured check");
   const changed = {...reviewed, goal_outcomes: refineGoalOutcome(reviewed, goal, null, "author", patch({requirements: [{id: "order", description: "Delegation before board"}], source: {ref: "message:order", summary: "Add ordering requirement"}}))};
-  const stale = projectGoalOutcomes(changed, goal, {enabled: false})!;
+  const stale = projectGoalOutcomes(changed, goal, {})!;
   assert.equal((stale.acceptance_gaps as unknown[]).length, 1);
   assert.equal(((((stale.outcomes as JsonObject[])[0].requirements as JsonObject[])[0].agent_review) as JsonObject).basis_current, false);
+});
+
+test("delta-only refinement resolves immutable intent without permitting foreign writes", () => {
+  const original = fixture();
+  const head = {...original, goal_outcomes: refineGoalOutcome(original, goal, null, "author", patch())};
+  const delta = {outcome_id: "tour", source: {ref: "message:delta", summary: "Add the ordering requirement"},
+    requirements: [{id: "order", description: "Keep the correct order"}]};
+  const result = refineGoalOutcome(head, goal, null, "author", delta);
+  assert.equal(result.outcomes[0].objective, "Deliver the tour");
+  assert.equal(result.outcomes[0].owner_agent_id, "author");
+  assert.deepEqual(result.outcomes[0].todo_ids, ["todo_tour"]);
+  assert.deepEqual(result.outcomes[0].requirements.map(r => r.id), ["opening", "order"]);
+  assert.throws(() => refineGoalOutcome(original, goal, null, "author", delta), /outcome Agent/);
+  assert.throws(() => refineGoalOutcome(head, goal, null, "other", delta), /own outcomes/);
+});
+
+for (const provider of ["file", "sqlite"] as const) test(`${provider}: referenced checks bind reviewed requirements, preserve disabled checks and replay`, async t => {
+  const root = await mkdtemp(join(tmpdir(), "referenced-check-")); t.after(() => rm(root, {recursive: true, force: true}));
+  const store = provider === "file" ? new FileAuthorityStore(root, goal) : new SqliteAuthorityStore(root, goal);
+  const head = fixture(); head.goal_outcomes = refineGoalOutcome(head, goal, null, "author", patch());
+  await store.commitAuthority({operation_id: "seed", expected_provider_revision: null, next_projection: head, events: [], receipts: []});
+  const original = await inspectGoalAcceptance(store, goal);
+  const document = {outcome_id: "tour", criteria: [{id: "opening", validation_argv: ["true"]}]};
+  const request = {goal_id: goal, actor_agent_id: null, operation_id: "checks", expected_provider_revision: original.provider_revision, document};
+  const preview = await configureGoalAcceptance(store, {...request, dry_run: true});
+  const resolved = preview.resolved_document as JsonObject;
+  assert.equal(resolved.objective, "Deliver the tour");
+  assert.deepEqual(resolved.scope, {kind: "selected_work", todo_ids: ["todo_tour"]});
+  assert.deepEqual(resolved.bindings, [{todo_id: "todo_tour", criterion_ids: ["opening"]}]);
+  assert.equal((resolved.criteria as JsonObject[])[0].description, "Keep the opening");
+  assert.deepEqual(await inspectGoalAcceptance(store, goal), original, "prepare never writes or executes");
+  for (const document of [{outcome_id: "missing", criteria: request.document.criteria},
+    {outcome_id: "tour", criteria: [{id: "missing", validation_argv: ["true"]}]},
+    {...request.document, objective: "Replace the original"},
+    {outcome_id: "tour", criteria: [{id: "opening", description: "Rewrite the requirement", validation_argv: ["true"]}]}]) {
+    await assert.rejects(configureGoalAcceptance(store, {...request, document, dry_run: true}));
+  }
+  const reviewed = await refineGoalAcceptanceOutcome(store, {goal_id: goal, actor_agent_id: "author", operation_id: "review",
+    expected_provider_revision: original.provider_revision, refinement: {outcome_id: "tour", source: {ref: "review:1", summary: "Inspected output"},
+      review: [{id: "opening", conclusion: "met", evidence_refs: ["tour.txt"], note: "Opening remains"}]}});
+  const admitted = {...request, review_context_digest: preview.review_context_digest};
+  assert.equal((await configureGoalAcceptance(store, admitted)).status, "applied", "review bookkeeping alone does not invalidate a prepared check");
+  const configured = await inspectGoalAcceptance(store, goal);
+  assert.equal((configured.goal_acceptance_contract as JsonObject).outcome_id, "tour");
+  const next = await configureGoalAcceptance(store, {...request, operation_id: "next-preview", expected_provider_revision: configured.provider_revision, dry_run: true});
+  const changed = await refineGoalAcceptanceOutcome(store, {goal_id: goal, actor_agent_id: "author", operation_id: "requirement",
+    expected_provider_revision: configured.provider_revision, refinement: {outcome_id: "tour", source: {ref: "message:2", summary: "Preserve ordering too"},
+      requirements: [{id: "order", description: "Preserve ordering"}]}});
+  const stale = await configureGoalAcceptance(store, {...request, operation_id: "stale-plan", expected_provider_revision: configured.provider_revision,
+    review_context_digest: next.review_context_digest});
+  assert.equal(stale.reason_code, "goal_acceptance_review_context_mismatch");
+  assert.equal((await configureGoalAcceptance(store, admitted)).status, "replayed", "historical retry never re-resolves or reconfigures intent");
+  const disabled = await configureGoalAcceptance(store, {...request, operation_id: "disable", expected_provider_revision: changed.provider_revision, document: null});
+  const after = await refineGoalAcceptanceOutcome(store, {goal_id: goal, actor_agent_id: "author", operation_id: "more-evidence",
+    expected_provider_revision: disabled.provider_revision, refinement: {outcome_id: "tour", source: {ref: "review:2", summary: "Continue polishing"}}});
+  assert.equal((after.goal_acceptance_contract as JsonObject).criteria, undefined, "removing checks leaves default outcome review available");
+  assert.equal(Object.hasOwn((await store.loadAuthority() as {head: JsonObject}).head.goal_acceptance as JsonObject, "enabled"), false);
+  assert.equal(Object.hasOwn(reviewed.goal_acceptance_contract as JsonObject, "enabled"), false);
+});
+
+for (const checksConfigured of [false, true]) test(`upgrade: every Goal receives the same refinement/review loop with checks=${checksConfigured}`, async t => {
+  const root = await mkdtemp(join(tmpdir(), "outcome-upgrade-")); t.after(() => rm(root, {recursive: true, force: true}));
+  const store = new SqliteAuthorityStore(root, goal);
+  await store.commitAuthority({operation_id: "seed", expected_provider_revision: null, next_projection: fixture(), events: [], receipts: []});
+  const before = await inspectGoalAcceptance(store, goal);
+  const document = {scope: {kind: "selected_work", todo_ids: ["todo_tour"]}, objective: "Deliver the tour", non_goals: [],
+    criteria: [{id: "opening", description: "Keep the opening", validation_argv: ["true"]}], bindings: [{todo_id: "todo_tour", criterion_ids: ["opening"]}]};
+  await configureGoalAcceptance(store, {goal_id: goal, actor_agent_id: null, operation_id: "initial-checks", document,
+    expected_provider_revision: before.provider_revision});
+  const current = await store.loadAuthority(); assert.equal(current.status, "loaded"); if (current.status !== "loaded") return;
+  const {owner_goal_ref: _ref, ...state} = current.head.goal_acceptance as JsonObject;
+  // An actual old persisted Goal; not a specially activated new fixture.
+  await store.commitAuthority({operation_id: "previous-version", expected_provider_revision: current.provider_revision,
+    next_projection: {...current.head, goal_acceptance: {...state, schema_version: "loopx_goal_acceptance_v0", enabled: checksConfigured}}, events: [], receipts: []});
+  const old = await inspectGoalAcceptance(store, goal);
+  const request = {goal_id: goal, goal_ref: goalRef, actor_agent_id: "author", operation_id: "upgrade-refinement",
+    expected_provider_revision: old.provider_revision, refinement: patch()};
+  const upgraded = await refineGoalAcceptanceOutcome(store, request);
+  assert.equal(upgraded.status, "applied");
+  const result = upgraded.goal_acceptance_contract as JsonObject;
+  assert.equal(Object.hasOwn(result, "enabled"), false);
+  assert.equal(Array.isArray(result.criteria), checksConfigured);
+  assert.equal(((result.outcome_requirements as JsonObject).outcomes as JsonObject[]).length, 1);
+  const canonical = await store.loadAuthority(); assert.equal(canonical.status, "loaded"); if (canonical.status !== "loaded") return;
+  assert.equal((canonical.head.goal_acceptance as JsonObject).schema_version, "loopx_goal_acceptance_v2");
+  assert.equal(Object.hasOwn(canonical.head.goal_acceptance as JsonObject, "enabled"), false);
+  assert.deepEqual(canonical.head.root_commitments, current.head.root_commitments);
+  const review = await refineGoalAcceptanceOutcome(store, {...request, operation_id: "upgrade-review", expected_provider_revision: upgraded.provider_revision,
+    refinement: {outcome_id: "tour", source: {ref: "artifact:review", summary: "Inspected the introduction"},
+      review: [{id: "opening", conclusion: "unmet", evidence_refs: ["tour.txt"], note: "Introduction still missing"}]}});
+  assert.equal(((review.goal_acceptance_contract as JsonObject).outcome_requirements as JsonObject).goal_completion_assessed, false);
+  assert.equal((((review.goal_acceptance_contract as JsonObject).outcome_requirements as JsonObject).acceptance_gaps as JsonObject[]).length, 1);
 });

@@ -24,7 +24,7 @@ def pages():
     metadata = {
         "todo_read_model": {"todo_count": 3},
         "handoff_mode": "native",
-        "goal_acceptance_contract": {"enabled": True},
+        "goal_acceptance_contract": {"criteria": []},
     }
     base = {
         "schema_version": RESULT_SCHEMA,

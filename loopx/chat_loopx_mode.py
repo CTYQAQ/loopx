@@ -49,7 +49,7 @@ TOOL = {
     "The host supplies the Goal and preparing Agent. It saves only a reviewable goal.acceptance.check proposal; it does not configure acceptance or run commands. "
     "The local owner can use that plan beside the delivery in the workspace. "
     "Action=outcomes reads persistent supporting outcomes and the provider revision. "
-    "Action=refine_outcome takes operation_id, expected_provider_revision and document with outcome_id, original objective, requirements [{id,description}], todo_ids and source_summary. "
+    "Action=refine_outcome takes operation_id, expected_provider_revision and document with outcome_id and source_summary; add only changed requirements [{id,description}], todo_ids or review. Creation also needs the original objective. "
     "Optional review addresses every retained requirement with {id,conclusion: met|unmet|uncertain,evidence_refs: strings,note}. "
     "The host fixes the owner and source Turn. It retains requirements and default Agent assessments without replacing original intent, granting authority or certifying independent checks.",
     "inputSchema": {
@@ -67,7 +67,7 @@ TOOL = {
             "expected_provider_revision": {"type": "string"},
             "document": {
                 "type": "object",
-                "description": "For refine_outcome: outcome_id, original objective, requirements [{id,description}], todo_ids (existing work) and source_summary; no actor/source routing. For prepare_check, existing acceptance document: objective (string), non_goals (strings), scope ({kind: selected_work, todo_ids: existing advancement Todo ids} or {kind: all_advancement}), criteria (id, description, validation_argv string array, optional validation_timeout_seconds), bindings (todo_id, criterion_ids). Checks use the registered Goal workspace or its pinned oracle snapshot only after local-owner apply. Use known requirements and approved scope; do not invent an oracle or authorization.",
+                "description": "For refine_outcome: outcome_id and source_summary, plus changed requirements [{id,description}], todo_ids (existing work) or review; original objective required on creation; no actor/source routing. For prepare_check, prefer {outcome_id, criteria: [{id: existing requirement ID, validation_argv: string array, optional validation_timeout_seconds}]}; the owner resolves retained descriptions and linked work. Legacy standalone check document: objective (string), non_goals (strings), scope ({kind: selected_work, todo_ids: existing advancement Todo ids} or {kind: all_advancement}), criteria (id, description, validation_argv string array, optional validation_timeout_seconds), bindings (todo_id, criterion_ids). Checks use the registered Goal workspace or its pinned oracle snapshot only after local-owner apply. Use known requirements and approved scope; do not invent an oracle or authorization.",
             },
             "limit": {"type": "integer", "minimum": 1, "maximum": 50},
             "cursor": {"type": "string"},
@@ -905,12 +905,12 @@ class ChatLoopXMode:
                     if set(arguments) != {"action", "operation_id", "expected_provider_revision", "document"}:
                         raise ValueError("refine_outcome needs its stable operation, inspected revision and document")
                     document = arguments["document"]
-                    if not isinstance(document, dict) or not {"outcome_id", "objective", "requirements", "todo_ids", "source_summary"} <= set(document) or set(document) - {"outcome_id", "objective", "requirements", "todo_ids", "source_summary", "review"}:
+                    if not isinstance(document, dict) or not {"outcome_id", "source_summary"} <= set(document) or set(document) - {"outcome_id", "objective", "requirements", "todo_ids", "source_summary", "review"}:
                         raise ValueError("refine_outcome document cannot replace host identity or source")
                     if not isinstance(operation_id, str) or not operation_id.strip():
                         raise ValueError("refine_outcome requires a stable operation id")
                     origin = "turn:" + turn_id + ":" + hashlib.sha256(str(operation_id).encode()).hexdigest()[:16]
-                    refinement = {key: document[key] for key in ("outcome_id", "objective", "requirements", "todo_ids")}
+                    refinement = {key: document[key] for key in ("outcome_id", "objective", "requirements", "todo_ids") if key in document}
                     if "review" in document:
                         refinement["review"] = document["review"]
                     refinement.update(owner_agent_id=settings["agent_id"], source={"ref": origin, "summary": document["source_summary"]})

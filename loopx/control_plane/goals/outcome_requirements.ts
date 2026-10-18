@@ -5,6 +5,7 @@ import {AuthorityStoreProtocolError, canonicalAuthorityObject, canonicalAuthorit
 import {indexCoordinationProjectionTodos} from "../coordination/coordination_projection.ts";
 import {readGoalAcceptanceLifecycle, sameExactGoalRef, parseWireExactGoalRef, type WireExactGoalRef} from "./acceptance_lifecycle.ts";
 
+import {BARE_SHA256_PATTERN} from "../content_digest.ts";
 import {goalAcceptanceTodoDigest} from "./acceptance_work_basis.ts";
 
 export const GOAL_OUTCOMES_SCHEMA = "loopx_goal_outcomes_v0";
@@ -82,7 +83,7 @@ function readState(head: JsonObject, goalId: string): OutcomeState | null {
     let review: OutcomeReview | undefined;
     if (o.review !== undefined) {
       const row = canonicalAuthorityObject(o.review, "outcome review"); keys(row, ["basis_digest", "items"]);
-      requireValue(typeof row.basis_digest === "string" && /^[a-f0-9]{64}$/.test(row.basis_digest), "review basis digest is invalid");
+      requireValue(typeof row.basis_digest === "string" && BARE_SHA256_PATTERN.test(row.basis_digest), "review basis digest is invalid");
       review = {basis_digest: row.basis_digest, items: reviewItems(row.items)};
     }
     const todoIds = list(o.todo_ids, "outcome work", 64).map(v => id(v, "Todo id")); unique(todoIds, "outcome work");
@@ -102,21 +103,22 @@ export function refineGoalOutcome(head: JsonObject, goalId: string, goalRef: Wir
   requireValue(!lifecycle || lifecycle.state === "active" && goalRef && sameExactGoalRef(lifecycle.goal_ref, goalRef), "outcome Goal lifetime is unavailable or changed");
   requireValue(!previous || canonicalAuthoritySha256(previous.goal_ref) === canonicalAuthoritySha256(goalRef), "outcome Goal lifetime changed; reconcile retained declarations");
   const patch = canonicalAuthorityObject(value, "outcome refinement");
-  keys(patch, ["outcome_id", "owner_agent_id", "objective", "requirements", "todo_ids", "source"], ["review"]);
-  const outcomeId = id(patch.outcome_id, "outcome id"), owner = id(patch.owner_agent_id, "outcome Agent");
-  requireValue(actor === null || actor === owner, "Agents can refine only their own outcomes");
+  keys(patch, ["outcome_id", "source"], ["owner_agent_id", "objective", "requirements", "todo_ids", "review"]);
+  const outcomeId = id(patch.outcome_id, "outcome id");
   const old = previous?.outcomes.find(o => o.id === outcomeId);
-  const objective = text(patch.objective, "outcome objective", 1024);
+  const owner = id(patch.owner_agent_id === undefined ? old?.owner_agent_id : patch.owner_agent_id, "outcome Agent");
+  requireValue(actor === null || actor === owner, "Agents can refine only their own outcomes");
+  const objective = text(patch.objective === undefined ? old?.objective : patch.objective, "outcome objective", 1024);
   requireValue(!old || old.owner_agent_id === owner && old.objective === objective, "refinement cannot replace the original outcome objective or owner");
   const todos = indexCoordinationProjectionTodos(head, goalId).todos;
-  const links = list(patch.todo_ids, "outcome work", 64).map(v => id(v, "Todo id")); unique(links, "outcome work");
+  const links = list(patch.todo_ids === undefined ? [] : patch.todo_ids, "outcome work", 64).map(v => id(v, "Todo id")); unique(links, "outcome work");
   for (const key of links) {
     const todo = todos.get(key);
     requireValue(todo && todo.role === "agent" && (todo.task_class == null || todo.task_class === "advancement_task"), "outcomes link existing Agent advancement Todos only");
     requireValue(actor === null || !todo.claimed_by || todo.claimed_by === actor, "an Agent cannot attach another Agent's claimed work");
   }
   const reqs = new Map((old?.requirements ?? []).map(row => [row.id, row]));
-  for (const row of requirements(patch.requirements)) {
+  for (const row of requirements(patch.requirements === undefined ? [] : patch.requirements)) {
     requireValue(!reqs.has(row.id) || reqs.get(row.id)!.description === row.description, "an existing requirement cannot be overwritten; reconcile conflicting intent explicitly");
     reqs.set(row.id, row);
   }
@@ -137,6 +139,18 @@ export function refineGoalOutcome(head: JsonObject, goalId: string, goalRef: Wir
   return readState({...head, goal_outcomes: state}, goalId)!;
 }
 
+/** Resolve check authoring from one current requirement source. Review/source
+ * bookkeeping does not invalidate an otherwise unchanged prepared check. */
+export function goalOutcomeCheckBasis(head: JsonObject, goalId: string, outcomeId: unknown): JsonObject {
+  const state = readState(head, goalId), lifecycle = readGoalAcceptanceLifecycle(head, goalId);
+  requireValue(state && (lifecycle === null ? state.goal_ref === null
+    : lifecycle.state === "active" && state.goal_ref !== null && sameExactGoalRef(lifecycle.goal_ref, state.goal_ref)),
+    "check source outcome lifetime is unavailable or changed");
+  const outcome = state.outcomes.find(o => o.id === id(outcomeId, "outcome id"));
+  requireValue(outcome, "check source outcome does not exist");
+  return {outcome_id: outcome.id, objective: outcome.objective, requirements: outcome.requirements, todo_ids: outcome.todo_ids};
+}
+
 /** Only the existing acceptance projection supplies check results. A matched
  * description alone is not evidence; work coverage and freshness also matter. */
 export function projectGoalOutcomes(head: JsonObject, goalId: string, acceptance: JsonObject): JsonObject | null {
@@ -154,13 +168,18 @@ export function projectGoalOutcomes(head: JsonObject, goalId: string, acceptance
  * become a current passing result without those observations. No state writes. */
 export function observeOutcomeRequirements(declaration: JsonObject, acceptance: JsonObject): JsonObject {
   const current = declaration.current_lifetime === true;
-  const criteria = (acceptance.criteria ?? []) as JsonObject[], tasks = (acceptance.tasks ?? []) as JsonObject[];
+  const allCriteria = (acceptance.criteria ?? []) as JsonObject[], tasks = (acceptance.tasks ?? []) as JsonObject[];
   const outcomes = (declaration.outcomes as (Outcome & {review_basis_current: boolean; work: {todo_id: string; status: string}[]})[]).map(o => ({...o,
     requirements: o.requirements.map(r => {
+      const criteria = acceptance.outcome_id === undefined || acceptance.outcome_id === o.id ? allCriteria : [];
       const criterion = criteria.find(c => c.id === r.id && c.description === r.description);
       const covered = o.todo_ids.length > 0 && o.todo_ids.every(key => tasks.some(t => t.todo_id === key && t.state === "ready" && (t.criterion_ids as string[]).includes(r.id)));
       const oracle = criterion?.oracle as JsonObject | undefined;
-      const checked = current && criterion && covered && acceptance.status === "accepted" && (!oracle || oracle.state === "current");
+      const receipt = acceptance.verification as JsonObject | null | undefined;
+      const ownResult = (receipt?.results as JsonObject[] | undefined)?.find(result => result.criterion_id === r.id);
+      const passed = acceptance.status === "accepted" || acceptance.status === "failed" && receipt?.todo_id === null
+        && receipt.contract_revision === acceptance.revision && receipt.contract_digest === acceptance.digest && ownResult?.passed === true;
+      const checked = current && criterion && covered && passed && (!oracle || oracle.state === "current");
       const review = o.review?.items.find(item => item.id === r.id) ?? r.agent_review as (ReviewItem & {basis_current?: boolean}) | undefined;
       const reviewCurrent = current && (o.review_basis_current ?? review?.basis_current === true);
       const configured = criteria.some(c => c.id === r.id);

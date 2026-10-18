@@ -36,7 +36,7 @@ def test_cumulative_refinement_guides_artifact_and_independent_check(acceptance_
     order = {"id": "order", "description": "Delegation precedes the task board"}
     (code, first), first_args = record(project, cli, refinement([opening], "message:first"), "first")
     assert code == 0, first
-    assert first["goal_acceptance_contract"]["enabled"] is False
+    assert "enabled" not in first["goal_acceptance_contract"]
     assert cli(*first_args)[1]["status"] == "replayed"
     (code, second), _ = record(project, cli, refinement([order], "message:second"), "second")
     assert code == 0, second
@@ -56,11 +56,10 @@ def test_cumulative_refinement_guides_artifact_and_independent_check(acceptance_
     source = next(row for row in context["sources"] if row["source"] == "goal_acceptance")
     assert source["content"]["goal_acceptance_contract"]["outcome_requirements"] == recovered
     assert not any(read["source"] == "goal_acceptance" for read in required), "complete inline read avoids another Agent CLI call"
-    plan = {"scope": {"kind": "selected_work", "todo_ids": ["todo_export"]}, "objective": outcome["objective"],
-        "non_goals": [], "criteria": [
-            {**opening, "validation_argv": [sys.executable, "-c", "from pathlib import Path; assert Path('tour.txt').read_text().startswith('Intro\\n')"]},
-            {**order, "validation_argv": [sys.executable, "-c", "from pathlib import Path; s=Path('tour.txt').read_text(); assert s.index('Delegation') < s.index('Board')"]},
-        ], "bindings": [{"todo_id": "todo_export", "criterion_ids": ["opening", "order"]}]}
+    plan = {"outcome_id": "tour", "criteria": [
+            {"id": opening["id"], "validation_argv": [sys.executable, "-c", "from pathlib import Path; assert Path('tour.txt').read_text().startswith('Intro\\n')"]},
+            {"id": order["id"], "validation_argv": [sys.executable, "-c", "from pathlib import Path; s=Path('tour.txt').read_text(); assert s.index('Delegation') < s.index('Board')"]},
+        ]}
     acceptance_file.write_text(json.dumps(plan))
     code, configured = cli("configure", "--document", str(acceptance_file), "--operation-id", "checks",
         "--expected-provider-revision", cli("inspect")[1]["provider_revision"], "--execute")
@@ -72,6 +71,7 @@ def test_cumulative_refinement_guides_artifact_and_independent_check(acceptance_
     # Readback drives the next edit; original intent and the new ordering coexist.
     current = cli("inspect")[1]["goal_acceptance_contract"]["outcome_requirements"]["outcomes"][0]
     assert any(r["id"] == "opening" and r["status"] != "accepted" for r in current["requirements"])
+    assert next(r for r in current["requirements"] if r["id"] == "order")["status"] == "accepted", "one failed check must not erase other current evidence"
     (project / "tour.txt").write_text("Intro\nDelegation\nBoard\n")
     code, passed = cli("verify", "--agent-id", "agent-a", "--execute")
     assert code == 0 and passed["checks_passed"], passed
@@ -147,7 +147,7 @@ def test_default_review_uses_one_existing_writeback_and_preserves_verification_b
     requirement = {"id": "opening", "description": "Keep the introduction"}
     assert record(project, cli, refinement([requirement], "message:first"), "first")[0][0] == 0
     (project / "tour.txt").write_text("Intro\nDelegation\nBoard\n")
-    patch = refinement([], "artifact:tour-v1")
+    patch = {"outcome_id": "tour", "source": {"ref": "artifact:tour-v1"}}
     patch["source"]["summary"] = "Reviewed the produced artifact against all retained requirements"
     patch["review"] = [{"id": "opening", "conclusion": "met", "evidence_refs": ["tour.txt#introduction"], "note": "Read the artifact and confirmed its introduction remains"}]
     envelope = {"operation_id": "review-tour", "expected_provider_revision": cli("inspect")[1]["provider_revision"], "refinement": patch}
@@ -161,7 +161,7 @@ def test_default_review_uses_one_existing_writeback_and_preserves_verification_b
     code, applied = run(*args)
     assert code == 0, json.dumps(applied)
     result = applied["goal_outcome_update"]["goal_acceptance_contract"]
-    assert result["enabled"] is False, "default review requires no validator activation"
+    assert "enabled" not in result and "criteria" not in result, "review is a default capability"
     req = result["outcome_requirements"]["outcomes"][0]["requirements"][0]
     assert req["agent_review"]["conclusion"] == "met" and req["planning_satisfied"]
     assert req["status"] == "unverified" and not req["agent_review"]["independently_verified"]
@@ -225,3 +225,39 @@ def test_batched_refinement_receipt_survives_later_writeback_failure(acceptance_
     recovered = json.loads(capsys.readouterr().out)
     assert recovered["goal_outcome_update"]["status"] == "replayed", recovered
     assert cli("inspect")[1]["goal_acceptance_contract"]["outcome_requirements"]["revision"] == 1
+
+
+@pytest.mark.parametrize("change_requirements", [False, True])
+def test_referenced_native_plan_reviews_retained_requirements_before_owner_execution(conversation_check, change_requirements):
+    from loopx.chat_actions import ChatActionService
+    from loopx.chat_action_store import ChatActionStore
+    project, cli, controller, _, _, call, _ = conversation_check
+    requirement = {"id": "opening", "description": "Keep the introduction"}
+    assert record(project, cli, refinement([requirement], "message:first"), "first")[0][0] == 0
+    compact = {"outcome_id": "tour", "criteria": [{"id": "opening", "validation_argv": ["python3", "check.py"]}]}
+    prepared = call(document=compact)
+    assert prepared["ok"], prepared
+    proposal = prepared["proposal"]
+    assert proposal["normalized_parameters"]["document"] == compact
+    resolved = proposal["normalized_parameters"]["resolved_document"]
+    assert resolved["objective"] == "Deliver a clear product tour"
+    assert resolved["criteria"][0]["description"] == requirement["description"]
+    assert resolved["scope"] == {"kind": "selected_work", "todo_ids": ["todo_export"]}
+    assert not (project / "runs.txt").exists()
+    # Same request recovers its immutable proposal even after a material update.
+    if change_requirements:
+        delta = {"outcome_id": "tour", "source": {"ref": "message:second", "summary": "Add ordering"},
+                 "requirements": [{"id": "order", "description": "Keep the correct order"}]}
+        assert record(project, cli, delta, "delta")[0][0] == 0
+    assert call(document=compact)["proposal"] == proposal
+    service = ChatActionService(store=ChatActionStore(project.parent / "runtime/chat/actions"), registry_path=controller.registry_path)
+    result = service.apply(proposal["proposal_id"])
+    if change_requirements:
+        assert result["proposal"]["status"] == "stale", result
+        assert not (project / "runs.txt").exists(), "stale requirements reject before commands run"
+        assert "criteria" not in cli("inspect")[1]["goal_acceptance_contract"]
+    else:
+        assert result["proposal"]["receipt"]["checks_passed"] is True, result
+        assert (project / "runs.txt").read_text() == "x"
+        assert service.apply(proposal["proposal_id"]) == result
+        assert (project / "runs.txt").read_text() == "x"

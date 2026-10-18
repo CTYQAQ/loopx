@@ -17,11 +17,10 @@ export const outcomeRequirementsSchema = z.object({schema_version: z.literal("lo
   })),
 });
 export type OutcomeRequirements = z.infer<typeof outcomeRequirementsSchema>;
-export const goalAcceptanceContractSchema = z.discriminatedUnion("enabled", [
-  z.object({ enabled: z.literal(false), outcome_requirements: outcomeRequirementsSchema.optional() }),
-  z.object({
+const goalAcceptanceChecksSchema = z.object({
     outcome_requirements: outcomeRequirementsSchema.optional(),
-    enabled: z.literal(true), revision: z.number().int().positive(), digest: z.string().min(1), objective: z.string(),
+    outcome_id: z.string().optional(),
+    revision: z.number().int().positive(), digest: z.string().min(1), objective: z.string(),
     scope: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("all_advancement") }).strict(),
       z.object({ kind: z.literal("selected_work"), todo_ids: z.array(z.string().min(1)).min(1) }).strict(),
@@ -43,9 +42,25 @@ export const goalAcceptanceContractSchema = z.discriminatedUnion("enabled", [
       todo_id: z.string().nullable(),
       results: z.array(z.object({ criterion_id: z.string(), passed: z.boolean(), exit_code: z.number().int().nullable(), oracle_evidence: oracleEvidenceSchema.optional() })),
     }).nullable(),
-  }),
-]);
+  });
+export type GoalAcceptanceChecks = z.infer<typeof goalAcceptanceChecksSchema>;
+export const goalAcceptanceContractSchema = z.preprocess(value => {
+  // Read retained pre-upgrade snapshots at the boundary, never as a feature flag.
+  if (!value || typeof value !== "object" || !("enabled" in value)) return value;
+  const legacy = value as Record<string, unknown>;
+  if (typeof legacy.enabled !== "boolean") return null;
+  if (!legacy.enabled) return {outcome_requirements: legacy.outcome_requirements};
+  const {enabled: _oldSwitch, ...current} = legacy;
+  return current;
+}, z.union([goalAcceptanceChecksSchema, z.object({
+  criteria: z.never().optional(), outcome_requirements: outcomeRequirementsSchema.optional(),
+  lifecycle_state: z.string().optional(), goal_ref: z.unknown().optional(),
+}).strict()]));
 export type GoalAcceptanceContract = z.infer<typeof goalAcceptanceContractSchema>;
+
+export function hasConfiguredGoalChecks(value: GoalAcceptanceContract | undefined): value is GoalAcceptanceChecks {
+  return value?.criteria !== undefined;
+}
 
 export const goalAcceptanceObservationSchema = z.object({
   schema_version: z.literal("goal_acceptance_observation_projection_v0"),
@@ -74,7 +89,7 @@ export type GoalAcceptanceObservation = z.infer<typeof goalAcceptanceObservation
 
 /** Present the current owner observation without promoting retained checks.
  * Equal contract revisions alone cannot establish unchanged work. */
-export function projectGoalAcceptanceCriteria(contract: Extract<NonNullable<GoalAcceptanceObservation["goal_acceptance_contract"]>, {enabled: true}>) {
+export function projectGoalAcceptanceCriteria(contract: GoalAcceptanceChecks) {
   const receipt = contract.verification;
   const sameContract = receipt?.contract_revision === contract.revision && receipt.contract_digest === contract.digest;
   const results = new Map(receipt?.results.map(result => [result.criterion_id, result.passed]));
@@ -97,7 +112,7 @@ export function projectGoalAcceptanceCriteria(contract: Extract<NonNullable<Goal
 }
 
 /** Display freshness only; this does not alter canonical acceptance or gates. */
-export function goalAcceptanceDisplayStatus(contract: Extract<GoalAcceptanceContract, {enabled: true}>) {
+export function goalAcceptanceDisplayStatus(contract: GoalAcceptanceChecks) {
   if (contract.status !== "accepted" && contract.status !== "partial") return contract.status;
   const criteria = projectGoalAcceptanceCriteria(contract);
   if (criteria.some(item => item.state === "failed")) return "failed";

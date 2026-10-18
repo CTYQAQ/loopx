@@ -52,6 +52,28 @@ for index, (criterion, description) in enumerate([
     cli("refine", "--agent-id", "author", "--document", str(path), "--operation-id", f"refine-{index}",
         "--expected-provider-revision", cli("inspect")["provider_revision"], "--execute")
 
+(project / "tour.txt").write_text("Delegation\nTask board\n")
+(project / "check-tour.py").write_text(
+    "from pathlib import Path\nimport sys\ntext = Path('tour.txt').read_text()\n"
+    "if sys.argv[1] == 'opening': assert text.startswith('Introduction\\n')\n"
+    "else: assert text.index('Delegation') < text.index('Task board')\n"
+)
+review = {"outcome_id": "product-tour", "source": {"ref": "artifact:review", "summary": "Reviewed the first presentation"},
+    "review": [
+        {"id": "tour-opening", "conclusion": "unmet", "evidence_refs": ["tour.txt"], "note": "The introduction is still missing"},
+        {"id": "tour-order", "conclusion": "met", "evidence_refs": ["tour.txt"], "note": "Delegation precedes the task board"},
+    ]}
+path = root / "review.json"
+path.write_text(json.dumps(review))
+cli("refine", "--agent-id", "author", "--document", str(path), "--operation-id", "review",
+    "--expected-provider-revision", cli("inspect")["provider_revision"], "--execute")
+path = root / "checks.json"
+path.write_text(json.dumps({"outcome_id": "product-tour", "criteria": [
+    {"id": "tour-opening", "validation_argv": ["python3", "check-tour.py", "opening"]},
+    {"id": "tour-order", "validation_argv": ["python3", "check-tour.py", "order"]},
+]}))
+cli("prepare", "--agent-id", "author", "--document", str(path), "--operation-id", "check-plan", "--execute")
+
 print(json.dumps({"ready": True, "port": int(sys.argv[2]), "registry": str(registry), "runtime": str(runtime)}), flush=True)
 serve_chat(registry_path=registry, runtime_root_override=runtime, scan_roots=[project],
     port=int(sys.argv[2]), codex_bin="unavailable-synthetic-host", claude_bin="unavailable-synthetic-host")

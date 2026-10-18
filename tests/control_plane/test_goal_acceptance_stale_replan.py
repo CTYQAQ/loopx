@@ -26,7 +26,7 @@ def _summary(*, ready_alternative: bool = False):
         "unclaimed_priority_open_items": [],
         "claim_scope": {"other_agent_claimed_items": []},
         "goal_acceptance_contract": {
-            "enabled": True,
+            "criteria": [{"id": "delivery", "description": "Retain the delivery result"}],
             "tasks": [
                 {"todo_id": "todo_stale", "state": "stale", "applicable": True},
             ],
@@ -72,10 +72,10 @@ def test_stale_binding_routes_to_bounded_replan_only_when_frontier_is_empty():
     ) is None
 
 
-def test_stale_binding_cannot_replan_another_agents_work_or_disabled_contract():
+def test_stale_binding_cannot_replan_another_agents_work_or_removed_checks():
     assert acceptance_gaps_from_held_goal_binding(_summary(), _source(), agent_id="agent-b") == []
     disabled = _summary()
-    disabled["goal_acceptance_contract"]["enabled"] = False
+    disabled["goal_acceptance_contract"] = {}
     assert acceptance_gaps_from_held_goal_binding(disabled, _source(), agent_id="agent-a") == []
 
 

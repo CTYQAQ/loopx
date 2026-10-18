@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..control_plane.goals.acceptance_readback import configured_checks
+
 import argparse
 import json
 from pathlib import Path
@@ -19,10 +21,10 @@ from ..control_plane.goals.acceptance import (
 def register_goal_acceptance_command(subparsers: Any, add_format: Any) -> None:
     parser = subparsers.add_parser(
         "goal-acceptance",
-        help="Configure, inspect or verify a versioned Goal acceptance basis.",
+        help="Retain outcome requirements, review evidence and optionally run configured checks.",
     )
     add_format(parser)
-    parser.add_argument("action", choices=("inspect", "prepare", "configure", "verify", "disable", "refine"))
+    parser.add_argument("action", type=lambda value: "clear-checks" if value == "disable" else value, choices=("inspect", "prepare", "configure", "verify", "clear-checks", "refine"))
     parser.add_argument("--goal-id", required=True)
     parser.add_argument(
         "--agent-id",
@@ -31,11 +33,11 @@ def register_goal_acceptance_command(subparsers: Any, add_format: Any) -> None:
     parser.add_argument(
         "--document",
         type=Path,
-        help="Check plan, or append-only outcome refinement for refine; configure requires the owner.",
+        help="Outcome refinement or check plan. Checks may reference outcome_id and requirement IDs; configure requires the owner.",
     )
     parser.add_argument(
         "--expected-provider-revision",
-        help="Exact revision from inspect; required by configure/disable/refine.",
+        help="Exact revision from inspect; required by configure/clear-checks/refine.",
     )
     parser.add_argument(
         "--operation-id", help="Stable identity for an unchanged configuration retry."
@@ -43,7 +45,7 @@ def register_goal_acceptance_command(subparsers: Any, add_format: Any) -> None:
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="With refine, retain requirements and optional Agent evidence review; with prepare, save a reviewable plan only; with configure/disable/verify, apply the named operation. Otherwise preview only.",
+        help="With refine, retain requirements and optional Agent evidence review; with prepare, save a reviewable plan only; with configure/clear-checks/verify, apply the named operation. Otherwise preview only.",
     )
 
 
@@ -54,8 +56,10 @@ def render_goal_acceptance(payload: dict[str, Any]) -> str:
     if payload.get("provider_revision"):
         lines.append(f"- provider revision: {payload['provider_revision']}")
     contract = payload.get("goal_acceptance_contract") or {}
-    lines.append(f"- enabled: {contract.get('enabled', False)}")
-    if contract.get("enabled"):
+    lines.append("- requirements and evidence review: available by default")
+    if not configured_checks(contract):
+        lines.append("- automated checks: not configured")
+    if configured_checks(contract):
         lines.extend(
             [
                 f"- coverage: {(contract.get('scope') or {}).get('kind', 'all_advancement')}",
@@ -74,6 +78,14 @@ def render_goal_acceptance(payload: dict[str, Any]) -> str:
         lines.append(f"- outcome {outcome['id']}: {outcome['objective']} ({outcome['owner_agent_id']})")
         for requirement in outcome["requirements"]:
             lines.append(f"  - {requirement['id']}: {requirement['description']} [{requirement['status']}]")
+            review = requirement.get("agent_review")
+            if review:
+                current = "current basis" if review["basis_current"] else "basis changed; review again"
+                lines.append(f"    Agent review: {review['conclusion']} ({current}; not independent verification). {review['note']}")
+                lines.extend(f"    evidence: {ref}" for ref in review["evidence_refs"])
+        lines.append("  work: " + (", ".join(f"{work['todo_id']} ({work['status']})" for work in outcome["work"]) or "not linked"))
+    for gap in (contract.get("outcome_requirements") or {}).get("acceptance_gaps", []):
+        lines.append(f"- next work for {gap['outcome_id']}: {', '.join(gap['requirement_ids'])} still needs evidence or linked work; use existing replan")
     return "\n".join(lines)
 
 
@@ -113,14 +125,14 @@ def handle_goal_acceptance_command(
                 raise ValueError("acceptance document must be a JSON object")
             payload = prepare_acceptance_check(**common, document=document,
                 operation_id=args.operation_id, execute=args.execute)
-        elif args.action in {"configure", "disable"}:
+        elif args.action in {"configure", "clear-checks"}:
             if not args.expected_provider_revision:
                 raise ValueError(
-                    "configure/disable requires --expected-provider-revision from inspect"
+                    "configure/clear-checks requires --expected-provider-revision from inspect"
                 )
             if args.action == "configure" and args.document is None:
                 raise ValueError("configure requires --document")
-            if args.action == "disable" and args.document is not None:
+            if args.action == "clear-checks" and args.document is not None:
                 raise ValueError("disable does not accept --document")
             document = (
                 json.loads(args.document.read_text(encoding="utf-8"))
@@ -136,7 +148,6 @@ def handle_goal_acceptance_command(
                     expected_provider_revision=args.expected_provider_revision,
                     operation_id=args.operation_id,
                     execute=args.execute,
-                    disable=args.action == "disable",
                 )
             )
         else:

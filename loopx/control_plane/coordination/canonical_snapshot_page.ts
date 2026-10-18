@@ -1,3 +1,4 @@
+import {configuredGoalChecks} from "../goals/acceptance_contract.ts";
 /** Byte-bounded canonical reads. Continuations are positions in one immutable
  * provider revision, never permission to combine independently current heads. */
 import type {JsonObject} from "../effect_program.ts";
@@ -102,9 +103,9 @@ export async function readCanonicalSnapshotFromStore(value: unknown, store: Auth
   const todoStart = after?.todo_offset ?? 0, leaseStart = after?.lease_offset ?? 0;
   const todoIds = projection.todo_ids.slice(todoStart, todoStart + CANONICAL_SNAPSHOT_PAGE_ITEMS);
   const leaseIds = leases?.lease_todo_ids.slice(leaseStart, leaseStart + CANONICAL_SNAPSHOT_PAGE_ITEMS - todoIds.length) ?? [];
-  const guards = acceptance.enabled === true ? projectGoalAcceptanceWorkGuards(head.head, goal, todoIds) : {};
+  const guards = !!configuredGoalChecks(acceptance) ? projectGoalAcceptanceWorkGuards(head.head, goal, todoIds) : {};
   const metadata = {todo_read_model: readModel,
-    ...(acceptance.enabled === true || acceptance.outcome_requirements ? {goal_acceptance_contract: acceptance} : {}),
+    ...(!!configuredGoalChecks(acceptance) || acceptance.outcome_requirements ? {goal_acceptance_contract: acceptance} : {}),
     ...(leases === null ? {} : {handoff_mode: head.head.handoff_mode ?? "legacy"}),
     ...(readback === null ? {} : {projection_readback: confirmProjectionReadback(readback, head.provider_revision)})};
   function page(size: number): JsonObject {
@@ -113,7 +114,7 @@ export async function readCanonicalSnapshotFromStore(value: unknown, store: Auth
     return {...base, status: "page", snapshot, metadata,
       todos: chosenTodos.map(id => projection.todos.get(id)!),
       ...(leases === null ? {} : {leases: chosenLeases.map(id => leases.leases.get(id)!)}),
-      ...(acceptance.enabled !== true ? {} : {goal_acceptance_work_guards: Object.fromEntries(
+      ...(!configuredGoalChecks(acceptance) ? {} : {goal_acceptance_work_guards: Object.fromEntries(
         chosenTodos.filter(id => Object.hasOwn(guards, id)).map(id => [id, guards[id]]))}),
       next: todoEnd === snapshot.todo_count && leaseEnd === snapshot.lease_count ? null :
         {snapshot, todo_offset: todoEnd, lease_offset: leaseEnd}};

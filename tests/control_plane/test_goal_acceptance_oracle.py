@@ -200,7 +200,7 @@ def test_oracle_http_owner_journey_uses_same_real_authority(acceptance_goal):
         assert status == 200 and disabled["goal_acceptance_contract"] == {
             "enabled": False
         }
-        assert cli("inspect")[1]["goal_acceptance_contract"] == {"enabled": False}
+        assert cli("inspect")[1]["goal_acceptance_contract"] == {}
     finally:
         server.shutdown()
         server.server_close()

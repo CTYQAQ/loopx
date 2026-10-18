@@ -1,3 +1,4 @@
+import {hasConfiguredGoalChecks} from "../../data/goal-acceptance-observation";
 import {GoalOutcomeRequirements} from "./goal-outcome-requirements";
 import {useEffect, useRef, useState, type ReactNode} from "react";
 import {CircleCheck, CircleDashed, CircleX} from "lucide-react";
@@ -35,8 +36,11 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   const plan = actions.isError ? null : preparedAcceptancePlan(actions.data ?? [], goalId);
   const fresh = canManage && !read.isError && read.data?.goal_id === goalId;
   const contract = fresh ? read.data!.goal_acceptance_contract : retained;
-  const enabled = contract?.enabled === true;
-  const criteria = enabled ? projectGoalAcceptanceCriteria(contract) : [];
+  const checksConfigured = hasConfiguredGoalChecks(contract);
+  const criteria = checksConfigured ? projectGoalAcceptanceCriteria(contract) : [];
+  const retainedOutcome = checksConfigured && contract.outcome_id
+    ? contract.outcome_requirements?.outcomes.find(o => o.id === contract.outcome_id) : undefined;
+  const standaloneCriteria = criteria.filter(c => !retainedOutcome?.requirements.some(r => r.id === c.id && r.description === c.description));
   const [document, setDocument] = useState<Record<string, unknown> | null>(null);
   const [filename, setFilename] = useState("");
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
@@ -48,7 +52,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
     setDocument(null); setFilename(""); setError(""); setNotice(""); setBusy(false);
     return () => {generation.current++;};
   }, [goalId, canManage]);
-  async function operate(action: "adopt" | "configure" | "verify" | "disable") {
+  async function operate(action: "adopt" | "configure" | "verify" | "clear-checks") {
     if (!canManage || flight.current || !fresh || action === "adopt" && !plan || action === "configure" && !document) return;
     const token = ++generation.current, target = goalId;
     flight.current = true; setBusy(true); setError(""); setNotice("");
@@ -69,7 +73,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
       if (source.current !== target || token !== generation.current) return;
       client.setQueryData(queryKey, observed);
       if (action === "configure") {setDocument(null); setFilename("");}
-      setNotice(action === "disable" ? (zh ? "已停用检查，历史记录仍保留。" : "Checks disabled; history is retained.")
+      setNotice(action === "clear-checks" ? (zh ? "已移除检查配置，历史记录仍保留。" : "Check configuration removed; history is retained.")
         : action === "configure" ? (zh ? "已保存，尚未运行检查。" : "Saved; checks have not run.")
         : "");
     } catch {
@@ -85,16 +89,16 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   const outcomes = contract?.outcome_requirements ? <GoalOutcomeRequirements goalId={goalId} declaration={contract.outcome_requirements}
     fresh={!!fresh} canManage={canManage} providerRevision={fresh ? read.data!.provider_revision : null}
     onRefresh={async () => {await read.refetch();}}/> : null;
-  if (!management && !enabled && !plan && !unavailable) return <>{children}{outcomes}
-    {overview ? <p className="goal-overview-note">{contract?.enabled === false
-      ? (zh ? "自动检查命令未配置（可选）。" : "Automated check commands are not configured (optional).")
+  if (!management && !checksConfigured && !plan && !unavailable) return <>{children}{outcomes}
+    {overview ? <p className="goal-overview-note">{contract !== undefined
+      ? (zh ? "成果核对默认可用；尚未配置自动检查。" : "Outcome review is available by default; no automated checks are configured.")
       : (zh ? "此来源未提供自动检查命令（可选）。" : "This source has not provided automated check commands (optional).")}</p> : null}
     {notice ? <p role="status">{notice}</p> : null}</>;
   const readOnly = !canManage;
   const criterionText = (item: typeof criteria[number]) => item.oracle
     ? copy.oracleState[fresh ? item.oracle.state : "recorded"]
     : fresh ? copy.verificationState[item.state] : copy.retained;
-  const advancedConfiguration = management || enabled ? <details className="delivery-check-advanced"><summary>{zh ? "高级配置与诊断" : "Advanced configuration and diagnostics"}</summary>
+  const advancedConfiguration = management || checksConfigured ? <details className="delivery-check-advanced"><summary>{zh ? "高级配置与诊断" : "Advanced configuration and diagnostics"}</summary>
         <p>{copy.guidance}</p>
         <div className="delivery-acceptance-controls">
           <button type="button" disabled={busy || readOnly} onClick={() => {setError(""); void read.refetch(); void actions.refetch();}}>{zh ? "刷新结果" : "Refresh result"}</button>
@@ -109,13 +113,13 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
           {document ? <details open><summary>{zh ? "待保存配置" : "Configuration to save"} · {filename}</summary><pre>{JSON.stringify(document, null, 2)}</pre>
             <p>{zh ? "保存会更新所列任务的关联，不会运行检查。" : "Saving updates the listed task associations and does not run checks."}</p></details> : null}
           <button type="button" disabled={busy || !fresh || !document || !!error} onClick={() => void operate("configure")}>{zh ? "保存配置" : "Save configuration"}</button>
-          <button type="button" disabled={busy || !fresh || !enabled} onClick={() => void operate("disable")}>{zh ? "停用检查" : "Disable checks"}</button>
+          <button type="button" disabled={busy || !fresh || !checksConfigured} onClick={() => void operate("clear-checks")}>{zh ? "移除检查配置" : "Remove check configuration"}</button>
         </div>
         <dl className="delivery-acceptance-source"><div><dt>{copy.source}</dt><dd><code>{goalId}</code></dd></div>
-          {enabled ? <><div><dt>{copy.scope}</dt><dd>{contract.scope?.kind === "selected_work" ? copy.selectedWork : copy.allWork}</dd></div>
+          {checksConfigured ? <><div><dt>{copy.scope}</dt><dd>{contract.scope?.kind === "selected_work" ? copy.selectedWork : copy.allWork}</dd></div>
             <div><dt>{copy.revision}</dt><dd>{contract.revision}</dd></div><div><dt>{copy.digest}</dt><dd><code>{contract.digest}</code></dd></div></> : null}
         </dl>
-        {enabled ? <><p>{contract.non_goals.join(" · ")}</p><h4>{copy.tasks}</h4>
+        {checksConfigured ? <><p>{contract.non_goals.join(" · ")}</p><h4>{copy.tasks}</h4>
           <ul>{contract.tasks.map(task => <li key={task.todo_id}><code>{task.todo_id}</code> · {copy.taskState[task.state]}
             <p>{copy.criteria}: {task.criterion_ids.join(", ") || copy.unknown}</p>
             {task.applicable === false ? <p>{copy.notApplicable}</p> : null}
@@ -127,8 +131,8 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
           <span>{fresh ? (zh ? `${criteria.filter(item => item.state === "accepted").length}/${criteria.length} 项条件当前通过` : `${criteria.filter(item => item.state === "accepted").length} of ${criteria.length} criteria currently passing`) : copy.retained}</span>
           <span aria-hidden className="goal-criteria-meter">{criteria.map(item => <i className={`is-${fresh ? item.state : "unverified"}`} key={item.id}/>)}</span>
         </span> : null;
-  const resultDetails = enabled ? <>
-        <ul className={overview ? "goal-overview-criteria" : undefined}>{criteria.map(item => <li className={overview ? `is-${fresh ? item.state : "unverified"}` : undefined} key={item.id}>
+  const resultDetails = checksConfigured ? <>
+        <ul className={overview ? "goal-overview-criteria" : undefined}>{standaloneCriteria.map(item => <li className={overview ? `is-${fresh ? item.state : "unverified"}` : undefined} key={item.id}>
           {overview ? fresh && item.state === "accepted" ? <CircleCheck aria-hidden size={16}/> : fresh && item.state === "failed" ? <CircleX aria-hidden size={16}/> : <CircleDashed aria-hidden size={16}/> : null}
           <span>{item.description}</span>{overview ? <small>{criterionText(item)}</small> : <span>{criterionText(item)}</span>}
         </li>)}</ul>
@@ -153,12 +157,12 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   return <section className={`delivery-acceptance-contract${overview ? " is-overview" : ""}`} aria-label={copy.title} aria-busy={busy}>
     <div className="delivery-acceptance-content">
       {outcomes}
-      {!overview || plan || enabled ? <header className="delivery-check-heading"><div>{!overview || plan ? <h3>{copy.title}</h3> : null}
-        <p className={overview && (plan || enabled) ? "goal-overview-objective" : undefined}>{plan ? plan.document.objective : enabled ? contract.objective : (zh ? "Agent 准备检查方案后，可在这里检查交付物。" : "Check the delivery here once the Agent prepares a plan.")}</p>{plan ? <p>{zh ? "将保存这份方案、更新相关任务的验收关联，并在本机运行以下检查。准备方案本身不会执行命令。" : "This saves the plan, updates its task associations and runs the following checks locally. Preparation itself executes no commands."}</p> : null}</div>
-        {canManage && fresh && (plan || enabled) ? <button className={`delivery-check-primary${plan ? " is-prepared" : ""}`} type="button" disabled={busy || !!error}
+      {!overview || plan || checksConfigured ? <header className="delivery-check-heading"><div>{!overview || plan ? <h3>{copy.title}</h3> : null}
+        <p className={overview && (plan || checksConfigured) ? "goal-overview-objective" : undefined}>{plan ? plan.document.objective : retainedOutcome ? (zh ? "已关联成果要求的自动检查" : "Automated checks for the retained requirements") : checksConfigured ? contract.objective : (zh ? "Agent 准备检查方案后，可在这里检查交付物。" : "Check the delivery here once the Agent prepares a plan.")}</p>{plan ? <p>{zh ? "将保存这份方案、更新相关任务的验收关联，并在本机运行以下检查。准备方案本身不会执行命令。" : "This saves the plan, updates its task associations and runs the following checks locally. Preparation itself executes no commands."}</p> : null}</div>
+        {canManage && fresh && (plan || checksConfigured) ? <button className={`delivery-check-primary${plan ? " is-prepared" : ""}`} type="button" disabled={busy || !!error}
           onClick={() => void operate(plan ? "adopt" : "verify")}>{busy ? (zh ? "正在检查…" : "Checking…") : plan ? (zh ? "采用并检查" : "Use plan and check") : (zh ? "检查交付" : "Check delivery")}</button> : null}
       </header> : null}
-      {overview && !enabled && !plan ? children : null}
+      {overview && !checksConfigured && !plan ? children : null}
       {plan ? <div className="delivery-check-plan">
         <p>{plan.document.scope.kind === "all_advancement" ? copy.allWork
           : (zh ? `仅覆盖方案选定的 ${plan.document.scope.todo_ids.length} 项任务` : `Covers only ${plan.document.scope.todo_ids.length} selected tasks`)}</p>
@@ -169,7 +173,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
             {item.oracle?.output_refs.map(ref => <p key={ref}>{zh ? "交付物" : "Delivery"}: {ref}</p>)}</div>)}
         </details>
       </div> : null}
-      {enabled ? <div className="delivery-check-result">
+      {checksConfigured ? <div className="delivery-check-result">
         <p role="status"><strong>{fresh ? overview && criteria.length === 1 ? criterionText(criteria[0]) : copy.verificationState[goalAcceptanceDisplayStatus(contract)] : copy.retained}</strong></p>
         <p className="delivery-check-boundary">{copy.boundary}</p>
         {overview ? <details className="delivery-check-inspection" open={detailsExpanded} onToggle={event => setDetailsExpanded(event.currentTarget.open)}>

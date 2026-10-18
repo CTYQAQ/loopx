@@ -1,3 +1,4 @@
+import {configuredGoalChecks} from "../goals/acceptance_contract.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import {projectTurnStartUnavailableContext} from "../capability_hooks.ts";
 import { createHash } from "node:crypto";
@@ -327,7 +328,7 @@ function interactionRequiredReads(request: JsonObject): JsonObject {
   const selectionRequired = requireBoolean(request.selection_required, "selection_required");
   const hasReplan = requireBoolean(request.has_replan, "has_replan");
   const settlementOnly = requireBoolean(request.settlement_only, "settlement_only");
-  const acceptanceEnabled = requireBoolean(request.goal_acceptance_enabled, "goal_acceptance_enabled");
+  const checksPresent = requireBoolean(request.goal_acceptance_checks_present, "goal_acceptance_checks_present");
   const goalId = readArgument(request.goal_id, "goal_id");
   if (!shouldRun || !deliveryAllowed || selectionRequired || settlementOnly || !goalId
       || request.effective_action === EffectiveAction.GOVERNED_CAPABILITY_INTENT) {
@@ -341,8 +342,8 @@ function interactionRequiredReads(request: JsonObject): JsonObject {
   const stateFile = readArgument(request.goal_state_file, "goal_state_file");
   if (stateFile) add(`cat -- ${shellQuote(stateFile)}`, "goal_state",
     "Read complete Goal intent, acceptance and stops. Exact Todo reads own task state/claims. Source failure or changed requirements require a fresh guard; summaries cannot replace this read.");
-  if (acceptanceEnabled || request.goal_outcomes_present === true) add(`${prefix} --format json goal-acceptance inspect --goal-id ${goalArg}`,
-    "goal_acceptance", request.goal_outcomes_present === true ? "Read the full acceptance basis and any supporting outcomes with cumulative requirements, work links and sources. Preserve the original Goal and earlier requirements when applying direct user refinements. Before switching work or declaring completion, reconcile unmet outcome requirements with subsequent work; batch changed requirements/evidence reviews through refresh-state --goal-outcome-update-json or goal-acceptance refine. Reuse complete inline context; unchanged work needs no extra inspect/write. Agent review is distinct from independent checks. Scoped acceptance never replaces Goal intent. Changed requirements need a fresh guard." : "Read full configured objective, non-goals and criteria with scope/revision. Scoped acceptance does not replace Goal intent or prove completion; disabled/changed criteria require a fresh guard.");
+  if (checksPresent || request.goal_outcomes_present === true) add(`${prefix} --format json goal-acceptance inspect --goal-id ${goalArg}`,
+    "goal_acceptance", request.goal_outcomes_present === true ? "Read the full acceptance basis and any supporting outcomes with cumulative requirements, work links and sources. Preserve the original Goal and earlier requirements when applying direct user refinements. Before switching work or declaring completion, reconcile unmet outcome requirements with subsequent work; batch changed requirements/evidence reviews through refresh-state --goal-outcome-update-json or goal-acceptance refine. Reuse complete inline context; unchanged work needs no extra inspect/write. Agent review is distinct from independent checks. Scoped acceptance never replaces Goal intent. Changed requirements need a fresh guard." : "Read full configured objective, non-goals and criteria with scope/revision. Scoped acceptance does not replace Goal intent or prove completion; Removed or changed checks require a fresh guard.");
   const todoId = hasReplan ? null : selectedWorkTodoId(request);
   if (todoId) add(`${prefix} --format json todo list --goal-id ${goalArg} --todo-id ${shellQuote(todoId)}`,
     "selected_todo", "Read full current requirements and status/claim. Require one matching active Todo; missing, ambiguous or changed work requires a fresh guard. A summary cannot replace this read.");
@@ -407,7 +408,7 @@ export function projectInteractionWorkContext(request: JsonObject): JsonObject {
         && sourceMatchesSelection;
     }
     if (valid && read.source === "goal_acceptance") {
-      valid = (jsonObject(content!.goal_acceptance_contract)?.enabled === true || !!jsonObject(content!.goal_acceptance_contract)?.outcome_requirements);
+      valid = (!!configuredGoalChecks(jsonObject(content!.goal_acceptance_contract)) || !!jsonObject(content!.goal_acceptance_contract)?.outcome_requirements);
     }
     if (!valid) {
       pending.push(read);

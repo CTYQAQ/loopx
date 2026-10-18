@@ -5,6 +5,8 @@ legal discharge outcomes; the canonical acceptance owner still guards execution.
 """
 from __future__ import annotations
 
+from ..acceptance_readback import configured_checks
+
 import hashlib
 import json
 from typing import Any
@@ -30,7 +32,7 @@ def acceptance_gaps_from_held_goal_binding(
     if not agent_id or not isinstance(agent_todo_summary, dict):
         return []
     contract = agent_todo_summary.get("goal_acceptance_contract")
-    if not isinstance(contract, dict) or contract.get("enabled") is not True:
+    if not isinstance(contract, dict) or configured_checks(contract) is None:
         return []
     held_states = {
         task.get("todo_id"): task.get("state")

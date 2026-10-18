@@ -7,9 +7,9 @@ const withContract = value => ({ ...snapshot, acceptance: { ...acceptance, goal_
 const before = structuredClone(contract);
 for (const copy of Object.values(deliveryReviewCopy)) {
   const baseline = deliveryReviewMarkdown(parseDeliveryReview(snapshot, snapshot.goal_id), copy);
-  for (const value of [undefined, { enabled: false }, { ...verifiedContract("accepted"), enabled: false }]) {
+  for (const value of [undefined, {}, { enabled: false }, { ...verifiedContract("accepted"), enabled: false }]) {
     assert.equal(deliveryReviewMarkdown(parseDeliveryReview(withContract(value), snapshot.goal_id), copy), baseline,
-      "Missing/disabled contract must preserve baseline export even with retained success data");
+      "Absent checks or retained inactive snapshots must preserve baseline export even with retained success data");
   }
   for (const status of ["unverified", "failed", "stale", "accepted", "partial", "held"]) {
     const source = withContract(verifiedContract(status));
@@ -68,7 +68,7 @@ const next = parseDeliveryReview(withContract({ ...contract, revision: 8, digest
 assert.equal(next.acceptance.goal_acceptance_contract.revision, 8);
 assert.notEqual(next.acceptance.goal_acceptance_contract.digest, contract.digest);
 assert.deepEqual(contract, before, "Rendering must not mutate the supplied contract");
-console.log("Goal acceptance contract API/export: off parity, association/verification distinction, source/revision and negative cases passed");
+console.log("Goal acceptance contract API/export: default absence, association/verification distinction, source/revision and negative cases passed");
 
 const {goalAcceptanceDisplayStatus, projectGoalAcceptanceCriteria} = await import("../node_modules/.cache/delivery-review/data/goal-acceptance-observation.js");
 for (const [observation, expected] of Object.entries({current: "accepted", stale: "stale", failed: "failed", recorded: "unverified", unavailable: "unverified"})) {
