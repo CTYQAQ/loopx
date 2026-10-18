@@ -470,6 +470,18 @@ CLI/SSH 导出使用 `goal-portfolio --manager-view todos --goal-id GOAL --todo-
 | 执行与控制 | 现有 managed Turn、attached-session/host binding、Chat steering/interrupt | 验收精确受支持的 profile。已注册或 inbox acknowledged 都不等于正在运行；原生 steering、next-Turn queue 和 unsupported 必须分别表达 |
 | 结果 | Answer-report、artifact/revision、review/adoption 与 return owners | 读取已存版本，保留来源与独立审阅。report 读取失败重试读取，不重新运行模型 |
 
+本机输入修复复用现有 `POST /api/chat/sessions/{session_id}/turns`，传入
+`message` 与稳定的 `client_turn_id`；`delivery: "queue"` 仍可省略。
+对已经存在的本人私聊绑定会话，普通发送在重新核对 provider/本人、原 binding
+与工作区后进入同一队列，保留 `origin=web`、原 Session/thread 和原项目或管家受众，
+不伪装 provider 事件，也不扩大成本机全局 portfolio。群输入与直接 steering
+继续受来源守卫约束；请求体不能声明 origin、本人或 provider 身份。
+TS binding/source owner 决定准入和来源关联，Python 观测身份并在 binding 发布锁内落队列。
+管家 ingress 沿注册的 coordination root 和现有 source policy，执行授权仍独立。
+真实 File/SQLite HTTP 回归覆盖完整文本、重放、FIFO 和撤权竞态。
+此项是 Core/API 前置：打包前端发现、真实共享飞书会话采用、项目接收者协作与原会话
+结果返回仍须完成各自现有验收，不以合成测试宣称整条用户旅程完成。
+
 Lark 可读回复的出口还要检查实际强调呈现，不能把 Markdown 原文读回一致当成视觉验收。
 依照 [CommonMark 分隔符规则](https://spec.commonmark.org/0.31.2/#emphasis-and-strong-emphasis)，
 共享 inbox 回复适配器对“加粗内的末尾标点紧接下一单词”做格式规范化：
