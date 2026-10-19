@@ -17,14 +17,15 @@ export async function startAuthority(mode) {
   });
   let diagnostic = "";
   child.stderr.on("data", chunk => { diagnostic = (diagnostic + chunk).slice(-4000); });
+  const closed = new Promise(accept => child.once("close", (code, signal) => accept({code, signal})));
   const lines = createInterface({input: child.stdout});
   const close = async () => {
     lines.close();
     if (child.exitCode === null && child.signalCode === null) {
-      const exited = new Promise(accept => child.once("exit", accept));
       child.kill("SIGTERM");
-      await exited;
     }
+    const result = await closed;
+    assert.equal(result.code, 0, `Worker authority cleanup failed (${result.signal ?? result.code}): ${diagnostic}`);
     await rm(root, {recursive: true, force: true});
   };
   try {

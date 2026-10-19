@@ -120,6 +120,11 @@ def serve(root: Path, mode: str) -> None:
         output = sys.stdout
 
         class ObservableChatServer(ChatHTTPServer):
+            # A page can close while a proxied read is still finishing. Drain
+            # those requests before ExitStack retires their Effect runtimes;
+            # a daemon handler could otherwise restart one during teardown.
+            daemon_threads = False
+
             def serve_forever(self, poll_interval=0.5):
                 print(json.dumps({"port": self.server_address[1], "registry": args.registry,
                     "runtime": args.runtime_root, "goal_id": GOAL, "agent_id": AGENT,
