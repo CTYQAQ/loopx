@@ -17,7 +17,14 @@ export const outcomeRequirementsSchema = z.object({schema_version: z.literal("lo
   })),
 });
 export type OutcomeRequirements = z.infer<typeof outcomeRequirementsSchema>;
+// Both configured checks and the default outcome projection retain the native
+// lifetime identity. A cached editor must not follow a reused Goal id.
+const goalAcceptanceSource = {
+  lifecycle_state: z.string().optional(),
+  goal_ref: z.object({goal_id: z.string(), goal_instance_id: z.string()}).nullable().optional(),
+};
 const goalAcceptanceChecksSchema = z.object({
+    ...goalAcceptanceSource,
     outcome_requirements: outcomeRequirementsSchema.optional(),
     outcome_id: z.string().optional(),
     revision: z.number().int().positive(), digest: z.string().min(1), objective: z.string(),
@@ -49,12 +56,13 @@ export const goalAcceptanceContractSchema = z.preprocess(value => {
   if (!value || typeof value !== "object" || !("enabled" in value)) return value;
   const legacy = value as Record<string, unknown>;
   if (typeof legacy.enabled !== "boolean") return null;
-  if (!legacy.enabled) return {outcome_requirements: legacy.outcome_requirements};
+  if (!legacy.enabled) return {outcome_requirements: legacy.outcome_requirements,
+    goal_ref: legacy.goal_ref, lifecycle_state: legacy.lifecycle_state};
   const {enabled: _oldSwitch, ...current} = legacy;
   return current;
 }, z.union([goalAcceptanceChecksSchema, z.object({
   criteria: z.never().optional(), outcome_requirements: outcomeRequirementsSchema.optional(),
-  lifecycle_state: z.string().optional(), goal_ref: z.unknown().optional(),
+  ...goalAcceptanceSource,
 }).strict()]));
 export type GoalAcceptanceContract = z.infer<typeof goalAcceptanceContractSchema>;
 

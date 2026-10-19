@@ -63,13 +63,14 @@ function Outcome({goalId, outcome, fresh, canManage, revision, onRefresh, zh}: {
       {!outcome.work.length ? <p>{zh ? "尚未关联执行任务" : "No execution task linked"}</p> : null}
       <ul>{outcome.sources.map(source => <li key={source.ref}>{source.summary}</li>)}</ul>
     </details>
-    {canManage ? <details><summary>{zh ? "补充要求" : "Add a requirement"}</summary>
+    {/* Keep an existing draft readable while its same-source write basis is unavailable. */}
+    {canManage || text || pending ? <details><summary>{zh ? "补充要求" : "Add a requirement"}</summary>
       <form onSubmit={event => {event.preventDefault(); void save();}}>
         <label>{zh ? "新增要求（保留已有要求）" : "New requirement (earlier requirements stay)"}
           <textarea value={text} maxLength={512} disabled={busy || !!pending} onChange={event => setText(event.target.value)}/></label>
-        <button type="submit" disabled={busy || !fresh || !text.trim()}>{zh ? "保留要求" : "Retain requirement"}</button>
+        <button type="submit" disabled={busy || !fresh || !canManage || !text.trim()}>{zh ? "保留要求" : "Retain requirement"}</button>
         <button type="button" disabled={busy} onClick={() => void onRefresh()}>{zh ? "刷新结果" : "Refresh result"}</button>
-        {pending && !busy ? <button type="button" disabled={!fresh || !revision} onClick={() => {setPending({...pending, operation_id: `outcome-ui:${crypto.randomUUID()}`, expected_provider_revision: revision}); setNotice("");}}>{zh ? "按当前版本重新准备" : "Rebase on current version"}</button> : null}
+        {pending && !busy ? <button type="button" disabled={!fresh || !canManage || !revision} onClick={() => {setPending({...pending, operation_id: `outcome-ui:${crypto.randomUUID()}`, expected_provider_revision: revision}); setNotice("");}}>{zh ? "按当前版本重新准备" : "Rebase on current version"}</button> : null}
       </form>
     </details> : null}
     {notice ? <p role="status">{notice}</p> : null}

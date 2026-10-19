@@ -13,8 +13,10 @@ import type {GoalAcceptanceContractCopy} from "./delivery-review-copy";
 
 /** The Agent prepares; the owner decides the described effect in context.
  * Proposal receipts are historical. Only native readback supplies check state. */
-export function GoalAcceptanceContractSection({goalId, contract: retained, copy, current, canManage = current, management = false, overview = false, children}: {
+export function GoalAcceptanceContractSection({goalId, contract: retained, copy, current, canManage = current, localSource = true, management = false, overview = false, children}: {
   goalId: string; contract?: GoalAcceptanceContract; copy: GoalAcceptanceContractCopy; current: boolean; canManage?: boolean; management?: boolean;
+  /** Source identity is independent of a temporarily unavailable write basis. */
+  localSource?: boolean;
   /** Overview composes the same readback and effect owner into its brief. */
   overview?: boolean; children?: ReactNode;
 }) {
@@ -30,14 +32,17 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   const client = useQueryClient();
   const queryKey = ["goal-acceptance-readback", goalId];
   const read = useQuery({queryKey, queryFn: ({signal}) => acceptanceRequest(goalId, undefined, signal),
-    enabled: canManage, retry: false, refetchOnWindowFocus: "always",
+    enabled: localSource && canManage, retry: false, refetchOnWindowFocus: "always",
     refetchInterval: 15_000, refetchIntervalInBackground: false});
-  const actions = useTypedActionReadback(!canManage, goalId);
-  const plan = actions.isError ? null : preparedAcceptancePlan(actions.data ?? [], goalId);
-  const fresh = canManage && !read.isError && read.data?.goal_id === goalId;
-  // Keep the last same-Goal declaration mounted during failed reads. Freshness
-  // still disables writes and prevents retained evidence from appearing current.
-  const contract = canManage && read.data?.goal_id === goalId ? read.data.goal_acceptance_contract : retained;
+  const actions = useTypedActionReadback(!localSource || !canManage, goalId);
+  const plan = !localSource || actions.isError ? null : preparedAcceptancePlan(actions.data ?? [], goalId);
+  // A failed or loading delivery read revokes writes, not a newer same-source
+  // declaration. Remote snapshots never inherit the local reader's cache.
+  const contract = localSource && read.data?.goal_id === goalId ? read.data.goal_acceptance_contract : retained;
+  const fresh = localSource && canManage && !read.isError && read.data?.goal_id === goalId
+    && (!contract?.lifecycle_state || contract.lifecycle_state === "active");
+  const sourceKey = JSON.stringify([localSource, goalId, contract?.goal_ref ?? null,
+    contract?.outcome_requirements?.current_lifetime ?? null]);
   const checksConfigured = hasConfiguredGoalChecks(contract);
   const criteria = checksConfigured ? projectGoalAcceptanceCriteria(contract) : [];
   const retainedOutcome = checksConfigured && contract.outcome_id
@@ -48,19 +53,19 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const generation = useRef(0), flight = useRef(false);
-  const source = useRef(goalId); source.current = goalId;
+  const source = useRef(sourceKey); source.current = sourceKey;
   useEffect(() => {
     generation.current++; flight.current = false;
     setDocument(null); setFilename(""); setError(""); setNotice(""); setBusy(false);
     return () => {generation.current++;};
-  }, [goalId, canManage]);
+  }, [sourceKey, canManage]);
   async function operate(action: "adopt" | "configure" | "verify" | "clear-checks") {
     if (!canManage || flight.current || !fresh || action === "adopt" && !plan || action === "configure" && !document) return;
-    const token = ++generation.current, target = goalId;
+    const token = ++generation.current, target = goalId, context = sourceKey;
     flight.current = true; setBusy(true); setError(""); setNotice("");
     try {
       await client.cancelQueries({queryKey, exact: true});
-      if (source.current !== target || token !== generation.current) return;
+      if (source.current !== context || token !== generation.current) return;
       if (action === "adopt") {
         const result = await applyTypedAction(plan!.proposal.proposal_id);
         await actions.acceptProposal(result.proposal);
@@ -72,14 +77,14 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
       }
       // Never turn a stored action receipt into current acceptance.
       const observed = await acceptanceRequest(target);
-      if (source.current !== target || token !== generation.current) return;
+      if (source.current !== context || token !== generation.current) return;
       client.setQueryData(queryKey, observed);
       if (action === "configure") {setDocument(null); setFilename("");}
       setNotice(action === "clear-checks" ? (zh ? "已移除检查配置，历史记录仍保留。" : "Check configuration removed; history is retained.")
         : action === "configure" ? (zh ? "已保存，尚未运行检查。" : "Saved; checks have not run.")
         : "");
     } catch {
-      if (source.current === target && token === generation.current) {
+      if (source.current === context && token === generation.current) {
         setError(zh ? "操作结果尚未确认。先刷新结果；不会自动重跑本机命令。" : "The result is unconfirmed. Refresh the result first; local commands will not be retried automatically.");
         // A read-only reconciliation may recover a committed native result.
         await read.refetch();
@@ -87,12 +92,12 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
       }
     } finally {if (token === generation.current) {flight.current = false; setBusy(false);}}
   }
-  const unavailable = read.isError || actions.isError || !!error;
-  const outcomes = contract?.outcome_requirements ? <GoalOutcomeRequirements goalId={goalId} declaration={contract.outcome_requirements}
-    fresh={!!fresh} canManage={canManage} providerRevision={fresh ? read.data!.provider_revision : null}
+  const unavailable = localSource && (read.isError || actions.isError || !!error);
+  const outcomes = contract?.outcome_requirements ? <GoalOutcomeRequirements key={sourceKey} goalId={goalId} declaration={contract.outcome_requirements}
+    fresh={!!fresh} canManage={localSource && canManage} providerRevision={fresh ? read.data!.provider_revision : null}
     onRefresh={async () => {await read.refetch();}}/> : null;
   const compact = !management && !checksConfigured && !plan && !unavailable;
-  const readOnly = !canManage;
+  const readOnly = !localSource;
   const criterionText = (item: typeof criteria[number]) => item.oracle
     ? copy.oracleState[fresh ? item.oracle.state : "recorded"]
     : fresh ? copy.verificationState[item.state] : copy.retained;
@@ -188,7 +193,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
         </details> : resultDetails}
       </div> : null}
       {readOnly ? <p role="status">{zh ? "当前来源只读；返回本机后可检查交付。" : "This source is read-only. Return to the local workspace to check."}</p> : null}
-      {read.isError || actions.isError || error ? <div role="alert"><p>{error || (zh ? "检查方案或结果暂时不可用。刷新只读取信息。" : "The plan or result is unavailable. Refresh only reads information.")}</p>
+      {unavailable ? <div role="alert"><p>{error || (zh ? "检查方案或结果暂时不可用。刷新只读取信息。" : "The plan or result is unavailable. Refresh only reads information.")}</p>
         <button type="button" disabled={busy} onClick={() => {setError(""); void read.refetch(); void actions.refetch();}}>{zh ? "刷新结果" : "Refresh result"}</button></div> : null}
       {notice ? <p role="status">{notice}</p> : null}
       {!overview ? advancedConfiguration : null}
