@@ -120,6 +120,17 @@ cannot display the old operation as current. Reading the observation and
 opening tasks do not dispatch work; the existing Stop control still uses the
 Goal lifecycle owner.
 
+An ordinary poll cannot overwrite a receipt whose JSON, encoding, schema or
+Goal association is unreadable. Quota still returns its independent decision,
+but reports the observation write as unsuccessful and retains the damaged
+source for diagnosis/repair. This does not clear the worker's unknown attempt.
+Agent ids use the existing Core normalization for scope comparison, default
+state-route identity and observations; case aliases cannot create a new attempt.
+The raw CLI input still goes through Core's existing syntax validation.
+
+普通轮询不覆盖不可读回执：quota 决策仍可返回，但观察写入明确失败，保留损坏来源
+和未解决的原操作。Agent 大小写别名沿用 Core 的规范化身份，不能通过换大小写重试。
+
 Scope includes the registry, runtime, Goal and Agent. Exact GoalRef is retained
 when supplied; executable legacy Goals keep their existing alias scope.
 Missing or newly supplied lifecycle metadata cannot reset an old attempt.
@@ -140,6 +151,18 @@ authority at the actual process-launch boundary, including checkpoint resumes.
 The existing authority writer lock covers launch only and is released before
 the model runs. A Goal stopped after session selection therefore cannot start
 a new Host or replace its saved session with an empty, unlaunched result.
+
+The opt-in Codex operation-tools transport applies the same admission owner at
+both app-server process creation and `turn/start`, including session resume and
+model-catalog retry. Locks are released after each launch/acceptance boundary,
+not held over model streaming. Ordinary chat sessions without a Goal launch
+guard keep their existing behavior. Legacy registration retains its existing
+normalized `active`/`active-*` semantics; source-session lifetime checks remain
+strict, and a stopped activation still rejects either registration spelling.
+
+Codex operation-tools 在进程创建和 `turn/start` 两处重新核验，包括恢复和模型目录
+兼容重试；锁不覆盖整段模型生成。普通 Chat 默认行为不变。legacy 沿用既有 active
+及 active-* 注册语义，但不放宽 Stop 或 source-session 的精确生命周期约束。
 
 Source-session admission retains its exact Goal lifetime checks. Executable
 legacy registries instead compare their original registry byte witness under

@@ -538,6 +538,25 @@ resolve the execution gap or name the changed inputs/new uncertainty first.
 A `verify` action names the grow-or-switch decision its result will inform;
 repeated checking without new information is not a default continuation policy.
 
+When evidence weakens the current route, the existing `route_distance` guidance
+asks for a small set of genuinely different explanations or approaches before
+selecting an experiment: representation, decomposition, search method or
+information source as applicable. Contrast predictions and full costs, preserve
+the qualified incumbent, and choose a comparison that can change the next
+decision. Parameter variants alone are not distinct mechanisms. Missing feedback
+is a wait/evidence gap, not evidence that a route failed or alternatives were
+exhausted. This is opt-in Agent guidance in the existing axes/reasons and
+`next_probe`, not a new proposal field, forced pivot, branch scheduler, permission
+or automatic experiment launch. A larger portfolio or a recorded switch does
+not establish adoption or benefit; subsequent evidence must still qualify both.
+
+当证据削弱当前路线时，现有 `route_distance` 指引要求先提出少量真正不同的解释或
+方法，再选择实验；可考虑表征、问题分解、搜索机制或信息来源。比较各自预测和
+完整成本，保留已验证的当前最佳产物，选择能改变下一步决策的对照。相同机制的
+参数变体不算不同路线；缺少反馈属于等待或证据缺口，不证明路线失败或其他方法
+已经穷尽。这仅补充启用策略后的既有轴、理由与 `next_probe` 指引，不增加字段、
+强制转向、分支调度或执行权限。记录了切换或更多候选，不等于执行或效果已经成立。
+
 When a prior accepted decision is delivered, `previous_review` references its
 exact `replan-decision-*` id and separately records:
 
@@ -1129,7 +1148,7 @@ explicit unproved claims. If the original criterion requires a proof, that same
 finite evidence leaves the requirement unproven; Core adds no universal proof
 judge or automatic weakening of the criterion.
 
-Once an enabled contract has concrete work or a verification attempt, no
+Once an enabled contract has concrete work or a currently accepted verification, no
 selected or independently executable work, no due
 Monitor and no new admitted obligation, quota does not turn its generic fallback
 recommendation into another model delivery. Preserve the current result and
@@ -1138,10 +1157,14 @@ requirement. This pause does not declare the whole Goal achieved. Original
 receipt recovery, actual independent work and inbox delivery retain their
 existing admission paths.
 
-A new `all_advancement` contract with no work and no verification attempt keeps
-the ordinary initial-planning route. Declaring requirements before planning
+A new `all_advancement` contract with no work keeps the ordinary initial-planning
+route, including after a failed preflight verification of a not-yet-built artifact.
+Such a failure is not evidence that planning already occurred. Declaring requirements before planning
 must not disable that first step; creating a plan or Todo still grants no
 missing acceptance association.
+
+空 Goal 的验收预检查失败不构成“已经执行过工作”的依据，仍允许首次规划；已有具体
+工作或当前验收通过后的暂停规则不变。新建 Todo 不自动获得缺失的验收关联。
 
 启用原有 Goal acceptance 合同后，Todo 的局部通过与 `no_followup` 不替代独立的
 Goal 验证回执。终态还要求原完整 frontier 已闭合；`selected_work` 的通过只说明
@@ -1296,10 +1319,11 @@ still rearm. Timestamp/evidence bookkeeping does not. Existing accepted ACKs
 remain readable, including predecessor recovery for historical open-count
 obligations; an outstanding pre-upgrade Turn should refresh its guard.
 
-The owned identity excludes only display `title`/`text` and `priority` from the
-existing serialized work basis. These edits still change the full frontier
-freshness revision, while a new owned task, target or dependency changes the
-review basis. Actual negative experiments remain material history even when
+The owned identity retains the original serialized work basis, including
+`title`/`text` and `priority`: task prose can contain substantive requirements,
+including when acceptance is disabled or covers other selected work only.
+Those edits, a new owned task, target or dependency change the review basis;
+maintenance timestamps alone do not. Actual negative experiments remain material history even when
 their score does not improve. For an unconfirmed acceptance association, its
 hold checkpoint binds the Todo, contract revision/digest and hold state. A
 formal accepted ACK for that exact checkpoint survives later display/note
@@ -1307,6 +1331,23 @@ timestamps and event IDs. A different owner revision, Todo or hold checkpoint
 does not match it. Other newly observed vision/evidence gaps still require
 their original strict timestamp coverage; legacy ACKs without an exact
 obligation identity retain that freshness requirement.
+
+Pre-stable acceptance checkpoints included the source Todo timestamp. Readers
+derive that exact old digest from the current Todo, owner revision/digest and
+hold state, and require the original timestamp coverage before honoring its
+accepted ACK. They do not rewrite old receipts or accept an arbitrary old hash.
+An admitted original Turn can retain this source-proven legacy obligation id;
+its context and delivery references are rebuilt for that same id before use.
+Provider-first Todo reentry retains the canonical acceptance projection rather
+than dropping the hold during list filtering. A changed owner/source must be
+reviewed again. Stable checkpoints keep their display-edit continuity; the old
+timestamp-bearing format cannot certify later source edits it never recorded.
+
+任务正文可能包含实质要求，不能全局当作显示文字从长链复盘依据中删除；未启用验收
+或所改任务不在 `selected_work` 范围内时同样如此。验收 hold 的显示稳定性仍由其
+owner 版本单独约束。读取旧时间戳摘要时，仅兼容当前源事实可重建且时间覆盖有效
+的旧确认；原 Turn、复盘上下文和结算身份保持一致，不改写历史回执，不放过新的
+owner 修订。Todo 重入列表保留验收投影；旧摘要不能证明其未记录过的后续源修改。
 
 长链触发范围修正：Agent lane 只在自己已认领的开放推进任务达到 15 项时触发；
 持续监控和共享未认领任务不计入该阈值，移除原 20 项已认领开放任务的触发分支。
