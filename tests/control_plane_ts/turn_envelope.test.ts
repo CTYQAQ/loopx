@@ -300,13 +300,59 @@ test("Turn preserves checkpointed scope approval without lifting other gates", (
   for (const inactive of [
     {schema_version: "checkpointed_boundary_authority_v0", active_count: 0, active_write_scope: []},
     {schema_version: "unknown", active_count: 1, active_write_scope: ["**"]},
-    {schema_version: "checkpointed_boundary_authority_v0", active_count: 1, active_write_scope: ["x".repeat(181)]},
+    {schema_version: "checkpointed_boundary_authority_v0", active_count: 1, active_write_scope: [null, ""]},
   ]) {
     scope.checkpointed_boundary_authority = inactive;
     assert.deepEqual(render().boundary, baseline.boundary);
   }
   delete scope.checkpointed_boundary_authority;
   assert.deepEqual(render(), baseline);
+});
+
+test("boundary obligations remain complete literals beyond display budgets", () => {
+  const source = payload();
+  const scopes = [...Array.from({length: 19}, (_, i) => `public/surface/${i}/**`),
+    `public/${"nested/".repeat(30)}two  spaces/**`, "tests/**"];
+  const boundary = source.goal_boundary as JsonObject;
+  Object.assign(boundary, {
+    write_scope: scopes,
+    available_capabilities: Array.from({length: 20}, (_, i) => `capability_${i}`),
+    requires_parent_approval: Array.from({length: 20}, (_, i) => `action_${i}`),
+    guards: [...Array.from({length: 9}, (_, i) => `Preserve evidence ${i}`),
+      "Keep the complete original evidence.\n".repeat(12) + "Stop before publishing private material."],
+    stop_condition: "Read the full original source.\n".repeat(14) + "Stop when owner approval is missing.",
+    checkpointed_boundary_authority: {
+      schema_version: "checkpointed_boundary_authority_v0", active_count: 2,
+      active_write_scope: scopes, entries: [{source: "private-decision-evidence"}],
+    },
+  });
+  const original = structuredClone(source);
+  const envelope = buildTurnEnvelope({payload: source,
+    protocol_action_fields: protocolActionFields, scheduler_execution_args: ""});
+  const projected = envelope.boundary as JsonObject;
+  for (const field of ["write_scope", "available_capabilities", "requires_parent_approval", "guards", "stop_condition"]) {
+    assert.deepEqual(projected[field], boundary[field], field);
+    const changedSource = structuredClone(source);
+    const changed = changedSource.goal_boundary as JsonObject;
+    if (Array.isArray(changed[field])) (changed[field] as unknown[]).pop();
+    else changed[field] = String(changed[field]).replace("Stop when owner approval is missing.", "Continue.");
+    assert.notDeepEqual(quotaActionSignatureDocument(changedSource, protocolActionFields),
+      turnEnvelopeActionSignatureDocument(envelope), field);
+  }
+  const approval = projected.checkpointed_boundary_authority as JsonObject;
+  assert.deepEqual(approval.active_write_scope, scopes);
+  assert.equal(approval.entries, undefined);
+  assert.deepEqual(source, original);
+  (projected.write_scope as string[]).pop();
+  assert.deepEqual(source, original);
+});
+
+test("explicit empty boundary lists remain distinguishable from absent facts", () => {
+  const source = payload();
+  source.goal_boundary = {write_scope: [], available_capabilities: [], requires_parent_approval: [], guards: [], stop_condition: ""};
+  const envelope = buildTurnEnvelope({payload: source,
+    protocol_action_fields: protocolActionFields, scheduler_execution_args: ""});
+  assert.deepEqual(envelope.boundary, {rule: "stay_in_scope_or_stop", ...source.goal_boundary as JsonObject});
 });
 
 test("required commands remain intact independently of additive hook prompt budgets", () => {

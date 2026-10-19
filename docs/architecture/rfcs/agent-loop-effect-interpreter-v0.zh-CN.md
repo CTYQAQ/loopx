@@ -341,6 +341,13 @@ envelope 投影，Codex CLI 保持关闭隔离；这不代表安装态 heartbeat
 | 结算／scheduler | 完整 typed 结算计划及显式宿主调度投影；省略的调度 argv 引用同一捕获的完整决策 | 此投影退役未绑定的详情命令。实际宿主读回、过期写入拒绝与一次恢复仍待宿主采用验收 |
 | 可选 memory | 核验后的 boundary 参与事实及新鲜宿主绑定 | 关闭／recall／ingest／失效／provider 失败隔离持续保留；传输等价不是模型收益 |
 
+边界投影现完整保留范围、审批、守卫和停止条款，不再套用显示裁剪。共享 DSH／云端
+candidate 适配器也传递此前遗漏的签名限制，原范围／workspace 兼容字段各保留一份。
+独立来源 oracle、真实 File/SQLite CLI 和仅使用协议 fixture 的 Host 子进程能复现旧
+遗漏，并验证完整传递、篡改拒绝和不扣费回放。这只修复一个既有调用族的边界交付，
+不新增执行规则 owner。保留 8 KiB 警告，披露恢复条款的成本；live 模型行为、安装态
+采用和完整成本仍须在推广前分别验收。
+
 能力事实修复归既有 TS read-model owner。真实捕获的 File/SQLite 决策覆盖拒绝及
 准入，包含关闭、仅 recall、仅 ingest 与配置失效。新投影签名覆盖这些保留事实，
 不重写历史签名、不增覆盖版本、准入规则或 Python 策略。宿主 provider 失败和

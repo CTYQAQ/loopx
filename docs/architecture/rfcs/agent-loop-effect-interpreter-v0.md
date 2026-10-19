@@ -483,6 +483,16 @@ Current source-path audit for the first convergence slice:
 | Settlement / scheduler | Intact typed settlement plan and explicit host-owned scheduler projection; omitted scheduler argv references resolve the same captured full decision | Unbound detail commands are retired in this projection. Actual host readback, stale mutation refusal and exactly-once recovery still need host adoption qualification |
 | Optional memory | Verified boundary participation plus fresh host binding | Off/recall/ingest/stale/provider-failure isolation remains mandatory; transport parity is not model value |
 
+The boundary projection now retains complete scope, approval, guard and stop
+clauses instead of applying display limits. The shared DSH/cloud candidate
+adapter also transports the signed restrictions that it previously omitted,
+keeping scope/workspace compatibility fields once. Independent source oracles
+and real File/SQLite CLI plus a protocol-only Host subprocess expose the old
+loss and exercise retention, tamper refusal and no-debit replay. This repairs
+one existing caller family's boundary delivery; it adds no enforcement owner.
+Keep the 8 KiB warning, disclose the cost of restored clauses, and qualify live
+model behavior, installed adoption and total costs separately before rollout.
+
 The capability-fact correction is a read-model change in the established
 TypeScript owner. Real captured File/SQLite decisions cover refusal and admission
 with memory off, recall-only, ingest-only and invalidated configuration. New

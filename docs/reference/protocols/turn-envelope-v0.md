@@ -524,6 +524,29 @@ final packet, including diagnostics. The historical `source_json_bytes` and
 `envelope_json_bytes` fields still count Unicode code points for v0 compatibility;
 do not use them as wire-byte measurements.
 
+### Execution boundary retention
+
+The envelope preserves complete `write_scope`, `available_capabilities`,
+`requires_parent_approval`, `guards` and `stop_condition` values, including
+literal path whitespace and explicit empty lists. Resolved checkpointed write
+approval retains every active scope; private approval entries stay on the
+authorized full-decision path. Display limits must not remove restrictions or
+change path patterns. The 8 KiB warning remains diagnostic.
+
+The shared DSH/cloud candidate prompt carries the remaining signed boundary
+under `boundary`. Its existing `write_scope` and `workspace_guard` fields keep
+their original locations and are not duplicated in that remainder. These are
+instructions for the Host, not a new enforcement mechanism or permission grant;
+owning admission, lease and mutation checks still apply. Boundary facts already
+belong to the action signature: new projections can change hashes, while saved
+signatures and receipts are not rewritten. Signature equality alone cannot
+prove source completeness when both sides use the same projection.
+
+中文：envelope 完整保留范围、能力、审批要求、守卫和停止条件，路径空白、空数组及
+已批准的全部范围也不裁剪。共享 DSH／云端提示传递其余签名边界，原范围和 workspace
+字段继续兼容且只传一份。它们是宿主指令，不替代准入、lease 或写入校验；8 KiB 仍只
+警告，不改写历史签名和回执。两边共用投影时，签名相等本身不能证明来源条款完整。
+
 ### Capability refusal facts
 
 `boundary.capability_gate` carries the existing quota gate's `required` and

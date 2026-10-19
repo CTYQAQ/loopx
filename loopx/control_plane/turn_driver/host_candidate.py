@@ -89,6 +89,14 @@ def extract_turn_authority(request: Mapping[str, Any]) -> dict[str, Any]:
         "write_scope": list(write_scope) if isinstance(write_scope, list) else [],
         "workspace_guard": _mapping(boundary.get("workspace_guard")),
     }
+    # Keep the established scope/workspace aliases once, and transport every
+    # remaining signed restriction rather than rebuilding policy in this IO adapter.
+    remaining_boundary = {
+        key: value for key, value in boundary.items()
+        if key not in {"write_scope", "workspace_guard"}
+    }
+    if remaining_boundary:
+        authority["boundary"] = remaining_boundary
     if isinstance(envelope.get("work_context"), Mapping):
         authority["work_context"] = dict(envelope["work_context"])
     selected = selected_turn_todo(envelope)
@@ -136,7 +144,9 @@ def render_prompt(authority: Mapping[str, Any]) -> str:
         "The JSON below is the complete host authority for this Turn. Execute "
         "primary_action only after reading work_context and any remaining required_reads. "
         "Do not repeat reads already fulfilled in work_context. Write only inside write_scope, "
-        "and obey workspace_guard. Do not infer authority from other prose.\n\n"
+        "and obey workspace_guard and all supplied boundary restrictions and stop conditions. "
+        "Checkpointed approval covers only its active_write_scope; other approval gates remain. "
+        "Do not infer authority from other prose.\n\n"
         f"{context_instruction}"
         f"Turn authority JSON:\n{authority_json}\n\n"
         "When finished, return only one JSON object (no Markdown fence) with "
