@@ -244,3 +244,33 @@ def test_pre_stable_hold_codec_is_derived_from_exact_current_source(state):
     contract["revision"] = 3
     source[0]["updated_at"] = "2026-09-23T08:04:00Z"
     assert derive() is not None  # Old timestamp-bearing proof cannot cover unseen source changes.
+
+
+@pytest.mark.parametrize("basis", ["disabled", "unrelated_gap", "current_checkpoint", "unrecorded"])
+def test_legacy_ack_source_lookup_is_absent_from_ordinary_or_current_paths(monkeypatch, basis):
+    import loopx.control_plane.goals.goal_frontier.acceptance as owner
+
+    summary = _summary()
+    summary["goal_acceptance_contract"].update(revision=1, digest="a" * 64)
+    gaps = acceptance_gaps_from_held_goal_binding(summary, _source(), agent_id="agent-a")
+    ack = {"agent_id": "agent-a", "recorded": True,
+           "todo_source": {"store_identity": "unused-current-source"}, "semantic_delta": {
+               "accepted": True, "obligation_id": "replan-1111111111111111",
+               "trigger_checkpoints": [{"kind": gaps[0]["kind"],
+                                        "frontier_revision": gaps[0]["frontier_revision"]}]}}
+    if basis == "disabled":
+        summary["goal_acceptance_contract"]["enabled"] = False
+        gaps = acceptance_gaps_from_held_goal_binding(summary, _source(), agent_id="agent-a")
+    elif basis == "unrelated_gap":
+        gaps = [{"kind": "vision_acceptance_gap", "frontier_revision": "other"}]
+    elif basis == "unrecorded":
+        ack["recorded"] = False
+        ack["semantic_delta"]["trigger_checkpoints"][0]["frontier_revision"] = "b" * 64
+
+    def unavailable(*args, **kwargs):
+        raise AssertionError("No legacy source read belongs to this decision path")
+
+    monkeypatch.setattr(owner, "effect_runtime_result", unavailable)
+    assert owner.project_legacy_acceptance_hold_ack(
+        ack, acceptance_gaps=gaps, goal_id="goal-a", agent_id="agent-a", runtime_root="unused",
+    ) is ack

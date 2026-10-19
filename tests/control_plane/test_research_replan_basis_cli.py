@@ -13,6 +13,7 @@ import pytest
 import test_goal_acceptance_cli as acceptance_fixture
 from test_goal_acceptance_cli import _configure
 from test_external_scheduler_worker import _args, worker
+from legacy_acceptance_checkpoint_fixture import legacy_acceptance_checkpoint_cli
 
 acceptance_goal = acceptance_fixture.acceptance_goal
 
@@ -71,7 +72,8 @@ def test_formal_task_instruction_change_rearms_the_actual_worker(
         assert spent["settlement_result"]["ok"] is True
 
     # Maintenance notes and timestamps do not revise the task requirement.
-    # Title, priority and formal text remain in the current owned work codec.
+    # Formal task text remains material; display title/priority and the exact
+    # legacy priority marker do not revise that normalized requirement.
     call("todo", "update", "--goal-id", GOAL, "--todo-id", "todo_existing_000", "--agent-id", AGENT,
         "--update-operation-id", "maintenance-note", "--note", "Read the current canonical task source.")
     unchanged = call(*guard_args).get("autonomous_replan_obligation")
@@ -157,25 +159,7 @@ def test_settled_owner_hold_stays_acknowledged_after_display_edits(acceptance_go
     if historical_codec:
         # Exercise real CLI writes/readback with only the source checkpoint
         # codec pinned to the pre-stable algorithm. No receipt/ACK is forged.
-        def run(*args):
-            prefix = [sys.executable, "-c", '''import hashlib,json
-from loopx.control_plane.goals import goal_frontier as owner
-original=owner.acceptance_gaps_from_held_goal_binding
-def old_codec(summary,items,*,agent_id):
-    gaps=original(summary,items,agent_id=agent_id)
-    contract=summary["goal_acceptance_contract"]
-    for gap in gaps:
-        state=gap["kind"].removeprefix("goal_acceptance_")
-        identity=[gap["vision_todo_ids"][0],gap.get("generated_at"),contract.get("digest"),contract.get("revision"),state]
-        gap["frontier_revision"]=hashlib.sha256(json.dumps(identity,ensure_ascii=True,separators=(",",":"),default=str).encode()).hexdigest()
-        gap.pop("legacy_frontier_revision",None)
-    return gaps
-owner.acceptance_gaps_from_held_goal_binding=old_codec
-from loopx.cli import main
-raise SystemExit(main())''', "--registry", str(project.parent / "registry.json"),
-                "--runtime-root", str(project.parent / "runtime"), "--format", "json"]
-            process = subprocess.run([*prefix, *args], capture_output=True, text=True)
-            return process.returncode, json.loads(process.stdout)
+        run = legacy_acceptance_checkpoint_cli(project)
     document = json.loads(document_path.read_text())
     document["bindings"] = []
     document_path.write_text(json.dumps(document))
@@ -251,9 +235,6 @@ raise SystemExit(main())''', "--registry", str(project.parent / "registry.json")
     args.goal_id, args.agent_id = goal, agent
     updates = (("--text", "Display rename of the same held export"),
                ("--priority", "P3"), ("--note", "A rewritten note about this unchanged hold"))
-    if checkpoint_codec == "pre_stable":
-        updates = ()  # The old digest proves the exact original source, not later edits.
-        assert worker.run_worker(args) == 0
     for event, update in enumerate(updates):
         code, changed = run("todo", "update", "--goal-id", goal, "--agent-id", agent,
             "--todo-id", "todo_export", "--update-operation-id", f"after-ack-display-{event}", *update)

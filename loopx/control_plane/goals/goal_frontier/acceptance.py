@@ -10,6 +10,8 @@ import json
 from typing import Any
 
 from ...agents.agent_scope import agent_scope_item_claimed_by_agent_or_unclaimed
+from ...effect_runtime import CANONICAL_AUTHORITY_READ_TIMEOUT_SECONDS, effect_runtime_result
+from ...todos.contract import normalize_todo_replan_obligation_id
 
 GOAL_ACCEPTANCE_HOLD_TRIGGERS = frozenset({"goal_acceptance_stale", "goal_acceptance_unbound"})
 
@@ -96,3 +98,58 @@ def acceptance_gaps_from_held_goal_binding(
         if len(gaps) == 3:
             break
     return gaps
+
+
+def project_legacy_acceptance_hold_ack(
+    ack: dict[str, Any] | None,
+    *,
+    acceptance_gaps: list[dict[str, Any]],
+    goal_id: str,
+    agent_id: str | None,
+    runtime_root: str | None,
+) -> dict[str, Any] | None:
+    """Read an old ACK against its exact canonical source, without rewriting it.
+
+    The old checkpoint included the Todo timestamp. Its run's retained source
+    anchor proves those bytes even after a later display edit. The existing
+    source owner verifies store lineage, cursor and revision in one bounded
+    transaction read. Equal current checkpoint hashes additionally require the
+    same Todo, owner contract digest/revision and hold state. No historical
+    source, unknown checkpoint or changed owner basis can acquire this mapping.
+    """
+    delta = (ack or {}).get("semantic_delta") or {}
+    checkpoints = delta.get("trigger_checkpoints")
+    current = {(gap.get("kind"), gap.get("frontier_revision"))
+               for gap in acceptance_gaps if gap.get("kind") in GOAL_ACCEPTANCE_HOLD_TRIGGERS}
+    if (not current or not isinstance(checkpoints, list) or not runtime_root or
+            (ack or {}).get("recorded") is not True or delta.get("accepted") is not True or
+            (ack or {}).get("agent_id") != agent_id or
+            not normalize_todo_replan_obligation_id(delta.get("obligation_id"))):
+        return ack
+    legacy = [checkpoint for checkpoint in checkpoints if isinstance(checkpoint, dict) and
+              checkpoint.get("kind") in GOAL_ACCEPTANCE_HOLD_TRIGGERS and
+              (checkpoint.get("kind"), checkpoint.get("frontier_revision")) not in current]
+    anchor = (ack or {}).get("todo_source")
+    if not legacy or not isinstance(anchor, dict):
+        return ack
+    source = effect_runtime_result("coordination.local_authority.todo_source", {
+        "schema_version": "loopx_local_coordination_todo_source_request_v0",
+        "runtime_root": runtime_root, "goal_id": goal_id, "source": anchor,
+    }, timeout=CANONICAL_AUTHORITY_READ_TIMEOUT_SECONDS, large_local_snapshot=True)
+    if (source.get("status") != "loaded" or source.get("goal_id") != goal_id or
+            source.get("source") != anchor or source.get("decision_read_from_provider") is not True or
+            source.get("legacy_fallback_used") is not False):
+        return ack
+    old = {(gap["kind"], gap["frontier_revision"]): gap["legacy_frontier_revision"]
+           for gap in acceptance_gaps_from_held_goal_binding(
+               {"goal_acceptance_contract": source.get("goal_acceptance_contract")},
+               source.get("todos"), agent_id=agent_id,
+           )}
+    verified = {(kind, previous): revision for (kind, revision), previous in old.items()
+                if (kind, revision) in current}
+    projected = [{**checkpoint, "frontier_revision": verified.get(
+        (checkpoint.get("kind"), checkpoint.get("frontier_revision")), checkpoint.get("frontier_revision"),
+    )} if isinstance(checkpoint, dict) else checkpoint for checkpoint in checkpoints]
+    # This ephemeral projection feeds the existing exact typed ACK comparison.
+    # Keep the original obligation identity, outcomes, durable record and debit.
+    return {**ack, "semantic_delta": {**delta, "trigger_checkpoints": projected}}

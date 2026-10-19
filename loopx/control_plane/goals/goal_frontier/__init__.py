@@ -60,6 +60,7 @@ from . import outcome_continuity
 from .acceptance import (
     GOAL_ACCEPTANCE_HOLD_TRIGGERS,
     acceptance_gaps_from_held_goal_binding,
+    project_legacy_acceptance_hold_ack,
 )
 from ...work_items.replan_semantics_codec import project_replan_semantics
 from ...work_items.replan_history_codec import project_replan_history
@@ -1565,7 +1566,11 @@ def build_goal_frontier_projection_context_from_status(
         project_asset,
         agent_id=agent_id,
     )
-    effective_replan_ack = latest_agent_replan_ack or projected_replan_ack
+    effective_replan_ack = project_legacy_acceptance_hold_ack(
+        latest_agent_replan_ack or projected_replan_ack,
+        acceptance_gaps=source_acceptance_gaps, goal_id=goal_id, agent_id=agent_id,
+        runtime_root=status_payload.get("runtime_root"),
+    )
     stride_strategy = ((project_asset or {}).get("execution_profile") or {}).get(
         "stride_strategy", "off"
     )
