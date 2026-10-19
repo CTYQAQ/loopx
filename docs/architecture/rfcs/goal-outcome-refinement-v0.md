@@ -81,6 +81,29 @@ provider failure. A stable operation ID recovers a lost reply; conflicting retri
 stale revisions, another Goal instance and another Agent's mutation are rejected.
 No existing Goal acquires outcomes or changed scheduling merely by upgrading.
 
+The native chat adapter saves the original host-bound request before dispatch.
+An identical operation in the same conversation can reuse that source Turn after
+a later Turn or process restart; the host still rechecks current admission,
+Goal instance, Agent and the original revision/document. The saved envelope is
+transport provenance, not a success receipt. Operations committed before this
+envelope existed cannot recover a lost source by guessing it. Outcome reads and
+refinements do not create member deliveries or consume delegation wake evidence.
+
+The 39-line envelope reservation stays in `ChatSessionStore`, which already owns
+Session existence, private paths, locking and atomic writes. Moving it into
+external message admission or an execution store would split that ownership
+without reducing state complexity. Its reviewed module ceiling changes from
+2,016 to the measured 2,055 lines, with no extra headroom; canonical acceptance
+receipts and current admission remain with their existing owners.
+
+The first exact lifetime binding retains legacy outcome declarations, whether it
+arrives through refinement, check configuration or explicit source binding.
+Recreation keeps them with the retired owner. A successor can declare fresh
+outcomes without inheriting the predecessor's requirements, and replaying an old
+operation cannot replace the current projection. A legacy registry entry with
+omitted status retains its existing active meaning; explicit inactive states
+still reject refinement.
+
 The acceptance readback includes declared outcomes without requiring executable
 checks. All Goals share default outcome maintenance, evidence review and gap
 projection; the current state and readback have no enable switch. A refinement
@@ -121,6 +144,26 @@ Replan should use evidence to choose the next useful action or justify continuin
 it; neither a gap nor a review mandates a direction change. No new scheduler,
 periodic audit, quota debit or outcome-driven root stop is introduced.
 
+An outcome gap uses a canonical requirements/work checkpoint, not a timestamp
+invented on read. An accepted, same-Agent Vision writeback bound to the original
+replan obligation acknowledges only that checkpoint. Ordinary settlement and
+source/review-note bookkeeping do not rearm the same obligation. New requirements,
+material linked-work or completion evidence, and changed configured-check or
+host-observed oracle versions do rearm it, as do changed default-review
+conclusions or evidence references. The bounded checkpoint covers the
+Agent's complete uncovered outcome set, including outcomes omitted from detailed
+triggers, while retaining separate held-Todo evidence. This suppresses duplicate
+review, not unresolved requirements, existing wait/stop rules or authorized work.
+Agent-supplied artifact references remain assertions; only the existing pinned
+oracle path supplies host-observed file versions.
+
+Status and refresh observe those configured pins from the same canonical snapshot
+as their Todos and checks, using the current source Goal's workspace. A stale
+shared roster cannot select an older checkout. The private observation basis
+must match the public contract revision and digest; it introduces no second
+authority fetch, verifier execution or change to the saved verification receipt.
+Refresh retains the original canonical snapshot for durable source identity.
+
 ## Simplify the default path
 
 Every Goal uses the same default loop: retained requirements → evidence review →
@@ -149,6 +192,10 @@ apply resolves them again and rejects changed requirements/work before execution
 The snapshot supports review and does not become a second requirement authority.
 Legacy standalone check documents remain supported. There is no implicit command
 execution, new permission or root completion decision.
+
+Opaque requirement IDs, including `:` and `@`, retain exactly the same identity
+through configured criteria, bindings, verification and readback. This does not
+extend the separate Todo-ID, filesystem-path or command grammars.
 
 ## Open-ended research and no premature stop
 
@@ -196,11 +243,37 @@ merge the PR or launch a paid model experiment.
 The heartbeat rule grows by 523 characters; every previous clause is retained.
 On the same supported scoped fixture, compact guidance grows from 7,286 to
 7,809 characters including the existing Reward Memory allowance; the ordinary
-thin fixture grows from 3,147 to 3,670. Presentation regression ceilings become
-7,200 compact and 3,700 thin, keeping the separate 640-character allowance.
+thin fixture in the original slice grows from 3,147 to 3,670. Compact retains
+its 7,200-character presentation ceiling and separate 640-character allowance.
 These are measured context costs, not an efficiency claim or a runtime budget
 increase. Unchanged work adds no Agent CLI interaction, but outcome-bearing
 context still has read/projection and token costs that benchmarks must include.
+
+After integrating main `4f6e20a13`, the unchanged public CLI fixture has a
+normalized thin body of 3,306 characters before outcome guidance and 3,829 after;
+the supported 320-character scope measures 3,595 and 4,118. The earlier 3,700
+proposal cannot fit this complete current rule. Set the thin body ceiling to
+4,200 and its emitted JSON ceiling to 4,500; the final emitted JSON is 4,172
+characters, or 4,461 with the supported scope. Standard Markdown is 6,076 under
+its unchanged 6,200 ceiling. This leaves 82 body characters and 39 emitted JSON
+characters at the scoped boundary, without shortening scope, authority or prose.
+
+The unchanged real CLI fixture with a 128-character root measures brief JSON at
+10,260 characters on main `4f6e20a13` and 10,783 with outcome guidance; Markdown
+measures 8,559 and 9,082. Both grow by the same 523 characters and fail the old
+10,500/9,000 ceilings. Keep all instructions and full command paths; set only
+these brief output ceilings to 11,100/9,600, leaving 317/518 characters of
+headroom. The 58/115 line limits and runtime quota remain unchanged. These
+measurements retain the original failures and do not establish token or model
+benefit. See the [interface budget contract](../../reference/contracts/interface-budget-contract.md).
+
+The 96-row base/head CLI matrix separately measures +523 characters on thin,
+brief, compact and full heartbeat carriers. Before the body repair, thin grew
+by 524 because its overflow flag changed. The existing differential observer
+allows 544 characters/bytes only for the complete frozen outcome-instruction
+transition on these four carriers. Missing/partial wording, an already-upgraded
+base, other surfaces and excess growth keep ordinary failure behavior. No line,
+semantic-key or shape allowance is added.
 
 The existing acceptance work digest is extracted unchanged for both acceptance
 and review-basis invalidation, avoiding a second work-identity policy or circular
@@ -227,12 +300,26 @@ Use disposable public-safe File and SQLite Goals, never active operational state
    runnable action unchanged; test blocked/deferred waits separately.
 7. Exercise the packaged Goal UI against the real backend: read, refine, reload,
    stale-write recovery, desktop/narrow view. Verify absent-outcome behavior parity.
+8. Accept the original replan checkpoint and settle its Turn. Repeated reads,
+   source-only refinement and a changed review note must not demand that same
+   review again; material work and oracle-version changes must. Include more than
+   three outcomes and mixed held-Todo/outcome gaps without losing either source.
+9. Lose a reply after a real native commit, restart the controller, admit another
+   Turn and replay the original operation once. Reject changed request identity,
+   foreign conversation/Agent/Goal instance, paused state and revoked binding.
+10. Bind legacy declarations through each existing first-owner path; recreate the
+    Goal and refine its successor, then replay the predecessor without replacing
+    current declarations.
 
 The same-Goal form retains unsent text and the original pending operation through
 failed refreshes, including a committed write whose reply and reconciliation read
 are lost. Retained data is not fresh write authority. After reading successfully,
 retry reuses the complete operation and cannot append a duplicate requirement;
 explicit rebase requires a current revision and preserves the requirement identity.
+This also covers a newer native outcome absent from the retained delivery snapshot:
+temporary delivery loading/error revokes writes without unmounting its draft or
+pending request. Remote/local source changes and exact Goal lifetime changes reset
+the editor instead of moving an old request to a new owner.
 Run `node examples/personal-workspace-browser/goal-outcome-recovery.mjs` after the
 normal Chat build for this targeted packaged regression. It uses disposable
 SQLite/HTTP/CLI authority and injects transport failures, not fabricated commits.
