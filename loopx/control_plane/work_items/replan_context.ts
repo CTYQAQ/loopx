@@ -9,6 +9,7 @@ import {FRESH_PATH_DISPOSITIONS, requiredSemanticOutcomes} from "./replan_semant
 import {readReplanSnapshot} from "./replan_history_snapshot.ts";
 import {normalizeGoalPathDelta} from "../goals/vision_checkpoint.ts";
 import {normalizeRecordedStrideDecision, normalizeStrideStrategy, projectStrideExploreBasis} from "./stride_policy.ts";
+import {MATERIAL_DELIVERY_OUTCOMES} from "./delivery_outcome.ts";
 
 const CONTEXT_SCHEMA = "replan_context_v0";
 // Replan is an infrequent decision, not the ordinary guard's display window.
@@ -229,6 +230,12 @@ function workResultUse(scoped: JsonObject[]): JsonObject | null {
       }
       continue;
     }
+    // Reuse the delivery owner's recorded classification. A status/preparation
+    // writeback is still readable evidence, but cannot consume a cited result
+    // or create a new pending work result. Unknown legacy outcomes stay unknown.
+    // Material gaps remain eligible: this relation certifies neither successful
+    // execution nor scientific gain, and must preserve useful negative evidence.
+    if (!MATERIAL_DELIVERY_OUTCOMES.some(outcome => outcome === row.delivery_outcome)) continue;
     const todo = String(observationTodo(row));
     if (!origin.has(todo)) continue;
     const ref = "replan-evidence-" + digest(readableEvidenceRow(row));
@@ -250,7 +257,7 @@ function workResultUse(scoped: JsonObject[]): JsonObject | null {
     unresolved: visible, recorded_followthrough_count: followed.length,
     recorded_followthrough: followed.slice(-6).reverse(),
     omitted_followthrough_count: Math.max(0, followed.length - 6),
-    guidance: "Resolve unresolved evidence even when a newer review has occurred. A cited result stays unresolved until later recorded work is linked through that decision's declared Todo. " +
+    guidance: "Resolve unresolved evidence even when a newer review has occurred. A cited result stays unresolved until a later material delivery is linked through that decision's declared Todo; surface-only and unknown outcomes do not consume it. " +
       "Recorded followthrough is an attributable history relation, not verified execution, applicability to a current candidate, or Goal gain. " +
       "Check the provider's exact candidate/input/result revision before adopting an outcome; retain valid negative and inconclusive evidence. Existing authority, stopping and settlement rules remain unchanged."};
 }

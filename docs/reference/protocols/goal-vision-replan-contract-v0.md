@@ -327,6 +327,21 @@ plan invalidates its unexecuted proposal, not the unresolved source. This is a
 read model, not a pending-duty ledger, new write gate or forced continuation.
 The Agent still checks the provider's exact candidate/input/result revision.
 
+The relation uses the existing delivery outcome owner: only `outcome_gap`,
+`outcome_progress` and `primary_goal_outcome` records create pending work results
+or satisfy subsequent followthrough. `surface_only`, missing and unsupported
+historical outcomes remain readable in ordinary history but neither consume a
+cited result nor create a new unresolved result. An optional progress attachment
+does not override that classification. Negative results and concrete blockers
+remain eligible material evidence; this does not certify execution or gain,
+rewrite source history, or alter settlement, waiting or continuation authority.
+
+结果接续复用既有 delivery outcome 分类：只有 `outcome_gap`、`outcome_progress`
+和 `primary_goal_outcome` 才形成待复盘工作结果或后续接续关系。纯整理
+`surface_only`、缺失或未知历史分类仍可从普通历史读取，但不会把旧结果标为已接续，
+也不会产生新的待复盘结果；可选 progress 附件不能覆盖这一分类。有效负结果和明确
+阻塞仍保留。这只是来源关系，不认证实际执行或收益，不改写历史、结算或继续运行权限。
+
 启用 `evidence_conditioned_v1` 且历史中已有被接受、绑定证据的 Vision 路线时，replan context 返回上次决定与之后的
 进度引用，按合格来源的顺序关联，而非根据时间戳或文案猜测因果。完整本地索引提供
 追加位置；已知最新在前的紧凑载体与 `newest_first_runs` 入口转换位置，保留普通
