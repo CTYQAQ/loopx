@@ -376,6 +376,45 @@ class ChatSessionStore(ChatIngressStore):
         payload = _read_json(self._session_path(session_id))
         return payload if payload.get("schema_version") == CHAT_SESSION_SCHEMA_VERSION else None
 
+    def reserve_loopx_outcome_request(
+        self, session_id: str, *, turn_id: str, operation_id: str,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Pin one host envelope before dispatch, including across later Turns.
+
+        This is private transport provenance, not an acceptance receipt. The
+        caller must revalidate current admission and replay at the canonical
+        owner; a saved request cannot establish that the write committed.
+        """
+        if self.load_session(session_id) is None:
+            raise KeyError("chat session was not found")
+        request_digest = hashlib.sha256(json.dumps(
+            request, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+            allow_nan=False,
+        ).encode()).hexdigest()
+        operation_key = hashlib.sha256(operation_id.encode()).hexdigest()
+        path = self._session_dir(session_id) / "outcome-requests" / f"{operation_key}.json"
+        with exclusive_file_lock(path, agent_id="loopx-chat", operation="reserve_outcome_request"):
+            if path.exists():
+                existing = _read_json(path)
+                if (existing.get("session_id") != session_id
+                        or existing.get("operation_id") != operation_id
+                        or existing.get("request_sha256") != request_digest
+                        or not isinstance(existing.get("source_ref"), str)
+                        or not existing["source_ref"]):
+                    raise ValueError("outcome refinement operation identity conflict")
+                return existing
+            scope = hashlib.sha256(json.dumps([session_id, operation_id]).encode()).hexdigest()[:16]
+            payload = {
+                "session_id": session_id,
+                "operation_id": operation_id,
+                "request_sha256": request_digest,
+                "request": request,
+                "source_ref": f"turn:{_opaque_id(turn_id, field='turn_id')}:{scope}",
+            }
+            _atomic_write_json(path, payload)
+            return payload
+
     def update_session(self, session_id: str, **changes: Any) -> dict[str, Any]:
         path = self._session_path(session_id)
         with self._session_lock(session_id):
