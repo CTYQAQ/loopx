@@ -428,22 +428,36 @@ def _observe_worker_replan(
                 "runtime_root": attempt["runtime_root"],
                 "registry_goal_digest": attempt.get("registry_goal_digest"),
             }
+            if "source_goal_observation_digest" in attempt:
+                observation["source_goal_observation_digest"] = attempt["source_goal_observation_digest"]
+            else:
+                # Older attempts bound only the selected registry view. Add
+                # source association only while that original view still
+                # matches; never rebind an old outcome to changed work.
+                current = _worker_goal_observation_digests(args)
+                if current.get("registry_goal_digest") and current["registry_goal_digest"] == attempt.get("registry_goal_digest"):
+                    observation["source_goal_observation_digest"] = current["source_goal_observation_digest"]
         record_host_poll_receipt(goal, state_path, agent_id=normalize_todo_claimed_by(args.agent_id),
                                  decision=payload, worker_observation=observation)
     except (OSError, RuntimeError, TypeError, ValueError):
         _log("status=worker_observation_unavailable next=inspect_original_worker_state")
 
 
-def _worker_goal_observation_digest(args: argparse.Namespace) -> str | None:
+def _worker_goal_observation_digests(args: argparse.Namespace) -> dict[str, str | None]:
     """Capture an observation witness before dispatch, never an admission."""
     from loopx.agent_registry import load_goal_from_registry
-    from loopx.history import goal_registry_digest
+    from loopx.history import goal_registry_digest, host_worker_goal_observation_digest
 
+    result: dict[str, str | None] = {"registry_goal_digest": None, "source_goal_observation_digest": None}
     try:
-        goal = load_goal_from_registry(Path(args.registry).expanduser().resolve(), args.goal_id)
-        return goal_registry_digest(goal) if goal is not None else None
+        registry = Path(args.registry).expanduser().resolve()
+        goal = load_goal_from_registry(registry, args.goal_id)
+        if goal is not None:
+            result.update(registry_goal_digest=goal_registry_digest(goal),
+                          source_goal_observation_digest=host_worker_goal_observation_digest(goal, registry_path=registry))
     except (OSError, RuntimeError, TypeError, ValueError):
-        return None
+        pass
+    return result
 
 
 def select_interval(
@@ -626,7 +640,7 @@ def _run_worker_locked(
                                  "goal_complete=false new_wake=false")
                             return 0
                         attempt["status"] = "started"
-                        attempt["registry_goal_digest"] = _worker_goal_observation_digest(args)
+                        attempt.update(_worker_goal_observation_digests(args))
                         attempts.append(attempt)
                         _save_state(state_path, {**state, "reset_token": decision.reset_token,
                                                 "unchanged_count": unchanged_count})

@@ -15,11 +15,13 @@ from __future__ import annotations
 from .effective_action import EffectiveAction
 
 import json
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ...file_lock import exclusive_file_lock, write_json_atomic
+from ..todos.contract import normalize_todo_claimed_by
 
 HOST_POLL_RECEIPT_SCHEMA_VERSION = "loopx_host_poll_receipt_v0"
 HOST_POLL_RECEIPT_DIRNAME = ".loopx-host-poll-receipts"
@@ -65,6 +67,10 @@ def record_host_poll_receipt(
     path = receipt_path_for_goal(goal, state_path)
     if path is None:
         return None
+    if agent_id:
+        agent_id = normalize_todo_claimed_by(agent_id)
+        if not agent_id:
+            raise ValueError("host poll receipt requires a public-safe Agent")
     with exclusive_file_lock(path, agent_id=agent_id, operation="host_poll_receipt"):
         return _record_host_poll_receipt(
             goal, path, agent_id=agent_id, decision=decision,
@@ -136,7 +142,8 @@ def _record_host_poll_receipt(
 
 def read_host_worker_observations(
     goal: dict[str, Any], state_path: Path | None, *,
-    registry_goal_digest: str, runtime_root: Path,
+    registry_goal_digest: str | None, runtime_root: Path,
+    source_goal_observation_digest: str | None | Callable[[], str | None] = None,
 ) -> dict[str, Any] | None:
     """Read driver observations without making them Goal execution authority.
 
@@ -160,6 +167,11 @@ def read_host_worker_observations(
         return {**source, "read_status": "unreadable", "rows": []}
     if not workers:
         return None
+    # A normal Goal with no worker observation must not acquire source reads.
+    if callable(source_goal_observation_digest):
+        source_goal_observation_digest = source_goal_observation_digest() if any(
+            isinstance(row, dict) and "source_goal_observation_digest" in row for row in workers.values()
+        ) else None
     rows = []
     stale = False
     for agent, row in workers.items():
@@ -179,7 +191,12 @@ def read_host_worker_observations(
                 raise ValueError("observation requires a timezone")
         except ValueError:
             return {**source, "read_status": "unreadable", "rows": []}
-        if (row.get("registry_goal_digest") != registry_goal_digest
+        # Keep the old selected-view contract for persisted legacy rows. New
+        # rows must satisfy their stronger source binding, with no fallback
+        # that could hide a changed source by matching mirror contents alone.
+        digest = source_goal_observation_digest if "source_goal_observation_digest" in row else registry_goal_digest
+        recorded_digest = row.get("source_goal_observation_digest") if "source_goal_observation_digest" in row else row.get("registry_goal_digest")
+        if (not digest or recorded_digest != digest
                 or row.get("runtime_root") != str(runtime_root.resolve())):
             stale = True
             continue

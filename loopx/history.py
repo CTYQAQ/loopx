@@ -93,6 +93,39 @@ def goal_registry_digest(goal: Mapping[str, Any]) -> str:
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
+def host_worker_goal_observation_digest(goal: dict[str, Any], *, registry_path: Path) -> str | None:
+    """Bind a driver observation to its actual source Goal, not sync metadata.
+
+    A global row must still match the existing sanitizer/merge projection of
+    that source. Sync timestamps and consumed merge directives are incidental;
+    changed source routes, Goal lifetimes or configuration must not reuse the
+    old observation. This readback check never changes execution admission.
+    """
+    from .global_registry import preserve_attention_override, sanitize_goal_for_global
+
+    try:
+        selected_registry = registry_path.expanduser().resolve()
+        source_route = goal.get("source_registry")
+        source_registry, source_goal = selected_registry, goal
+        if source_route:
+            if not isinstance(source_route, str) or not Path(source_route).is_absolute():
+                return None
+            source_registry = Path(source_route).expanduser().resolve()
+            if source_registry != selected_registry:
+                candidates = [row for row in registry_goals(load_registry(source_registry))
+                              if row.get("id") == goal.get("id")]
+                if len(candidates) != 1:
+                    return None
+                source_goal = candidates[0]
+                expected = preserve_attention_override({}, sanitize_goal_for_global(
+                    source_goal, source_registry=source_registry, synced_at=""))
+                if preserve_attention_override({}, {**goal, "synced_at": ""}) != expected:
+                    return None
+        return goal_registry_digest({"source_registry": str(source_registry), "goal": source_goal})
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class RunIndexAudit:
     goal_id: str
@@ -383,6 +416,10 @@ def collect_history(
         str(goal.get("id")): goal_registry_digest(goal)
         for goal in registry_goal_rows
     }
+    registry_goal_meta = {
+        str(goal.get("id")): goal
+        for goal in registry_goal_rows
+    }
     goal_meta = {
         str(goal.get("id")): project_goal_with_builtin_machine_configuration(
             goal, machine_configuration
@@ -463,6 +500,8 @@ def collect_history(
             "host_worker_observations": read_host_worker_observations(
                 meta, resolve_goal_local_path(meta.get("state_file"), meta, fallback_base=registry_path.parent),
                 registry_goal_digest=registry_goal_digests[current_goal_id], runtime_root=runtime_root,
+                source_goal_observation_digest=lambda: host_worker_goal_observation_digest(
+                    registry_goal_meta[current_goal_id], registry_path=registry_path),
             ) if registry_member else None,
             "display_name": meta.get("display_name") if registry_member else None,
             "domain": meta.get("domain"),
