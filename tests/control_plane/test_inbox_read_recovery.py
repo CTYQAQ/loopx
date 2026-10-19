@@ -108,7 +108,7 @@ def test_operation_source_appearing_after_committed_read_is_observed_on_next_rea
     import pytest
     from loopx.chat_store import ChatSessionStore
     from loopx.capabilities.manager_context import deliver
-    from loopx.control_plane.collaboration import inbox_read
+    from loopx.control_plane.collaboration import inbox
     from loopx.control_plane.collaboration.peers import read_inbox
 
     registry = tmp_path / "registry.json"
@@ -120,7 +120,7 @@ def test_operation_source_appearing_after_committed_read_is_observed_on_next_rea
     turn, _ = store.create_turn(session["session_id"], client_turn_id="source", message="Inspect the artifact", origin="web")
     receipt = deliver(tmp_path, registry, session=session, turn=turn,
         request={"goal_id": "research", "agent_id": "worker"})
-    transport = inbox_read.read_inbox_transaction
+    transport = inbox.read_inbox_transaction
 
     def source_appears(root, query, **kwargs):
         response = transport(root, query, **kwargs)
@@ -130,11 +130,11 @@ def test_operation_source_appearing_after_committed_read_is_observed_on_next_rea
             path.write_text("{broken", encoding="utf-8")
         return response
 
-    monkeypatch.setattr(inbox_read, "read_inbox_transaction", source_appears)
+    monkeypatch.setattr(inbox, "read_inbox_transaction", source_appears)
     observed = read_inbox(tmp_path, registry, "research", "worker")
     assert [item["request_id"] for item in observed["items"]] == [receipt["request_id"]]
     reads = {p: p.read_bytes() for p in (_root(tmp_path) / "reads").glob("*.json")}
-    monkeypatch.setattr(inbox_read, "read_inbox_transaction", transport)
+    monkeypatch.setattr(inbox, "read_inbox_transaction", transport)
     with pytest.raises(ValueError):
         read_inbox(tmp_path, registry, "research", "worker")
     assert {p: p.read_bytes() for p in reads} == reads
