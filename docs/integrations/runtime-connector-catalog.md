@@ -225,6 +225,12 @@ is deduplicated. Launch follows that owner's decision, including any lawful
 health-repair action, rather than treating every health finding as an
 unconditional refusal.
 
+The launch reread retains the required inbox reads already dispatched for that
+same Turn. They cover only the material observed by that dispatch; later material
+still passes through the current quota owner's decision. If launch is refused,
+completed preflight synchronization remains reported, while the refusal itself
+creates no model Turn or quota debit.
+
 This full decision callback is qualified for executable legacy local, source
 and source-to-global routes. Source-session admission retains its separate
 lifecycle-only boundary; this qualification does not enable its CLI execution.
@@ -248,6 +254,10 @@ Turn；原生会话按原选择和结算规则继续。
 状态缺失也会进入 quota 决策。尚未声明状态的初始设置不会因此产生缺失报告，global
 中的同一报告按原规则去重。启动遵守原 owner 的决定，也保留其允许的健康修复动作，
 不把所有健康异常都改成无条件拒绝。
+
+启动前重读保留同一 Turn 已派发的 inbox 必读结果，覆盖范围仅限该次派发实际
+观察到的材料；之后新增的材料仍由当前 quota owner 判断。启动被拒绝时，已完成
+的前置同步仍须如实报告；拒绝本身不会创建模型 Turn 或配额扣减。
 
 完整决策验证覆盖当前可执行的 legacy 本地、source 和 source/global 路径。
 source-session 保留独立的生命周期边界，这项验证不会启用其 CLI 执行；benchmark

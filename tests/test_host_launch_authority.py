@@ -219,11 +219,15 @@ def test_first_normal_turn_with_declared_state_needs_no_global_registry(
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 @pytest.mark.parametrize("operation_tools", [False, True])
-def test_actual_launch_keeps_same_turn_fresh_inbox_read(
+@pytest.mark.parametrize("late_material", [False, True])
+def test_actual_launch_preserves_same_turn_inbox_read_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, operation_tools: bool,
+    late_material: bool,
 ):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     project, runtime, registry = _write_live_fixture(tmp_path, provider=provider)
+    state = project / f".codex/goals/{GOAL}/ACTIVE_GOAL_STATE.md"
+    original_state = state.read_bytes()
     with project_registry_transaction(registry, operation="synthetic_fresh_inbox") as tx:
         current = tx.payload_copy()
         current["goals"][0].setdefault("control_plane", {})["lark_event_inbox"] = {
@@ -234,8 +238,13 @@ def test_actual_launch_keeps_same_turn_fresh_inbox_read(
         "loopx.control_plane.quota.goal_boundary.operator_inbox_binding",
         lambda **_kwargs: {"status": "verified", "attention_required": False},
     )
+    pending_count = 1
+
+    def urgency(**_kwargs):
+        return _material_review_urgency(pending_count=pending_count)
+
     monkeypatch.setattr(turn_decision, "build_lark_operator_inbox_urgency_projector",
-                        lambda **_kwargs: _material_review_urgency)
+                        lambda **_kwargs: urgency)
     dispatches = []
 
     def sync(**_kwargs):
@@ -245,7 +254,34 @@ def test_actual_launch_keeps_same_turn_fresh_inbox_read(
 
     monkeypatch.setattr(lark_inbox, "dispatch_goal_lark_turn_start_hooks", sync)
     host_arguments, native_start, turn_start = _host(tmp_path, monkeypatch, operation_tools)
+    if late_material:
+        owner = codex_operation_host if operation_tools else codex_cli
+        prompt = owner._prompt
+
+        def changed_inbox_prompt(request):
+            nonlocal pending_count
+            # A later message was not in this Turn's initial required read.
+            # Operation Host is already open here, before its model Turn.
+            pending_count = 2
+            return prompt(request)
+
+        monkeypatch.setattr(owner, "_prompt", changed_inbox_prompt)
     code, payload = _run(registry, runtime, project, host_arguments)
+    assert len(dispatches) == 1
+    if late_material:
+        assert code == 1 and "goal_launch_not_allowed" in json.dumps(payload), payload
+        assert native_start.exists() is operation_tools
+        assert not turn_start.exists(), payload
+        # Keep the already performed inbox sync visible even when launch is
+        # refused. It cannot stand in for work writeback or quota settlement.
+        assert payload["effects"]["state_written"] is True, payload
+        assert not payload["effects"]["quota_spent"], payload
+        # Failed execution may keep an effect unknown; inspect its actual
+        # business state and spend history instead of upgrading that readback.
+        assert state.read_bytes() == original_state
+        index = runtime / f"goals/{GOAL}/runs/index.jsonl"
+        assert not index.exists() or "quota_slot_spent" not in index.read_text()
+        return
     assert code == 0, payload
     # The shared operation server requests confirmation and returns a wait;
     # retaining fresh reads grants no additional operation or settlement.
@@ -254,7 +290,6 @@ def test_actual_launch_keeps_same_turn_fresh_inbox_read(
     assert payload["effects"]["host_invoked"] is True, payload
     # New material belongs to this Turn's required reads. Launch checks must
     # retain that context without synchronizing the external source again.
-    assert len(dispatches) == 1
     assert payload["effects"]["quota_spent"] is (not operation_tools), payload
     index = runtime / f"goals/{GOAL}/runs/index.jsonl"
     rows = [json.loads(line) for line in index.read_text().splitlines()] if index.exists() else []
