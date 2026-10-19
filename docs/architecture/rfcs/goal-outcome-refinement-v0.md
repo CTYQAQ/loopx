@@ -258,12 +258,16 @@ characters, or 4,461 with the supported scope. Standard Markdown is 6,076 under
 its unchanged 6,200 ceiling. This leaves 82 body characters and 39 emitted JSON
 characters at the scoped boundary, without shortening scope, authority or prose.
 
-The unchanged real CLI fixture with a 128-character root measures brief JSON at
+The unchanged real Linux CLI fixture with a 128-character root measures brief JSON at
 10,260 characters on main `4f6e20a13` and 10,783 with outcome guidance; Markdown
 measures 8,559 and 9,082. Both grow by the same 523 characters and fail the old
-10,500/9,000 ceilings. Keep all instructions and full command paths; set only
-these brief output ceilings to 11,100/9,600, leaving 317/518 characters of
-headroom. The 58/115 line limits and runtime quota remain unchanged. These
+10,500/9,000 ceilings. Keep all instructions and full command paths. Combining
+main's 10,800 native-path JSON allowance with the measured 523-character guidance
+increment sets the brief ceilings to 11,400/9,600, leaving 617/518 characters on
+this Linux fixture. The recorded Windows depth-0/6/12 baselines plus that increment
+derive 11,005/11,125/11,245 JSON characters; these are arithmetic projections,
+not native Windows qualification of the combined source. The 58/115 line limits,
+strict first-transition allowance and runtime quota remain unchanged. These
 measurements retain the original failures and do not establish token or model
 benefit. See the [interface budget contract](../../reference/contracts/interface-budget-contract.md).
 

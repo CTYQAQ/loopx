@@ -54,6 +54,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   const [notice, setNotice] = useState("");
   const generation = useRef(0), flight = useRef(false);
   const source = useRef(sourceKey); source.current = sourceKey;
+  const writable = useRef(!!fresh); writable.current = !!fresh;
   useEffect(() => {
     generation.current++; flight.current = false;
     setDocument(null); setFilename(""); setError(""); setNotice(""); setBusy(false);
@@ -65,7 +66,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
     flight.current = true; setBusy(true); setError(""); setNotice("");
     try {
       await client.cancelQueries({queryKey, exact: true});
-      if (source.current !== context || token !== generation.current) return;
+      if (source.current !== context || token !== generation.current || !writable.current) return;
       if (action === "adopt") {
         const result = await applyTypedAction(plan!.proposal.proposal_id);
         await actions.acceptProposal(result.proposal);

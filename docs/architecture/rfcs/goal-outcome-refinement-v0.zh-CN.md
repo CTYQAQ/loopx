@@ -191,11 +191,14 @@ compact 指导从 7,286 增至 7,809 字符（含原 Reward Memory 额度），�
 为 6,076，仍沿用 6,200 上限。scope 边界保留 82 正文字符和 39 输出 JSON 字符
 余量，不缩短 scope、权限说明或指令。
 
-不改真实 CLI fixture，在 128 字符根路径下，brief JSON 从 main `4f6e20a13`
+不改真实 Linux CLI fixture，在 128 字符根路径下，brief JSON 从 main `4f6e20a13`
 的 10,260 字符增至 10,783，Markdown 从 8,559 增至 9,082；都增加 523 字符，
-并分别超过原 10,500／9,000 上限。保留完整指令和命令路径，只把这两项 brief
-输出上限调至 11,100／9,600，余量为 317／518 字符。58／115 行上限和运行配额
-保持。这些测量保留原始失败，不证明 token 或模型收益。详见
+并分别超过原 10,500／9,000 上限。保留完整指令和命令路径，把 main 的原生路径
+JSON 额度 10,800 与实测指导增量 523 组合后，brief 上限为 11,400／9,600，
+该 Linux fixture 余量为 617／518 字符。已记录的 Windows depth-0/6/12 基线
+加上该增量，推导 JSON 为 11,005／11,125／11,245；这是算术推导，不是组合源码的
+原生 Windows qualification。58／115 行上限、严格首次迁移额度和运行配额保持。
+这些测量保留原始失败，不证明 token 或模型收益。详见
 [接口预算合同](../../reference/contracts/interface-budget-contract.md)。
 
 96 行 base/head CLI 矩阵独立测得 thin／brief／compact／full heartbeat 都增加

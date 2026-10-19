@@ -9,7 +9,7 @@ import {compactWorkspaceText as compactShareText, workspaceAgentTodoFromItem} fr
 import type { GoalAcceptanceObservation } from "../data/goal-acceptance-observation";
 import { attentionDetails, attentionDetailsFromSnapshot, sourceAttention } from "../features/personal-workspace/attention-details";
 import type { AttentionDetails } from "../features/personal-workspace/attention-details";
-import { directoryStatusPayload, fetchWorkspaceDirectory, loadWorkspaceGoalSnapshots, workspaceReadPlan, type WorkspaceProgress, type WorkspaceLoadError, type WorkspaceReadScope } from "../data/workspace-progressive-status";
+import { directoryStatusPayload, fetchWorkspaceDirectory, loadWorkspaceGoalSnapshots, scopeWorkspaceDirectory, workspaceReadPlan, type WorkspaceProgress, type WorkspaceLoadError, type WorkspaceReadScope } from "../data/workspace-progressive-status";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleAlert, Moon, RefreshCw, Sun } from "lucide-react";
 import type { DigestAttentionSummary } from "../../../../../loopx/control_plane/presentation/goal_workspace_digest.js";
@@ -3260,6 +3260,9 @@ export function DashboardPage() {
   const progressiveAbortRef = useRef<AbortController | null>(null);
   const preferredGoalRef = useRef(search.goalId);
   preferredGoalRef.current = search.goalId;
+  const rootGoalRef = useRef(search.rootGoalId);
+  rootGoalRef.current = search.rootGoalId;
+  const requestedRootRef = useRef<string | undefined>(undefined);
   const [payload, setPayload] = useState<StatusPayload>(exampleStatusPayload);
   const [source, setSource] = useState<DataSource>({ kind: "example", label: "bundled example" });
   const [statusSourceCatalog, setStatusSourceCatalog] = useState(() => {
@@ -3416,6 +3419,10 @@ export function DashboardPage() {
       selectionRevision: options.selectionRevision,
     });
     if (!request) return;
+    const requestRoot = rootGoalRef.current;
+    requestedRootRef.current = requestRoot;
+    const canCommit = () => rootGoalRef.current === requestRoot
+      && statusRequestCanCommit(statusRequestFenceRef.current, request);
     progressiveAbortRef.current?.abort();
     const progressiveAbort = new AbortController();
     progressiveAbortRef.current = progressiveAbort;
@@ -3428,9 +3435,12 @@ export function DashboardPage() {
       setGoalArchiveLoadState({ error: null, phase: "idle" });
     }
     try {
-      const directory = await fetchWorkspaceDirectory(trimmed, window.location.href).catch(() => null);
-      if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
-      if (directory) {
+      const discovered = await fetchWorkspaceDirectory(trimmed, window.location.href).catch(() => null);
+      if (!canCommit()) return;
+      if (discovered) {
+        // Root views must not open unrelated Goals just to hide them later.
+        // Keep discovery metadata and the source's original revision fence.
+        const directory = scopeWorkspaceDirectory(discovered, requestRoot);
         // Keep valid snapshots on screen during a refresh. Only an explicit
         // partial read may skip them; lifecycle identity is not data freshness.
         const { snapshots, requestedDirectory } = workspaceReadPlan(
@@ -3445,9 +3455,10 @@ export function DashboardPage() {
         setGoalArchiveLoadState({ error: null, phase: "loading" });
         await loadWorkspaceGoalSnapshots(trimmed, window.location.href, requestedDirectory,
           (id, snapshot, error) => {
+            if (!canCommit()) return;
             if (error === "revision") directoryChanged = true;
             setProgress((current) => {
-              if (!current) return current;
+              if (!canCommit() || !current) return current;
               const snapshots = { ...current.snapshots };
               const errors = { ...current.errors };
               if (snapshot) { snapshots[id] = snapshot; delete errors[id]; }
@@ -3455,16 +3466,16 @@ export function DashboardPage() {
               return { ...current, snapshots, errors };
             });
           },
-          () => statusRequestCanCommit(statusRequestFenceRef.current, request),
+          canCommit,
           () => preferredGoalRef.current,
           progressiveAbort.signal,
         );
         if (directoryChanged && (options.resyncAttempt ?? 0) < 1
-          && statusRequestCanCommit(statusRequestFenceRef.current, request)) {
+          && canCommit()) {
           await loadFromUrl(trimmed, { resyncAttempt: 1 });
           return;
         }
-        if (statusRequestCanCommit(statusRequestFenceRef.current, request)) {
+        if (canCommit()) {
           setGoalArchiveLoadState({ error: null, phase: "ready" });
         }
         return;
@@ -3472,7 +3483,7 @@ export function DashboardPage() {
       const nextPayload = await fetchStatusPayload(
         scopedStatusUrl(trimmed, "active", window.location.href),
       );
-      if (!statusRequestCanCommit(statusRequestFenceRef.current, request)) return;
+      if (!canCommit()) return;
       setProgress(null);
       request.registryRevision = nextPayload.goal_projection?.registry_revision ?? null;
       if (!await commitLoadedStatus(trimmed, nextPayload, request)) return;
@@ -3483,13 +3494,13 @@ export function DashboardPage() {
       }
       loadGoalArchive(trimmed, request, options.resyncAttempt ?? 0);
     } catch (error) {
-      if (!statusRequestIsCurrent(statusRequestFenceRef.current, request)) return;
+      if (!canCommit()) return;
       if (!background) setLoadError(formatStatusError(error));
       // A confirmed action keeps its receipt while its caller reports that
       // the independent status read needs retrying. Passive refreshes stay quiet.
       if (options.rejectOnError) throw error;
     } finally {
-      if (!background && statusRequestIsCurrent(statusRequestFenceRef.current, request)) {
+      if (!background && canCommit()) {
         setIsLoading(false);
       }
     }
@@ -3570,6 +3581,17 @@ export function DashboardPage() {
   };
 
   useEffect(() => {
+    if (requestedRootRef.current !== search.rootGoalId && !exampleModeRequested) {
+      // Re-scope an in-flight source selection as well as a loaded source.
+      // Older root responses cannot populate the newly selected subtree.
+      // A history entry restores source and root together, so the route's
+      // restored source outranks the source that is still loaded. Only when
+      // the route names no source does the loaded source act as the fallback.
+      const target = requestedStatusUrl
+        ?? (search.statusUrl.trim() || (source.kind === "url" ? source.label : ""));
+      void loadFromUrl(target || defaultGlobalStatusUrl);
+      return;
+    }
     const trimmedStatusUrl = search.statusUrl.trim();
     if (trimmedStatusUrl) {
       if (suppressedStatusUrlRef.current === trimmedStatusUrl) {
@@ -3595,9 +3617,10 @@ export function DashboardPage() {
     if (source.kind === "example") {
       void loadFromUrl(defaultGlobalStatusUrl);
     }
-  }, [exampleModeRequested, requestedStatusUrl, search.statusUrl, source.kind, source.label]);
+  }, [exampleModeRequested, requestedStatusUrl, search.statusUrl, search.rootGoalId, source.kind, source.label]);
 
   useEffect(() => {
+    if (isLoading && search.rootGoalId) return;
     if (search.statusUrl && source.kind === "example") {
       return;
     }
@@ -3622,7 +3645,7 @@ export function DashboardPage() {
         }),
       });
     }
-  }, [goalArchiveLoadState.phase, goalRows, navigate, search.goalId, search.statusUrl, source.kind]);
+  }, [goalArchiveLoadState.phase, goalRows, isLoading, navigate, search.goalId, search.rootGoalId, search.statusUrl, source.kind]);
 
   useEffect(() => {
     if (!progress || isLoading || !search.goalId || source.kind !== "url") return;

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Exercise owner contract readback and unavailable operation controls with synthetic sources.
+// --write-authority-only runs the React/Vite cancellation race without native fixtures.
 import assert from "node:assert/strict";
 import {mkdir} from "node:fs/promises";
 import { execFileSync, spawn } from "node:child_process";
@@ -12,10 +13,12 @@ import { resolveTestPython } from "../../../../scripts/test-python.mjs";
 
 const dashboardDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = resolve(dashboardDir, "../../..");
-const python = resolveTestPython();
+const writeAuthorityOnly = process.argv.includes("--write-authority-only");
+const python = writeAuthorityOnly ? null : resolveTestPython();
 const port = Number(process.env.LOOPX_ACCEPTANCE_CONTRACT_PORT ?? 5297);
 const packaged = process.env.LOOPX_ACCEPTANCE_CONTRACT_PACKAGED === "1";
-const payload = JSON.parse(execFileSync(python, ["-c", `
+if (writeAuthorityOnly && packaged) throw new Error("--write-authority-only requires the Vite fixture");
+const payload = writeAuthorityOnly ? null : JSON.parse(execFileSync(python, ["-c", `
 import runpy, tempfile, json
 from pathlib import Path
 from loopx.status import collect_status
@@ -24,15 +27,72 @@ with tempfile.TemporaryDirectory() as directory:
     registry, runtime = fixture['make_project'](Path(directory))
     print(json.dumps(collect_status(registry_path=registry, runtime_root_override=str(runtime), scan_roots=[], limit=20, goal_id='release-demo', include_public_boundary_scan=False)))
 `], { cwd: root, encoding: "utf8" }));
-payload.run_history.goals[0].acceptance_observation = acceptance;
+if (payload) payload.run_history.goals[0].acceptance_observation = acceptance;
 const server = packaged
   ? spawn(python, ["-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", resolve(root, "loopx/web")], { stdio: "ignore" })
   : startViteDashboardServer({ dashboardDir, port });
+async function checkLiveWriteAuthority(browser, origin) {
+  const page = await browser.newPage({viewport: {width: 1024, height: 768}});
+  const writes = [], errors = [];
+  let readsFail = false;
+  const native = {ok: true, goal_id: "release-demo", provider_revision: "fixture:current",
+    goal_acceptance_contract: {...contract, lifecycle_state: "active",
+      goal_ref: {goal_id: "release-demo", goal_instance_id: "write-authority-instance"}}};
+  page.on("pageerror", error => errors.push(error.message));
+  await page.addInitScript(() => localStorage.setItem("loopx-pw-locale", "en"));
+  await page.route("**/api/**", route => {
+    const request = route.request(), path = new URL(request.url()).pathname;
+    if (request.method() !== "GET") writes.push({path, body: request.postDataJSON()});
+    if (path === "/api/chat/goal-acceptance") return route.fulfill(
+      request.method() === "GET" && readsFail
+        ? {status: 503, json: {error: "Synthetic native read failure"}}
+        : {json: native});
+    if (path === "/api/actions") return route.fulfill({json: {
+      ok: true, schema_version: "loopx_chat_action_list_v1", proposals: [],
+    }});
+    return route.fulfill({status: 404, json: {error: "Unavailable in the write-authority fixture"}});
+  });
+  const phase = expected => page.waitForFunction(value =>
+    document.querySelector('output[aria-label="Cancellation state"]')?.textContent === value, expected);
+  const idle = () => page.waitForFunction(() =>
+    document.querySelector(".delivery-acceptance-contract")?.getAttribute("aria-busy") === "false");
+  try {
+    await page.goto(origin + "/smoke/goal-acceptance-write-authority-smoke.html");
+    await phase("ready");
+    const section = page.locator(".delivery-acceptance-contract");
+    const check = section.getByRole("button", {name: "Check delivery", exact: true});
+    await check.click();
+    await phase("waiting");
+    readsFail = true;
+    await page.getByRole("button", {name: "Refresh native read", exact: true}).click();
+    await section.getByRole("alert").waitFor();
+    assert.equal(await check.count(), 0, "The new native read revokes current write controls");
+    await page.getByRole("button", {name: "Release query cancellation", exact: true}).click();
+    await phase("released"); await idle();
+    assert.deepEqual(writes, [], "Native read failure during cancellation must prevent the stale effect POST");
+
+    // A fresh retry remains usable; the negative case must not pass by blocking every write.
+    readsFail = false;
+    await page.getByRole("button", {name: "Refresh native read", exact: true}).click();
+    await check.waitFor();
+    const sent = page.waitForResponse(response =>
+      new URL(response.url()).pathname === "/api/chat/goal-acceptance" && response.request().method() === "POST");
+    await check.click(); await sent; await idle();
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].path, "/api/chat/goal-acceptance");
+    assert.equal(writes[0].body.action, "verify");
+    assert.equal(writes[0].body.goal_id, "release-demo");
+    assert.deepEqual(errors, []);
+    console.log("Goal acceptance write authority: deferred cancellation/read failure blocks a stale POST; fresh retry passed");
+  } finally {await page.close();}
+}
+
 let browser;
 try {
   await waitForHttp(`http://127.0.0.1:${port}/`);
   browser = await launchBrowser(createRequire(import.meta.url)("playwright").chromium);
-  for (const [locale, viewport] of [["en", { width: 1440, height: 1000 }], ["zh-CN", { width: 390, height: 844 }]]) {
+  if (!packaged) await checkLiveWriteAuthority(browser, `http://127.0.0.1:${port}`);
+  for (const [locale, viewport] of writeAuthorityOnly ? [] : [["en", { width: 1440, height: 1000 }], ["zh-CN", { width: 390, height: 844 }]]) {
     const page = await browser.newPage({ viewport });
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
@@ -189,7 +249,7 @@ try {
     assert.deepEqual(errors, []);
     await page.close();
   }
-  console.log(`Goal acceptance contract browser (${packaged ? "packaged" : "development"}): off parity, states, keyboard, locales, mobile, revision refresh and read-only export passed`);
+  if (!writeAuthorityOnly) console.log(`Goal acceptance contract browser (${packaged ? "packaged" : "development"}): off parity, states, keyboard, locales, mobile, revision refresh and read-only export passed`);
 } finally {
   await cleanupBrowserSmoke({ browser, server, fixturePaths: [] });
 }

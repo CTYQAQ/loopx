@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { parseStatusPayload, type StatusPayload } from "./status";
+import { goalSubtree } from "../features/personal-workspace/goal-hierarchy";
 
 /** The source facts a discovery read can state without opening runtime state; older services omit it. */
 const directoryContractSchema = z.object({
@@ -30,6 +31,20 @@ export type WorkspaceProgress = {
   snapshots: Record<string, StatusPayload>;
   errors: Record<string, WorkspaceLoadError>;
 };
+
+/** Narrow only this source's discovered Goals before reading their state.
+ * Organization is not an access grant: an absent root stays absent, and the
+ * existing source membership/revision checks still validate every response. */
+export function scopeWorkspaceDirectory(
+  directory: WorkspaceDirectory,
+  rootGoalId?: string | null,
+): WorkspaceDirectory {
+  if (!rootGoalId) return directory;
+  const included = new Set(goalSubtree(directory.goals.map(goal => ({
+    goalId: goal.id, parentGoalId: goal.parent_goal_id,
+  })), rootGoalId).map(goal => goal.goalId));
+  return { ...directory, goals: directory.goals.filter(goal => included.has(goal.id)) };
+}
 
 /**
  * Snapshots a same-source read may keep visible while it reconciles.

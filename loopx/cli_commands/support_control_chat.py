@@ -72,7 +72,7 @@ def register_chat_and_dashboard_commands(
         help="Open the local Goal Studio and review Agent-proposed LoopX Todos.",
     )
     chat_parser.add_argument(
-        "--goal-id", help="Goal to select when the local workspace opens."
+        "--goal-id", help="Restrict this workspace to one Goal. Omit to browse the registered Goal hierarchy."
     )
     chat_parser.add_argument(
         "--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host."
@@ -161,7 +161,7 @@ def register_chat_and_dashboard_commands(
         help="Start the local LoopX dashboard, status service, and Chat service.",
     )
     dashboard_parser.add_argument(
-        "--goal-id", help="Goal to select when the local workspace opens."
+        "--goal-id", help="Restrict this workspace to one Goal. Omit to browse the registered Goal hierarchy."
     )
     dashboard_parser.add_argument(
         "--host", default=DEFAULT_CHAT_HOST, help="Loopback bind host."
