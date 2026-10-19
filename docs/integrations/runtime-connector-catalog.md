@@ -131,6 +131,21 @@ The raw CLI input still goes through Core's existing syntax validation.
 普通轮询不覆盖不可读回执：quota 决策仍可返回，但观察写入明确失败，保留损坏来源
 和未解决的原操作。Agent 大小写别名沿用 Core 的规范化身份，不能通过换大小写重试。
 
+New worker observations bind the complete source Goal and actual registry route
+using the existing global projection/merge rules. With the complete source Goal
+unchanged, updates to the mirror's `synced_at` and the existing merge owner's
+consumption of `clear_attention_override` keep the observation readable.
+A changed source route, Goal instance, runtime or substantive source
+configuration remains stale. The original raw `registry_goal_digest` retains
+its meaning for old rows. An observation for an old attempt can gain a source witness only
+while its original raw proof still matches; lost proof is not guessed or rebound,
+and the durable attempt itself is never rewritten by this upgrade.
+
+新的 worker 观察按既有 global 投影／合并规则绑定完整 source Goal 和实际来源路径。
+完整 source Goal 未变时，镜像同步时间与合并过程中已消费的指令不改变关联证明；
+实质来源变化仍过期。旧 raw digest 保留原义，只有原证明仍匹配
+时才补充观察来源，不猜测重绑丢失的证明，也不改写原派发身份。
+
 Scope includes the registry, runtime, Goal and Agent. Exact GoalRef is retained
 when supplied; executable legacy Goals keep their existing alias scope.
 Missing or newly supplied lifecycle metadata cannot reset an old attempt.
@@ -149,22 +164,39 @@ wakes, and a real negative experiment remains evidence for the original owner.
 First-party Codex CLI and benchmark Hosts also recheck their captured Goal
 authority at the actual process-launch boundary, including checkpoint resumes.
 The existing authority writer lock covers launch only and is released before
-the model runs. A Goal stopped after session selection therefore cannot start
+waiting for provider output. A Goal stopped before the guarded launch cannot start
 a new Host or replace its saved session with an empty, unlaunched result.
 
 The opt-in Codex operation-tools transport applies the same admission owner at
 both app-server process creation and `turn/start`, including session resume and
-model-catalog retry. Locks are released after each launch/acceptance boundary,
-not held over model streaming. Ordinary chat sessions without a Goal launch
+model-catalog retry. Locks cover process creation or the request write and flush,
+then release before waiting for the native response. Ordinary chat sessions without a Goal launch
 guard keep their existing behavior. Legacy registration retains its existing
 normalized `active`/`active-*` semantics; source-session lifetime checks remain
 strict, and a stopped activation still rejects either registration spelling.
 
-Codex operation-tools 在进程创建和 `turn/start` 两处重新核验，包括恢复和模型目录
-兼容重试；锁不覆盖整段模型生成。普通 Chat 默认行为不变。legacy 沿用既有 active
+Codex operation-tools 在进程创建和 `turn/start` 写入两处重新核验，包括恢复和模型目录
+兼容重试；写入完成即释放锁，等待 native 响应时不持锁。普通 Chat 默认行为不变。legacy 沿用既有 active
 及 active-* 注册语义，但不放宽 Stop 或 source-session 的精确生命周期约束。
 
-Source-session admission retains its exact Goal lifetime checks. Executable
+For supported legacy Codex CLI normal and operation-tools execution, launch also
+reads the current quota/health decision through the existing admission owner,
+retaining the original Turn/Todo and effective action. Both the actual source
+and its mirror must still allow that action; an unchanged registry byte witness
+does not establish current quota or health. The existing health owner checks a
+current registry's declared `state_file` even without a global registry. Global
+availability remains false, but a missing declared state still blocks ordinary
+delivery through the quota owner. Undeclared initial setup does not create a
+missing-state finding; a global copy of the same finding is deduplicated.
+
+受支持的 legacy Codex CLI 普通与 operation-tools 执行还须核验当前 quota/health，
+保留原 Turn、Todo 和已准入动作；source 与 mirror 都必须仍允许该动作。当前项目
+已声明的状态文件缺失不依赖 global 镜像是否存在，正常初建未声明状态的路径保留。
+
+Source-session admission retains its exact Goal lifetime checks. The
+`source_session_v1` profile remains lifecycle-only: generic runtime/CLI execution
+is still rejected by its existing protocol boundary, and its exact lifetime
+guard does not enter the legacy quota reader. Executable
 legacy registries instead compare their original registry byte witness under
 the existing registry writer lock and verify the Goal is still active. A
 changed registry requires a fresh plan, including when an unrelated registry
