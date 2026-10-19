@@ -229,3 +229,95 @@ def test_worker_observation_scope_and_damage_remain_visible_unknown(tmp_path, da
     if damage == "bad-map":
         record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision())
         assert read_host_worker_observations(goal, state, registry_goal_digest="current-goal", runtime_root=runtime) == read
+
+
+def test_poll_observation_keys_reuse_the_core_agent_normalizer(tmp_path):
+    goal, state = {"id": "goal-1"}, tmp_path / "state.md"
+    observed = {"status": "replan_outcome_unknown", "obligation_id": "replan-original"}
+    first = record_host_poll_receipt(goal, state, agent_id="AGENT-1", decision=run_now_decision(),
+                                     worker_observation=observed)
+    assert first["agent_id"] == "agent-1"
+    assert set(first["worker_observations"]) == {"agent-1"}
+    polled = record_host_poll_receipt(goal, state, agent_id="AGENT-1", decision=run_now_decision())
+    assert polled["expected_continuation"] is False
+    assert polled["worker_observations"] == first["worker_observations"]
+
+
+def test_ordinary_receipts_do_not_read_worker_sources(tmp_path):
+    goal, state = {"id": "goal-1"}, tmp_path / "state.md"
+
+    def unexpected_source_read():
+        pytest.fail("a receipt without worker rows must not read another registry")
+
+    assert read_host_worker_observations(goal, state, registry_goal_digest="unused",
+        source_goal_observation_digest=unexpected_source_read, runtime_root=tmp_path) is None
+    record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision())
+    assert read_host_worker_observations(goal, state, registry_goal_digest="unused",
+        source_goal_observation_digest=unexpected_source_read, runtime_root=tmp_path) is None
+
+
+@pytest.mark.parametrize("clear_attention", [False, True])
+def test_existing_sync_materialization_keeps_the_same_source_witness(tmp_path, clear_attention):
+    from loopx.global_registry import merge_goal_entries, sanitize_goal_for_global
+    from loopx.history import host_worker_goal_observation_digest
+
+    source, mirror = tmp_path / "registry.json", tmp_path / "global.json"
+    goal = {"id": "goal-1", "quota": {"compute": 1}}
+    if clear_attention:
+        goal["clear_attention_override"] = True
+    source.write_text(json.dumps({"goals": [goal]}))
+    witness = host_worker_goal_observation_digest(goal, registry_path=source)
+    rows = []
+    for timestamp in ("first-sync", "next-sync"):
+        rows, *_ = merge_goal_entries(rows, [sanitize_goal_for_global(
+            goal, source_registry=source, synced_at=timestamp)])
+        assert host_worker_goal_observation_digest(rows[0], registry_path=mirror) == witness
+
+
+@pytest.mark.parametrize("change", ["source-config", "source-instance", "source-route", "source-missing", "source-unreadable", "mirror-config", "runtime", "missing-witness"])
+def test_worker_observation_never_reuses_a_changed_source_or_scope(tmp_path, change):
+    from loopx.global_registry import sanitize_goal_for_global
+    from loopx.history import goal_registry_digest, host_worker_goal_observation_digest
+
+    source, mirror = tmp_path / "registry.json", tmp_path / "global.json"
+    runtime, state = tmp_path / "runtime", tmp_path / "state.md"
+    goal = {"id": "goal-1", "goal_instance_id": "ginst_" + "a" * 32,
+            "repo": str(tmp_path), "state_file": state.name, "quota": {"compute": 1}}
+
+    def write_source():
+        source.write_text(json.dumps({"goals": [goal]}))
+
+    write_source()
+    witness = host_worker_goal_observation_digest(goal, registry_path=source)
+    assert witness
+    materialized = sanitize_goal_for_global(goal, source_registry=source, synced_at="first-sync")
+    assert host_worker_goal_observation_digest(materialized, registry_path=mirror) == witness
+    record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision(),
+        worker_observation={"status": "replan_outcome_unknown", "obligation_id": "replan-original",
+                            "turn_instance_id": "original-turn", "registry_goal_digest": goal_registry_digest(goal),
+                            "source_goal_observation_digest": witness,
+                            "runtime_root": str(runtime)})
+    if change == "source-config":
+        goal["quota"]["compute"] = 0
+        write_source()
+        # Even a newly refreshed mirror must reject the original observation.
+        materialized = sanitize_goal_for_global(goal, source_registry=source, synced_at="next-sync")
+    elif change == "source-instance":
+        goal["goal_instance_id"] = "ginst_" + "b" * 32
+        write_source()
+    elif change == "source-route":
+        other_source = tmp_path / "different-source.json"
+        other_source.write_bytes(source.read_bytes())
+        materialized = sanitize_goal_for_global(goal, source_registry=other_source, synced_at="next-sync")
+    elif change == "source-missing":
+        source.unlink()
+    elif change == "source-unreadable":
+        source.write_bytes(b"{broken")
+    elif change == "mirror-config":
+        materialized["quota"]["compute"] = 0
+    elif change == "runtime":
+        runtime = tmp_path / "different-runtime"
+    digest = None if change == "missing-witness" else host_worker_goal_observation_digest(materialized, registry_path=mirror)
+    assert read_host_worker_observations(materialized, state, registry_goal_digest=goal_registry_digest(materialized),
+        source_goal_observation_digest=digest, runtime_root=runtime) == {
+        "goal_id": "goal-1", "read_status": "stale", "rows": []}

@@ -196,6 +196,23 @@ def test_source_profile_initializes_absent_state_with_exact_goal_ref(
     }
 
 
+def test_source_lifetime_does_not_nest_legacy_launch_quota_reader(tmp_path: Path) -> None:
+    registry = tmp_path / ".loopx" / "registry.json"
+    _write_source_registry(registry, INSTANCE_A)
+    admission = FirstPartyHostGoalAdmission.for_plan(
+        registry_path=registry, goal_id="release",
+        planned_goal_ref={"goal_id": "release", "goal_instance_id": INSTANCE_A},
+    ).with_launch_decision(
+        lambda _registry: pytest.fail("legacy quota admission nested inside source guard"),
+    )
+    with admission.launch_lifetime(operation="fixture_exact_source_lifetime"):
+        assert admission.planned_goal_ref["goal_instance_id"] == INSTANCE_A
+    _replace_goal_instance(registry, INSTANCE_B)
+    with pytest.raises(FirstPartyHostRuntimeRejected, match="stale_goal_instance"):
+        with admission.launch_lifetime(operation="fixture_stale_exact_source_lifetime"):
+            pytest.fail("the exact source lifetime check must remain active")
+
+
 def test_source_profile_rejects_legacy_host_state_without_rewriting_it(
     tmp_path: Path,
 ) -> None:

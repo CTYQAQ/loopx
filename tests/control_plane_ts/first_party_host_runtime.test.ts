@@ -9,7 +9,7 @@ const GOAL_A = { goal_id: "release", goal_instance_id: INSTANCE_A };
 const GOAL_B = { goal_id: "release", goal_instance_id: INSTANCE_B };
 
 function facts(
-  operation: "select_state" | "require_current" | "accept_result",
+  operation: "select_state" | "require_current" | "launch" | "accept_result",
   overrides: Record<string, unknown> = {},
 ) {
   return {
@@ -75,6 +75,30 @@ test("legacy Host launch requires the original live registry witness without inv
   }
 });
 
+test("legacy native launch consumes the current quota owner without weakening source identity", () => {
+  const witness = {path: "/fixture/registry.json", sha256: "a".repeat(64)};
+  const legacy = {profile_id: null, operation: "launch", goal_id: "release",
+    registry_path: witness.path, planned_registry_witness: witness, registry_witness: witness,
+    authority: {kind: "present", goal_id: "release", registration_status: "active", activation_state: "active"}};
+  const exact = {...facts("require_current"), operation: "launch"};
+  const admitted = {planned_effective_action: "normal_run", current: {
+    should_run: true, status_health_ok: true, effective_action: "normal_run"}};
+  for (const launch_decision of [null, {}, {...admitted, current: {...admitted.current, should_run: false}},
+    {...admitted, current: {...admitted.current, effective_action: "control_plane_health_repair"}},
+    {...admitted, current: {...admitted.current, should_run: "true"}}]) {
+    assert.deepEqual(decideFirstPartyHostRuntime({...legacy, launch_decision}),
+      {kind: "reject", code: "goal_launch_not_allowed"});
+  }
+  assert.notEqual(decideFirstPartyHostRuntime({...legacy, launch_decision: admitted}).kind, "reject");
+  assert.notEqual(decideFirstPartyHostRuntime({...legacy, launch_decision: {
+    planned_effective_action: "control_plane_health_repair",
+    current: {should_run: true, status_health_ok: false, effective_action: "control_plane_health_repair"},
+  }}).kind, "reject");
+  assert.deepEqual(decideFirstPartyHostRuntime({...exact,
+    planned_goal_ref: {goal_id: "release"}, launch_decision: admitted}),
+  {kind: "reject", code: "goal_instance_id_missing"});
+});
+
 test("current exact GoalRef admits each host runtime checkpoint", () => {
   assert.deepEqual(decideFirstPartyHostRuntime(facts("select_state")), {
     kind: "start_new",
@@ -92,6 +116,10 @@ test("current exact GoalRef admits each host runtime checkpoint", () => {
     kind: "resume",
     goal_ref: GOAL_A,
   });
+  assert.deepEqual(decideFirstPartyHostRuntime(facts("launch")), {
+    kind: "resume",
+    goal_ref: GOAL_A,
+  });
   assert.deepEqual(decideFirstPartyHostRuntime(facts("accept_result")), {
     kind: "accept_result",
     goal_ref: GOAL_A,
@@ -102,6 +130,7 @@ test("Goal recreation rejects a stale plan at every checkpoint", () => {
   for (const operation of [
     "select_state",
     "require_current",
+    "launch",
     "accept_result",
   ] as const) {
     assert.deepEqual(
@@ -120,6 +149,7 @@ test("a stopped exact Goal rejects every host runtime checkpoint", () => {
   for (const operation of [
     "select_state",
     "require_current",
+    "launch",
     "accept_result",
   ] as const) {
     assert.deepEqual(

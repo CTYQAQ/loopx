@@ -270,3 +270,50 @@ def test_settled_other_turn_cannot_clear_original_unknown(tmp_path, monkeypatch)
         settlement=SettlementResult.pure({"verified": True})))
     assert worker.run_worker(args) != 0
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("mismatch", ["agent", "goal", "runtime"])
+def test_canonical_agent_spelling_does_not_waive_admission_scope(tmp_path, monkeypatch, mismatch):
+    packet = replan_packet()
+    args, calls = setup_worker(tmp_path, monkeypatch, packet)
+    args.agent_id = "AGENT"
+    if mismatch == "agent":
+        packet["agent_identity"]["agent_id"] = "other-agent"
+    elif mismatch == "goal":
+        packet["goal_id"] = "other-goal"
+    else:
+        args.runtime_root = str(tmp_path / "different-runtime")
+    assert worker.run_worker(args) == 2
+    assert not calls
+
+
+@pytest.mark.parametrize("source_changed", [False, True])
+def test_legacy_observation_upgrades_only_against_its_original_registry_view(tmp_path, source_changed):
+    from loopx.control_plane.quota.host_poll_receipts import read_host_worker_observations, receipt_path_for_goal, record_host_poll_receipt
+    from loopx.global_registry import sanitize_goal_for_global
+    from loopx.history import goal_registry_digest, host_worker_goal_observation_digest
+
+    args = _args(fake_cli=tmp_path / "unused", state_file=tmp_path / "worker.json")
+    runtime, state = tmp_path / "runtime", tmp_path / "state.md"
+    goal = {"id": args.goal_id, "repo": str(tmp_path), "state_file": state.name, "quota": {"compute": 1}}
+    source = Path(args.registry)
+    source.write_text(json.dumps({"goals": [goal]}))
+    old_digest = goal_registry_digest(goal)
+    original = {"obligation_id": OBLIGATION, "runtime_root": str(runtime), "registry_goal_digest": old_digest}
+    record_host_poll_receipt(goal, state, agent_id=args.agent_id, decision={"should_run": True},
+        worker_observation={**original, "status": "replan_outcome_unknown", "turn_instance_id": None})
+    initial = read_host_worker_observations(goal, state, registry_goal_digest=old_digest, runtime_root=runtime)
+    assert initial["read_status"] == "read"
+    if source_changed:
+        goal["quota"]["compute"] = 0
+        source.write_text(json.dumps({"goals": [goal]}))
+    before = deepcopy(original)
+    worker._observe_worker_replan({"should_run": True}, args, original, "replan_outcome_unknown")
+    assert original == before  # Compatibility never rewrites the durable attempt.
+    row = json.loads(receipt_path_for_goal(goal, state).read_text())["worker_observations"][args.agent_id]
+    assert ("source_goal_observation_digest" in row) is (not source_changed)
+    mirror_goal = sanitize_goal_for_global(goal, source_registry=source, synced_at="current")
+    observed = read_host_worker_observations(mirror_goal, state, registry_goal_digest=goal_registry_digest(mirror_goal),
+        source_goal_observation_digest=host_worker_goal_observation_digest(mirror_goal, registry_path=tmp_path / "global.json"),
+        runtime_root=runtime)
+    assert observed["read_status"] == ("stale" if source_changed else "read")

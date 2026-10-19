@@ -62,6 +62,9 @@ def test_owner_stop_prevents_operation_native_launch(tmp_path, monkeypatch, boun
     assert stops == [True]
     assert process_marker.exists() == (boundary == "turn")
     assert not turn_marker.exists()
+    assert not packet["effects"]["state_written"] and not packet["effects"]["quota_spent"]
+    index = runtime / "goals/loopx-turn-fixture/runs/index.jsonl"
+    assert not index.exists() or "quota_slot_spent" not in index.read_text()
 
 
 def test_legacy_read_only_registration_can_preview_and_launch(tmp_path, monkeypatch):

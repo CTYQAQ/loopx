@@ -17,6 +17,80 @@ from test_external_scheduler_worker import _args, worker
 acceptance_goal = acceptance_fixture.acceptance_goal
 
 
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("prior_review", ["returned", "settled"])
+def test_formal_task_instruction_change_rearms_the_actual_worker(
+    tmp_path, monkeypatch, provider, prior_review,
+):
+    from test_replan_successor_guard_reentry import _fixture, GOAL, AGENT
+
+    todos = [{"schema_version": "todo_item_v0", "todo_id": f"todo_existing_{index:03}",
+        "role": "agent", "text": "[P1] Validate the finite samples" if index == 0 else f"[P1] Validate result {index}",
+        "title": "Validate the finite samples" if index == 0 else f"Validate result {index}", "priority": "P1",
+        "status": "open", "done": False, "task_class": "advancement_task", "action_kind": "validate",
+        "index": index + 1, "source_section": "Agent Todo", "archive_state": "active", "claimed_by": AGENT,
+        "updated_at": "2026-09-01T00:00:00Z"} for index in range(15)]
+    call, runtime, history = _fixture(tmp_path, monkeypatch, provider, future_monitor=False, initial_todos=todos)
+    history.write_text("")
+    calls = tmp_path / "review-calls"
+    args = _args(fake_cli=Path(sys.executable).parent / "loopx", state_file=tmp_path / "scheduler.json",
+        wake_cmd=shlex.join([sys.executable, "-c",
+            "from pathlib import Path; import sys; p=Path(sys.argv[1]); "
+            "p.write_text((p.read_text() if p.exists() else '')+'returned without conclusion\\n')", str(calls)]),
+        quota_timeout_seconds=90, wake_timeout_seconds=10)
+    args.registry, args.runtime_root = str(tmp_path / "registry.json"), str(runtime)
+    args.goal_id, args.agent_id = GOAL, AGENT
+    turn = "turn-original-task-review"
+    guard_args = ("quota", "should-run", "--goal-id", GOAL, "--agent-id", AGENT)
+    initial = call(*guard_args, "--turn-instance-id", turn)
+    original = initial["autonomous_replan_obligation"]["obligation_id"]
+    assert initial["effective_action"] == "autonomous_replan_required"
+    if prior_review == "returned":
+        assert worker.run_worker(args) == 0
+    else:
+        selected = call(*guard_args, "--turn-instance-id", turn, "--todo-id", "todo_existing_000")
+        identity = selected["heartbeat_receipt"]["settlement_identity"]
+        assert identity["todo_id"] == "todo_existing_000"
+        vision = tmp_path / "task-review.json"
+        vision.write_text(json.dumps({"schema_version": "goal_vision_replan_contract_v0", "agent_id": AGENT,
+            "state": "active", "vision_patch": {"acceptance_summary": "Retain the requested independent results.",
+                "advancement_policy": "as_needed"}, "path_delta": {"schema_version": "goal_path_delta_v0",
+                "outcome": "continue", "prior_assumption": "The finite sample review is the current first task.",
+                "observed_reality": "The current canonical task still requests finite samples.",
+                "retained": ["The requested work and its original limits."],
+                "evidence_refs": ["evidence:current-canonical-task-review"]}}))
+        binding = ("--goal-id", GOAL, "--agent-id", AGENT, "--turn-instance-id", turn,
+                   "--todo-id", identity["todo_id"])
+        refreshed = call("refresh-state", *binding, "--progress-scope", "agent_lane",
+            "--classification", "task_instruction_review", "--delivery-batch-scale", "single_surface",
+            "--delivery-outcome", "outcome_progress", "--agent-vision-json", str(vision),
+            "--delivery-workspace-path", str(tmp_path / "project"),
+            "--no-global-sync", "--suppress-external-sinks")
+        assert refreshed["autonomous_replan_ack"]["semantic_delta"]["accepted"] is True
+        spent = call("quota", "spend-slot", *binding, "--slots", "1", "--source", "heartbeat", "--execute")
+        assert spent["settlement_result"]["ok"] is True
+
+    # Maintenance notes and timestamps do not revise the task requirement.
+    # Title, priority and formal text remain in the current owned work codec.
+    call("todo", "update", "--goal-id", GOAL, "--todo-id", "todo_existing_000", "--agent-id", AGENT,
+        "--update-operation-id", "maintenance-note", "--note", "Read the current canonical task source.")
+    unchanged = call(*guard_args).get("autonomous_replan_obligation")
+    assert (unchanged or {}).get("obligation_id") == (original if prior_review == "returned" else None)
+    if prior_review == "returned":
+        assert worker.run_worker(args) == 0
+        assert len(calls.read_text().splitlines()) == 1
+
+    call("todo", "update", "--goal-id", GOAL, "--todo-id", "todo_existing_000", "--agent-id", AGENT,
+        "--update-operation-id", "formal-instruction-change", "--text",
+        "Prove the result for all integers and return its exact certificate; finite samples are insufficient.")
+    revised = call(*guard_args)
+    assert revised["effective_action"] == "autonomous_replan_required"
+    assert revised["autonomous_replan_obligation"]["obligation_id"] != original
+    assert worker.run_worker(args) == 0
+    assert worker.run_worker(args) == 0
+    assert len(calls.read_text().splitlines()) == (2 if prior_review == "returned" else 1)
+
+
 def test_unconfirmed_work_edits_do_not_regrant_the_same_owner_review(acceptance_goal):
     project, document_path, cli, run = acceptance_goal
     document = json.loads(document_path.read_text())
@@ -75,11 +149,12 @@ def test_unconfirmed_work_edits_do_not_regrant_the_same_owner_review(acceptance_
     assert all(attempt["status"] == "returned" for attempt in attempts)
 
 
-@pytest.mark.parametrize("checkpoint_codec", ["stable", "pre_stable"])
+@pytest.mark.parametrize("checkpoint_codec", ["stable", "pre_stable", "pre_stable_unwritten"])
 def test_settled_owner_hold_stays_acknowledged_after_display_edits(acceptance_goal, checkpoint_codec):
     project, document_path, cli, run = acceptance_goal
     current_run = run
-    if checkpoint_codec == "pre_stable":
+    historical_codec = checkpoint_codec != "stable"
+    if historical_codec:
         # Exercise real CLI writes/readback with only the source checkpoint
         # codec pinned to the pre-stable algorithm. No receipt/ACK is forged.
         def run(*args):
@@ -118,6 +193,11 @@ raise SystemExit(main())''', "--registry", str(project.parent / "registry.json")
         "--turn-instance-id", turn)
     assert code == 0, reentered
     assert reentered["autonomous_replan_obligation"]["obligation_id"] == obligation["obligation_id"]
+    assert reentered["autonomous_replan_obligation"]["replan_context"]["obligation_id"] == obligation["obligation_id"]
+    if checkpoint_codec == "pre_stable_unwritten":
+        # The already-admitted Turn crosses the upgrade before its writeback;
+        # retaining old-code writes would not verify the new recovery path.
+        run = current_run
     binding = ("--goal-id", goal, "--agent-id", agent, "--turn-instance-id", turn,
                "--replan-obligation-id", obligation["obligation_id"])
     artifact = project / "owner-association-review.json"
@@ -186,7 +266,7 @@ raise SystemExit(main())''', "--registry", str(project.parent / "registry.json")
     current = cli("inspect")[1]["goal_acceptance_contract"]
     assert current["digest"] == original["digest"] and current["revision"] == original["revision"]
     assert current["status"] == "held"
-    if checkpoint_codec == "pre_stable":
+    if historical_codec:
         document["objective"] = "Produce the export and retain its checksum under new owner criteria."
         document_path.write_text(json.dumps(document))
         _configure(cli, document_path)
