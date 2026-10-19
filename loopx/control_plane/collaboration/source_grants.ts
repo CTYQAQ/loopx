@@ -6,6 +6,29 @@ import { normalizeStewardGoalScope, resolveConversationScope } from "./conversat
 type Recipient = { goal_id: string; agent_id?: string };
 type LocalDeliveryScope = "all_registered" | "selected";
 
+/** Retire only this exact native conversation's grants. Historical requests and
+ * receipts remain readable; neither another App nor a legacy source is revoked.
+ */
+export function revokeConversationSources(params: JsonObject): JsonObject {
+  const id = requireNonEmptyString(params.binding_id, "conversation binding identity");
+  if (!/^[a-f0-9]{24}$/.test(id)) throw new EffectRuntimeRequestError("invalid conversation binding identity");
+  const policy = requireJsonObject(params.policy, "source policy");
+  if (policy.schema_version !== "loopx_manager_context_policy_v1") throw new EffectRuntimeRequestError("invalid source policy");
+  const sources = requireJsonObject(policy.sources, "context sources");
+  let changed = false;
+  const retired = Object.fromEntries(Object.entries(sources).map(([key, value]) => {
+    const sourceBinding = /^manager\.external\.native\.([a-f0-9]{24})\.[a-f0-9]{24}$/.exec(key)?.[1];
+    if (sourceBinding !== id) return [key, value];
+    const source = requireJsonObject(value, "conversation source");
+    // Keep an explicit empty read scope: removing the row would restore the
+    // historical evidence-read fallback before the binding write completes.
+    const next = {...source, sender_ids: [], evidence_goal_scope: "selected", evidence_goal_ids: []};
+    changed ||= JSON.stringify(source) !== JSON.stringify(next);
+    return [key, next];
+  }));
+  return {policy: {...policy, sources: retired}, would_change: changed};
+}
+
 /** A live read grant is independent of delivery and of the bounded Turn index.
  * Missing mode preserves historical exact lists and the connection's fallback.
  * Only a trusted local configuration operation may select all registered Goals.

@@ -8,9 +8,9 @@ from ...control_plane.collaboration import conversation_scope
 from . import project_context as project_context_policy
 
 
-def enqueue_turn(controller, *, session_id: str, client_turn_id: str, message: str,
+def enqueue_turn(controller: Any, *, session_id: str, client_turn_id: str, message: str,
                  attachments: list[dict[str, Any]] | None, work_dir: Path | None, objective: str,
-                 origin: str, external_agent_target: dict | None):
+                 origin: str, external_agent_target: dict[str, Any] | None) -> tuple[dict[str, Any], bool]:
     session = controller.store.load_session(session_id)
     if session is None or session.get("status") == "closed":
         raise KeyError("chat session was not found")
@@ -63,13 +63,14 @@ def enqueue_turn(controller, *, session_id: str, client_turn_id: str, message: s
     return turn, created
 
 
-def _enqueue_bound(controller, session, client_turn_id, message, attachments, origin):
+def _enqueue_bound(controller: Any, session: dict[str, Any], client_turn_id: str, message: str,
+                   attachments: list[dict[str, Any]] | None, origin: str) -> tuple[dict[str, Any], bool]:
     contexts = controller.project_contexts
     bindings = contexts.conversation_bindings
     if bindings is None:
         raise ValueError("bound conversation authority is unavailable")
     saved = session.get("steward_context") or session["project_context"]
-    with bindings.input_context(saved, origin=origin) as selected:
+    with bindings.input_context(saved, origin=origin, session=session, store=controller.store) as selected:
         fresh = controller.store.load_session(session["session_id"])
         if fresh is None or fresh.get("status") == "closed":
             raise KeyError("chat session was not found")
@@ -81,7 +82,7 @@ def _enqueue_bound(controller, session, client_turn_id, message, attachments, or
             project_context_policy.validate_project_executor_scope(str(fresh["agent_id"]),
                 fresh["project_context"], controller.capabilities)
         elif origin == "web":
-            bindings.ensure_delivery_scope(selected)
+            bindings._ensure_delivery_scope(selected)  # input_context retains the binding fence
             _record_local_ingress(controller.coordination_runtime_root, fresh, client_turn_id, message)
         turn, created = controller.store.create_queued_turn(session["session_id"],
             client_turn_id=client_turn_id, message=message, attachments=attachments, origin=origin)
@@ -92,7 +93,8 @@ def _enqueue_bound(controller, session, client_turn_id, message, attachments, or
     return turn, created
 
 
-def _record_local_ingress(runtime_root, session, client_turn_id, message):
+def _record_local_ingress(runtime_root: Path, session: dict[str, Any],
+                          client_turn_id: str, message: str) -> None:
     from ..manager_context import register_ingress
     from ...control_plane.collaboration.inbox import _hash, normalize_source_context
 

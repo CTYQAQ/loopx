@@ -349,6 +349,30 @@ def _require_external_channel(channel: str) -> None:
         raise ValueError("an exact external manager channel is required")
 
 
+def revoke_conversation_sources(runtime_root: Path, binding_id: str) -> None:
+    """Persist the typed binding revocation under the existing source fence."""
+    path = _root(runtime_root) / "policy.json"
+    try:
+        path.stat()
+    except FileNotFoundError:
+        return
+    with exclusive_file_lock(path.with_suffix(".lock")):
+        try:
+            policy = _read(path)
+        except FileNotFoundError:
+            return
+        try:
+            planned = effect_runtime_result("collaboration.source.revoke_conversation", {
+                "policy": policy, "binding_id": binding_id,
+            })
+        except EffectRuntimeRejected as exc:
+            raise ValueError(str(exc)) from exc
+        if planned["would_change"]:
+            _write(path, planned["policy"])
+            if _read(path) != planned["policy"]:
+                raise OSError("conversation source revocation did not verify")
+
+
 def configure_evidence_scope(runtime_root: Path, registry_path: Path, *, channel: str,
                              goal_ids: list[str], goal_scope: str = "selected", execute: bool = False) -> dict:
     """Configure read-only evidence through the existing audience policy owner."""

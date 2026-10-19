@@ -34,7 +34,6 @@ from ...control_plane.effect_runtime import EffectRuntimeRejected, effect_runtim
 from ...control_plane.collaboration.inbox import (
     _request_lock,
     iter_result_paths,
-    result_paths,
     inspect_result_identity,
     prior_result_delivered,
     DELIVERY_STATUSES as DELIVERY_STATUSES,
@@ -343,10 +342,23 @@ def _exact_return_scope(registry, reply):
     )
 
 
-def _exact_return_context(root, registry, store, path, state_path, now):
+def _hold_return_source_fence(root, route, effects):
+    # Match the grant writer through transcript/provider publication. Owner-only
+    # returns stay independent of source policy and create no policy storage.
+    if conversation_scope(route)["kind"] == "external_audience":
+        effects.enter_context(
+            exclusive_file_lock((_root(root) / "policy.json").with_suffix(".lock"))
+        )
+
+
+def _exact_return_context(root, registry, store, path, state_path, now, effects):
     reply = _read(path)
     if not isinstance(reply.get("goal_ref"), dict):
         raise ValueError("exact return reply is missing goal_ref")
+    # Observe the frozen route only to select the fence, before Goal/request
+    # locks. Validate it against the exact request again under those locks.
+    frozen_route = _read(_root(root) / "roundtrips" / (path.parent.name + ".json"))
+    _hold_return_source_fence(root, frozen_route, effects)
     with _exact_return_scope(registry, reply) as scope:
         row = _entry(
             root,
@@ -366,6 +378,8 @@ def _exact_return_context(root, registry, store, path, state_path, now):
         ):
             raise ValueError("return_reply_identity_mismatch")
         route = _route(root, row, scope=scope)
+        if route != frozen_route:
+            raise ValueError("context return route changed during admission")
         if route.get("kind") == "peer":
             return None
         session = store.load_session(route["session_id"])
@@ -637,6 +651,7 @@ def _drain_exact(root, registry, store, external_sender, *, now, cancelled):
                 path,
                 state_path,
                 now,
+                effect_locks,
             )
         except (OSError, ValueError, KeyError, TypeError, RuntimeError):
             effect_locks.close()
@@ -939,7 +954,7 @@ def drain(root, registry, store, external_sender, *, now=None, cancelled=lambda:
         if not _belongs_to_chat_host(root, store, path):
             continue
         state_path = path.with_name(path.stem + ".delivery.json")
-        with exclusive_file_lock(path.with_suffix(".lock")):
+        with exclusive_file_lock(path.with_suffix(".lock")), ExitStack() as effects:
             try:
                 state = _read(state_path) if state_path.exists() else {}
             except (OSError, ValueError):
@@ -966,6 +981,7 @@ def drain(root, registry, store, external_sender, *, now=None, cancelled=lambda:
                 route = _transport_route(_route(root, row), reply, external_sender)
                 if route.get("kind") == "peer":
                     continue  # Delivered by the requester inbox, never a Chat audience.
+                _hold_return_source_fence(root, route, effects)
                 session = store.load_session(route["session_id"])
                 turn = store.turn_for_client(
                     route["session_id"], route["client_turn_id"]

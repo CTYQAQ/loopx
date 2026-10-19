@@ -532,7 +532,9 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         output_formats=("json", "markdown"),
         semantic_json_keys=("task_body", "quota_guard_command", "interface_budget"),
         markdown_anchor="# Heartbeat Automation Prompt",
-        max_chars={"json": 10_500, "markdown": 9_000},
+        # Equal-length native roots incur different JSON escaping costs:
+        # qualified depth-0/6/12 Windows layouts retain complete routes.
+        max_chars={"json": 10_800, "markdown": 9_000},
         max_lines={"json": 58, "markdown": 115},
     ),
     CliOutputModeVariantSpec(

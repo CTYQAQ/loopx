@@ -9,9 +9,7 @@ import pytest
 
 from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
 from test_monitor_followthrough_contract import AGENT_ID, GOAL_ID, _write_fixture
-from loopx.control_plane.coordination.local_authority import (
-    LocalCoordinationAuthorityUnavailable, read_canonical_todos_if_promoted,
-)
+from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
 from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 from loopx.control_plane.effect_runtime import EffectRuntimeRejected, MAX_REQUEST_BYTES
 from loopx.control_plane.quota.monitor_poll import resolve_due_monitor_candidate
@@ -55,16 +53,10 @@ def test_real_large_authority_returns_complete_target(tmp_path, monkeypatch, pro
     initialize_canonical_authority(runtime, GOAL_ID, projection, state_path=state, provider=provider)
     state.unlink()  # No legacy Markdown fallback can satisfy the lookup.
 
-    # The canonical source has its own per-record page ceiling. Keep that
-    # refusal; this transport repair must not loosen it or call it "not due".
-    if target_repetitions == 120_000:
-        with pytest.raises(LocalCoordinationAuthorityUnavailable) as error:
-            resolve_due_monitor_candidate(registry_path=registry, runtime_root=runtime,
-                goal_id=GOAL_ID, todo_id=target["todo_id"], target_key=None)
-        assert error.value.code == "canonical_snapshot_record_too_large"
-        assert not state.exists()
-        return
-
+    # A record beyond the inline 2 MiB request ceiling is still complete: the
+    # canonical adapter reads through the opt-in private-file entrypoint
+    # (62 MiB), which never truncates a record or substitutes display Markdown.
+    # The wire-only page endpoint keeps its own per-page refusal.
     selected = monitor_poll_writeback.resolve_monitor_todo_item(
         registry_path=registry, runtime_root=runtime, goal_id=GOAL_ID,
         todo_id=target["todo_id"], target_key=target["target_key"],

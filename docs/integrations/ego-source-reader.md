@@ -62,7 +62,7 @@ LoopX does not intercept or promise to modify the browser's updater.
 ## Optional public-source reader
 
 The optional `loopx.extensions.ego_source_reader` stdio MCP adapter gives an
-existing Codex host narrow `read_public_url` and `read_public_image` tools when its model shell cannot
+existing Codex host narrow `read_public_url`, `read_public_image`, and `search_x` tools when its model shell cannot
 reach Ego's local bootstrap. It reuses an installed Ego browser with a reserved
 Page. It does not replace the Chat Session owner or create a browser,
 model thread, background service, material catalog or permission authority.
@@ -112,6 +112,42 @@ login, browser control, filesystem writes, publishing or private-account access.
 The tools retain their existing `read_public_url` and `read_public_image` names;
 the host must still distinguish public sources from signed-in private pages.
 The adapter remains optional and disabled until configured on the execution host.
+
+### X search and original-post discovery
+
+`search_x(query, max_posts=10, latest=false)` uses the same configured reader,
+reserved Page, origin scope, live-control checks, deadline and cleanup. It opens
+X's rendered search UI and returns at most 20 currently loaded post references,
+author handles, timestamps, bounded excerpts and media-presence indicators.
+It does not scroll indefinitely or use a second browser controller. `latest=true`
+selects the platform's Latest tab; the default uses its Top search.
+
+For creator demonstrations, a useful starting query is
+`"geometry nodes" filter:videos`; refine by topic, language or `from:<creator>`
+when the first results reveal an origin. The provider encodes query text as URL
+data. It never executes query text as shell or browser code. An explicit origin
+list must include `https://x.com`; this operation does not expand that list.
+
+Wait for real post cards or the platform's explicit empty state. Loading shells,
+unrecognized cards, login/verification walls and timeouts are not empty-result
+proof. Results identify each card through its own timestamp link, exclude account
+navigation and analytics links, and deduplicate post URLs. Private account chrome
+is not returned. Visible content still does not prove public visibility: review
+that boundary before publishing or admitting public evidence.
+
+Open the returned original URL with the existing reader or authorized Ego CLI,
+then inspect relevant media and trace technical claims to primary documentation
+or code. An excerpt, thumbnail or `media_present` flag is not full-post reading
+or video observation. Search ranking is neither exhaustive coverage nor a
+reliability score. Record sources through the existing
+[external-evidence workflow](../../loopx/capabilities/external_research/README.md#egox-discovery--egox-发现)
+when using LoopX research; the tool never admits evidence itself.
+
+The operation is available after upgrading this optional adapter and reloading
+its idle MCP host through the existing host lifecycle. Existing installations
+without that update can use the installed Ego CLI under its skill. Do not restart
+an active chat or change its permissions solely to expose the new tool. Disable
+by removing the existing adapter entry; no new persistent setting is added.
 
 To restrict or roll back that origin scope, set
 `LOOPX_EGO_READ_ORIGINS = "https://example.com,https://www.example.org"` and reload

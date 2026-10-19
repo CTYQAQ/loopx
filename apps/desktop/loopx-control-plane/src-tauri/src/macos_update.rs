@@ -19,7 +19,7 @@ enum InstallError {
 
 pub(crate) fn install(update: &Update, verified_bytes: &[u8]) -> Result<(), String> {
     let executable = std::env::current_exe().map_err(|_| "app_install_failed")?;
-    match install_verified_archive(&executable, verified_bytes) {
+    match install_archive(&executable, verified_bytes, Some(&update.version)) {
         Ok(()) => Ok(()),
         // An administrator-owned installation retains the existing native
         // authorization path. Never fall back after extraction or a failed
@@ -31,7 +31,25 @@ pub(crate) fn install(update: &Update, verified_bytes: &[u8]) -> Result<(), Stri
     }
 }
 
+// Prepared downloads are activated before this App starts any service. A
+// permission-restricted target stays on the working App; its explicit update
+// action retains the updater's existing native authorization adapter above.
+pub(crate) fn install_prepared(version: &str, verified_bytes: &[u8]) -> Result<(), String> {
+    let executable = std::env::current_exe().map_err(|_| "app_install_failed")?;
+    install_archive(&executable, verified_bytes, Some(version))
+        .map_err(|_| "app_install_failed".into())
+}
+
+#[cfg(test)]
 fn install_verified_archive(executable: &Path, verified_bytes: &[u8]) -> Result<(), InstallError> {
+    install_archive(executable, verified_bytes, None)
+}
+
+fn install_archive(
+    executable: &Path,
+    verified_bytes: &[u8],
+    expected_version: Option<&str>,
+) -> Result<(), InstallError> {
     let failed = || InstallError::Failed;
     let target = crate::update_backup::installed_bundle_at(executable).map_err(|_| failed())?;
     let parent = target.parent().ok_or_else(failed)?;
@@ -73,6 +91,21 @@ fn install_verified_archive(executable: &Path, verified_bytes: &[u8]) -> Result<
         )
     {
         return Err(failed());
+    }
+    // The archive is signed, but its local cache metadata is not. Bind the
+    // announced version to the sealed bundle before any replacement so a
+    // modified cache cannot relabel a valid older archive as a newer update.
+    if let Some(expected) = expected_version {
+        let mut command = std::process::Command::new("/usr/libexec/PlistBuddy");
+        command
+            .args(["-c", "Print :CFBundleShortVersionString"])
+            .arg(candidate.join("Contents/Info.plist"));
+        let matches = crate::services::timed_output(command).is_some_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == expected
+        });
+        if !matches {
+            return Err(failed());
+        }
     }
 
     // Retain both sides before the only commit operation. The same atomic
@@ -217,6 +250,37 @@ mod tests {
         assert!(crate::update_backup::installed_bundle_verifies(
             &synthetic_executable(&target)
         ));
+    }
+
+    #[test]
+    fn local_metadata_cannot_relabel_a_sealed_older_bundle() {
+        let root = tempfile::tempdir().unwrap();
+        let target = ad_hoc_signed_synthetic_app(root.path(), "Installed.app");
+        let candidate = ad_hoc_signed_synthetic_app(root.path(), "Candidate.app");
+        let plist = candidate.join("Contents/Info.plist");
+        let content = fs::read_to_string(&plist).unwrap().replace(
+            "</dict>",
+            "<key>CFBundleShortVersionString</key><string>1.1.0</string></dict>",
+        );
+        fs::write(&plist, content).unwrap();
+        assert!(std::process::Command::new("codesign")
+            .args(["--sign", "-", "--force"])
+            .arg(&candidate)
+            .status()
+            .unwrap()
+            .success());
+        let bytes = archive(&candidate);
+        assert_eq!(
+            install_archive(&synthetic_executable(&target), &bytes, Some("9.0.0")),
+            Err(InstallError::Failed)
+        );
+        assert!(!fs::read_to_string(target.join("Contents/Info.plist"))
+            .unwrap()
+            .contains("1.1.0"));
+        install_archive(&synthetic_executable(&target), &bytes, Some("1.1.0")).unwrap();
+        assert!(fs::read_to_string(target.join("Contents/Info.plist"))
+            .unwrap()
+            .contains("1.1.0"));
     }
 
     #[test]

@@ -483,6 +483,48 @@ try {
   await page.getByText(/启动用时较长/).waitFor();
   nativeState = { phase: "service_error", details: { code: "service_start_failed" } };
   await page.getByText("本地服务连接失败，正在等待重试", { exact: true }).waitFor();
+  // Background preparation observes native progress without disabling a
+  // user's explicit action or manufacturing an installation/restart effect.
+  const beforeBackground = calls.length;
+  nativeState = { phase: "downloading", details: { channel: "stable", version: "0.5.5", background: true, received: 40, total: 100 } };
+  await page.goto(`${origin}/chat/?statusUrl=/status.json`);
+  await page.getByRole("button", { name: "后台更新中" }).click();
+  assert.equal(await page.getByRole("button", { name: "检查更新", exact: true }).isEnabled(), true);
+  await page.getByText(/当前版本可继续使用/).waitFor();
+  assert.equal(calls.length, beforeBackground);
+  // A poll already in flight belongs to the old channel, even when it returns
+  // a prepared update after the user has selected another channel.
+  const delayedChannelStatus = delayNextStatus("available");
+  nativeState = { phase: "available", details: { channel: "stable", version: "0.5.5", background: true, prepared: true } };
+  await delayedChannelStatus.started.promise;
+  await page.getByText("高级选项", { exact: true }).click();
+  await page.getByRole("combobox", { name: "更新通道" }).selectOption("main");
+  delayedChannelStatus.release.resolve();
+  await delayedChannelStatus.returned.promise;
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  assert.equal(await page.getByRole("button", { name: "更新并准备重启", exact: true }).count(), 0, "an old-channel response cannot revive its install action");
+  assert.equal(await page.getByText("目标版本：0.5.5", { exact: true }).count(), 0);
+  assert.equal(await page.getByRole("combobox", { name: "更新通道" }).inputValue(), "main");
+  assert.equal(calls.length, beforeBackground, "selecting a channel never installs or checks by itself");
+  await page.getByRole("button", { name: "检查更新", exact: true }).click();
+  await page.getByRole("button", { name: "更新并准备重启", exact: true }).waitFor();
+  assert.deepEqual(calls.slice(beforeBackground).map((call) => call.args?.action), ["check"]);
+  assert.equal(calls.at(-1).args.channel, "main");
+  nativeState = { phase: "available", details: { channel: "stable", version: "0.5.5", background: true, prepared: true } };
+  await page.reload();
+  await page.getByRole("button", { name: "更新已准备" }).click();
+  await page.getByText(/下次打开时自动安装/).waitFor();
+  await page.screenshot({ path: resolve(output, "background-prepared-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "打开 Goal 导航" }).click();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.screenshot({ path: resolve(output, "background-prepared-mobile.png") });
+  await page.evaluate(() => localStorage.setItem("loopx-pw-locale", "en"));
+  await page.reload();
+  await page.getByRole("button", { name: "Open Goal navigation" }).click();
+  await page.getByRole("button", { name: "Update prepared" }).click();
+  await page.getByText(/It installs on the next open/).waitFor();
+  assert.deepEqual(calls.slice(beforeBackground).map((call) => call.args?.action), ["check"]);
   console.log("desktop-update-browser-smoke: passed (confirmation, failure redaction, mobile, missing assets + reload, startup motion states, startup recovery, immediate terminal recovery, automatic startup presentation)");
 } finally {
   await browser.close();

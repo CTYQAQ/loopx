@@ -27,6 +27,8 @@ for (const kind of ["project", "steward"]) {
     agent_id: "codex", executor_endpoint_id: "codex", session_mode: "managed_runtime", status: "ready",
     channel_id: `${kind === "steward" ? "manager.external.native" : "project.external"}.${row.binding_id}.${"e".repeat(24)}`,
     ...(kind === "steward" ? {steward_context: context} : {project_context: context})};
+  const continuation = {...lookup, source_ref: "e".repeat(24), sender_ref: row.operator_ref,
+    private_human_message: false, origin: "web", session_context: context};
 
   test(`${kind} discovery reuses verified saved identity and excludes unrelated or closed Sessions`, () => {
     const snapshots = [session, {...session, session_id: "historical", status: "closed"},
@@ -36,6 +38,9 @@ for (const kind of ["project", "steward"]) {
     assert.deepEqual(snapshots, before);
     assert.deepEqual(listLocalBoundSessions({...lookup, sessions: []}), {session_ids: []});
     assert.throws(() => listLocalBoundSessions({...lookup, sessions: [session, session]}), /ambiguous/);
+    assert.deepEqual(resolveBoundConversation({...continuation, session}).context, context);
+    assert.throws(() => resolveBoundConversation({...continuation, session: {...session, status: "closed"}}),
+      /canonical bound Session identity/);
   });
 
   test(`${kind} discovery refuses changed canonical role, executor, channel or saved source`, () => {
@@ -47,6 +52,7 @@ for (const kind of ["project", "steward"]) {
       {[kind === "steward" ? "steward_context" : "project_context"]:
         {...context as Record<string, unknown>, source_ref: "f".repeat(24)}}]) {
       assert.throws(() => listLocalBoundSessions({...lookup, sessions: [{...session, ...change}]}));
+      assert.throws(() => resolveBoundConversation({...continuation, session: {...session, ...change}}));
     }
     for (const change of [{current}, {available_projects: []},
       {observation: {...observation, verified: false}},

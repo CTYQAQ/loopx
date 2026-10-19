@@ -438,6 +438,62 @@ def _bound_project(fixture):
     return bindings, args, binding, session, turn
 
 
+@pytest.mark.parametrize("entrypoint", ["http", "runtime_context"])
+def test_bound_session_identity_is_checked_before_input_or_runtime_resolution(ordinary, monkeypatch, entrypoint):  # noqa: F811
+    from loopx.capabilities.native_chat.external_conversations import ChatExternalConversations
+
+    store, runtime, contexts, request, capture, _, workspace = ordinary
+    observation = {"transport_ref": "notes-app", "provider_ref": "c" * 24,
+                   "operator_ref": "d" * 24, "verified": True}
+    bindings = ChatConversationBindings(root=store.root, project_contexts=contexts,
+                                        observe=lambda _: observation)
+    contexts.conversation_bindings = bindings
+    ChatExternalConversations(runtime)
+    binding = bindings.configure(transport_ref="notes-app",
+        project_ref=contexts.available()[0]["project_ref"], executor_endpoint_id="codex")
+    session, _ = runtime.open_session(goal_id=None, agent_id="codex", work_dir=workspace,
+        objective="", mode="resume_latest", conversation_binding_id=binding["binding_id"],
+        source_context={"source_ref": "a" * 24, "sender_ref": observation["operator_ref"],
+                        "private_human_message": True})
+    # The canonical store accepts an executor endpoint separately from its
+    # agent id. A retained Session must still match the current binding.
+    changed = store.create_session(goal_id=None, agent_id="codex",
+        executor_endpoint_id="kiro-cli", adapter_kind="codex_app_server",
+        upstream_thread_id="retained-thread", channel_id=session["channel_id"],
+        project_context=session["project_context"])
+    sid = changed["session_id"]
+    with pytest.raises(ValueError, match="canonical bound Session identity"):
+        bindings.local_sessions(binding["binding_id"])
+    before_messages = store.messages(sid)
+    before_requests = capture.read_text() if capture.exists() else ""
+    resume = runtime.resume_session_queue
+    dispatches = []
+    monkeypatch.setattr(runtime, "resume_session_queue", lambda **args: dispatches.append(args))
+    if entrypoint == "http":
+        status, _ = request(f"/api/chat/sessions/{sid}/turns",
+                            {"message": "Continue here", "client_turn_id": "wrong-recipient"})
+        assert status == 400
+    else:
+        with pytest.raises(ValueError, match="canonical bound Session identity"):
+            contexts.session_context(changed)
+    assert store.turn_for_client(sid, "wrong-recipient") is None
+    assert dispatches == []
+    assert store.messages(sid) == before_messages
+    assert (capture.read_text() if capture.exists() else "") == before_requests
+    # Select the original valid recipient to recover through the same shipped
+    # HTTP path. No replacement conversation or Goal registration is needed.
+    monkeypatch.setattr(runtime, "resume_session_queue", resume)
+    original = session["session_id"]
+    body = {"message": "Continue here", "client_turn_id": "original-recipient"}
+    status, accepted = request(f"/api/chat/sessions/{original}/turns", body)
+    assert status == 202 and accepted["created"] is True
+    assert runtime.wait_for_turn(session_id=original,
+        turn_id=accepted["turn_id"], timeout_sec=10)["status"] == "completed"
+    status, replay = request(f"/api/chat/sessions/{original}/turns", body)
+    assert status == 202 and replay["created"] is False and replay["turn_id"] == accepted["turn_id"]
+    assert store.load_session(original)["goal_id"] is None
+
+
 def test_binding_reconfiguration_keeps_same_grant_running_but_stops_replaced_grant(ordinary):  # noqa: F811
     store, runtime, contexts, _, _, _, workspace = ordinary
     bindings, args, binding, session, turn = _bound_project(ordinary)

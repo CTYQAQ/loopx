@@ -334,13 +334,27 @@ export function resolveBoundConversation(params: JsonObject): JsonObject {
       : JSON.stringify(saved) === JSON.stringify(context);
     if (!matches) throw new EffectRuntimeRequestError("bound Session context changed");
   }
+  const channel = row.context_kind === "steward"
+    ? `manager.external.native.${id}.${source}` : `project.external.${id}.${source}`;
+  if (params.session !== undefined) {
+    const session = requireJsonObject(params.session, "canonical bound Session");
+    const steward = row.context_kind === "steward";
+    sessionIdentity(session.session_id, "bound Session identity");
+    if (session.status === "closed" || session.channel_id !== channel
+        || session.goal_id !== (steward ? "loopx-manager" : null)
+        || session.agent_id !== row.executor_endpoint_id || session.executor_endpoint_id !== row.executor_endpoint_id
+        || session.session_mode !== "managed_runtime" || (steward ? session.project_context : session.steward_context) != null
+        || params.session_context === undefined
+        || JSON.stringify(steward ? session.steward_context : session.project_context) !== JSON.stringify(params.session_context)) {
+      throw new EffectRuntimeRequestError("canonical bound Session identity changed");
+    }
+  }
   // This is an audience proof, not a host-tool grant. Only the independently
   // verified owner in this private source may inherit an explicit machine
   // owner grant. Portfolio scope and project write grants do not imply it.
   return {binding: row, context, owner_manager_audience: row.context_kind === "steward"
       && project.filesystem_scope !== "workspace_only",
-    channel_id: row.context_kind === "steward"
-    ? `manager.external.native.${id}.${source}` : `project.external.${id}.${source}`};
+    channel_id: channel};
 }
 
 /** Discover existing private targets from canonical metadata. This is a read
@@ -363,13 +377,9 @@ export function listLocalBoundSessions(params: JsonObject): JsonObject {
         && (value as JsonObject).binding_id === id) || session.status === "closed") continue;
     const steward = row.context_kind === "steward";
     const saved = requireJsonObject(steward ? session.steward_context : session.project_context, "bound Session context");
-    const selected = resolveBoundConversation({...params, source_ref: saved.source_ref,
+    resolveBoundConversation({...params, source_ref: saved.source_ref,
+      session,
       sender_ref: row.operator_ref, private_human_message: false, origin: "web", session_context: saved});
-    if (session.channel_id !== selected.channel_id || session.goal_id !== (steward ? "loopx-manager" : null)
-        || session.agent_id !== row.executor_endpoint_id || session.executor_endpoint_id !== row.executor_endpoint_id
-        || session.session_mode !== "managed_runtime" || (steward ? session.project_context : session.steward_context) != null) {
-      throw new EffectRuntimeRequestError("canonical bound Session identity changed");
-    }
     ids.push(sessionIdentity(session.session_id, "bound Session identity"));
   }
   if (new Set(ids).size !== ids.length) throw new EffectRuntimeRequestError("canonical bound Session identity is ambiguous");

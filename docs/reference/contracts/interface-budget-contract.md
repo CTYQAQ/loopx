@@ -434,6 +434,19 @@ other modes, differential growth and semantic obligations remain unchanged.
 These bounded increases retain full executable routes rather than trimming
 agent-consumed instructions to satisfy a host-specific ceiling.
 
+Brief heartbeat JSON also retains the 128-character physical-root workload.
+Equal physical length does not imply equal serialized cost: native Windows
+roots with 7, 13 and 19 separators emit 10,482, 10,602 and 10,722 JSON characters.
+Markdown remains 8,579 characters / 94 lines. Replacing only each owned root
+produces identical complete JSON payloads and Markdown; the extra escaping
+cost preserves the same executable routes. Hosted main and candidate both
+fail the previous 10,500 ceiling at 10,522 characters. The brief JSON ceiling
+is now 10,800; Markdown's 9,000 ceiling, line limits, body budgets and other
+modes remain unchanged. This qualifies the measured layouts, not arbitrary
+path topology. The depth regression enforces raw output sizes; root replacement
+is used only for semantic comparison. If the native namespace cannot fit the
+depth-12 workload, that comparison reports a skip without shortening its root.
+
 Windows qualification can use the existing explicit canary time budget:
 
 ```powershell

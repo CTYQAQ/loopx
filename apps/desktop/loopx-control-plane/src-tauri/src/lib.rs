@@ -2,6 +2,7 @@ mod bundled_runtime;
 #[cfg(target_os = "macos")]
 mod macos_update;
 mod maintenance;
+mod prepared_update;
 mod runtime_ancestry;
 mod runtime_selection;
 mod service_endpoints;
@@ -238,6 +239,7 @@ pub fn run() {
                                 .expect("workspace handoff lock")
                                 .services_ready();
                             WorkspaceHandoff::reconcile(&handoff, &handle);
+                            maintenance::start_background_update(&handle);
                             if healed {
                                 let _ = handle
                                     .notification()
