@@ -365,7 +365,7 @@ export function strideControlContract(context: JsonObject, obligationId: unknown
     minimal_example: example,
     attachment: "agent_vision.stride_decision", requires_evidence_linked_path: true,
     required_on_periodic_review: true,
-    rule: "Every due periodic review with this strategy enabled must record a stride decision before settlement, including when a typed progress, successor, blocker or terminal outcome is also reported. " +
+    rule: "Every due periodic review and observed-stall review (typed_progress_repeat, no_progress_streak, repeated_action_loop or external_progress_review_drift) with this strategy enabled must record a stride decision before settlement, including when a typed progress, successor, blocker or terminal outcome is also reported. " +
       "The decision requires an evidence-linked Vision path (including a terminal stop when supported by evidence), an explicit grow/switch/verify action and a concrete plan/reason for each axis. " +
       "Grow expands a supported route; switch names the reference method and changed mechanism; verify resolves a named grow-or-switch question. Size every action for a coherent accepted deliverable or complete interpretable experiment, including ordinary engineering and maintenance. Grow changes useful completed scope, not authority or settlement boundaries. " +
       "The minimal example demonstrates syntax, not the recommended action for the current evidence. " +
