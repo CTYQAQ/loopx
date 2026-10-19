@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ...control_plane.goals.acceptance_readback import configured_checks
+
 import re
 from typing import Any
 
@@ -35,10 +37,10 @@ def append_goal_acceptance_observation_markdown(
                     f"{markdown_scalar(gap.get('evidence_required') or gap.get('reason') or 'unknown')}"
                 )
         contract = as_dict(observation.get("goal_acceptance_contract"))
-        if contract.get("enabled") is not True:
-            return
         if observation.get("goal_id") != goal.get("id"):
             lines.append("  - Goal acceptance contract: source unavailable; acceptance unknown")
+            return
+        if configured_checks(contract) is None:
             return
         task_states = {
             "ready": "task association confirmed",

@@ -301,7 +301,7 @@ def test_reviewed_selected_plan_survives_unrelated_progress(acceptance_goal, cha
         code, result = run("todo", "add", "--goal-id", "goal-acceptance", "--role", "agent",
             "--text", "Independent work", "--action-kind", "implement", "--claimed-by", "agent-a")
     assert code == 0, result
-    assert cli("inspect")[1]["goal_acceptance_contract"] == {"enabled": False}
+    assert cli("inspect")[1]["goal_acceptance_contract"] == {}
     assert not (project / "runs.txt").exists()
     result = service.apply(proposal["proposal_id"])
     assert result["proposal"]["status"] == "applied"
@@ -380,7 +380,7 @@ def test_configuration_response_loss_keeps_its_original_review_basis(acceptance_
 
 def test_agent_preparation_does_not_approve_or_execute(acceptance_goal):
     project, cli, service, proposal = prepare(acceptance_goal)
-    assert cli("inspect")[1]["goal_acceptance_contract"] == {"enabled": False}
+    assert cli("inspect")[1]["goal_acceptance_contract"] == {}
     assert not (project / "runs.txt").exists()
     assert proposal["permission_classification"] == "local_command_execution"
     result = service.apply(proposal["proposal_id"])
@@ -486,5 +486,5 @@ def test_prepared_plan_cannot_claim_another_goal_context(acceptance_goal):
         service.preview({"action_kind": "goal.acceptance.check", "summary": "Wrong context",
             "idempotency_key": "wrong-context", "context": {"kind": "goal", "goal_id": "other"},
             "normalized_parameters": proposal["normalized_parameters"]})
-    assert cli("inspect")[1]["goal_acceptance_contract"]["enabled"] is False
+    assert cli("inspect")[1]["goal_acceptance_contract"].get("criteria") is None
     assert not (project / "runs.txt").exists()

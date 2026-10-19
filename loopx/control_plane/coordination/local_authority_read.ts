@@ -1,3 +1,4 @@
+import {configuredGoalChecks} from "../goals/acceptance_contract.ts";
 /** Canonical Todo reads and projection confirmation share one provider snapshot. */
 import type {JsonObject} from "../effect_program.ts";
 import {requireJsonObject} from "../runtime_decode.ts";
@@ -181,7 +182,7 @@ export async function readLocalCoordinationTodoSource(
       provider_revision: revision, cursor, store_identity: identity.store_identity,
       todos: projection.todo_ids.map((todoId) => projection.todos.get(todoId)!),
       todo_ids: projection.todo_ids, todo_read_model: todoReadModel,
-      ...(acceptance.enabled !== true ? {} : {
+      ...(!configuredGoalChecks(acceptance) ? {} : {
         goal_acceptance_contract: acceptance,
         goal_acceptance_work_guards: projectGoalAcceptanceWorkGuards(
           transaction.projection, goalId, projection.todo_ids),
@@ -320,7 +321,7 @@ export async function listLocalCoordinationTodos(
       todos: projection.todo_ids.map((todoId) => projection.todos.get(todoId)!),
       todo_ids: projection.todo_ids,
       todo_read_model: todoReadModel,
-      ...(acceptance.enabled !== true ? {} : {goal_acceptance_contract: acceptance,
+      ...(!configuredGoalChecks(acceptance) ? {} : {goal_acceptance_contract: acceptance,
         goal_acceptance_work_guards: projectGoalAcceptanceWorkGuards(head.head, goalId, projection.todo_ids)}),
       ...(leaseIndex === null ? {} : {
         leases: leaseIndex.lease_todo_ids.map((id) => leaseIndex.leases.get(id)!),

@@ -9,7 +9,7 @@ import {AuthorityStoreProtocolError, canonicalAuthorityObject, canonicalAuthorit
 import {CoordinationCommandReceipt} from "../coordination/command_receipt.ts";
 import {withCanonicalWriter} from "../coordination/local_authority_write.ts";
 import {openLocalAuthorityStore, localAuthorityOpenFailure} from "../coordination/local_authority_provider.ts";
-import {GOAL_ACCEPTANCE_OWNED_SCHEMA, GOAL_ACCEPTANCE_SCHEMA, acceptanceKeys, acceptanceRequire, acceptanceTask,
+import {GOAL_ACCEPTANCE_SCHEMA, clearedGoalAcceptance, acceptanceKeys, acceptanceRequire, acceptanceTask,
   acceptanceText, acceptanceTodos, acceptanceCompletionRequirements, bindGoalAcceptanceStateOwner,
   goalAcceptanceTodoDigest, goalAcceptanceWorkDigest, normalizeAcceptanceResults,
   normalizeGoalAcceptanceDocument, projectGoalAcceptance, readGoalAcceptance, readGoalAcceptanceAuthority,
@@ -108,6 +108,7 @@ function reviewContext(head: JsonObject, goalId: string, document: AcceptanceDoc
   const state = readGoalAcceptance(head, goalId);
   return canonicalAuthoritySha256({goal_id: goalId, document,
     lifecycle: readGoalAcceptanceLifecycle(head, goalId),
+    configuration_revision: readGoalAcceptanceAuthority(head, goalId).configuration_revision,
     contract: state === null ? null : {...state, verification: null},
     work_digest: goalAcceptanceWorkDigest(head, goalId, document.scope)});
 }
@@ -123,7 +124,7 @@ async function replayWithCurrentProjection(
   }
   const current = await store.loadAuthority();
   const contract = current.status === "loaded"
-    ? projectGoalAcceptance(current.head, goalId) : {enabled: false, authority_status: current.status};
+    ? projectGoalAcceptance(current.head, goalId) : {authority_status: current.status};
   const lifecycle = current.status === "loaded"
     ? readGoalAcceptanceLifecycle(current.head, goalId) : null;
   return source(store, {...result,
@@ -145,7 +146,8 @@ async function commit(store: AuthorityStore, request: JsonObject, head: Authorit
       goal_ref: goalRef,
     };
   }
-  if (committedState !== null) next.goal_acceptance = committedState;
+  next.goal_acceptance = committedState ?? clearedGoalAcceptance(
+    readGoalAcceptanceAuthority(head.head, String(request.goal_id)).configuration_revision + 1, goalRef);
   const reviewed = kind === "configure" && request.document !== null && committedState !== null;
   const result = {goal_id: request.goal_id, operation_id: request.operation_id,
     goal_acceptance_contract: projectGoalAcceptance(next, String(request.goal_id)),
@@ -163,7 +165,7 @@ async function commit(store: AuthorityStore, request: JsonObject, head: Authorit
     next_projection: next,
     events: [{schema_version: RECEIPT_SCHEMA, kind: `goal_acceptance_${kind}`, goal_id: request.goal_id,
       operation_id: request.operation_id, revision: committedState?.revision ?? null,
-      digest: committedState?.digest ?? null, enabled: committedState?.enabled ?? false}],
+      digest: committedState?.digest ?? null}],
     receipts: [{...command.identity, result}],
   });
   // No Todo/Markdown display document changes in this transaction.
@@ -172,9 +174,7 @@ async function commit(store: AuthorityStore, request: JsonObject, head: Authorit
 
 export async function configureGoalAcceptance(store: AuthorityStore, value: JsonObject): Promise<JsonObject> {
   const request = mutationRequest(value, false);
-  const disable = request.disable === true || request.document === null;
-  acceptanceRequire(!disable || request.document === null, "disable requires document:null");
-  const document = disable ? null : normalizeGoalAcceptanceDocument(request.document);
+  acceptanceRequire(request.disable !== true || request.document === null, "legacy disable requires document:null");
   const command = receiptFor(request, "configure");
   const replay = await command.receipt.read(store);
   if (replay) return replayWithCurrentProjection(store, replay, String(request.goal_id));
@@ -182,6 +182,8 @@ export async function configureGoalAcceptance(store: AuthorityStore, value: Json
   if (observation.kind === "receipt") {
     return replayWithCurrentProjection(store, observation.result, String(request.goal_id));
   }
+  if (observation.authority.status !== "loaded") return source(store, {...current(observation.authority, request)});
+  const document = request.document === null ? null : normalizeGoalAcceptanceDocument(request.document);
   let admission = request;
   if (request.review_context_digest !== undefined && observation.authority.status === "loaded") {
     acceptanceTodos(observation.authority.head, String(request.goal_id));
@@ -206,7 +208,7 @@ export async function configureGoalAcceptance(store: AuthorityStore, value: Json
       acceptanceRequire(todo && todo.role === "agent" && (todo.task_class == null || todo.task_class === "advancement_task"),
         "acceptance scope must reference existing Agent advancement work");
     }
-    const revision = (previous?.revision ?? 0) + 1;
+    const revision = readGoalAcceptanceAuthority(head.head, String(request.goal_id)).configuration_revision + 1;
     acceptanceRequire(Number.isSafeInteger(revision), "acceptance revision exhausted");
     const bindings = document.bindings.map(binding => {
       const todo = todos.get(binding.todo_id);
@@ -221,13 +223,11 @@ export async function configureGoalAcceptance(store: AuthorityStore, value: Json
     const verification = !document.criteria.some(criterion => criterion.oracle !== undefined)
       && previousVerification?.results.some(result => result.oracle_evidence !== undefined)
       ? null : previousVerification;
-    const fields = {enabled: true, revision, digest: canonicalAuthoritySha256(document),
+    const fields = {revision, digest: canonicalAuthoritySha256(document),
       document, bindings, verification};
     const goalRef = requestGoalRef(request);
-    state = goalRef === null
-      ? {schema_version: GOAL_ACCEPTANCE_SCHEMA, ...fields}
-      : {schema_version: GOAL_ACCEPTANCE_OWNED_SCHEMA, owner_goal_ref: goalRef, ...fields};
-  } else if (previous) state = {...previous, enabled: false};
+    state = {schema_version: GOAL_ACCEPTANCE_SCHEMA, owner_goal_ref: goalRef, ...fields};
+  } else state = null;
   return commit(store, request, head, state, command, "configure");
 }
 
@@ -251,7 +251,7 @@ export async function commitGoalAcceptanceVerification(store: AuthorityStore, va
   if (!loaded(head)) return source(store, head);
   const goalId = String(request.goal_id);
   const state = readGoalAcceptance(head.head, goalId);
-  acceptanceRequire(state?.enabled, "goal acceptance is disabled");
+  acceptanceRequire(state, "no executable checks are configured");
   if (state.revision !== request.revision || state.digest !== request.contract_digest) return source(store,
     failure("goal_acceptance_contract_stale", "acceptance contract changed while validation ran"));
   let criterionIds = state.document.criteria.map(item => item.id);
@@ -311,7 +311,7 @@ type LifecyclePlan =
   | Readonly<{
       kind: "commit";
       lifecycle: GoalAcceptanceLifecycle;
-      acceptance: AcceptanceState | null;
+      acceptance: JsonObject | null;
     }>
   | Readonly<{kind: "no_change"; lifecycle: GoalAcceptanceLifecycle}>
   | Readonly<{kind: "failure"; reason_code: string; reason: string}>;
@@ -337,7 +337,8 @@ function planLifecycleTransition(
           goal_ref: transition.goal_ref,
         },
         acceptance: acceptance === null
-          ? null
+          ? readGoalAcceptanceAuthority(head, goalId).configuration_revision === 0 ? null
+            : clearedGoalAcceptance(readGoalAcceptanceAuthority(head, goalId).configuration_revision, transition.goal_ref)
           : bindGoalAcceptanceStateOwner(acceptance, transition.goal_ref),
       };
     }
@@ -360,7 +361,8 @@ function planLifecycleTransition(
           goal_ref: transition.goal_ref,
         },
         acceptance: acceptance === null
-          ? null
+          ? readGoalAcceptanceAuthority(head, goalId).configuration_revision === 0 ? null
+            : clearedGoalAcceptance(readGoalAcceptanceAuthority(head, goalId).configuration_revision, transition.retired_goal_ref)
           : bindGoalAcceptanceStateOwner(acceptance, transition.retired_goal_ref),
       };
     }
@@ -413,24 +415,15 @@ export async function transitionGoalAcceptanceLifecycle(
   acceptanceTodos(observation.authority.head, goalId);
   const plan = planLifecycleTransition(observation.authority.head, goalId, transition);
   if (plan.kind === "failure") return source(store, failure(plan.reason_code, plan.reason));
+  const next: JsonObject = {...observation.authority.head, goal_acceptance_lifecycle: plan.lifecycle};
+  if (plan.kind === "commit" && plan.acceptance !== null) next.goal_acceptance = plan.acceptance;
   const result = {
     goal_id: goalId,
     operation_id: request.operation_id,
     changed: plan.kind === "commit",
     goal_acceptance_lifecycle: plan.lifecycle,
-    goal_acceptance_contract: projectGoalAcceptance(
-      plan.kind === "commit"
-        ? {
-            ...observation.authority.head,
-            goal_acceptance_lifecycle: plan.lifecycle,
-            ...(plan.acceptance === null ? {} : {goal_acceptance: plan.acceptance}),
-          }
-        : observation.authority.head,
-      goalId,
-    ),
+    goal_acceptance_contract: projectGoalAcceptance(next, goalId),
   };
-  const next: JsonObject = {...observation.authority.head, goal_acceptance_lifecycle: plan.lifecycle};
-  if (plan.kind === "commit" && plan.acceptance !== null) next.goal_acceptance = plan.acceptance;
   const committed = await command.receipt.commit(store, {
     operation_id: String(request.operation_id),
     expected_provider_revision: observation.authority.provider_revision,
@@ -472,11 +465,11 @@ export async function inspectGoalAcceptance(
     : authority.owner_matches && authority.lifecycle.state === "active" ? authority.state : null;
   const tasks = [...todos.entries()].filter(([key]) => todoId === undefined || key === todoId).map(([key, todo]) => ({
     todo_id: key, todo_semantic_digest: goalAcceptanceTodoDigest(todo),
-    ...(state?.enabled ? acceptanceTask(key, todo, state) : {state: "unbound", criterion_ids: [], applicable: false}),
+    ...(state ? acceptanceTask(key, todo, state) : {state: "unbound", criterion_ids: [], applicable: false}),
   }));
   return source(store, {status: "loaded", provider_revision: head.provider_revision,
     revision: state?.revision ?? null, contract_digest: state?.digest ?? null,
-    contract: state?.enabled ? state.document : null, tasks,
+    contract: state ? state.document : null, tasks,
     ...(todoId === undefined ? {} : {todo: todos.get(todoId) ?? null,
       completion_requirements: acceptanceCompletionRequirements(head.head, goalId, todoId)}),
     goal_acceptance_contract: projectGoalAcceptance(head.head, goalId)});

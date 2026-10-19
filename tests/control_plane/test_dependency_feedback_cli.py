@@ -146,7 +146,9 @@ def test_current_feedback_is_adopted_and_analyzed_once_with_old_feedback_retaine
     basis = goal.call("goal-acceptance", "inspect", "--goal-id", GOAL)["provider_revision"]
     configured = goal.call("goal-acceptance", "configure", "--goal-id", GOAL, "--document", str(document),
         "--expected-provider-revision", basis, "--operation-id", "confirm-current-feedback-analysis", "--execute")
-    assert configured["goal_acceptance_contract"]["enabled"] is True
+    contract = configured["goal_acceptance_contract"]
+    assert contract["status"] == "unverified"
+    assert [criterion["id"] for criterion in contract["criteria"]] == ["finite-feedback-analysis"]
     assert_quiet(guard(goal), analysis)
 
     old_feedback = project / "old-feedback.json"

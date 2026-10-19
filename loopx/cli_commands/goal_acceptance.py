@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..control_plane.goals.acceptance_readback import configured_checks
+
 import argparse
 import json
 from pathlib import Path
@@ -21,7 +23,7 @@ def register_goal_acceptance_command(subparsers: Any, add_format: Any) -> None:
         help="Configure, inspect or verify a versioned Goal acceptance basis.",
     )
     add_format(parser)
-    parser.add_argument("action", choices=("inspect", "prepare", "configure", "verify", "disable"))
+    parser.add_argument("action", type=lambda value: "clear-checks" if value == "disable" else value, choices=("inspect", "prepare", "configure", "verify", "clear-checks"))
     parser.add_argument("--goal-id", required=True)
     parser.add_argument(
         "--agent-id",
@@ -34,7 +36,7 @@ def register_goal_acceptance_command(subparsers: Any, add_format: Any) -> None:
     )
     parser.add_argument(
         "--expected-provider-revision",
-        help="Exact revision from inspect; required by configure/disable.",
+        help="Exact revision from inspect; required by configure/clear-checks.",
     )
     parser.add_argument(
         "--operation-id", help="Stable identity for an unchanged configuration retry."
@@ -42,7 +44,7 @@ def register_goal_acceptance_command(subparsers: Any, add_format: Any) -> None:
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="With prepare, save a reviewable plan only; with configure/disable/verify, apply the named operation. Otherwise preview only.",
+        help="With prepare, save a reviewable plan only; with configure/clear-checks/verify, apply the named operation. Otherwise preview only.",
     )
 
 
@@ -53,8 +55,9 @@ def render_goal_acceptance(payload: dict[str, Any]) -> str:
     if payload.get("provider_revision"):
         lines.append(f"- provider revision: {payload['provider_revision']}")
     contract = payload.get("goal_acceptance_contract") or {}
-    lines.append(f"- enabled: {contract.get('enabled', False)}")
-    if contract.get("enabled"):
+    if not configured_checks(contract):
+        lines.append("- automated checks: not configured")
+    if configured_checks(contract):
         lines.extend(
             [
                 f"- coverage: {(contract.get('scope') or {}).get('kind', 'all_advancement')}",
@@ -100,14 +103,14 @@ def handle_goal_acceptance_command(
                 raise ValueError("acceptance document must be a JSON object")
             payload = prepare_acceptance_check(**common, document=document,
                 operation_id=args.operation_id, execute=args.execute)
-        elif args.action in {"configure", "disable"}:
+        elif args.action in {"configure", "clear-checks"}:
             if not args.expected_provider_revision:
                 raise ValueError(
-                    "configure/disable requires --expected-provider-revision from inspect"
+                    "configure/clear-checks requires --expected-provider-revision from inspect"
                 )
             if args.action == "configure" and args.document is None:
                 raise ValueError("configure requires --document")
-            if args.action == "disable" and args.document is not None:
+            if args.action == "clear-checks" and args.document is not None:
                 raise ValueError("disable does not accept --document")
             document = (
                 json.loads(args.document.read_text(encoding="utf-8"))
@@ -123,7 +126,6 @@ def handle_goal_acceptance_command(
                     expected_provider_revision=args.expected_provider_revision,
                     operation_id=args.operation_id,
                     execute=args.execute,
-                    disable=args.action == "disable",
                 )
             )
         else:

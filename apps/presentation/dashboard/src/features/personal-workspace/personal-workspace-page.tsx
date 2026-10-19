@@ -1,3 +1,4 @@
+import {hasConfiguredGoalChecks} from "../../data/goal-acceptance-observation";
 import {useDeliveryReview} from "./delivery-review-state";
 import {useGoalWorkspaceDigest} from "./goal-masthead";
 import { goalCreateRequest, goalCreationAgentId } from "./goal-create-request";
@@ -1462,7 +1463,7 @@ export function PersonalWorkspacePage({
       digest: workspaceDigest,
       todos: selectedGoal.agentTodos.map((todo) => ({ todoId: todo.todoId, text: todo.text })),
       execution: selectedGoal.execution ? { kind: selectedGoal.execution.kind } : null,
-      criteria: contract?.enabled ? projectGoalAcceptanceCriteria(contract) : null,
+      criteria: hasConfiguredGoalChecks(contract) ? projectGoalAcceptanceCriteria(contract) : null,
     });
   }, [selectedGoal, workspaceDigest]);
   function goalSuggestionLabel(suggestion: GoalSuggestion): string {

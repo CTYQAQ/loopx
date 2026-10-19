@@ -94,10 +94,14 @@ def acceptance_goal(tmp_path, monkeypatch, request):
     return project, document_path, cli, run
 
 
+
+
+
+
 def test_owner_configure_validation_failure_success_and_disable(acceptance_goal):
     project, document, cli, _ = acceptance_goal
     code, before = cli("inspect")
-    assert code == 0 and before["goal_acceptance_contract"] == {"enabled": False}
+    assert code == 0 and before["goal_acceptance_contract"] == {}
     revision = before["provider_revision"]
     code, preview = cli(
         "configure",
@@ -120,7 +124,7 @@ def test_owner_configure_validation_failure_success_and_disable(acceptance_goal)
     )
     assert code == 0, configured
     contract = configured["goal_acceptance_contract"]
-    assert contract["enabled"] and contract["tasks"][0]["state"] == "ready"
+    assert "enabled" not in contract and contract["tasks"][0]["state"] == "ready"
     assert "validation_argv" not in json.dumps(configured)
     code, failed = cli("verify", "--agent-id", "agent-a", "--execute")
     assert code == 1 and failed["checks_passed"] is False
@@ -139,7 +143,7 @@ def test_owner_configure_validation_failure_success_and_disable(acceptance_goal)
         observed["provider_revision"],
         "--execute",
     )
-    assert code == 0 and disabled["goal_acceptance_contract"] == {"enabled": False}
+    assert code == 0 and disabled["goal_acceptance_contract"] == {}
 
 
 def test_agents_cannot_rewrite_acceptance_and_stale_owner_write_rejects(

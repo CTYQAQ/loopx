@@ -137,7 +137,7 @@ test("the required-read reply retains its reads and complete scheduler dispositi
   const arbitration = facts();
   const result = projectInteractionRequiredReads({required_reads: [], should_run: false,
     delivery_allowed: false, selection_required: false, has_replan: false, settlement_only: false,
-    goal_acceptance_enabled: false, goal_id: null, arbitration_facts: arbitration});
+    goal_acceptance_checks_present: false, goal_id: null, arbitration_facts: arbitration});
   assert.deepEqual(result, {required_reads: [], arbitration: {mode: "bounded_delivery",
     disposition: "active_work", reason_code: "interaction_agent_attempt_required", errors: []}});
 });

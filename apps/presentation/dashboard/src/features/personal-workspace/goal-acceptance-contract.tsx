@@ -1,3 +1,4 @@
+import {hasConfiguredGoalChecks} from "../../data/goal-acceptance-observation";
 import {useEffect, useRef, useState, type ReactNode} from "react";
 import {CircleCheck, CircleDashed, CircleX} from "lucide-react";
 import {useQuery, useQueryClient} from "@tanstack/react-query";
@@ -34,7 +35,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   const plan = actions.isError ? null : preparedAcceptancePlan(actions.data ?? [], goalId);
   const fresh = canManage && !read.isError && read.data?.goal_id === goalId;
   const contract = fresh ? read.data!.goal_acceptance_contract : retained;
-  const enabled = contract?.enabled === true;
+  const enabled = hasConfiguredGoalChecks(contract);
   const criteria = enabled ? projectGoalAcceptanceCriteria(contract) : [];
   const [document, setDocument] = useState<Record<string, unknown> | null>(null);
   const [filename, setFilename] = useState("");
@@ -47,7 +48,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
     setDocument(null); setFilename(""); setError(""); setNotice(""); setBusy(false);
     return () => {generation.current++;};
   }, [goalId, canManage]);
-  async function operate(action: "adopt" | "configure" | "verify" | "disable") {
+  async function operate(action: "adopt" | "configure" | "verify" | "clear-checks") {
     if (!canManage || flight.current || !fresh || action === "adopt" && !plan || action === "configure" && !document) return;
     const token = ++generation.current, target = goalId;
     flight.current = true; setBusy(true); setError(""); setNotice("");
@@ -68,7 +69,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
       if (source.current !== target || token !== generation.current) return;
       client.setQueryData(queryKey, observed);
       if (action === "configure") {setDocument(null); setFilename("");}
-      setNotice(action === "disable" ? (zh ? "已停用检查，历史记录仍保留。" : "Checks disabled; history is retained.")
+      setNotice(action === "clear-checks" ? (zh ? "已移除检查配置，历史记录仍保留。" : "Check configuration removed; history is retained.")
         : action === "configure" ? (zh ? "已保存，尚未运行检查。" : "Saved; checks have not run.")
         : "");
     } catch {
@@ -82,7 +83,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
   }
   const unavailable = read.isError || actions.isError || !!error;
   if (!management && !enabled && !plan && !unavailable) return <>{children}
-    {overview ? <p className="goal-overview-note">{contract?.enabled === false
+    {overview ? <p className="goal-overview-note">{contract !== undefined
       ? (zh ? "验收标准未配置（可选）。" : "Acceptance criteria are not configured (optional).")
       : (zh ? "此来源未提供验收标准（可选）。" : "This source has not provided acceptance criteria (optional).")}</p> : null}
     {notice ? <p role="status">{notice}</p> : null}</>;
@@ -105,7 +106,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
           {document ? <details open><summary>{zh ? "待保存配置" : "Configuration to save"} · {filename}</summary><pre>{JSON.stringify(document, null, 2)}</pre>
             <p>{zh ? "保存会更新所列任务的关联，不会运行检查。" : "Saving updates the listed task associations and does not run checks."}</p></details> : null}
           <button type="button" disabled={busy || !fresh || !document || !!error} onClick={() => void operate("configure")}>{zh ? "保存配置" : "Save configuration"}</button>
-          <button type="button" disabled={busy || !fresh || !enabled} onClick={() => void operate("disable")}>{zh ? "停用检查" : "Disable checks"}</button>
+          <button type="button" disabled={busy || !fresh || !enabled} onClick={() => void operate("clear-checks")}>{zh ? "移除检查配置" : "Remove check configuration"}</button>
         </div>
         <dl className="delivery-acceptance-source"><div><dt>{copy.source}</dt><dd><code>{goalId}</code></dd></div>
           {enabled ? <><div><dt>{copy.scope}</dt><dd>{contract.scope?.kind === "selected_work" ? copy.selectedWork : copy.allWork}</dd></div>

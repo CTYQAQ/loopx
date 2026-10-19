@@ -135,7 +135,7 @@ function readFacts(): JsonObject {
   }, required_reads: [{command: "read-existing-evidence", source: "existing"}],
     goal_id: "goal-requirements", goal_state_file: "/tmp/goal source/state's requirements.md",
     command_prefix: "loopx --registry '/tmp/goal source/registry.json' --runtime-root '/tmp/goal source/runtime'",
-    goal_acceptance_enabled: true, should_run: true, delivery_allowed: true, selection_required: false,
+    goal_acceptance_checks_present: true, should_run: true, delivery_allowed: true, selection_required: false,
     has_replan: false, settlement_only: false, effective_action: "normal_run",
     selected_todo: {todo_id: "todo_selected"}};
 }
@@ -184,7 +184,7 @@ test("shared requirement reads use final admission and add no work on non-delive
 });
 
 test("shared reads follow adaptive primary and never fabricate a missing Goal source", () => {
-  const facts: JsonObject = {...readFacts(), goal_state_file: null, goal_acceptance_enabled: false,
+  const facts: JsonObject = {...readFacts(), goal_state_file: null, goal_acceptance_checks_present: false,
     task_orchestration_contract: {schema_version: "task_orchestration_contract_v2", mode: "adaptive", primary_todo_id: "todo_primary"}};
   const reads = projectInteractionRequiredReads(facts).required_reads as JsonObject[];
   assert.deepEqual(reads.map(read => read.source), ["existing", "selected_todo"]);

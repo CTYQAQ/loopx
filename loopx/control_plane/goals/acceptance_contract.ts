@@ -12,8 +12,7 @@ import {parseWireExactGoalRef, readGoalAcceptanceLifecycle, sameExactGoalRef, ty
 
 import {normalizeAcceptanceOracle, normalizeOracleEvidence, projectAcceptanceOracle, validateOracleResults, type AcceptanceOracle} from "./acceptance_oracle.ts";
 
-export const GOAL_ACCEPTANCE_SCHEMA = "loopx_goal_acceptance_v0";
-export const GOAL_ACCEPTANCE_OWNED_SCHEMA = "loopx_goal_acceptance_v1";
+export const GOAL_ACCEPTANCE_SCHEMA = "loopx_goal_acceptance_v2";
 export interface AcceptanceCriterion extends JsonObject {
   id: string;
   description: string;
@@ -52,30 +51,33 @@ export interface AcceptanceVerification extends JsonObject {
   todo_id: string | null;
   results: AcceptanceResult[];
 }
-interface AcceptanceStateFields extends JsonObject {
-  enabled: boolean;
+export interface AcceptanceState extends JsonObject {
+  schema_version: typeof GOAL_ACCEPTANCE_SCHEMA;
+  owner_goal_ref: WireExactGoalRef | null;
   revision: number;
   digest: string;
   document: AcceptanceDocument;
   bindings: AcceptanceBinding[];
   verification: AcceptanceVerification | null;
 }
-export interface LegacyAcceptanceState extends AcceptanceStateFields {
-  schema_version: typeof GOAL_ACCEPTANCE_SCHEMA;
-}
-export interface OwnedAcceptanceState extends AcceptanceStateFields {
-  schema_version: typeof GOAL_ACCEPTANCE_OWNED_SCHEMA;
-  owner_goal_ref: WireExactGoalRef;
-}
-export type AcceptanceState = LegacyAcceptanceState | OwnedAcceptanceState;
+export type OwnedAcceptanceState = AcceptanceState & {owner_goal_ref: WireExactGoalRef};
 export type GoalAcceptanceAuthority =
-  | Readonly<{kind: "legacy"; state: LegacyAcceptanceState | null}>
-  | Readonly<{
-      kind: "exact";
-      lifecycle: GoalAcceptanceLifecycle;
-      state: OwnedAcceptanceState | null;
-      owner_matches: boolean;
-    }>;
+  | Readonly<{kind: "legacy"; state: AcceptanceState | null; configuration_revision: number}>
+  | Readonly<{kind: "exact"; lifecycle: GoalAcceptanceLifecycle; state: AcceptanceState | null;
+      configuration_revision: number; owner_matches: boolean}>;
+
+/** Removing checks retains the revision fence, without a feature switch or
+ * dormant command document. Immutable operation history keeps old evidence. */
+export function clearedGoalAcceptance(revision: number, goalRef: WireExactGoalRef | null): JsonObject {
+  return {schema_version: GOAL_ACCEPTANCE_SCHEMA, owner_goal_ref: goalRef, revision,
+    digest: null, document: null, bindings: [], verification: null};
+}
+
+/** Current readback has no enable flag. This boundary also reads retained
+ * pre-upgrade snapshots; consumers only ask whether actual checks exist. */
+export function configuredGoalChecks(value: JsonObject | null | undefined): JsonObject | null {
+  return value && value.enabled !== false && Array.isArray(value.criteria) ? value : null;
+}
 export type AcceptanceBindingState = "ready" | "unbound" | "stale";
 export interface AcceptanceTask extends JsonObject {
   todo_id: string;
@@ -321,25 +323,38 @@ export function goalAcceptanceWorkDigest(head: JsonObject, goalId: string, scope
     .map(todo => ({todo_id: todo.todo_id, digest: goalAcceptanceTodoDigest(todo)})));
 }
 
-/** Absent is the sole legacy/off shortcut; malformed present state fails closed. */
+/** Absent checks need no command guard; malformed present state fails closed. */
 export function readGoalAcceptanceAuthority(head: JsonObject, goalId: string): GoalAcceptanceAuthority {
   const lifecycle = readGoalAcceptanceLifecycle(head, goalId);
   if (!Object.hasOwn(head, "goal_acceptance")) {
     return lifecycle === null
-      ? {kind: "legacy", state: null}
-      : {kind: "exact", lifecycle, state: null, owner_matches: false};
+      ? {kind: "legacy", state: null, configuration_revision: 0}
+      : {kind: "exact", lifecycle, state: null, configuration_revision: 0, owner_matches: false};
   }
   acceptanceRequire(head.goal_id === goalId, "acceptance Goal identity mismatch");
   const state = canonicalAuthorityObject(head.goal_acceptance, "goal_acceptance");
-  const owned = state.schema_version === GOAL_ACCEPTANCE_OWNED_SCHEMA;
-  acceptanceKeys(state, ["schema_version", "enabled", "revision", "digest", "document", "bindings", "verification",
-    ...(owned ? ["owner_goal_ref"] : [])]);
-  acceptanceRequire((state.schema_version === GOAL_ACCEPTANCE_SCHEMA || owned) && typeof state.enabled === "boolean" &&
-    Number.isSafeInteger(state.revision) && Number(state.revision) > 0, "invalid acceptance state version");
+  // Normalize old storage once at this reader; all Goals share the same
+  // current runtime model. The old boolean never reaches execution logic.
+  const legacy = state.schema_version === "loopx_goal_acceptance_v0" || state.schema_version === "loopx_goal_acceptance_v1";
+  const owned = legacy ? state.schema_version === "loopx_goal_acceptance_v1" : state.owner_goal_ref !== null;
+  acceptanceKeys(state, ["schema_version", "revision", "digest", "document", "bindings", "verification",
+    ...(legacy ? ["enabled"] : []), ...(!legacy || owned ? ["owner_goal_ref"] : [])]);
+  acceptanceRequire((legacy || state.schema_version === GOAL_ACCEPTANCE_SCHEMA) &&
+    (!legacy || typeof state.enabled === "boolean") && Number.isSafeInteger(state.revision) && Number(state.revision) > 0,
+    "invalid acceptance state version");
   acceptanceRequire((lifecycle === null) === !owned,
     "goal acceptance state and lifecycle versions must be migrated atomically");
   const ownerGoalRef = owned ? parseWireExactGoalRef(state.owner_goal_ref, "goal acceptance owner_goal_ref") : null;
   if (ownerGoalRef) acceptanceRequire(ownerGoalRef.goal_id === goalId, "acceptance owner Goal identity mismatch");
+  const authority = (active: AcceptanceState | null): GoalAcceptanceAuthority => lifecycle === null
+    ? {kind: "legacy", state: active, configuration_revision: Number(state.revision)}
+    : {kind: "exact", lifecycle, state: active, configuration_revision: ownerGoalRef !== null && sameExactGoalRef(lifecycle.goal_ref, ownerGoalRef) ? Number(state.revision) : 0,
+        owner_matches: ownerGoalRef !== null && sameExactGoalRef(lifecycle.goal_ref, ownerGoalRef)};
+  if (!legacy && state.document === null) {
+    acceptanceRequire(state.digest === null && Array.isArray(state.bindings) && state.bindings.length === 0 && state.verification === null,
+      "removed checks must not retain active commands or verification");
+    return authority(null);
+  }
   const document = normalizeGoalAcceptanceDocument(state.document);
   acceptanceRequire(state.digest === canonicalAuthoritySha256(document), "acceptance contract digest mismatch");
   const bindings = list(state.bindings, "canonical bindings", 4096).map(value => {
@@ -377,31 +392,10 @@ export function readGoalAcceptanceAuthority(head: JsonObject, goalId: string): G
       results: normalizeAcceptanceResults(receipt.results, expectedIds)} as AcceptanceVerification;
     if (receipt.contract_revision === state.revision) validateOracleResults(document.criteria, verification.results);
   }
-  if (lifecycle === null) {
-    const legacyState: LegacyAcceptanceState = {
-      schema_version: GOAL_ACCEPTANCE_SCHEMA,
-      enabled: Boolean(state.enabled),
-      revision: Number(state.revision),
-      digest: String(state.digest),
-      document,
-      bindings,
-      verification,
-    };
-    return {kind: "legacy", state: legacyState};
-  }
-  acceptanceRequire(ownerGoalRef !== null, "exact goal acceptance requires an owner Goal reference");
-  const exactState: OwnedAcceptanceState = {
-    schema_version: GOAL_ACCEPTANCE_OWNED_SCHEMA,
-    owner_goal_ref: ownerGoalRef,
-    enabled: Boolean(state.enabled),
-    revision: Number(state.revision),
-    digest: String(state.digest),
-    document,
-    bindings,
-    verification,
-  };
-  return {kind: "exact", lifecycle, state: exactState,
-    owner_matches: sameExactGoalRef(lifecycle.goal_ref, exactState.owner_goal_ref)};
+  return authority(legacy && state.enabled === false ? null : {
+    schema_version: GOAL_ACCEPTANCE_SCHEMA, owner_goal_ref: ownerGoalRef,
+    revision: Number(state.revision), digest: String(state.digest), document, bindings, verification,
+  });
 }
 
 export function readGoalAcceptance(head: JsonObject, goalId: string): AcceptanceState | null {
@@ -414,14 +408,14 @@ export function bindGoalAcceptanceStateOwner(
   state: AcceptanceState,
   ownerGoalRef: WireExactGoalRef,
 ): OwnedAcceptanceState {
-  if (state.schema_version === GOAL_ACCEPTANCE_OWNED_SCHEMA) {
+  if (state.owner_goal_ref !== null) {
     acceptanceRequire(sameExactGoalRef(state.owner_goal_ref, ownerGoalRef),
       "goal acceptance state belongs to another Goal instance");
-    return state;
+    return {...state, owner_goal_ref: ownerGoalRef};
   }
   return {
     ...state,
-    schema_version: GOAL_ACCEPTANCE_OWNED_SCHEMA,
+    schema_version: GOAL_ACCEPTANCE_SCHEMA,
     owner_goal_ref: ownerGoalRef,
   };
 }
@@ -470,8 +464,8 @@ export function projectGoalAcceptance(head: JsonObject, goalId: string): JsonObj
     : {};
   const state = authority.kind === "legacy" ? authority.state
     : authority.owner_matches ? authority.state : null;
-  if (!state?.enabled || authority.kind === "exact" && authority.lifecycle.state !== "active") {
-    return {enabled: false, ...exactProjection};
+  if (!state || authority.kind === "exact" && authority.lifecycle.state !== "active") {
+    return {...exactProjection};
   }
   const todos = acceptanceTodos(head, goalId);
   const taskIds = new Set(state.document.scope?.kind === "selected_work" ? state.document.scope.todo_ids
@@ -490,7 +484,7 @@ export function projectGoalAcceptance(head: JsonObject, goalId: string): JsonObj
   }
   if (held.length) status = "held";
   return {...exactProjection, ...(state.document.scope === undefined ? {} : {scope: state.document.scope}),
-    enabled: true, revision: state.revision, digest: state.digest, objective: state.document.objective,
+    revision: state.revision, digest: state.digest, objective: state.document.objective,
     non_goals: state.document.non_goals, criteria: state.document.criteria.map(criterion => ({id: criterion.id, description: criterion.description,
       ...(criterion.oracle === undefined ? {} : {oracle: projectAcceptanceOracle(criterion, receipt?.results.find(row => row.criterion_id === criterion.id), status === "stale" || status === "held")})})),
     tasks, held_todo_ids: held.map(task => task.todo_id), status,
@@ -521,7 +515,7 @@ export function projectGoalAcceptanceWorkGuards(
   const authority = readGoalAcceptanceAuthority(head, goalId);
   const state = authority.kind === "legacy" ? authority.state
     : authority.owner_matches ? authority.state : null;
-  if (!state?.enabled) return {};
+  if (!state) return {};
   const todos = acceptanceTodos(head, goalId);
   const retiring = authority.kind === "exact" && authority.lifecycle.state === "retiring";
   return Object.fromEntries(todoIds.flatMap(todoId => {
@@ -541,7 +535,7 @@ export function acceptanceCompletionRequirements(head: JsonObject, goalId: strin
   const authority = readGoalAcceptanceAuthority(head, goalId);
   const state = authority.kind === "legacy" ? authority.state
     : authority.owner_matches ? authority.state : null;
-  if (!state?.enabled) return null;
+  if (!state) return null;
   const todo = acceptanceTodos(head, goalId).get(todoId);
   acceptanceRequire(todo, "acceptance completion Todo is missing");
   // Applicability follows the owner's binding, not the Todo's current shape:
