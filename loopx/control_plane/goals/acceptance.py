@@ -27,6 +27,7 @@ from ..todos.completion_validation import (
 )
 from .goal_ref_validation import exact_goal_ref
 from .acceptance_oracle_io import oracle_versions, run_snapshot_oracle
+from .activation import goal_is_stopped
 
 
 _INSPECT_METHOD = "goal.acceptance.inspect"
@@ -109,6 +110,24 @@ def transition_goal_acceptance_lifecycle(
     )
 
 
+def refine_goal_outcome(
+    *, registry_path: Path, goal_id: str, refinement: dict[str, Any],
+    expected_provider_revision: str, operation_id: str, agent_id: str | None = None,
+    runtime_root: str | None = None, execute: bool = False,
+) -> dict[str, Any]:
+    """Record scoped planning intent, never configure validators or attest success."""
+    route = _routing(registry_path, goal_id, runtime_root, agent_id)
+    goal = load_goal_from_registry(registry_path, goal_id)
+    if "owner_agent_id" in refinement and refinement["owner_agent_id"] not in registered_agent_ids_for_goal(goal):
+        raise ValueError("Outcome owner must be a registered Agent")
+    # The registry's legacy omitted-status form denotes an active Goal too.
+    if goal.get("status", "active") not in {"active", "ready"} or goal_is_stopped(goal):
+        raise ValueError("Outcome refinement requires an active Goal")
+    return _result("goal.acceptance.refine", {**route, "actor_agent_id": agent_id,
+        "expected_provider_revision": expected_provider_revision, "operation_id": operation_id,
+        "refinement": refinement, "dry_run": not execute}, timeout=CANONICAL_AUTHORITY_WRITE_TIMEOUT_SECONDS)
+
+
 def inspect_goal_acceptance(
     *,
     registry_path: Path,
@@ -125,26 +144,42 @@ def inspect_goal_acceptance(
         {**_routing(registry_path, goal_id, runtime_root, agent_id),
          **({"todo_id": todo_id} if todo_id is not None else {})},
     )
+    basis["goal_acceptance_contract"] = observe_goal_acceptance_oracles(
+        registry_path=registry_path, goal_id=goal_id,
+        contract=basis["goal_acceptance_contract"], criteria=(basis.get("contract") or {}).get("criteria", []),
+        task_repository=(basis.get("todo") or {}).get("task_repository"),
+        delivery_workspace=delivery_workspace, validation_workspace_path=validation_workspace_path)
+    return basis
+
+
+def observe_goal_acceptance_oracles(
+    *, registry_path: Path | None, goal_id: str, contract: dict[str, Any],
+    criteria: list[dict[str, Any]], task_repository: str | None = None,
+    delivery_workspace: Mapping[str, Any] | None = None,
+    validation_workspace_path: Path | None = None,
+) -> dict[str, Any]:
+    """Observe pinned refs supplied by one canonical read, without another read.
+
+    Inspect and status share this host IO. The caller retains the same snapshot
+    for Todos, checks and observation inputs; TS still classifies the evidence.
+    """
     observations = []
-    for criterion in (basis.get("contract") or {}).get("criteria", []):
+    for criterion in criteria:
         oracle = criterion.get("oracle")
         if oracle is None:
             continue
-        workspace, failure = _resolve_completion_validation_workspace(
-            registry_path=registry_path, goal_id=goal_id,
-            task_repository=(basis.get("todo") or {}).get("task_repository"),
-            delivery_workspace=delivery_workspace, validation_workspace_path=validation_workspace_path,
-            label=criterion["id"],
-        )
+        workspace, failure = (None, True) if registry_path is None else _resolve_completion_validation_workspace(
+            registry_path=registry_path, goal_id=goal_id, task_repository=task_repository,
+            delivery_workspace=delivery_workspace, validation_workspace_path=validation_workspace_path, label=criterion["id"])
         versions = None if failure else oracle_versions(workspace, oracle)
         observations.append({"criterion_id": criterion["id"], "available": versions is not None,
             "source_current": _acceptance_pins_match(criterion["validation_files"], workspace),
             **(versions or {})})
-    if observations:
-        basis["goal_acceptance_contract"] = effect_runtime_result("goal.acceptance.oracle.observe", {
-            "contract": basis["goal_acceptance_contract"], "observations": observations,
-        })
-    return basis
+    return effect_runtime_result("goal.acceptance.oracle.observe", {
+        "contract": contract, "observations": observations,
+    }) if observations else contract
+
+
 
 
 def _criterion_effects(criteria: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -1,3 +1,6 @@
+import {NON_WORK_FIELDS, goalAcceptanceTodoDigest} from "./acceptance_work_basis.ts";
+export {goalAcceptanceTodoDigest} from "./acceptance_work_basis.ts";
+import {goalOutcomeCheckBasis, projectGoalOutcomes} from "./outcome_requirements.ts";
 /** Owner-configured acceptance basis. This is neither a permission grant nor
  * the full shared Goal intent/amendment authority. The Todo manifest is unchanged. */
 import type {JsonObject} from "../effect_program.ts";
@@ -25,6 +28,7 @@ export type AcceptanceScope =
   | {kind: "all_advancement"}
   | {kind: "selected_work"; todo_ids: string[]};
 export interface AcceptanceDocument extends JsonObject {
+  outcome_id?: string;
   scope?: AcceptanceScope;
   objective: string;
   non_goals: string[];
@@ -124,6 +128,14 @@ function id(value: unknown): string {
   acceptanceRequire(result === value && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(result), "acceptance identifier must be a safe token");
   return result;
 }
+function criterionId(value: unknown): string {
+  // Outcome requirements use opaque IDs. Preserve their identity through
+  // configured checks and receipts; they are never executable paths.
+  const result = acceptanceText(value, "acceptance criterion identifier", 128);
+  acceptanceRequire(result === value && /^[A-Za-z0-9][A-Za-z0-9_.:@-]*$/.test(result),
+    "acceptance criterion identifier must be an opaque token");
+  return result;
+}
 function list(value: unknown, label: string, max: number, min = 0): unknown[] {
   acceptanceRequire(Array.isArray(value) && value.length >= min && value.length <= max, `${label} has invalid size`);
   return value;
@@ -171,7 +183,7 @@ function acceptanceIncludes(scope: AcceptanceScope | undefined, todoId: string):
 
 export function normalizeGoalAcceptanceDocument(value: unknown): AcceptanceDocument {
   const raw = canonicalAuthorityObject(value, "acceptance document");
-  acceptanceKeys(raw, ["objective", "non_goals", "criteria", "bindings"], ["scope"]);
+  acceptanceKeys(raw, ["objective", "non_goals", "criteria", "bindings"], ["scope", "outcome_id"]);
   const scope = raw.scope === undefined ? undefined : normalizeAcceptanceScope(raw.scope);
   acceptanceRequire(canonicalAuthorityBytes(raw).length <= 262144, "acceptance document exceeds byte limit");
   const criteria = list(raw.criteria, "acceptance criteria", 64, 1).map(value => {
@@ -184,7 +196,7 @@ export function normalizeGoalAcceptanceDocument(value: unknown): AcceptanceDocum
     acceptanceRequire(argv[0].trim().length > 0, "validation argv requires an executable");
     const timeout = item.validation_timeout_seconds ?? 5;
     acceptanceRequire(Number.isSafeInteger(timeout) && Number(timeout) >= 1 && Number(timeout) <= 25, "validation timeout must be 1..25 seconds");
-    const criterion = {id: id(item.id), description: acceptanceText(item.description, "criterion description"),
+    const criterion = {id: criterionId(item.id), description: acceptanceText(item.description, "criterion description"),
       validation_argv: argv, validation_timeout_seconds: Number(timeout),
       validation_files: validationFiles(item.validation_files === undefined ? [] : item.validation_files)};
     return {...criterion, ...(item.oracle === undefined ? {} : {oracle: normalizeAcceptanceOracle(item.oracle, criterion)})};
@@ -195,32 +207,40 @@ export function normalizeGoalAcceptanceDocument(value: unknown): AcceptanceDocum
   const bindings = list(raw.bindings, "acceptance bindings", 4096).map(value => {
     const item = canonicalAuthorityObject(value, "acceptance binding");
     acceptanceKeys(item, ["todo_id", "criterion_ids"]);
-    const criterion_ids = unique(list(item.criterion_ids, "binding criteria", 64, 1).map(id), "binding criteria");
+    const criterion_ids = unique(list(item.criterion_ids, "binding criteria", 64, 1).map(criterionId), "binding criteria");
     acceptanceRequire(criterion_ids.every(key => criterionIds.includes(key)), "binding references an unknown criterion");
     return {todo_id: id(item.todo_id), criterion_ids};
   }).sort((a, b) => authorityUnicodeCompare(a.todo_id, b.todo_id));
   unique(bindings.map(item => item.todo_id), "bindings");
   acceptanceRequire(bindings.every(binding => acceptanceIncludes(scope, binding.todo_id)),
     "acceptance binding is outside the declared scope");
-  return {...(scope === undefined ? {} : {scope}), objective: acceptanceText(raw.objective, "acceptance objective"),
+  return {...(raw.outcome_id === undefined ? {} : {outcome_id: acceptanceText(raw.outcome_id, "outcome id", 128)}),
+    ...(scope === undefined ? {} : {scope}), objective: acceptanceText(raw.objective, "acceptance objective"),
     non_goals: list(raw.non_goals, "non-goals", 64).map(item => acceptanceText(item, "non-goal", 2048)), criteria, bindings};
 }
 
-// Exact field classification, never prose/substring relevance. Unknown future
-// domain fields remain digest inputs by default. Execution observations and
-// presentation must not revoke a confirmed work declaration.
-const NON_WORK_FIELDS = new Set([
-  "schema_version", "source_section", "index", "title", "priority", "status", "done", "archive_state",
-  "claimed_by", "created_by", "last_actor_agent_id", "updated_at", "completed_at", "completion_turn_key",
-  "completion_validation_sha256", "completion_recovery", "completion_continuation", "no_followup", "decision_outcome",
-  "completion_result", "completion_receipt_id",
-  "decision_scope_outcomes", "note", "evidence", "reason", "handoff_note", "resume_ready",
-  "resume_monitor_generation", "last_checked_at", "result_hash", "consecutive_no_change",
-  "material_change", "material_change_generation", "monitor_effect_id",
-]);
-export function goalAcceptanceTodoDigest(todo: JsonObject): string {
-  return canonicalAuthoritySha256(Object.fromEntries(Object.entries(todo).filter(([key]) => !NON_WORK_FIELDS.has(key))));
+/** Compact authoring references retained requirements instead of duplicating
+ * objective, descriptions and work. Expanded snapshots remain readable on disk. */
+export function resolveGoalAcceptanceDocument(head: JsonObject, goalId: string, value: unknown): AcceptanceDocument {
+  const raw = canonicalAuthorityObject(value, "acceptance document");
+  if (raw.outcome_id === undefined) return normalizeGoalAcceptanceDocument(raw);
+  acceptanceKeys(raw, ["outcome_id", "criteria"]);
+  const basis = goalOutcomeCheckBasis(head, goalId, raw.outcome_id);
+  const requirements = basis.requirements as {id: string; description: string}[];
+  const todoIds = basis.todo_ids as string[];
+  acceptanceRequire(todoIds.length > 0, "link outcome work before preparing executable checks");
+  const criteria = list(raw.criteria, "acceptance criteria", 64, 1).map(value => {
+    const check = canonicalAuthorityObject(value, "requirement check");
+    acceptanceKeys(check, ["id", "validation_argv"], ["validation_timeout_seconds", "validation_files", "oracle"]);
+    const requirement = requirements.find(r => r.id === check.id);
+    acceptanceRequire(requirement, "check references an unknown outcome requirement");
+    return {...check, id: requirement.id, description: requirement.description};
+  });
+  return normalizeGoalAcceptanceDocument({outcome_id: basis.outcome_id, objective: basis.objective, non_goals: [],
+    scope: {kind: "selected_work", todo_ids: todoIds}, criteria,
+    bindings: todoIds.map(todo_id => ({todo_id, criterion_ids: criteria.map(c => c.id)}))});
 }
+
 function acceptanceDigestMatches(todo: JsonObject, boundDigest: string): boolean {
   if (goalAcceptanceTodoDigest(todo) === boundDigest) return true;
   // Before completion checkpoints were classified as observations, an owner
@@ -448,7 +468,7 @@ export function normalizeAcceptanceResults(value: unknown, expectedIds?: readonl
     acceptanceRequire(typeof item.passed === "boolean" && (item.exit_code === null ||
       (Number.isSafeInteger(item.exit_code) && Number(item.exit_code) >= 0 && Number(item.exit_code) <= 255)), "invalid verification result");
     acceptanceRequire(item.passed === (item.exit_code === 0), "criterion pass/fail must agree with exit code zero");
-    return {criterion_id: id(item.criterion_id), passed: item.passed, exit_code: item.exit_code as number | null,
+    return {criterion_id: criterionId(item.criterion_id), passed: item.passed, exit_code: item.exit_code as number | null,
       ...(item.oracle_evidence === undefined ? {} : {oracle_evidence: normalizeOracleEvidence(item.oracle_evidence)})};
   }).sort((a, b) => authorityUnicodeCompare(a.criterion_id, b.criterion_id));
   const ids = unique(results.map(item => item.criterion_id), "verification results");
@@ -457,7 +477,7 @@ export function normalizeAcceptanceResults(value: unknown, expectedIds?: readonl
   return results;
 }
 
-export function projectGoalAcceptance(head: JsonObject, goalId: string): JsonObject {
+function projectAcceptanceChecks(head: JsonObject, goalId: string): JsonObject {
   const authority = readGoalAcceptanceAuthority(head, goalId);
   const exactProjection = authority.kind === "exact"
     ? {lifecycle_state: authority.lifecycle.state, goal_ref: authority.lifecycle.goal_ref}
@@ -484,12 +504,21 @@ export function projectGoalAcceptance(head: JsonObject, goalId: string): JsonObj
   }
   if (held.length) status = "held";
   return {...exactProjection, ...(state.document.scope === undefined ? {} : {scope: state.document.scope}),
+    ...(state.document.outcome_id === undefined ? {} : {outcome_id: state.document.outcome_id}),
     revision: state.revision, digest: state.digest, objective: state.document.objective,
     non_goals: state.document.non_goals, criteria: state.document.criteria.map(criterion => ({id: criterion.id, description: criterion.description,
       ...(criterion.oracle === undefined ? {} : {oracle: projectAcceptanceOracle(criterion, receipt?.results.find(row => row.criterion_id === criterion.id), status === "stale" || status === "held")})})),
     tasks, held_todo_ids: held.map(task => task.todo_id), status,
     verification: receipt ? {operation_id: receipt.operation_id, contract_revision: receipt.contract_revision,
       contract_digest: receipt.contract_digest, todo_id: receipt.todo_id, results: receipt.results} : null};
+}
+
+/** Outcomes extend the existing acceptance read, even before checks are configured.
+ * No declaration preserves the original projection byte-for-byte. */
+export function projectGoalAcceptance(head: JsonObject, goalId: string): JsonObject {
+  const checks = projectAcceptanceChecks(head, goalId);
+  const outcomes = projectGoalOutcomes(head, goalId, checks);
+  return outcomes === null ? checks : {...checks, outcome_requirements: outcomes};
 }
 
 /** Explicit selection and confirmed bindings survive mutable work fields.

@@ -73,17 +73,42 @@ plus `node examples/dashboard-goal-acceptance-browser-smoke.mjs`. The browser
 check consumes real status collection over a disposable synthetic Goal; set
 `LOOPX_GOAL_ACCEPTANCE_PACKAGED=1` after the Dashboard build to check shipped assets.
 
+## Default supporting outcomes
+
+Goal Overview shows supporting outcomes recorded by a bound Agent: original
+objective, cumulative requirements, linked work, sources and separate Agent
+review/check results. The local owner can **Add a requirement** and read the
+canonical result. Refresh a stale view before rebasing; an unconfirmed write
+retains its operation for retry. No model starts and no check command runs.
+
+Outcome maintenance and evidence review are default, without a feature switch.
+Current storage/readback has no `enabled` switch. Every upgraded Goal uses the
+same feedback loop. An Agent review does
+not certify independent acceptance or complete the root Goal; requirements/work
+changes invalidate its basis and artifact edits require another review. Other
+runnable research and original budget/stop conditions retain precedence.
+The native tool and CLI provide inline context and one-call writeback.
+Automatic frontier/ACK routing and the external-host workflow are the next
+dependent slice; their delivery is qualified separately.
+
+中文：Goal 概览显示 Agent 登记的支撑成果：原始目的、累计要求、关联工作、来源，
+并区分 Agent 自查与独立检查。所有者可原地补充要求并读取原生结果；过期视图先
+刷新再重基，未确认写入保留原操作重试。不启动模型或执行检查命令。默认维护和
+有据自查没有开关，当前存储和读回删除 `enabled`；升级后的所有 Goal 使用同一闭环。
+自查不代表独立验收或根
+Goal 完成；要求／工作变化使依据过期，产物修改后须重新核对。既有可执行研究及
+原始预算／停止条件保持权威。
+
 <a id="owner-authorized-contract-v0"></a>
 
-## Owner-configured executable checks (v2)
+## Executable checks within default acceptance
 
-An owner can configure executable checks for an existing registered Goal.
+An owner can attach executable checks to an existing registered Goal’s requirements.
 The Goal must already use promoted canonical authority. These commands never
 promote a provider or fall back to legacy Markdown when canonical reads fail.
-The owner reviews the complete check document: its objective, criteria,
-command effects and coverage of existing advancement work. Configured checks
-define this gate; there is no separate acceptance enablement decision.
-The existing Goal authority owns the contract; the
+Prefer a plan that references `outcome_id` and criteria IDs; the typed owner resolves
+objective, requirement descriptions and linked work. The owner reviews the concrete
+commands and scope before execution. Standalone check documents remain supported. The existing Goal authority owns the contract; the
 Dashboard presents its checked result and uses the same owner for authorized changes. No new capability editor or provider is introduced.
 
 For an ordinary delivery, the Agent prepares the technical plan from the stated
@@ -154,8 +179,7 @@ Count the complete task: with an Agent-prepared plan already delivered, the owne
 has one required decision. If the original request still lacks acceptance intent
 or authority, that missing decision is an additional round; preparing a proposal
 alone does not establish a one-round cold-start or live-model experience.
-Without a configured check plan, ordinary task and acceptance observation
-behavior remains unchanged. No Lark action is introduced.
+No-plan/default-off behavior remains unchanged, and no Lark action is introduced.
 
 中文：普通路径由 Agent 根据目标与既有上下文准备方案，负责人在交付处核对要求、覆盖范围和
 执行影响，一次“采用并检查”；已有配置直接“检查交付”。JSON 导入仅保留为高级迁移入口。
@@ -311,8 +335,8 @@ the Agent can read the exact checkpoints that recovery requires. Only an
 accepted, evidence-linked runnable successor or concrete blocker receipt covering
 the exact hold generation can quiet it. Unrelated progress, a vision rewrite,
 or an acknowledgement for another association cannot discharge the hold.
-Reconfirming the contract or changing the work rearms recovery. Goals without configured
-checks retain their existing task and frontier behavior. When quota selects replan, candidate
+Reconfirming the contract or changing the work rearms recovery. Disabled/absent
+acceptance retains its existing behavior. When quota selects replan, candidate
 monitors remain inventory; `selected_todo` and `agent_lane_next_action` do not
 advertise them as this decision's execution target. Original receipt identities
 remain in their settlement contracts. A genuinely Todo-bound replan still
@@ -321,7 +345,7 @@ projects its selected Todo; this only removes the unrelated inventory fallback.
 Existing check documents configured
 with a persisted `no_followup` field under the earlier digest rule require owner inspection and
 reconfiguration; no historical receipt is rewritten or automatically accepted.
-Goals without configured checks retain their existing behavior.
+Disabled/absent acceptance retains its existing behavior.
 
 For an already authorized delegation, `turn plan --todo-id todo_example` and
 `turn run-once --todo-id todo_example` select that exact currently eligible work
@@ -344,9 +368,8 @@ the delivery chain. It shows the Goal ID, contract revision/digest, criteria,
 task associations, and verification results with their own revision/digest.
 The section exists only when the server's
 `acceptance.goal_acceptance_contract.criteria` carries a check configuration.
-Goals without a check configuration retain their existing acceptance observation
-and export. The existing snapshot export and status Markdown include check
-readback without command bodies or raw logs.
+Requirements and Agent reviews remain available without commands. The existing
+snapshot export and status Markdown include readback without command bodies or raw logs.
 
 | Server state | Readback meaning |
 | --- | --- |
@@ -359,9 +382,8 @@ readback without command bodies or raw logs.
 | Contract `accepted` | All configured artifact checks passed on the current basis; this does not approve or complete the Goal |
 
 Removing check configuration is an explicit owner operation against a freshly
-inspected provider revision. It removes the active commands and their gate while
-retaining the revision fence and historical records. Existing task authority,
-permissions, and lifecycle rules still apply:
+inspected provider revision. Default requirement review and replanning continue; existing
+task authority, permissions, and lifecycle rules still apply:
 
 ```bash
 loopx --format json goal-acceptance inspect --goal-id example-goal
@@ -425,12 +447,12 @@ status 同时在独立的 `run_history.goals[].artifact_lifecycle` 和 Markdown 
 上面的测试命令覆盖合成 Goal 的生产 refresh-state 写入、
 真实 status 收集和浏览器入口；打包验证使用 `LOOPX_GOAL_ACCEPTANCE_PACKAGED=1`。
 
-### 所有者配置的命令检查（v2）
+### 默认验收中的命令检查
 
-所有者可为已注册且**已提升到 canonical authority** 的 Goal 配置命令检查。
+已注册且**已提升到 canonical authority** 的 Goal 可为已有成果要求配置命令检查。
 命令不会自动提升 provider，canonical 读取失败也不回退到旧 Markdown。
-所有者审阅完整检查文档中的目标、条件、命令影响和既有推进任务覆盖范围，
-再采用配置。检查配置决定此门禁，不设额外的验收启用决定。
+优先引用 `outcome_id` 和要求 ID，由类型化 owner 解析目标、条件描述和关联任务；
+所有者审阅实际命令及范围后采用。不设整体启用开关。
 合同归既有 Goal authority 所有，Dashboard 展示其检查结果，并通过同一 owner 执行授权操作；
 不新增独立配置 owner 或 provider。普通路径采用上方的 Agent 准备与原位检查，以下 CLI/JSON
 步骤保留给高级配置及迁移。
@@ -481,14 +503,14 @@ claim、lease/fence、权限和后续工作要求。既有验证回执或已确�
 
 有界触发项优先保留验收阻塞及其精确检查点，再展示通用 vision 缺口。只有覆盖该阻塞
 代次、被接纳的有据可运行后继或具体阻塞回执，才会消解重复唤醒。无关进展、改写 vision、
-其他关联的确认均不能代替；重新确认合同或改变工作会重新触发恢复。未配置命令检查时，原有任务和 frontier 规则保持生效。
+其他关联的确认均不能代替；重新确认合同或改变工作会重新触发恢复。未配置命令检查时，默认要求核对和 replan 仍然可用。
 配额选择重规划时，候选观察任务仍可见于清单，但不再同时成为 `selected_todo` 或
 `agent_lane_next_action`；原回执身份仍由结算合同保留。真正绑定 Todo 的重规划仍展示原 Todo，
 本次仅移除从无关观察清单补出的选择。
 
 `loopx goal-acceptance verify --goal-id example-goal` 仅预览；加 `--execute` 执行全部配置条件，
 再运行 inspect 读回。进入 **概览 → 交付与依据**，刷新并展开交付链下方的 **Goal 验收合同**。
-命令检查区块按实际 `criteria` 配置展示；无配置时保留原有验收观察与导出，不设额外启用开关。
+命令检查区块按实际 `criteria` 配置展示；无命令时仍展示成果要求与 Agent 自查。整体没有启用开关。
 区块及导出展示 Goal ID、合同版本/摘要、条件、任务关联，以及带独立版本/摘要的历史验证结果。
 
 任务 `ready` 只表示所有者确认关联；`unbound` / `stale` 表示缺失 / 过期；
@@ -499,12 +521,12 @@ claim、lease/fence、权限和后续工作要求。既有验证回执或已确�
 
 移除检查配置前重新 inspect，随后执行
 `loopx goal-acceptance clear-checks --goal-id example-goal --expected-provider-revision '<current_provider_revision>' --execute`，
-并再次 inspect。该操作移除命令检查约束，保留版本栅栏和历史记录；原有任务、权限、frontier 和生命周期规则继续生效。
+并再次 inspect。该操作移除命令检查约束，保留版本栅栏和历史记录；默认目标核对与 replan 继续生效。
 检查配置不会授予发布、外部副作用、provider 提升或 Goal 完成权威；目标、条件描述与原因必须适合其 status 受众。
 Lark 呈现、远端合同编辑、语义意图保持证明与通用共享 amendment 留给 #3836 / #2831 后续切片，
 不宣称任一 RFC 已完成。合同浏览器检查用 `npm run smoke:goal-acceptance-contract-browser`；
 前端集成打包后，`npm run smoke:goal-acceptance-contract-packaged` 对已发布资源跑同一项检查。
-Python renderer 测试和 API/export smoke 覆盖缺失、旧停用快照、过期、失败及通过的区别。
+Python renderer 测试和 API/export smoke 覆盖缺失、停用、过期、失败及通过的区别。
 
 
 ## Restore an unintended text/wait edit after lease release
@@ -628,12 +650,12 @@ The witness remains under the historical check record when files change or
 current observations are unavailable. It cannot turn a recorded or stale check
 into current acceptance. Downloading reads the snapshot; it does not execute a
 checker. Missing witness fields stay missing. Ordinary criteria retain their export format; absent checks add no command
-verification section. Existing acceptance observations remain available.
+verification section. Supporting outcomes remain visible independently.
 
 **导出依据。** 现有「交付与依据 → 导出交付快照」保留检查器来源、摘要、实际检查时间
 及输入／输出版本，并分别显示条件的观测状态与历史检查记录。文件变化或当前观测缺失时，
 旧依据仍可回看，但不表示当前通过；下载不会重跑检查，也不会补造缺失的回执。
-普通条件保留原有导出格式；未配置检查时不增加命令验证段，原有验收观察保持可用。
+普通条件保留原有导出格式；未配置检查时不增加命令验证段，子成果仍独立可见。
 
 The same local-owner journey is available through the existing CLI:
 
@@ -679,22 +701,3 @@ model preparation or a complete one-round request.
 | --- | --- | --- |
 | Desktop | ![Earlier desktop](../../examples/personal-workspace-browser/check-overview-before-desktop.png) | ![Check in the Goal brief](../../examples/personal-workspace-browser/check-overview-desktop.png) |
 | 390px | ![Earlier phone](../../examples/personal-workspace-browser/check-overview-before-phone.png) | ![Phone check and folded details](../../examples/personal-workspace-browser/check-overview-phone.png) |
-
-
-## Check configuration migration
-
-Current storage is `loopx_goal_acceptance_v2`, without an `enabled` flag.
-The shared reader normalizes v0/v1 state and retained snapshots; all native, CLI
-and Dashboard consumers use the actual check configuration. `clear-checks`
-removes active commands and verification while retaining the revision fence and
-immutable history. The legacy `disable` CLI/HTTP spelling remains readable.
-Older binaries cannot write v2 state; clearing checks is not a storage downgrade.
-No command runs during migration, and owner approval is still required to change
-checks. Persistent outcome authoring and automatic outcome replanning are
-separate dependent delivery slices.
-
-中文：当前存储统一为 `loopx_goal_acceptance_v2`，不再保存 `enabled`。
-读取边界兼容旧 v0/v1 和历史快照；原生、CLI、Dashboard 都按实际检查配置判断。
-`clear-checks` 删除当前命令和验证投影，保留版本栅栏与不可变历史，旧 `disable`
-CLI/HTTP 拼写仍兼容。旧二进制不支持写入 v2，清除检查不是存储降级。
-迁移不执行命令，也不改变 owner 配置权限；累计成果和自动重规划分别由后继切片交付。

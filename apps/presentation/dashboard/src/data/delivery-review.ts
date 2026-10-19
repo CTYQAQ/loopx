@@ -223,6 +223,16 @@ export function deliveryReviewMarkdown(snapshot: DeliveryReviewSnapshot, labels:
       `${labels.next}: ${line(acceptance.next_action)} (${line(acceptance.next_action_source)})`);
   }
   const contract = acceptance?.goal_acceptance_contract;
+  for (const outcome of contract?.outcome_requirements?.outcomes ?? []) {
+    rows.push("", `### ${line(outcome.objective)}`);
+    for (const requirement of outcome.requirements) {
+      const review = requirement.agent_review;
+      rows.push(`- ${line(requirement.description)} · checks: ${requirement.status}`);
+      if (review) rows.push(`  Agent review: ${review.conclusion}; basis_current=${review.basis_current}; not independent verification`,
+        `  ${line(review.note)}`, ...review.evidence_refs.map(ref => `  evidence: ${line(ref)}`));
+    }
+    rows.push(...outcome.work.map(work => `- ${line(work.todo_id)}: ${line(work.status)}`));
+  }
   if (hasConfiguredGoalChecks(contract)) {
     const copy = labels.contract;
     rows.push("", `## ${copy.title}`, "", copy.boundary,

@@ -57,6 +57,7 @@ class GoalAcceptanceRequestMixin:
     def _goal_acceptance_update(self) -> None:
         from .acceptance import (
             configure_goal_acceptance,
+            refine_goal_outcome,
             public_goal_acceptance,
             verify_goal_acceptance,
         )
@@ -67,6 +68,7 @@ class GoalAcceptanceRequestMixin:
                 "goal_id",
                 "action",
                 "document",
+                "refinement",
                 "expected_provider_revision",
                 "operation_id",
             }:
@@ -88,7 +90,14 @@ class GoalAcceptanceRequestMixin:
                 "goal_id": goal_id,
                 "execute": True,
             }
-            if action == "verify":
+            if action == "refine":
+                if set(body) != {"goal_id", "action", "refinement", "expected_provider_revision", "operation_id"}:
+                    raise ValueError("refine requires an exact outcome request")
+                if not isinstance(body["refinement"], dict) or not isinstance(body["operation_id"], str) or not body["operation_id"]:
+                    raise ValueError("refine requires a document and stable operation id")
+                result = public_goal_acceptance(refine_goal_outcome(**common, refinement=body["refinement"],
+                    operation_id=body["operation_id"], expected_provider_revision=revision))
+            elif action == "verify":
                 if set(body) - {"goal_id", "action", "expected_provider_revision"}:
                     raise ValueError("check does not accept declarations or results")
                 result = verify_goal_acceptance(

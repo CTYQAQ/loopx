@@ -21,11 +21,12 @@ import {completionTurnOperationId,
  * this same owner. */
 export function canonicalTodoCollection(head: JsonObject, goalId: string, includeLeases: boolean) {
   const read = new CoordinationProjectionRead(head, goalId);
+  const acceptance = projectGoalAcceptance(head, goalId);
   return {
     projection: read.todoIndex,
     todoReadModel: read.validateTodoReadModel(),
     leaseIndex: includeLeases ? read.coordinationIndex : null,
-    acceptance: projectGoalAcceptance(head, goalId),
+    acceptance,
   };
 }
 
@@ -182,7 +183,7 @@ export async function readLocalCoordinationTodoSource(
       provider_revision: revision, cursor, store_identity: identity.store_identity,
       todos: projection.todo_ids.map((todoId) => projection.todos.get(todoId)!),
       todo_ids: projection.todo_ids, todo_read_model: todoReadModel,
-      ...(!configuredGoalChecks(acceptance) ? {} : {
+      ...(!configuredGoalChecks(acceptance) && !acceptance.outcome_requirements ? {} : {
         goal_acceptance_contract: acceptance,
         goal_acceptance_work_guards: projectGoalAcceptanceWorkGuards(
           transaction.projection, goalId, projection.todo_ids),
@@ -321,7 +322,7 @@ export async function listLocalCoordinationTodos(
       todos: projection.todo_ids.map((todoId) => projection.todos.get(todoId)!),
       todo_ids: projection.todo_ids,
       todo_read_model: todoReadModel,
-      ...(!configuredGoalChecks(acceptance) ? {} : {goal_acceptance_contract: acceptance,
+      ...(!configuredGoalChecks(acceptance) && !acceptance.outcome_requirements ? {} : {goal_acceptance_contract: acceptance,
         goal_acceptance_work_guards: projectGoalAcceptanceWorkGuards(head.head, goalId, projection.todo_ids)}),
       ...(leaseIndex === null ? {} : {
         leases: leaseIndex.lease_todo_ids.map((id) => leaseIndex.leases.get(id)!),

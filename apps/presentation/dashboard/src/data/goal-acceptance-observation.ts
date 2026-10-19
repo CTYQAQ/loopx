@@ -6,7 +6,18 @@ export const oracleEvidenceSchema = z.object({source_id: z.string(), source_dige
   input_versions: z.array(z.object({ref: z.string(), sha256: z.string()})),
   output_versions: z.array(z.object({ref: z.string(), sha256: z.string()}))});
 export type OracleEvidence = z.infer<typeof oracleEvidenceSchema>;
-// Configured checks and empty projections retain the native
+export const outcomeRequirementsSchema = z.object({schema_version: z.literal("loopx_goal_outcomes_v0"),
+  revision: z.number().int().positive(), current_lifetime: z.boolean(), execution_authority_granted: z.literal(false), goal_completion_assessed: z.literal(false),
+  outcomes: z.array(z.object({id: z.string(), owner_agent_id: z.string(), objective: z.string(), revision: z.number().int().positive(),
+    requirements: z.array(z.object({id: z.string(), description: z.string(),
+      agent_review: z.object({id: z.string(), conclusion: z.enum(["met", "unmet", "uncertain"]), evidence_refs: z.array(z.string()), note: z.string(), basis_current: z.boolean(), independently_verified: z.literal(false)}).optional(),
+      planning_satisfied: z.boolean(), status: z.enum(["unverified", "stale", "failed", "partial", "accepted", "held"])})),
+    todo_ids: z.array(z.string()), sources: z.array(z.object({ref: z.string(), summary: z.string()})),
+    work: z.array(z.object({todo_id: z.string(), status: z.string()})),
+  })),
+});
+export type OutcomeRequirements = z.infer<typeof outcomeRequirementsSchema>;
+// Both configured checks and the default outcome projection retain the native
 // lifetime identity. A cached editor must not follow a reused Goal id.
 const goalAcceptanceSource = {
   lifecycle_state: z.string().optional(),
@@ -14,6 +25,8 @@ const goalAcceptanceSource = {
 };
 const goalAcceptanceChecksSchema = z.object({
     ...goalAcceptanceSource,
+    outcome_requirements: outcomeRequirementsSchema.optional(),
+    outcome_id: z.string().optional(),
     revision: z.number().int().positive(), digest: z.string().min(1), objective: z.string(),
     scope: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("all_advancement") }).strict(),
@@ -43,11 +56,12 @@ export const goalAcceptanceContractSchema = z.preprocess(value => {
   if (!value || typeof value !== "object" || !("enabled" in value)) return value;
   const legacy = value as Record<string, unknown>;
   if (typeof legacy.enabled !== "boolean") return null;
-  if (!legacy.enabled) return {goal_ref: legacy.goal_ref, lifecycle_state: legacy.lifecycle_state};
+  if (!legacy.enabled) return {outcome_requirements: legacy.outcome_requirements,
+    goal_ref: legacy.goal_ref, lifecycle_state: legacy.lifecycle_state};
   const {enabled: _oldSwitch, ...current} = legacy;
   return current;
 }, z.union([goalAcceptanceChecksSchema, z.object({
-  criteria: z.never().optional(),
+  criteria: z.never().optional(), outcome_requirements: outcomeRequirementsSchema.optional(),
   ...goalAcceptanceSource,
 }).strict()]));
 export type GoalAcceptanceContract = z.infer<typeof goalAcceptanceContractSchema>;

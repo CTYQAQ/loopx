@@ -459,3 +459,14 @@ test("an inline unfinished agenda cannot fulfill the full Inbox read", () => {
   assert.equal(context.complete, true);
   assert.deepEqual((context.sources as JsonObject[])[0].content, content);
 });
+
+
+test("declared outcomes remain required reads without enabled checks after a work switch", () => {
+  const facts = {...readFacts(), goal_acceptance_checks_present: false, goal_outcomes_present: true, selected_todo: {todo_id: "todo_other"}};
+  const reads = projectInteractionRequiredReads(facts).required_reads as JsonObject[];
+  const acceptance = reads.find(read => read.source === "goal_acceptance");
+  assert.ok(acceptance);
+  assert.match(String(acceptance.reason), /cumulative requirements/);
+  const off = projectInteractionRequiredReads({...facts, goal_outcomes_present: false}).required_reads as JsonObject[];
+  assert.ok(!off.some(read => read.source === "goal_acceptance"));
+});

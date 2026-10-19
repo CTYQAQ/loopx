@@ -11,6 +11,7 @@ from typing import Any
 
 from ..control_plane.goals.acceptance import (
     configure_goal_acceptance,
+    refine_goal_outcome,
     inspect_goal_acceptance,
     public_goal_acceptance,
     verify_goal_acceptance,
@@ -20,23 +21,23 @@ from ..control_plane.goals.acceptance import (
 def register_goal_acceptance_command(subparsers: Any, add_format: Any) -> None:
     parser = subparsers.add_parser(
         "goal-acceptance",
-        help="Configure, inspect or verify a versioned Goal acceptance basis.",
+        help="Retain outcome requirements, review evidence and optionally run configured checks.",
     )
     add_format(parser)
-    parser.add_argument("action", type=lambda value: "clear-checks" if value == "disable" else value, choices=("inspect", "prepare", "configure", "verify", "clear-checks"))
+    parser.add_argument("action", type=lambda value: "clear-checks" if value == "disable" else value, choices=("inspect", "prepare", "configure", "verify", "clear-checks", "refine"))
     parser.add_argument("--goal-id", required=True)
     parser.add_argument(
         "--agent-id",
-        help="Registered caller; Agents may inspect, prepare or verify, but preparation never approves or executes a plan.",
+        help="Registered caller; Agents may inspect, prepare or verify, or refine their own outcomes; preparation/refinement never approves or executes checks.",
     )
     parser.add_argument(
         "--document",
         type=Path,
-        help="Prepared check plan with explicit scope; prepare validates it without approval/execution, configure requires the owner.",
+        help="Outcome refinement or check plan. Checks may reference outcome_id and requirement IDs; configure requires the owner.",
     )
     parser.add_argument(
         "--expected-provider-revision",
-        help="Exact revision from inspect; required by configure/clear-checks.",
+        help="Exact revision from inspect; required by configure/clear-checks/refine.",
     )
     parser.add_argument(
         "--operation-id", help="Stable identity for an unchanged configuration retry."
@@ -44,7 +45,7 @@ def register_goal_acceptance_command(subparsers: Any, add_format: Any) -> None:
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="With prepare, save a reviewable plan only; with configure/clear-checks/verify, apply the named operation. Otherwise preview only.",
+        help="With refine, retain requirements and optional Agent evidence review; with prepare, save a reviewable plan only; with configure/clear-checks/verify, apply the named operation. Otherwise preview only.",
     )
 
 
@@ -55,6 +56,7 @@ def render_goal_acceptance(payload: dict[str, Any]) -> str:
     if payload.get("provider_revision"):
         lines.append(f"- provider revision: {payload['provider_revision']}")
     contract = payload.get("goal_acceptance_contract") or {}
+    lines.append("- requirements and evidence review: available by default")
     if not configured_checks(contract):
         lines.append("- automated checks: not configured")
     if configured_checks(contract):
@@ -72,6 +74,18 @@ def render_goal_acceptance(payload: dict[str, Any]) -> str:
         lines.append(
             f"- configured artifact checks: {contract.get('status', 'unverified')}"
         )
+    for outcome in (contract.get("outcome_requirements") or {}).get("outcomes", []):
+        lines.append(f"- outcome {outcome['id']}: {outcome['objective']} ({outcome['owner_agent_id']})")
+        for requirement in outcome["requirements"]:
+            lines.append(f"  - {requirement['id']}: {requirement['description']} [{requirement['status']}]")
+            review = requirement.get("agent_review")
+            if review:
+                current = "current basis" if review["basis_current"] else "basis changed; review again"
+                lines.append(f"    Agent review: {review['conclusion']} ({current}; not independent verification). {review['note']}")
+                lines.extend(f"    evidence: {ref}" for ref in review["evidence_refs"])
+        lines.append("  work: " + (", ".join(f"{work['todo_id']} ({work['status']})" for work in outcome["work"]) or "not linked"))
+    for gap in (contract.get("outcome_requirements") or {}).get("acceptance_gaps", []):
+        lines.append(f"- next work for {gap['outcome_id']}: {', '.join(gap['requirement_ids'])} still needs evidence or linked work; use existing replan")
     return "\n".join(lines)
 
 
@@ -92,7 +106,15 @@ def handle_goal_acceptance_command(
             "runtime_root": runtime_root_arg,
             "agent_id": args.agent_id,
         }
-        if args.action == "prepare":
+        if args.action == "refine":
+            if args.document is None or not args.operation_id or not args.expected_provider_revision:
+                raise ValueError("refine requires --document, --operation-id and --expected-provider-revision from inspect")
+            refinement = json.loads(args.document.read_text(encoding="utf-8"))
+            if not isinstance(refinement, dict):
+                raise ValueError("outcome refinement must be a JSON object")
+            payload = public_goal_acceptance(refine_goal_outcome(**common, refinement=refinement,
+                operation_id=args.operation_id, expected_provider_revision=args.expected_provider_revision, execute=args.execute))
+        elif args.action == "prepare":
             from ..control_plane.goals.acceptance_actions import prepare_acceptance_check
             if args.document is None or not args.operation_id:
                 raise ValueError("prepare requires --document and a stable --operation-id")

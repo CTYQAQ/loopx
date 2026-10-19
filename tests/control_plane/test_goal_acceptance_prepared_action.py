@@ -55,15 +55,28 @@ def conversation_check(acceptance_goal):
     sid, turn = session["session_id"], "admitted-tool-turn"
     store.update_session(sid, active_turn_id=turn, loopx_mode={"enabled": True,
         "paused": False, "settings": {"agent_id": "coordinator", "token_budget": 10000}})
-    adapter = SimpleNamespace(goal_driver=SimpleNamespace(stopped=Event()), session=SimpleNamespace())
-    lock = controller.loopx_mode.prepare(sid, turn, adapter, lambda *_: {"read": True}, lambda *_: None)
+    lock = None
+    def prepare_turn(turn_id, *, runtime_controller=controller, session_id=sid):
+        nonlocal lock
+        if lock is not None:
+            lock.__exit__(None, None, None)
+            lock = None
+        runtime_controller.store.update_session(session_id, active_turn_id=turn_id)
+        events = []
+        next_adapter = SimpleNamespace(goal_driver=SimpleNamespace(stopped=Event()),
+            session=SimpleNamespace(), events=events, prepare_turn=prepare_turn)
+        lock = runtime_controller.loopx_mode.prepare(session_id, turn_id, next_adapter,
+            lambda *_: {"read": True}, lambda kind, payload: events.append((kind, payload)))
+        return next_adapter
+    adapter = prepare_turn(turn)
     def call(**extra):
         return adapter.session.read_tool_handler(TOOL["name"], {
             "action": "prepare_check", "operation_id": "conversation-check", "document": plan, **extra})
     try:
         yield project, cli, controller, sid, plan, call, adapter
     finally:
-        lock.__exit__(None, None, None)
+        if lock is not None:
+            lock.__exit__(None, None, None)
         controller.close()
 
 
@@ -486,5 +499,5 @@ def test_prepared_plan_cannot_claim_another_goal_context(acceptance_goal):
         service.preview({"action_kind": "goal.acceptance.check", "summary": "Wrong context",
             "idempotency_key": "wrong-context", "context": {"kind": "goal", "goal_id": "other"},
             "normalized_parameters": proposal["normalized_parameters"]})
-    assert cli("inspect")[1]["goal_acceptance_contract"].get("criteria") is None
+    assert "criteria" not in cli("inspect")[1]["goal_acceptance_contract"]
     assert not (project / "runs.txt").exists()
