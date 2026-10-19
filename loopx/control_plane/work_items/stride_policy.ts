@@ -281,6 +281,7 @@ export function projectStrideExploreBasis(value: unknown, goal: string, agent: s
   for (const row of [...findings, ...audits, ...recent]) {
     const id = requireNonEmptyString(row.finding_id, "Explore finding id");
     if (!byId.has(id)) byId.set(id, {finding_id: id, node_id: row.node_id, status: row.status,
+      ...(row.execution_observation ? {execution_observation: row.execution_observation} : {}),
       source_sha256: typeof row.source_sha256 === "string" ? row.source_sha256
         : createHash("sha256").update(JSON.stringify(row)).digest("hex")});
   }

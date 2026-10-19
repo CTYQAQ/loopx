@@ -205,6 +205,7 @@ export function projectExploreTurnContext(params: JsonObject): JsonObject {
       writeback_results: visibleResults
         .map(row => ({...compact(row, ["finding_id", "node_id", "finding", "status", "evidence_refs"]),
           summary: String(row.summary ?? "").slice(0, EXPLORE_WRITEBACK_SUMMARY_LIMIT),
+          ...(row.execution_observation ? {execution_observation: row.execution_observation} : {}),
           ...currentQuestion(row),
           ...findingDigest(row, findingSources)})),
       result_page: {
