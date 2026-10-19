@@ -1772,8 +1772,8 @@ def test_thin_json_budget_retains_full_supported_scope(tmp_path: Path) -> None:
 
 
 def test_brief_budget_retains_full_commands_on_real_long_paths() -> None:
-    # A reproducible 128-character absolute root, independent of pytest's
-    # ever-growing temp/worker prefix. Keep full routes and this workload;
+    # A reproducible 128-character absolute root; directory depth can still
+    # change JSON escaping cost. Keep full routes and this workload;
     # presentation-budget changes require matched base/head cost evidence.
     # Use an existing native temp namespace on Windows; a drive-root /tmp
     # need not exist. POSIX keeps the short namespace used by socket fixtures.
@@ -1791,6 +1791,65 @@ def test_brief_budget_retains_full_commands_on_real_long_paths() -> None:
         root = Path(directory).resolve()
         assert len(str(root)) == 128
         _assert_mode_variant_budgets(root, only="heartbeat_prompt_brief")
+
+
+def test_brief_long_path_budget_retains_semantics_across_parent_depths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    # Use the native namespace on every host, without changing pathlib or the
+    # product's platform checks. Keep raw output measurements for enforcement.
+    monkeypatch.setitem(globals(), "os", SimpleNamespace(name="nt", environ=os.environ))
+    invoke = _invoke_cli
+    assert_budgets = _assert_mode_variant_budgets
+    roots: list[Path] = []
+    outputs: list[dict[str, object]] = []
+
+    def capture_root(root: Path, *, only: str | None = None) -> None:
+        roots.append(root)
+        assert len(str(root)) == 128
+        assert_budgets(root, only=only)
+
+    def capture_output(command):
+        exit_code, text = invoke(command)
+        output_format = command[command.index("--format") + 1]
+        root = str(roots[-1])
+        if output_format == "json":
+            canonical = json.dumps(json.loads(text), ensure_ascii=False, sort_keys=True)
+            normalized = json.loads(canonical.replace(
+                json.dumps(root, ensure_ascii=False)[1:-1], "<OWNED_ROOT>"
+            ))
+            spec = CLI_OUTPUT_MODE_VARIANT_BY_ID["heartbeat_prompt_brief"]
+            oversized = text + " " * max(0, spec.max_chars["json"] + 1 - len(text))
+            with pytest.raises(AssertionError, match="variant ceiling"):
+                assert_cli_output_mode_variant(
+                    spec,
+                    output_format="json", text=oversized,
+                    measurement=measure_cli_output(oversized, output_format="json"),
+                )
+        else:
+            assert len(text.splitlines()) == 94
+            normalized = text.replace(root, "<OWNED_ROOT>")
+        outputs.append({"format": output_format, "normalized": normalized})
+        return exit_code, text
+
+    monkeypatch.setitem(globals(), "_assert_mode_variant_budgets", capture_root)
+    monkeypatch.setitem(globals(), "_invoke_cli", capture_output)
+    with tempfile.TemporaryDirectory(prefix="loopx-depth-") as directory:
+        base = Path(directory).resolve()
+        # Do not silently climb to an unqualified writable ancestor to fit.
+        if len(str(base.joinpath(*("d" for _ in range(12))) / "loopx-brief-")) + 8 > 128:
+            pytest.skip("Native temp namespace cannot fit the qualified depth-12 layout")
+        for depth in (0, 6, 12):
+            parent = base.joinpath(*("d" for _ in range(depth)))
+            parent.mkdir(parents=True, exist_ok=True)
+            monkeypatch.setattr(tempfile, "tempdir", str(parent))
+            test_brief_budget_retains_full_commands_on_real_long_paths()
+    assert [len(root.parts) for root in roots] == [
+        len(roots[0].parts) + depth for depth in (0, 6, 12)
+    ]
+    assert outputs[:2] == outputs[2:4] == outputs[4:6]
 
 
 def test_long_path_budget_is_independent_of_runner_temp_prefix(

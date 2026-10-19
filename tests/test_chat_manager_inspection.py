@@ -20,6 +20,7 @@ from loopx.capabilities.manager_context.inspection import (
 from loopx.chat_agent import CodexChatAgentSession, CodexChatAgentError
 from loopx.chat_manager_history import read_manager_delivery_history
 import loopx.chat_manager_details as details
+from tests.control_plane.host_process_fixture import write_python_host_fixture
 
 
 def inspector(tmp_path, scope=lambda: True):
@@ -478,6 +479,9 @@ for line in sys.stdin:
     elif m == 'thread/start':
         assert r['params']['dynamicTools'][0]['name'] == 'loopx_manager_read'
         result = {'thread': {'id': 'fixture-thread'}}
+    elif m == 'thread/name/set':
+        assert r['params'] == {'threadId': 'fixture-thread', 'name': 'LoopX Chat'}
+        result = {}
     elif m == 'turn/start':
         text = json.dumps(r['params']['input'])
         assert 'manager_evidence_index_v1' in text
@@ -517,7 +521,7 @@ for line in sys.stdin:
             "'view':'todos','goal_id':'alpha'", "'view':'todos','goal_id':'alpha','todo_id':'todo_sample'").replace(
             "evidence['rows'][0]['title'] == 'Check the sample result'",
             "evidence['rows'][0]['continuation'].endswith('Keep this a draft; do not publish.')"))
-    fake.chmod(0o755)
+    fake = write_python_host_fixture(fake, fake.read_text(encoding="utf-8"))
     collected = []
 
     def collect(*args, **kwargs):

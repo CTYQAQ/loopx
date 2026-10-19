@@ -82,7 +82,7 @@ def _enqueue_bound(controller: Any, session: dict[str, Any], client_turn_id: str
             project_context_policy.validate_project_executor_scope(str(fresh["agent_id"]),
                 fresh["project_context"], controller.capabilities)
         elif origin == "web":
-            bindings.ensure_delivery_scope(selected)
+            bindings._ensure_delivery_scope(selected)  # input_context retains the binding fence
             _record_local_ingress(controller.coordination_runtime_root, fresh, client_turn_id, message)
         turn, created = controller.store.create_queued_turn(session["session_id"],
             client_turn_id=client_turn_id, message=message, attachments=attachments, origin=origin)

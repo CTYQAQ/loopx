@@ -628,6 +628,7 @@ export function createEffectRuntimeHandlers(
     ["collaboration.source.execution_bindings", lazyHandler(() => import("./collaboration/source_grants.ts"), ({sourceExecutionBindings}) => sourceExecutionBindings)],
     ["collaboration.source.configure_recipient", lazyHandler(() => import("./collaboration/source_grants.ts"), ({configureSourceRecipient}) => configureSourceRecipient)],
     ["collaboration.source.configure_scope", lazyHandler(() => import("./collaboration/source_grants.ts"), ({configureSourceScope}) => configureSourceScope)],
+    ["collaboration.source.revoke_conversation", lazyHandler(() => import("./collaboration/source_grants.ts"), ({revokeConversationSources}) => revokeConversationSources)],
     ["collaboration.source.evidence_goals", lazyHandler(() => import("./collaboration/source_grants.ts"), ({resolveSourceEvidenceGoals}) => resolveSourceEvidenceGoals)],
     ["collaboration.source.configure_evidence_scope", lazyHandler(() => import("./collaboration/source_grants.ts"), ({configureSourceEvidenceScope}) => configureSourceEvidenceScope)],
     ["collaboration.conversation.reply_context", lazyHandler(() => import("./collaboration/conversation_reply_context.ts"), ({projectConversationReplyContext}) => projectConversationReplyContext)],

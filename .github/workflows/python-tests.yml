@@ -844,6 +844,7 @@ jobs:
       - name: Qualify native CLI output fixture and diagnostic boundaries
         run: >-
           python -m pytest -q
+          --basetemp "${{ runner.temp }}/lxb-${{ github.run_id }}-${{ github.run_attempt }}"
           tests/control_plane/test_cli_output_budget.py
           tests/control_plane/test_cli_output_differential.py
           -k "stable_budget_fixture or long_path_budget or probe_process_failure_preserves_utf8_diagnostics"
@@ -855,6 +856,7 @@ jobs:
       - name: Run native Windows lifecycle tests
         run: >-
           python -m pytest -q
+          tests/test_chat_manager_inspection.py
           tests/test_command_invocation.py
           tests/test_context_provider_service_ownership.py
           tests/test_doctor_git_encoding.py

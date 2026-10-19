@@ -2171,6 +2171,7 @@ dependencies = [
  "open",
  "pep440_rs",
  "rustix",
+ "semver",
  "serde_json",
  "sha2 0.11.0",
  "tar",

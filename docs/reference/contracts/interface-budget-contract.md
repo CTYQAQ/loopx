@@ -446,9 +446,10 @@ The persistent outcome guidance adds 523 characters to the complete heartbeat
 rule without deleting earlier instructions. On the unchanged real brief fixture
 with a 128-character root, main `4f6e20a13` emits 10,260 JSON / 8,559 Markdown
 characters; the outcome candidate emits 10,783 / 9,082. Both fail the former
-10,500 / 9,000 output ceilings. The brief characterization ceilings become
-11,100 / 9,600, retaining 317 / 518 characters of headroom and the existing
-58 / 115 line limits. These clauses preserve cumulative requirements, evidence
+10,500 / 9,000 output ceilings. The initial outcome qualification used brief
+characterization ceilings of 11,100 / 9,600, retaining 317 / 518 characters of
+headroom and the existing 58 / 115 line limits. These clauses preserve cumulative
+requirements, evidence
 review and the distinction between supporting outcomes and root completion.
 They serve different decisions from existing continuation/settlement guidance;
 full executable paths and requirements remain intact. Other output modes,
@@ -459,8 +460,8 @@ efficiency claim or an expansion of model/execution allowance.
 持久成果指导给完整 heartbeat 规则增加 523 字符，旧条款全部保留。同一 128 字符
 根路径的真实 brief fixture，在 main `4f6e20a13` 为 JSON 10,260／Markdown
 8,559 字符，成果候选为 10,783／9,082，均超过旧 10,500／9,000 输出上限。
-只把 brief 展示上限调至 11,100／9,600，保留 317／518 字符余量及原 58／115
-行上限。新增条款指导保留累积要求、有据自查和区分支撑成果与根目标完成，与已有
+最初的成果资格检查只把 brief 展示上限调至 11,100／9,600，保留 317／518 字符余量
+及原 58／115 行上限。新增条款指导保留累积要求、有据自查和区分支撑成果与根目标完成，与已有
 续行／结算指导分别服务不同决定；完整命令路径和要求不删减。其他模式、机器
 envelope、执行配额和权限另有合同。保留原始超限，不宣称效率提升或模型／执行
 额度扩张。
@@ -489,6 +490,29 @@ characterization limits are 6,200 and 14,000 / 12,200 respectively; line limits,
 other modes, differential growth and semantic obligations remain unchanged.
 These bounded increases retain full executable routes rather than trimming
 agent-consumed instructions to satisfy a host-specific ceiling.
+
+Brief heartbeat JSON also retains the 128-character physical-root workload.
+Equal physical length does not imply equal serialized cost: native Windows
+roots with 7, 13 and 19 separators emit 10,482, 10,602 and 10,722 JSON characters.
+Markdown remains 8,579 characters / 94 lines. Replacing only each owned root
+produces identical complete JSON payloads and Markdown; the extra escaping
+cost preserves the same executable routes. Hosted main and candidate both
+fail the previous 10,500 ceiling at 10,522 characters. That path-only
+qualification raised the brief JSON ceiling to 10,800 and kept Markdown's
+9,000 ceiling. The combined characterization ceilings are 11,400 / 9,600,
+applying the outcome qualification's 600-character allowance to those native
+path ceilings. This retains the already measured 523-character content delta
+and the native escaping allowance; it is budget composition, not a new native
+Windows measurement. Line limits, body budgets and other modes retain their
+separate contracts. The native measurements qualify those layouts, not arbitrary
+path topology. The depth regression enforces raw output sizes; root replacement
+is used only for semantic comparison. If the native namespace cannot fit the
+depth-12 workload, that comparison reports a skip without shortening its root.
+
+Windows 原生路径资格检查把 brief JSON 上限调至 10,800，Markdown 仍为 9,000。
+组合后分别叠加成果指导已资格化的 600 字符余量，展示上限为 11,400／9,600，
+同时保留已测 523 字符内容增量和路径转义余量。这是两项预算的组合，不能作为
+新的 Windows 原生实测；原始路径测量、行数和语义检查仍保留其各自边界。
 
 Windows qualification can use the existing explicit canary time budget:
 

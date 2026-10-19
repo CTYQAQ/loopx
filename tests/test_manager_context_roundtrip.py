@@ -143,6 +143,21 @@ def test_single_request_returns_to_original_transcript_without_second_model_turn
     assert reply_status(root, receipt)[0]["status"] == "delivered"
 
 
+@pytest.mark.parametrize("project", [False, True], ids=["steward", "project"])
+def test_owner_return_does_not_create_source_policy(flow, project):
+    root, registry, store, create = flow
+    session, turn, receipt = create(project=project)
+    rid = receipt["request_id"]
+    acknowledge(root, "research", "worker", rid, "adopt", "Checked")
+    report(root, "research", "worker", rid, "conclusion", "Owner result.")
+    assert drain(root, registry, store, None) == 1
+    assert reply_status(root, receipt)[0]["status"] == "delivered"
+    returned = [m for m in store.messages(session["session_id"])
+                if m.get("origin") == "manager_followup"]
+    assert len(returned) == 1 and returned[0]["turn_id"] == turn["turn_id"]
+    assert not list(_root(root).glob("policy*"))
+
+
 @pytest.mark.parametrize("explicit_source", [False, True], ids=["legacy-root", "pinned-root"])
 def test_other_chat_host_cannot_delay_original_host_return(flow, explicit_source):
     root, registry, store, create = flow
@@ -1304,7 +1319,7 @@ def test_exact_loop_payload_conflict_sets_terminal_state_without_retry(
         return_roundtrip, "_write_exact_return_state", fake_settlement
     )
 
-    def fake_context(root, registry, store, path, state_path, now):
+    def fake_context(root, registry, store, path, state_path, now, effects):
         reply = return_roundtrip._read(path)
         return {
             "reply": {**reply, "phase": path.stem},

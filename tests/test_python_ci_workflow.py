@@ -317,6 +317,9 @@ def test_windows_lifecycle_suite_references_existing_tests() -> None:
         if step.get("name") == "Qualify native CLI output fixture and diagnostic boundaries"
     )
     args = shlex.split(fixture_step["run"])
+    assert args[args.index("--basetemp") + 1] == (
+        "${{ runner.temp }}/lxb-${{ github.run_id }}-${{ github.run_attempt }}"
+    )
     assert "tests/control_plane/test_cli_output_budget.py" in args
     assert "tests/control_plane/test_cli_output_differential.py" in args
     assert set(args[args.index("-k") + 1].split(" or ")) == {

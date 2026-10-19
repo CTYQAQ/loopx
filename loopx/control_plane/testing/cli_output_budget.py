@@ -535,9 +535,10 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         semantic_json_keys=("task_body", "quota_guard_command", "interface_budget"),
         markdown_anchor="# Heartbeat Automation Prompt",
         # Matched 128-character root: JSON 10,260 -> 10,783, Markdown
-        # 8,559 -> 9,082. Retain the complete +523-character outcome guidance
-        # and command routes; +600 leaves 317/518 characters of headroom.
-        max_chars={"json": 11_100, "markdown": 9_600},
+        # 8,559 -> 9,082. Retain the +600 allowance for complete outcome
+        # guidance on top of main's 10,800 / 9,000 ceilings, including the
+        # qualified depth-0/6/12 Windows layouts' JSON escaping costs.
+        max_chars={"json": 11_400, "markdown": 9_600},
         max_lines={"json": 58, "markdown": 115},
     ),
     CliOutputModeVariantSpec(

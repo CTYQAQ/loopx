@@ -109,13 +109,15 @@ class ChatConversationBindings:
             proposed = next(row for row in result["state"]["bindings"] if row["transport_ref"] == transport_ref)
             channels = self.delivery_channels(proposed) if goal_scope is not None else []
             for channel in channels:
-                self.ensure_delivery_scope({"binding": proposed, "channel_id": channel}, execute=False)
+                self._ensure_delivery_scope({"binding": proposed, "channel_id": channel}, execute=False)
             # Publish the advertised scope only after every known source policy
             # has applied and verified. On IO failure the old binding remains;
             # retrying the explicit scope operation converges any earlier source
             # writes without making ordinary admission undo a manual restriction.
             for channel in channels:
-                self.ensure_delivery_scope({"binding": proposed, "channel_id": channel}, if_absent=False)
+                self._ensure_delivery_scope({"binding": proposed, "channel_id": channel}, if_absent=False)
+            if previous and previous["binding_id"] != proposed["binding_id"]:
+                self._revoke_delivery_sources(previous["binding_id"])
             if result["changed"]:
                 _atomic_write_json(self.path, result["state"])
             readback = self.read()
@@ -132,12 +134,18 @@ class ChatConversationBindings:
                 "current": self.read(), "expected_revision": expected_revision,
                 "operation": "disconnect", "binding_id": binding_id,
             })
+            self._revoke_delivery_sources(binding_id)
             if result["changed"]:
                 _atomic_write_json(self.path, result["state"])
             if self.read() != result["state"]:
                 raise OSError("conversation binding revocation did not verify")
         self._stop_revoked_binding(binding_id)
         return dict(result["state"])
+
+    def _revoke_delivery_sources(self, binding_id: str) -> None:
+        if self.controller is not None:
+            from ..manager_context import revoke_conversation_sources
+            revoke_conversation_sources(self.controller.coordination_runtime_root, binding_id)
 
     def _stop_revoked_binding(self, binding_id: str) -> None:
         """Apply the committed grant decision through existing exact Turn control.
@@ -313,6 +321,17 @@ class ChatConversationBindings:
                 and binding["operator_ref"] in source.get("sender_ids", [])]
 
     def ensure_delivery_scope(self, selected: dict[str, Any], *, if_absent: bool = True, execute: bool = True) -> None:
+        if selected["binding"].get("goal_scope") not in {"all_registered", "selected"} or self.controller is None:
+            return
+        # Match configuration's binding -> source-policy order. An observation
+        # from before disconnect must never recreate its retired source grant.
+        with exclusive_file_lock(self.path, operation="configure_bound_delivery_scope"):
+            if selected["binding"] not in self.read()["bindings"]:
+                raise ValueError("conversation binding is no longer authorized")
+            self._ensure_delivery_scope(selected, if_absent=if_absent, execute=execute)
+
+    def _ensure_delivery_scope(self, selected: dict[str, Any], *, if_absent: bool = True, execute: bool = True) -> None:
+        """The caller retains the binding publication fence, including configure."""
         binding = selected["binding"]
         if binding.get("goal_scope") not in {"all_registered", "selected"} or self.controller is None:
             return
