@@ -154,6 +154,7 @@ const CANONICAL_CONSUMERS = [
   "control_plane/work_items/progress_review_evidence.ts",
   "control_plane/work_items/replan_context.ts",
   "control_plane/work_items/replan_history_snapshot.ts",
+  "control_plane/work_items/replan_semantics.ts",
   "control_plane/work_items/refresh_recommendation.ts",
   "control_plane/work_items/stride_policy.ts",
   "control_plane/work_items/task_lease_acquire.ts",
