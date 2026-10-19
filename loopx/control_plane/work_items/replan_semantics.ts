@@ -432,6 +432,7 @@ export function projectReplanSemantics(value: unknown): JsonObject {
   const context = object(obligation.replan_context);
   const [strideDecision] = normalizeStrideDecision(vision.stride_decision);
   const structuredReview = normalizeStrideStrategy(context.stride_strategy) !== "off";
+  const selectedComparison = object(strideDecision?.explore_review).selected_candidate != null;
   const requiredStrideReview = requiresStrideDecision(obligation);
   const pathOutcome = String(path.outcome ?? "").trim();
   const evidenceLinkedPath = Boolean(String(patch.acceptance_summary ?? "").trim() &&
@@ -441,12 +442,12 @@ export function projectReplanSemantics(value: unknown): JsonObject {
   const missingStride = structuredReview && (freshPath || requiredStrideReview) &&
     (!strideDecision || !independentStride);
   const missingStridePath = requiredStrideReview && !evidenceLinkedPath;
-  const staleStride = !!strideDecision && structuredReview &&
+  const staleStride = !!strideDecision && (structuredReview || selectedComparison) &&
     strideDecision.reference_obligation_id !== obligation.obligation_id;
-  const reviewMismatch = strideDecision && structuredReview
-    ? requiredStrideReview && strideDecision.reference_context_id !== context.context_id
+  const reviewMismatch = strideDecision && (structuredReview || selectedComparison)
+    ? (requiredStrideReview || selectedComparison) && strideDecision.reference_context_id !== context.context_id
       ? "Stride decision must reference the delivered due-review context."
-      : strideReviewMismatch(strideDecision, context, request.stride_review_evidence)
+      : strideReviewMismatch(strideDecision, context, request.stride_review_evidence, vision.todo_delta)
     : null;
   let outcomes = strings(observation.delta_kinds);
   if (outcomes.some(value => (CAPABILITY_OUTCOMES as readonly string[]).includes(value))) {
@@ -478,6 +479,7 @@ export function projectReplanSemantics(value: unknown): JsonObject {
   }
   if (staleStride || missingStride || reviewMismatch) outcomes = outcomes.filter(outcome => outcome !== "fresh_vision_path_outcome");
   const satisfying = inconsistentTerminal || (requiredStrideReview && (missingStride || missingStridePath || staleStride || reviewMismatch))
+    || (selectedComparison && (staleStride || reviewMismatch))
     ? [] : outcomes.filter(outcome => required.includes(outcome as SemanticOutcome));
   const replayRefused = (replayed || knownBlocker) && !satisfying.length && !inconsistentTerminal;
   const identityRefused = identityWithoutEvidence && !satisfying.length && !inconsistentTerminal;
