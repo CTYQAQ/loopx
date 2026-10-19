@@ -1166,6 +1166,29 @@ another uncovered binding. When there is no other selectable advancement, quota/
 `vision_acceptance_gap` is deferred while that read model is active, so the
 agent can remain quiet instead of inventing duplicate successor work.
 
+For a single exact successor without a bound heartbeat Turn, the scheduler can
+keep inexpensive source rechecks alive beyond the unchanged-poll limit when
+the resume owner supplies positive pending evidence. Alongside the existing
+clock-backed `resume_at` case, `todo_done` requires an identified, unarchived
+source of the supported task class that is still open or deferred.
+`monitor_changed` requires the exact open Monitor, the successor's matching
+generation baseline, and a current generation that has not advanced. The
+Monitor source must also carry a valid next-due time, the runtime clock
+observation, and explicit expiry evidence: either no expiry or an expiry later
+than both the observation and the next due time. These source facts are
+projected before compaction, including explicit null values that distinguish
+known absence of expiry or archival from missing evidence.
+
+This quiet path grants no delivery or spend. Missing sources, incomplete proof,
+an unscheduled or expired Monitor, and an existing Turn or settlement binding
+retain their original supervision. Supplying a new Turn id to a quota command
+is a bound operation, not an unbound scheduler recheck. Monitor-only waits keep
+their existing schedule-based cadence caps; when a Monitor becomes due, fresh
+quota admission must select its work before quiet waiting. A material poll then
+advances the original generation fence so the successor can resume. Goal stop,
+user gates and independently runnable advancement retain their existing
+priority.
+
 This is a read model, not a stored vision or todo lifecycle state. When the
 condition becomes ready, normal open-todo or deferred-successor routing resumes
 automatically and the active vision remains available for acceptance auditing.
