@@ -20,13 +20,42 @@ def _worker_readback(args):
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_real_unresolved_replan_dispatches_once_across_return_and_restart(tmp_path, monkeypatch, provider):
+@pytest.mark.parametrize("damage", [b"{broken", b"\xff", b'{"schema_version":"other"}'])
+def test_ordinary_cli_poll_preserves_unreadable_unknown_operation(tmp_path, monkeypatch, provider, damage):
+    call, runtime, _ = _fixture(tmp_path, monkeypatch, provider, future_monitor=False)
+    args = _args(fake_cli=Path(sys.executable).parent / "loopx",
+        state_file=tmp_path / "worker-state.json", wake_cmd="controlled-failure", quota_timeout_seconds=90)
+    args.registry, args.runtime_root = str(tmp_path / "registry.json"), str(runtime)
+    args.goal_id, args.agent_id = GOAL, AGENT
+    dispatches = []
+    monkeypatch.setattr(worker, "_run_wake", lambda *a, **kw: dispatches.append(1) or
+        CappedProcessResult(returncode=1, stdout=b""))
+    assert worker.run_worker(args) != 0
+    assert _worker_readback(args)["rows"][0]["status"] == "replan_outcome_unknown"
+    from loopx.control_plane.quota.host_poll_receipts import receipt_path_for_goal
+    path = receipt_path_for_goal({"id": GOAL}, tmp_path / "project/ACTIVE_GOAL_STATE.md")
+    path.write_bytes(damage)
+    for _ in range(2):
+        packet = call("quota", "should-run", "--goal-id", GOAL, "--agent-id", AGENT, "--record-host-poll")
+        assert packet["host_poll_receipt"]["recorded"] is False
+        assert "unreadable" in packet["host_poll_receipt"]["error"]
+        assert path.read_bytes() == damage
+        assert _worker_readback(args)["read_status"] == "unreadable"
+    assert json.loads(Path(args.state_file).read_text())["replan_attempts"][0]["status"] == "unknown"
+    assert dispatches == [1]
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("uppercase", [False, True])
+def test_real_unresolved_replan_dispatches_once_across_return_and_restart(tmp_path, monkeypatch, provider, uppercase):
     _, runtime, index = _fixture(tmp_path, monkeypatch, provider, future_monitor=False)
     args = _args(fake_cli=Path(sys.executable).parent / "loopx",
                  state_file=tmp_path / "worker-state.json", wake_cmd="controlled-host-boundary",
                  quota_timeout_seconds=90)
     args.registry, args.runtime_root = str(tmp_path / "registry.json"), str(runtime)
     args.goal_id, args.agent_id, args.once = GOAL, AGENT, False
+    if uppercase:
+        args.agent_id = AGENT.upper()
     decisions, requests = [], []
     real_quota = worker.run_quota_should_run
 
@@ -43,6 +72,7 @@ def test_real_unresolved_replan_dispatches_once_across_return_and_restart(tmp_pa
     monkeypatch.setattr(worker, "_run_wake", inconclusive_host)
     before = index.read_bytes()
     assert worker.run_worker(args, sleep=lambda _: pytest.fail("active recheck must be immediate")) == 0
+    args.agent_id = AGENT
     args.once = True
     for _ in range(2):
         assert worker.run_worker(args) == 0

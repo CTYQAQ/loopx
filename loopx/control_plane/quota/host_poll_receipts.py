@@ -77,7 +77,13 @@ def _record_host_poll_receipt(
     decision: dict[str, Any], poll_count: int | None, now: datetime | None,
     worker_observation: object,
 ) -> dict[str, Any]:
-    current = read_host_poll_receipt(path)
+    observation = read_host_poll_receipt_observation(path, expected_goal_id=str(goal.get("id") or ""))
+    if observation["read_status"] == "unreadable":
+        # A poll proves liveness, not recovery of an unknown original request.
+        # Preserve the damaged source. The CLI reports recorded=false without
+        # failing admission; the worker also keeps its durable attempt intact.
+        raise ValueError("host poll receipt is unreadable; repair its source before updating observations")
+    current = observation["receipt"]
     previous_count = current.get("poll_count") if isinstance(current, dict) else None
     count = (
         poll_count

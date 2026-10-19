@@ -60,6 +60,19 @@ def test_successful_exit_and_restart_cannot_retry_same_unresolved_replan(tmp_pat
     assert "status=replan_paused" in capsys.readouterr().out
 
 
+def test_agent_case_alias_preserves_state_route_and_unknown_attempt(tmp_path, monkeypatch):
+    args, calls = setup_worker(tmp_path, monkeypatch, replan_packet(), result(1))
+    lower_route = worker._default_state_path(args)
+    args.agent_id = "AGENT"
+    assert worker._default_state_path(args) == lower_route
+    assert worker.run_worker(args) != 0
+    saved = json.loads(Path(args.state_file).read_text())
+    assert saved["replan_attempts"][0]["agent_id"] == "agent"
+    args.agent_id = "agent"
+    assert worker.run_worker(args) != 0
+    assert calls == [1]
+
+
 def test_independent_work_and_temporary_wait_do_not_erase_original_attempt(tmp_path, monkeypatch):
     packet = replan_packet()
     args, calls = setup_worker(tmp_path, monkeypatch, packet)

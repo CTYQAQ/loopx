@@ -47,7 +47,10 @@ from loopx.control_plane.goals.goal_ref_validation import exact_goal_ref  # noqa
 from loopx.control_plane.quota.effective_action import EffectiveAction  # noqa: E402
 from loopx.control_plane.quota.effect_program import SettlementIdentity  # noqa: E402
 from loopx.control_plane.quota.settlement import read_heartbeat_settlement  # noqa: E402
-from loopx.control_plane.todos.contract import normalize_todo_replan_obligation_id  # noqa: E402
+from loopx.control_plane.todos.contract import (  # noqa: E402
+    normalize_todo_claimed_by,
+    normalize_todo_replan_obligation_id,
+)
 
 SCHEDULER_DETAIL_KEY = "local_scheduler"
 LOCAL_SCHEDULER_STOP_DIRECTIVE = "stop"
@@ -248,7 +251,7 @@ def _default_state_path(args: argparse.Namespace) -> Path:
         {
             "registry": str(args.registry),
             "goal_id": str(args.goal_id),
-            "agent_id": str(args.agent_id),
+            "agent_id": normalize_todo_claimed_by(args.agent_id) or str(args.agent_id),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -288,13 +291,18 @@ def _attempt_scope(value: dict[str, Any]) -> dict[str, Any]:
     agent_id = value.get("agent_id")
     if not isinstance(agent_id, str) or not agent_id.strip():
         raise ValueError("worker replan attempt is missing its original agent")
+    agent_id = normalize_todo_claimed_by(agent_id)
+    if agent_id is None:
+        raise ValueError("worker replan attempt has an invalid original agent")
     return {"registry": registry, "runtime_root": runtime_root,
             "goal_id": goal_id, "goal_ref": goal_ref, "agent_id": agent_id}
 
 
 def _admission_scope(payload: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     agent_id = _mapping(payload.get("agent_identity")).get("agent_id")
-    if agent_id != args.agent_id or payload.get("goal_id", args.goal_id) != args.goal_id:
+    # Keep the original CLI input for Core validation, then compare the same
+    # canonical identity Core returned. Do not widen CLI syntax in this driver.
+    if agent_id != normalize_todo_claimed_by(args.agent_id) or payload.get("goal_id", args.goal_id) != args.goal_id:
         raise ValueError("worker scope does not match current admission")
     runtime_root = payload.get("runtime_root")
     if (not isinstance(runtime_root, str) or not Path(runtime_root).is_absolute()
@@ -420,7 +428,7 @@ def _observe_worker_replan(
                 "runtime_root": attempt["runtime_root"],
                 "registry_goal_digest": attempt.get("registry_goal_digest"),
             }
-        record_host_poll_receipt(goal, state_path, agent_id=args.agent_id,
+        record_host_poll_receipt(goal, state_path, agent_id=normalize_todo_claimed_by(args.agent_id),
                                  decision=payload, worker_observation=observation)
     except (OSError, RuntimeError, TypeError, ValueError):
         _log("status=worker_observation_unavailable next=inspect_original_worker_state")

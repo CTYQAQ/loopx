@@ -97,6 +97,28 @@ def test_read_receipt_rejects_foreign_schemas(tmp_path: Path) -> None:
     assert read_host_poll_receipt(tmp_path / "missing.json") is None
 
 
+@pytest.mark.parametrize("damage", [b"{broken", b"\xff", b'{"schema_version":"other"}',
+    b'{"schema_version":"host_poll_receipt_v0","goal_id":"other"}'])
+def test_poll_never_erases_unreadable_source(tmp_path, damage):
+    goal, state = {"id": "goal-1"}, tmp_path / "state.md"
+    original = record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision(),
+        worker_observation={"status": "replan_outcome_unknown", "obligation_id": "replan-original",
+            "turn_instance_id": "original", "registry_goal_digest": "current-goal",
+            "runtime_root": str(tmp_path.resolve())})
+    path = receipt_path_for_goal(goal, state)
+    path.write_bytes(damage)
+    for observation in ({}, {"worker_observation": None}):
+        with pytest.raises(ValueError, match="unreadable"):
+            record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision(), **observation)
+        assert path.read_bytes() == damage
+        assert read_host_worker_observations(goal, state, registry_goal_digest="current-goal",
+            runtime_root=tmp_path)["read_status"] == "unreadable"
+    # A source repair, not an ordinary liveness poll, restores safe updates.
+    path.write_text(json.dumps(original))
+    restored = record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision())
+    assert restored["worker_observations"] == original["worker_observations"]
+
+
 def test_read_receipt_observation_distinguishes_missing_and_unreadable(
     tmp_path: Path,
 ) -> None:
