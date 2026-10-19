@@ -301,10 +301,12 @@ CLI_OUTPUT_BUDGET_SPECS: tuple[CliOutputBudgetSpec, ...] = (
         ),
         markdown_anchor="# Heartbeat Automation Prompt",
         max_chars={
-            # Matched native Windows base/head emit 5,989 Markdown chars.
-            "small": {"json": 3_900, "markdown": 6_200},
-            "crowded": {"json": 3_900, "markdown": 6_200},
-            "multi_agent": {"json": 3_900, "markdown": 6_200},
+            # Matched Linux output: JSON 3,649 -> 4,172 and Markdown
+            # 5,553 -> 6,076. The supported 320-char scope reaches 4,461
+            # JSON chars. Keep the full outcome guidance and Markdown guard.
+            "small": {"json": 4_500, "markdown": 6_200},
+            "crowded": {"json": 4_500, "markdown": 6_200},
+            "multi_agent": {"json": 4_500, "markdown": 6_200},
         },
         max_lines={
             "small": {"json": 18, "markdown": 72},
@@ -532,7 +534,10 @@ CLI_OUTPUT_MODE_VARIANT_SPECS: tuple[CliOutputModeVariantSpec, ...] = (
         output_formats=("json", "markdown"),
         semantic_json_keys=("task_body", "quota_guard_command", "interface_budget"),
         markdown_anchor="# Heartbeat Automation Prompt",
-        max_chars={"json": 10_500, "markdown": 9_000},
+        # Matched 128-character root: JSON 10,260 -> 10,783, Markdown
+        # 8,559 -> 9,082. Retain the complete +523-character outcome guidance
+        # and command routes; +600 leaves 317/518 characters of headroom.
+        max_chars={"json": 11_100, "markdown": 9_600},
         max_lines={"json": 58, "markdown": 115},
     ),
     CliOutputModeVariantSpec(
