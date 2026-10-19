@@ -51,7 +51,8 @@ TOOL = {
     "Action=outcomes reads persistent supporting outcomes and the provider revision. "
     "Action=refine_outcome takes operation_id, expected_provider_revision and document with outcome_id and source_summary; add only changed requirements [{id,description}], todo_ids or review. Creation also needs the original objective. "
     "Optional review addresses every retained requirement with {id,conclusion: met|unmet|uncertain,evidence_refs: strings,note}. "
-    "The host fixes the owner and source Turn. It retains requirements and default Agent assessments without replacing original intent, granting authority or certifying independent checks.",
+    "The host fixes the owner and retains the first source Turn for an unchanged operation in this conversation. After response loss, retry the same operation, revision and document. "
+    "It retains requirements and default Agent assessments without replacing original intent, granting authority or certifying independent checks.",
     "inputSchema": {
         "type": "object",
         "additionalProperties": False,
@@ -909,11 +910,21 @@ class ChatLoopXMode:
                         raise ValueError("refine_outcome document cannot replace host identity or source")
                     if not isinstance(operation_id, str) or not operation_id.strip():
                         raise ValueError("refine_outcome requires a stable operation id")
-                    origin = "turn:" + turn_id + ":" + hashlib.sha256(str(operation_id).encode()).hexdigest()[:16]
+                    goal = self._goal(current)
+                    envelope = self.store.reserve_loopx_outcome_request(
+                        session_id, turn_id=turn_id, operation_id=operation_id,
+                        request={
+                            "goal_id": current["goal_id"],
+                            "goal_instance_id": goal.get("goal_instance_id"),
+                            "agent_id": settings["agent_id"],
+                            "expected_provider_revision": arguments["expected_provider_revision"],
+                            "document": document,
+                        },
+                    )
                     refinement = {key: document[key] for key in ("outcome_id", "objective", "requirements", "todo_ids") if key in document}
                     if "review" in document:
                         refinement["review"] = document["review"]
-                    refinement.update(owner_agent_id=settings["agent_id"], source={"ref": origin, "summary": document["source_summary"]})
+                    refinement.update(owner_agent_id=settings["agent_id"], source={"ref": envelope["source_ref"], "summary": document["source_summary"]})
                     result = public_goal_acceptance(refine_goal_outcome(**route, refinement=refinement,
                         expected_provider_revision=arguments["expected_provider_revision"], operation_id=operation_id, execute=True))
             elif action == "prepare_check":
@@ -1000,7 +1011,9 @@ class ChatLoopXMode:
                         result = service.read(operation_id)
             else:
                 raise ValueError("unsupported collaboration action")
-            if "status" in result:
+            # Goal acceptance responses also carry a status, but they are
+            # neither member deliveries nor evidence for observing a wake.
+            if action in {"start", "read", "wait", "resume", "revalidate", "adopt"} and "status" in result:
                 if result["status"] == "accepted":
                     # Seen inside this Turn: the pending wake would be redundant.
                     wake = service.wake_observed_in_turn(operation_id, session_id=session_id)
