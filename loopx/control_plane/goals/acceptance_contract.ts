@@ -128,6 +128,14 @@ function id(value: unknown): string {
   acceptanceRequire(result === value && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(result), "acceptance identifier must be a safe token");
   return result;
 }
+function criterionId(value: unknown): string {
+  // Outcome requirements use opaque IDs. Preserve their identity through
+  // configured checks and receipts; they are never executable paths.
+  const result = acceptanceText(value, "acceptance criterion identifier", 128);
+  acceptanceRequire(result === value && /^[A-Za-z0-9][A-Za-z0-9_.:@-]*$/.test(result),
+    "acceptance criterion identifier must be an opaque token");
+  return result;
+}
 function list(value: unknown, label: string, max: number, min = 0): unknown[] {
   acceptanceRequire(Array.isArray(value) && value.length >= min && value.length <= max, `${label} has invalid size`);
   return value;
@@ -188,7 +196,7 @@ export function normalizeGoalAcceptanceDocument(value: unknown): AcceptanceDocum
     acceptanceRequire(argv[0].trim().length > 0, "validation argv requires an executable");
     const timeout = item.validation_timeout_seconds ?? 5;
     acceptanceRequire(Number.isSafeInteger(timeout) && Number(timeout) >= 1 && Number(timeout) <= 25, "validation timeout must be 1..25 seconds");
-    const criterion = {id: id(item.id), description: acceptanceText(item.description, "criterion description"),
+    const criterion = {id: criterionId(item.id), description: acceptanceText(item.description, "criterion description"),
       validation_argv: argv, validation_timeout_seconds: Number(timeout),
       validation_files: validationFiles(item.validation_files === undefined ? [] : item.validation_files)};
     return {...criterion, ...(item.oracle === undefined ? {} : {oracle: normalizeAcceptanceOracle(item.oracle, criterion)})};
@@ -199,7 +207,7 @@ export function normalizeGoalAcceptanceDocument(value: unknown): AcceptanceDocum
   const bindings = list(raw.bindings, "acceptance bindings", 4096).map(value => {
     const item = canonicalAuthorityObject(value, "acceptance binding");
     acceptanceKeys(item, ["todo_id", "criterion_ids"]);
-    const criterion_ids = unique(list(item.criterion_ids, "binding criteria", 64, 1).map(id), "binding criteria");
+    const criterion_ids = unique(list(item.criterion_ids, "binding criteria", 64, 1).map(criterionId), "binding criteria");
     acceptanceRequire(criterion_ids.every(key => criterionIds.includes(key)), "binding references an unknown criterion");
     return {todo_id: id(item.todo_id), criterion_ids};
   }).sort((a, b) => authorityUnicodeCompare(a.todo_id, b.todo_id));
@@ -416,6 +424,18 @@ export function readGoalAcceptance(head: JsonObject, goalId: string): Acceptance
   return authority.owner_matches ? authority.state : null;
 }
 
+/** Private same-snapshot host inputs for read-only freshness observation.
+ * They contain only already pinned files and oracle refs, never commands or
+ * a new result. Public summaries keep using the acceptance projection. */
+export function goalAcceptanceOracleObservationBasis(head: JsonObject, goalId: string): JsonObject | null {
+  const authority = readGoalAcceptanceAuthority(head, goalId);
+  const state = authority.kind === "legacy" ? authority.state
+    : authority.owner_matches && authority.lifecycle.state === "active" ? authority.state : null;
+  const criteria = state?.document.criteria.filter(criterion => criterion.oracle !== undefined)
+    .map(criterion => ({id: criterion.id, validation_files: criterion.validation_files, oracle: criterion.oracle!})) ?? [];
+  return state && criteria.length ? {revision: state.revision, digest: state.digest, criteria} : null;
+}
+
 export function bindGoalAcceptanceStateOwner(
   state: AcceptanceState,
   ownerGoalRef: WireExactGoalRef,
@@ -460,7 +480,7 @@ export function normalizeAcceptanceResults(value: unknown, expectedIds?: readonl
     acceptanceRequire(typeof item.passed === "boolean" && (item.exit_code === null ||
       (Number.isSafeInteger(item.exit_code) && Number(item.exit_code) >= 0 && Number(item.exit_code) <= 255)), "invalid verification result");
     acceptanceRequire(item.passed === (item.exit_code === 0), "criterion pass/fail must agree with exit code zero");
-    return {criterion_id: id(item.criterion_id), passed: item.passed, exit_code: item.exit_code as number | null,
+    return {criterion_id: criterionId(item.criterion_id), passed: item.passed, exit_code: item.exit_code as number | null,
       ...(item.oracle_evidence === undefined ? {} : {oracle_evidence: normalizeOracleEvidence(item.oracle_evidence)})};
   }).sort((a, b) => authorityUnicodeCompare(a.criterion_id, b.criterion_id));
   const ids = unique(results.map(item => item.criterion_id), "verification results");

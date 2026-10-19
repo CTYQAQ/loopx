@@ -130,7 +130,11 @@ export function observeAcceptanceOracles(params: JsonObject): JsonObject {
     return {...criterion, oracle: {...oracle, state}};
   })};
   return contract.outcome_requirements ? {...observed,
-    outcome_requirements: observeOutcomeRequirements(contract.outcome_requirements as JsonObject, observed)} : observed;
+    outcome_requirements: observeOutcomeRequirements(contract.outcome_requirements as JsonObject, observed,
+      (params.observations as JsonObject[]).map(facts => ({criterion_id: facts.criterion_id,
+        available: facts.available === true, source_current: facts.source_current === true,
+        ...(facts.available === true ? {input_versions: normalizeOracleVersions(facts.input_versions),
+          output_versions: normalizeOracleVersions(facts.output_versions)} : {})})))} : observed;
 }
 
 export function planAcceptanceOracle(params: JsonObject): JsonObject {

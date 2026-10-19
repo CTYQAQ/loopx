@@ -959,7 +959,8 @@ def refresh_state_run(
                 agent_id=normalized_agent_id or None, operation="research-writeback",
             ))
         planning_source = load_refresh_planning_source(
-            runtime_root, safe_goal_id, resolved_state_file, require_display=False
+            runtime_root, safe_goal_id, resolved_state_file, require_display=False,
+            registry_path=next_action_source_registry,
         )
         state_text, planning_events, todo_fields = (
             planning_source.state_text, planning_source.events, planning_source.todo_fields,
@@ -1420,7 +1421,8 @@ def refresh_state_run(
                 if current_goal is None:
                     raise ValueError("Next Action source Goal disappeared; reread status")
                 current_planning = load_refresh_planning_source(
-                    runtime_root, safe_goal_id, resolved_state_file, require_display=False)
+                    runtime_root, safe_goal_id, resolved_state_file, require_display=False,
+                    registry_path=next_action_source_registry)
                 resolve_refresh_recommendation(current_text,
                     todo_fields=current_planning.todo_fields, agent_id=normalized_agent_id or None,
                     settlement_identity=settlement_identity.as_dict() if settlement_identity else None,

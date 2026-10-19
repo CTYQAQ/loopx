@@ -1,4 +1,4 @@
-import {goalOutcomeCheckBasis, refineGoalOutcome} from "./outcome_requirements.ts";
+import {bindGoalOutcomesStateOwner, goalOutcomeCheckBasis, refineGoalOutcome} from "./outcome_requirements.ts";
 /** Acceptance effects use the existing canonical head, CAS and operation journal.
  * Only trusted local owner/host adapters may invoke these mutation exports. */
 import {isAbsolute} from "node:path";
@@ -147,6 +147,8 @@ async function commit(store: AuthorityStore, request: JsonObject, head: Authorit
       state: "active",
       goal_ref: goalRef,
     };
+    const outcomes = bindGoalOutcomesStateOwner(head.head, String(request.goal_id), goalRef);
+    if (outcomes !== null) next.goal_outcomes = outcomes;
   }
   next.goal_acceptance = committedState ?? clearedGoalAcceptance(
     readGoalAcceptanceAuthority(head.head, String(request.goal_id)).configuration_revision + 1, goalRef);
@@ -450,24 +452,25 @@ export async function transitionGoalAcceptanceLifecycle(
   acceptanceTodos(observation.authority.head, goalId);
   const plan = planLifecycleTransition(observation.authority.head, goalId, transition);
   if (plan.kind === "failure") return source(store, failure(plan.reason_code, plan.reason));
+  const next: JsonObject = {...observation.authority.head, goal_acceptance_lifecycle: plan.lifecycle};
+  if (plan.kind === "commit" && plan.acceptance !== null) next.goal_acceptance = plan.acceptance;
+  if (plan.kind === "commit" && readGoalAcceptanceLifecycle(observation.authority.head, goalId) === null) {
+    // Legacy declarations follow the same initial source binding as checks.
+    // Historical recreation binds them to the retired owner, never its successor.
+    const initialOwner = transition.kind === "bind_existing" ? transition.goal_ref
+      : transition.kind === "reconcile_recreated" ? transition.retired_goal_ref : null;
+    if (initialOwner !== null) {
+      const outcomes = bindGoalOutcomesStateOwner(observation.authority.head, goalId, initialOwner);
+      if (outcomes !== null) next.goal_outcomes = outcomes;
+    }
+  }
   const result = {
     goal_id: goalId,
     operation_id: request.operation_id,
     changed: plan.kind === "commit",
     goal_acceptance_lifecycle: plan.lifecycle,
-    goal_acceptance_contract: projectGoalAcceptance(
-      plan.kind === "commit"
-        ? {
-            ...observation.authority.head,
-            goal_acceptance_lifecycle: plan.lifecycle,
-            ...(plan.acceptance === null ? {} : {goal_acceptance: plan.acceptance}),
-          }
-        : observation.authority.head,
-      goalId,
-    ),
+    goal_acceptance_contract: projectGoalAcceptance(next, goalId),
   };
-  const next: JsonObject = {...observation.authority.head, goal_acceptance_lifecycle: plan.lifecycle};
-  if (plan.kind === "commit" && plan.acceptance !== null) next.goal_acceptance = plan.acceptance;
   const committed = await command.receipt.commit(store, {
     operation_id: String(request.operation_id),
     expected_provider_revision: observation.authority.provider_revision,

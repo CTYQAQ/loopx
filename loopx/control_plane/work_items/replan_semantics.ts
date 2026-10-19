@@ -1,4 +1,5 @@
 import type { JsonObject } from "../effect_program.ts";
+import {BARE_SHA256_PATTERN} from "../content_digest.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { optionalNonEmptyString, requireJsonObject, requireNonEmptyString } from "../runtime_decode.ts";
 import { visionAuthoringContract } from "../goals/vision_checkpoint.ts";
@@ -318,9 +319,10 @@ function writebackProjection(required: SemanticOutcome[], externalReview: boolea
   return {cli_semantic_args: PROGRESS_CLI_ARGS, writeback_contract: {}};
 }
 
-/** Vision gaps use their durable run or completed-chain source timestamp.
- * A patch label proves no relationship to a later run; equal timestamps cover
- * the atomic writeback without granting a permanent waiver for new gaps.
+/** Ordinary Vision gaps keep their durable source timestamp. Outcome gaps
+ * instead bind the exact canonical requirements/work checkpoint: reading one
+ * again does not create another event, while changed evidence must rearm.
+ * This path neither relaxes acceptance holds nor acknowledges later run facts.
  */
 function acknowledgeVisionEvidence(request: JsonObject): JsonObject {
   if (!Array.isArray(request.acceptance_gaps)) {
@@ -333,13 +335,26 @@ function acknowledgeVisionEvidence(request: JsonObject): JsonObject {
   const acknowledgedAt = timestamp(ack.generated_at);
   const gaps = request.acceptance_gaps.map(value => {
     const gap = object(value);
-    return timestamp(gap.generated_at ?? (gap.kind === "vision_outcome_checkpoint_required" &&
+    if (gap.kind === "goal_outcome_uncovered") {
+      const outcomes = strings(delta.outcomes), satisfying = strings(delta.satisfying_outcomes);
+      return gap.source === "goal_acceptance_contract" && typeof gap.agent_id === "string" &&
+        !!gap.agent_id && ack.agent_id === gap.agent_id &&
+        typeof gap.frontier_revision === "string" && BARE_SHA256_PATTERN.test(gap.frontier_revision) &&
+        typeof delta.obligation_id === "string" && /^replan-[a-f0-9]{16}$/.test(delta.obligation_id) &&
+        strings(delta.trigger_kinds).includes(gap.kind) &&
+        Array.isArray(delta.trigger_checkpoints) && delta.trigger_checkpoints.some(value => {
+          const checkpoint = object(value);
+          return checkpoint.kind === gap.kind && checkpoint.frontier_revision === gap.frontier_revision;
+        }) && outcomes.some(outcome => VISION_OUTCOMES.some(known => known === outcome) && satisfying.includes(outcome));
+    }
+    const observedAt = timestamp(gap.generated_at ?? (gap.kind === "vision_outcome_checkpoint_required" &&
       gap.source === "recent_completed_advancement_todo" ? gap.completed_at : null));
+    return observedAt !== null && acknowledgedAt !== null && observedAt <= acknowledgedAt;
   });
   return {acknowledged: ack.recorded === true && delta.accepted === true &&
     strings(delta.outcomes).some(outcome => VISION_OUTCOMES.some(known => known === outcome)) &&
     acknowledgedAt !== null &&
-    gaps.length > 0 && gaps.every(time => time !== null && time <= acknowledgedAt)};
+    gaps.length > 0 && gaps.every(covered => covered)};
 }
 
 export function projectReplanWriteback(value: unknown): JsonObject {

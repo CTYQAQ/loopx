@@ -119,7 +119,8 @@ def refine_goal_outcome(
     goal = load_goal_from_registry(registry_path, goal_id)
     if "owner_agent_id" in refinement and refinement["owner_agent_id"] not in registered_agent_ids_for_goal(goal):
         raise ValueError("Outcome owner must be a registered Agent")
-    if goal.get("status") not in {"active", "ready"}:
+    # The registry's legacy omitted-status form denotes an active Goal too.
+    if goal.get("status", "active") not in {"active", "ready"}:
         raise ValueError("Outcome refinement requires an active Goal")
     return _result("goal.acceptance.refine", {**route, "actor_agent_id": agent_id,
         "expected_provider_revision": expected_provider_revision, "operation_id": operation_id,
@@ -142,26 +143,60 @@ def inspect_goal_acceptance(
         {**_routing(registry_path, goal_id, runtime_root, agent_id),
          **({"todo_id": todo_id} if todo_id is not None else {})},
     )
+    basis["goal_acceptance_contract"] = observe_goal_acceptance_oracles(
+        registry_path=registry_path, goal_id=goal_id,
+        contract=basis["goal_acceptance_contract"], criteria=(basis.get("contract") or {}).get("criteria", []),
+        task_repository=(basis.get("todo") or {}).get("task_repository"),
+        delivery_workspace=delivery_workspace, validation_workspace_path=validation_workspace_path)
+    return basis
+
+
+def observe_goal_acceptance_oracles(
+    *, registry_path: Path | None, goal_id: str, contract: dict[str, Any],
+    criteria: list[dict[str, Any]], task_repository: str | None = None,
+    delivery_workspace: Mapping[str, Any] | None = None,
+    validation_workspace_path: Path | None = None,
+) -> dict[str, Any]:
+    """Observe pinned refs supplied by one canonical read, without another read.
+
+    Inspect and status share this host IO. The caller retains the same snapshot
+    for Todos, checks and observation inputs; TS still classifies the evidence.
+    """
     observations = []
-    for criterion in (basis.get("contract") or {}).get("criteria", []):
+    for criterion in criteria:
         oracle = criterion.get("oracle")
         if oracle is None:
             continue
-        workspace, failure = _resolve_completion_validation_workspace(
-            registry_path=registry_path, goal_id=goal_id,
-            task_repository=(basis.get("todo") or {}).get("task_repository"),
-            delivery_workspace=delivery_workspace, validation_workspace_path=validation_workspace_path,
-            label=criterion["id"],
-        )
+        workspace, failure = (None, True) if registry_path is None else _resolve_completion_validation_workspace(
+            registry_path=registry_path, goal_id=goal_id, task_repository=task_repository,
+            delivery_workspace=delivery_workspace, validation_workspace_path=validation_workspace_path, label=criterion["id"])
         versions = None if failure else oracle_versions(workspace, oracle)
         observations.append({"criterion_id": criterion["id"], "available": versions is not None,
             "source_current": _acceptance_pins_match(criterion["validation_files"], workspace),
             **(versions or {})})
-    if observations:
-        basis["goal_acceptance_contract"] = effect_runtime_result("goal.acceptance.oracle.observe", {
-            "contract": basis["goal_acceptance_contract"], "observations": observations,
-        })
-    return basis
+    return effect_runtime_result("goal.acceptance.oracle.observe", {
+        "contract": contract, "observations": observations,
+    }) if observations else contract
+
+
+def observe_canonical_goal_acceptance(
+    canonical: dict[str, Any], *, registry_path: Path | None, goal_id: str,
+) -> dict[str, Any] | None:
+    """Add current host observations to this exact canonical planning read.
+
+    The private basis only carries configured oracle refs. The original source
+    snapshot and its provider identity remain unchanged for historical replay.
+    """
+    acceptance = canonical.get("goal_acceptance_contract")
+    oracle_basis = canonical.get("goal_acceptance_oracle_observation_basis")
+    if oracle_basis is None:
+        return acceptance
+    if not isinstance(acceptance, dict) or not isinstance(oracle_basis, dict) or any(
+        oracle_basis.get(key) != acceptance.get(key) for key in ("revision", "digest")
+    ) or not isinstance(oracle_basis.get("criteria"), list):
+        raise ValueError("oracle observation basis does not match the canonical acceptance snapshot")
+    return observe_goal_acceptance_oracles(registry_path=registry_path, goal_id=goal_id,
+        contract=acceptance, criteria=oracle_basis["criteria"])
 
 
 def _criterion_effects(criteria: list[dict[str, Any]]) -> list[dict[str, Any]]:
