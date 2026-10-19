@@ -269,10 +269,11 @@ def _apply_selected_todo_guards(
     summary = prepared.agent_todo_summary or {}
     acceptance = summary.get("goal_acceptance_contract")
     if isinstance(acceptance, dict) and acceptance.get("enabled") is True:
-        # The typed owner retains completed/archived work and verification
-        # attempts in this basis. A new all-advancement contract with neither
-        # must still admit its first planning through the ordinary Goal lane.
-        has_existing_work_basis = bool(acceptance.get("tasks") or acceptance.get("verification"))
+        # The typed owner retains completed/archived work. A failed preflight
+        # check on an empty Goal is not evidence that any work has happened;
+        # preserve its initial planning. A currently accepted result can still
+        # suppress redundant empty delivery without declaring the Goal complete.
+        has_existing_work_basis = bool(acceptance.get("tasks")) or acceptance.get("status") == "accepted"
         no_executable_work = not selected_todo and not any(
             summary.get(field) for field in (
                 "first_executable_items", "executable_backlog_items", "monitor_due_items",

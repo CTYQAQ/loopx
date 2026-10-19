@@ -1137,6 +1137,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                             "completed_todo_ids",
                             "vision_todo_ids",
                             "frontier_revision",
+                            "legacy_frontier_revision",
                             "reason_code",
                             "component_checks",
                             "resolution_hint",
@@ -1697,6 +1698,7 @@ def build_goal_frontier_projection_context_from_status(
         source_status=status_payload, stride_strategy=stride_strategy,
         explore_reader=replan_explore_reader, todo_items=agent_todo_source_items,
         goal_acceptance_contract=(agent_todo_summary or {}).get("goal_acceptance_contract"),
+        receipt_bound_replan_obligation_id=receipt_bound_replan_obligation_id,
     )
 
     goal_frontier_projection = build_goal_frontier_projection_from_summaries(

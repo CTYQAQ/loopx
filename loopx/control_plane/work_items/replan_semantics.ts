@@ -252,6 +252,12 @@ function preserveReceiptBoundObligation(request: JsonObject): JsonObject {
   if (current?.obligation_id === selected) {
     return {obligation: {...current, selection_binding: "heartbeat_receipt"}};
   }
+  // Only an existing receipt may use the exact legacy identity reconstructed
+  // from current canonical acceptance sources. Keep its original settlement.
+  if (request.guard_scoped && current?.legacy_obligation_id === selected &&
+      triggerKinds(current).some(kind => ACCEPTANCE_HOLD_TRIGGERS.has(kind))) {
+    return {obligation: {...current, obligation_id: selected, selection_binding: "heartbeat_receipt"}};
+  }
   throw new EffectRuntimeRequestError(
     "heartbeat receipt settlement identity conflicts with the current autonomous replan obligation",
     "heartbeat_receipt_identity_conflict",
@@ -342,13 +348,18 @@ function acknowledgeVisionEvidence(request: JsonObject): JsonObject {
   const gaps = request.acceptance_gaps.map(value => {
     const gap = object(value);
     if (ACCEPTANCE_HOLD_TRIGGERS.has(String(gap.kind ?? ""))) {
+      const currentCheckpoint = checkpoints.some(checkpoint => checkpoint.kind === gap.kind &&
+        checkpoint.frontier_revision === gap.frontier_revision);
+      const legacyCheckpoint = formalObligation && gap.source === "goal_acceptance_contract" &&
+        typeof gap.legacy_frontier_revision === "string" && BARE_SHA256_PATTERN.test(gap.legacy_frontier_revision) &&
+        checkpoints.some(checkpoint => checkpoint.kind === gap.kind &&
+          checkpoint.frontier_revision === gap.legacy_frontier_revision);
       if (!strings(delta.trigger_kinds).includes(String(gap.kind)) ||
           typeof gap.frontier_revision !== "string" || !gap.frontier_revision ||
-          !checkpoints.some(checkpoint => checkpoint.kind === gap.kind &&
-            checkpoint.frontier_revision === gap.frontier_revision) ||
+          !(currentCheckpoint || legacyCheckpoint) ||
           !outcomes.some(outcome => (outcome === "new_runnable_successor" || outcome === "new_concrete_blocker") &&
             satisfying.includes(outcome))) return false;
-      if (formalObligation && gap.source === "goal_acceptance_contract" &&
+      if (currentCheckpoint && formalObligation && gap.source === "goal_acceptance_contract" &&
           BARE_SHA256_PATTERN.test(gap.frontier_revision)) return true;
     }
     const observedAt = timestamp(gap.generated_at ?? (gap.kind === "vision_outcome_checkpoint_required" &&

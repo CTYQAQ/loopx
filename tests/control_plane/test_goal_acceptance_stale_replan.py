@@ -209,3 +209,38 @@ def test_accepted_hold_checkpoint_survives_only_display_or_note_updates(state):
     revised = acceptance_gaps_from_held_goal_binding(summary, source, agent_id="agent-a")
     assert revised[0]["frontier_revision"] != gaps[0]["frontier_revision"]
     assert derive(revised) is not None
+
+
+@pytest.mark.parametrize("state", ["stale", "unbound"])
+def test_pre_stable_hold_codec_is_derived_from_exact_current_source(state):
+    import hashlib
+    import json
+
+    summary, source = _summary(), _source()
+    contract = summary["goal_acceptance_contract"]
+    contract.update(revision=3, digest="a" * 64)
+    contract["tasks"][0]["state"] = state
+    gaps = acceptance_gaps_from_held_goal_binding(summary, source, agent_id="agent-a")
+    # Frozen pre-stable codec: independent of the production compatibility helper.
+    prior = hashlib.sha256(json.dumps(["todo_stale", "2026-09-23T08:02:52Z", "a" * 64, 3, state],
+        ensure_ascii=True, separators=(",", ":"), default=str).encode()).hexdigest()
+    assert gaps[0]["legacy_frontier_revision"] == prior
+    ack = {"recorded": True, "generated_at": "2026-09-23T08:03:00Z", "semantic_delta": {
+        "accepted": True, "obligation_id": "replan-1111111111111111",
+        "outcomes": ["new_concrete_blocker"], "satisfying_outcomes": ["new_concrete_blocker"],
+        "trigger_kinds": [gaps[0]["kind"]],
+        "trigger_checkpoints": [{"kind": gaps[0]["kind"], "frontier_revision": prior}]}}
+
+    def derive():
+        return derive_goal_frontier_replan_obligation_from_summaries(
+            user_todo_summary={"open_count": 0}, agent_todo_summary=summary,
+            work_lane_contract=None, agent_id="agent-a", existing_replan_obligation=None,
+            acceptance_gaps=acceptance_gaps_from_held_goal_binding(summary, source, agent_id="agent-a"),
+            latest_replan_ack=ack)
+
+    assert derive() is None
+    contract["revision"] = 4
+    assert derive() is not None
+    contract["revision"] = 3
+    source[0]["updated_at"] = "2026-09-23T08:04:00Z"
+    assert derive() is not None  # Old timestamp-bearing proof cannot cover unseen source changes.

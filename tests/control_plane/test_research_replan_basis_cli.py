@@ -8,6 +8,8 @@ import shlex
 import subprocess
 import sys
 
+import pytest
+
 import test_goal_acceptance_cli as acceptance_fixture
 from test_goal_acceptance_cli import _configure
 from test_external_scheduler_worker import _args, worker
@@ -73,8 +75,32 @@ def test_unconfirmed_work_edits_do_not_regrant_the_same_owner_review(acceptance_
     assert all(attempt["status"] == "returned" for attempt in attempts)
 
 
-def test_settled_owner_hold_stays_acknowledged_after_display_edits(acceptance_goal):
+@pytest.mark.parametrize("checkpoint_codec", ["stable", "pre_stable"])
+def test_settled_owner_hold_stays_acknowledged_after_display_edits(acceptance_goal, checkpoint_codec):
     project, document_path, cli, run = acceptance_goal
+    current_run = run
+    if checkpoint_codec == "pre_stable":
+        # Exercise real CLI writes/readback with only the source checkpoint
+        # codec pinned to the pre-stable algorithm. No receipt/ACK is forged.
+        def run(*args):
+            prefix = [sys.executable, "-c", '''import hashlib,json
+from loopx.control_plane.goals import goal_frontier as owner
+original=owner.acceptance_gaps_from_held_goal_binding
+def old_codec(summary,items,*,agent_id):
+    gaps=original(summary,items,agent_id=agent_id)
+    contract=summary["goal_acceptance_contract"]
+    for gap in gaps:
+        state=gap["kind"].removeprefix("goal_acceptance_")
+        identity=[gap["vision_todo_ids"][0],gap.get("generated_at"),contract.get("digest"),contract.get("revision"),state]
+        gap["frontier_revision"]=hashlib.sha256(json.dumps(identity,ensure_ascii=True,separators=(",",":"),default=str).encode()).hexdigest()
+        gap.pop("legacy_frontier_revision",None)
+    return gaps
+owner.acceptance_gaps_from_held_goal_binding=old_codec
+from loopx.cli import main
+raise SystemExit(main())''', "--registry", str(project.parent / "registry.json"),
+                "--runtime-root", str(project.parent / "runtime"), "--format", "json"]
+            process = subprocess.run([*prefix, *args], capture_output=True, text=True)
+            return process.returncode, json.loads(process.stdout)
     document = json.loads(document_path.read_text())
     document["bindings"] = []
     document_path.write_text(json.dumps(document))
@@ -88,6 +114,10 @@ def test_settled_owner_hold_stays_acknowledged_after_display_edits(acceptance_go
                       "--turn-instance-id", turn)
     assert code == 0 and guard["effective_action"] == "autonomous_replan_required", guard
     obligation = guard["autonomous_replan_obligation"]
+    code, reentered = current_run("quota", "should-run", "--goal-id", goal, "--agent-id", agent,
+        "--turn-instance-id", turn)
+    assert code == 0, reentered
+    assert reentered["autonomous_replan_obligation"]["obligation_id"] == obligation["obligation_id"]
     binding = ("--goal-id", goal, "--agent-id", agent, "--turn-instance-id", turn,
                "--replan-obligation-id", obligation["obligation_id"])
     artifact = project / "owner-association-review.json"
@@ -122,6 +152,7 @@ def test_settled_owner_hold_stays_acknowledged_after_display_edits(acceptance_go
     spend = ("quota", "spend-slot", *binding, "--slots", "1", "--source", "heartbeat", "--execute")
     code, spent = run(*spend)
     assert code == 0 and spent["settlement_result"]["ok"] is True, spent
+    run = current_run
 
     def fresh_quota():
         code, packet = run("quota", "should-run", "--goal-id", goal, "--agent-id", agent)
@@ -138,8 +169,12 @@ def test_settled_owner_hold_stays_acknowledged_after_display_edits(acceptance_go
         wake_cmd=shlex.join([sys.executable, "-c", "from pathlib import Path; import sys; Path(sys.argv[1]).touch()", str(marker)]))
     args.registry, args.runtime_root = str(project.parent / "registry.json"), str(project.parent / "runtime")
     args.goal_id, args.agent_id = goal, agent
-    for event, update in enumerate((("--text", "Display rename of the same held export"),
-                                    ("--priority", "P3"), ("--note", "A rewritten note about this unchanged hold"))):
+    updates = (("--text", "Display rename of the same held export"),
+               ("--priority", "P3"), ("--note", "A rewritten note about this unchanged hold"))
+    if checkpoint_codec == "pre_stable":
+        updates = ()  # The old digest proves the exact original source, not later edits.
+        assert worker.run_worker(args) == 0
+    for event, update in enumerate(updates):
         code, changed = run("todo", "update", "--goal-id", goal, "--agent-id", agent,
             "--todo-id", "todo_export", "--update-operation-id", f"after-ack-display-{event}", *update)
         assert code == 0, changed
@@ -151,3 +186,10 @@ def test_settled_owner_hold_stays_acknowledged_after_display_edits(acceptance_go
     current = cli("inspect")[1]["goal_acceptance_contract"]
     assert current["digest"] == original["digest"] and current["revision"] == original["revision"]
     assert current["status"] == "held"
+    if checkpoint_codec == "pre_stable":
+        document["objective"] = "Produce the export and retain its checksum under new owner criteria."
+        document_path.write_text(json.dumps(document))
+        _configure(cli, document_path)
+        code, changed = run("quota", "should-run", "--goal-id", goal, "--agent-id", agent)
+        assert code == 0 and changed["should_run"] is True, changed
+        assert changed["autonomous_replan_obligation"]["obligation_id"] != obligation["obligation_id"]

@@ -76,7 +76,7 @@ test("revision is order-independent and maintenance timestamps do not change mat
   assert.notEqual(project(rows).frontier_updated_at, project(changed).frontier_updated_at);
 });
 
-test("renaming and reprioritizing owned work changes freshness but not its replan basis", () => {
+test("owned task requirements rearm review while maintenance timestamps do not", () => {
   const original = row("todo_a", "worker-a");
   const initial = JSON.parse(original.serialized);
   original.serialized = JSON.stringify({...initial, text: "[P1] Original name", title: "Original name", priority: "P1"});
@@ -84,12 +84,14 @@ test("renaming and reprioritizing owned work changes freshness but not its repla
     serialized: JSON.stringify({...initial, text: "[P3] New display name", title: "New display name", priority: "P3"})};
   const first = project([original], "worker-a"), changed = project([updated], "worker-a");
   assert.notEqual(first.frontier_revision, changed.frontier_revision);
-  assert.equal(first.frontier_owned_identity, changed.frontier_owned_identity);
+  assert.notEqual(first.frontier_owned_identity, changed.frontier_owned_identity);
   const observed = observe({rows: [original]}).observation as Record<string, unknown>;
   const ack = {recorded: true, semantic_delta: {accepted: true, obligation_id: "replan-0123456789abcdef",
     trigger_kinds: ["long_todo_chain"], trigger_checkpoints: [{kind: "long_todo_chain",
       frontier_revision: observed.frontier_revision, frontier_owned_identity: observed.frontier_owned_identity}]}};
   assert.deepEqual(observe({rows: [updated], ack}).decision,
+    {acknowledged: false, rearmed_after_obligation_id: "replan-0123456789abcdef"});
+  assert.deepEqual(observe({rows: [{...original, updated: updated.updated}], ack}).decision,
     {acknowledged: true, rearmed_after_obligation_id: null});
   const candidate = {...updated,
     serialized: JSON.stringify({...JSON.parse(updated.serialized), target_key: "experiment:authorized-probe-v2"})};

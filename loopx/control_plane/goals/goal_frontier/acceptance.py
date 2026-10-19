@@ -14,6 +14,12 @@ from ...agents.agent_scope import agent_scope_item_claimed_by_agent_or_unclaimed
 GOAL_ACCEPTANCE_HOLD_TRIGGERS = frozenset({"goal_acceptance_stale", "goal_acceptance_unbound"})
 
 
+def _hold_checkpoint_revision(identity: list[Any]) -> str:
+    return hashlib.sha256(json.dumps(
+        identity, ensure_ascii=True, separators=(",", ":"), default=str,
+    ).encode("utf-8")).hexdigest()
+
+
 def acceptance_gaps_from_held_goal_binding(
     agent_todo_summary: dict[str, Any] | None,
     source_items: list[dict[str, Any]] | None,
@@ -57,10 +63,8 @@ def acceptance_gaps_from_held_goal_binding(
         # unconfirmed work, its display text or a review note does not create
         # another owner-review opportunity. The current timestamp remains
         # useful readback, but only a real contract revision changes this basis.
-        frontier_revision = hashlib.sha256(json.dumps(
-            [todo_id, contract.get("digest"), contract.get("revision"), state],
-            ensure_ascii=True, separators=(",", ":"), default=str,
-        ).encode("utf-8")).hexdigest()
+        owner_basis = [contract.get("digest"), contract.get("revision"), state]
+        frontier_revision = _hold_checkpoint_revision([todo_id, *owner_basis])
         gap = {
             "kind": kind,
             "source": "goal_acceptance_contract",
@@ -68,6 +72,9 @@ def acceptance_gaps_from_held_goal_binding(
             "reason_code": kind,
             "vision_todo_ids": [todo_id],
             "frontier_revision": frontier_revision,
+            # Compatibility proof comes from the same current canonical source,
+            # not an unqualified historical ACK. Never rewrite old receipts.
+            "legacy_frontier_revision": _hold_checkpoint_revision([todo_id, generated_at, *owner_basis]),
             "replan_trigger_summary": f"The acceptance association for {todo_id} is {state}.",
             "acceptance_summary": "Preserve the owner-confirmed criteria and the original Turn identity.",
             "resolution_hint": (

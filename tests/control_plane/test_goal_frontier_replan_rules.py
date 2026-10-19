@@ -298,7 +298,7 @@ def test_long_todo_chain_checkpoint_is_edge_triggered_and_rearms_on_change() -> 
 
 @pytest.mark.parametrize("change,rearms", [
     ("peer_claim", False), ("unclaimed_priority", False),
-    ("owned_priority", False), ("owned_text", False),
+    ("owned_priority", True), ("owned_text", True),
     ("owned_target", True), ("maintenance_timestamp", False),
 ])
 def test_writeback_ack_preserves_owned_material_basis(change: str, rearms: bool) -> None:

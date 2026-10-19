@@ -156,7 +156,8 @@ def test_bounded_research_stop_preserves_unproved_claims_and_cannot_certify_proo
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_empty_current_owner_contract_preserves_initial_planning(tmp_path, monkeypatch, provider):
+@pytest.mark.parametrize("failed_preflight", [False, True])
+def test_empty_current_owner_contract_preserves_initial_planning(tmp_path, monkeypatch, provider, failed_preflight):
     from test_replan_successor_guard_reentry import AGENT, GOAL, ROOT, _fixture
 
     call, runtime, index = _fixture(tmp_path, monkeypatch, provider, future_monitor=False)
@@ -178,6 +179,14 @@ def test_empty_current_owner_contract_preserves_initial_planning(tmp_path, monke
         "--document", str(document_path), "--expected-provider-revision", basis,
         "--operation-id", "initial-authorized-requirements", "--execute")["goal_acceptance_contract"]
     assert configured["enabled"] is True and configured["tasks"] == [] and configured["verification"] is None
+    if failed_preflight:
+        prefix = [sys.executable, "-m", "loopx.cli", "--registry", str(registry),
+                  "--runtime-root", str(runtime), "--format", "json"]
+        result = subprocess.run([*prefix, "goal-acceptance", "verify", "--goal-id", GOAL, "--execute"],
+            capture_output=True, text=True, cwd=ROOT)
+        assert result.returncode == 1, result.stdout + result.stderr
+        verified = json.loads(result.stdout)["goal_acceptance_contract"]
+        assert verified["status"] == "failed" and verified["tasks"] == []
     guard = call("quota", "should-run", "--runtime-profile", "generic_cli", "--goal-id", GOAL, "--agent-id", AGENT)
     assert guard.get("selected_todo") is None
     assert guard["should_run"] is True, {key: guard.get(key) for key in ("should_run", "effective_action", "reason")}
