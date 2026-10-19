@@ -3,6 +3,8 @@
 Run with an empty fixture directory and a free loopback port. Pass
 --without-check-plan to exercise default review and failed-read recovery. The ordinary
 Agent refinement uses the same native CLI as an external host after upgrade.
+An explicit --assets-dir selects a frozen packaged UI for a UI counterfactual;
+the default still requires a source-current bundle.
 """
 import json
 from pathlib import Path
@@ -78,4 +80,5 @@ if "--without-check-plan" not in sys.argv[3:]:
 
 print(json.dumps({"ready": True, "port": int(sys.argv[2]), "registry": str(registry), "runtime": str(runtime)}), flush=True)
 serve_chat(registry_path=registry, runtime_root_override=runtime, scan_roots=[project],
-    port=int(sys.argv[2]), codex_bin="unavailable-synthetic-host", claude_bin="unavailable-synthetic-host")
+    port=int(sys.argv[2]), codex_bin="unavailable-synthetic-host", claude_bin="unavailable-synthetic-host",
+    assets_dir=Path(sys.argv[sys.argv.index("--assets-dir") + 1]) if "--assets-dir" in sys.argv else None)

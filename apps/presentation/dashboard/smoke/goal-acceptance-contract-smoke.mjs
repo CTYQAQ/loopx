@@ -67,6 +67,13 @@ assert.throws(() => parseDeliveryReview({ ...withContract(contract), acceptance:
 const next = parseDeliveryReview(withContract({ ...contract, revision: 8, digest: "b".repeat(64) }), snapshot.goal_id);
 assert.equal(next.acceptance.goal_acceptance_contract.revision, 8);
 assert.notEqual(next.acceptance.goal_acceptance_contract.digest, contract.digest);
+for (const value of [{}, contract, {enabled: false}, {...contract, enabled: false}]) {
+  const source = {goal_ref: {goal_id: snapshot.goal_id, goal_instance_id: "release-instance"}, lifecycle_state: "active"};
+  const retained = parseDeliveryReview(withContract({...value, ...source}), snapshot.goal_id).acceptance.goal_acceptance_contract;
+  assert.deepEqual(retained.goal_ref, source.goal_ref, "Configured, default and retained disabled checks preserve the owning Goal lifetime");
+  assert.equal(retained.lifecycle_state, source.lifecycle_state);
+  if (value.enabled === false) assert.equal(retained.criteria, undefined, "Retained ownership does not re-enable legacy checks");
+}
 assert.deepEqual(contract, before, "Rendering must not mutate the supplied contract");
 console.log("Goal acceptance contract API/export: default absence, association/verification distinction, source/revision and negative cases passed");
 

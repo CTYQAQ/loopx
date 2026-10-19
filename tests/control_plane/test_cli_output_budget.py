@@ -1745,6 +1745,32 @@ def _assert_mode_variant_budgets(root: Path, *, only: str | None = None) -> None
             )
 
 
+def test_thin_json_budget_retains_full_supported_scope(tmp_path: Path) -> None:
+    # Keep the original public CLI fixture and expand only its authored scope
+    # to the supported boundary. JSON/body budgets must fit complete guidance.
+    with _stable_budget_fixture_root(tmp_path) as root:
+        project, runtime, registry_path, state_file = _write_fixture(root, SCENARIOS[0])
+        command = _surface_commands(
+            project=project, runtime=runtime, registry_path=registry_path,
+            state_file=state_file, output_format="json",
+        )["heartbeat_prompt_thin"]
+        scope = "x" * 320
+        command[command.index("--agent-scope") + 1] = scope
+        exit_code, text = _invoke_cli(command)
+        assert exit_code == 0, text
+        measurement = measure_cli_output(text, output_format="json")
+        assert_cli_output_baseline(
+            CLI_OUTPUT_BUDGET_BY_ID["heartbeat_prompt_thin"], scenario="small",
+            output_format="json", text=text, measurement=measurement,
+        )
+        payload = measurement["payload"]
+        assert scope in payload["task_body"]
+        assert payload["interface_budget"]["max_chars"] == 4200
+        assert payload["interface_budget"]["within_budget"] is True
+        assert "refresh-state --goal-outcome-update-json" in payload["task_body"]
+        assert "Local outcomes never replace root continuation, budget or stop criteria." in payload["task_body"]
+
+
 def test_brief_budget_retains_full_commands_on_real_long_paths() -> None:
     # A reproducible 128-character absolute root, independent of pytest's
     # ever-growing temp/worker prefix. Keep full routes and this workload;

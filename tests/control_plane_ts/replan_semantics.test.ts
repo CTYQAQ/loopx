@@ -403,6 +403,31 @@ test("vision ACK compares strict calendar timestamps at microsecond precision", 
   }
 });
 
+test("outcome blocker ACK covers only its exact current agent checkpoint", () => {
+  const gap = {kind: "goal_outcome_uncovered", source: "goal_acceptance_contract",
+    agent_id: "author", frontier_revision: "a".repeat(64)};
+  const delta = {accepted: true, obligation_id: "replan-1111111111111111",
+    trigger_kinds: [gap.kind], trigger_checkpoints: [{kind: gap.kind, frontier_revision: gap.frontier_revision}],
+    outcomes: ["new_concrete_blocker"], satisfying_outcomes: ["new_concrete_blocker"]};
+  const ack = {recorded: true, agent_id: "author", generated_at: "2026-08-01T00:00:00Z", semantic_delta: delta};
+  const accepts = (changes: JsonObject = {}, gaps: JsonObject[] = [gap]) => projectReplanSemantics({
+    operation: "vision_ack", ack: {...ack, ...changes}, acceptance_gaps: gaps}).acknowledged;
+  assert.equal(accepts(), true, "an accepted blocker needs no read-time timestamp to settle the same source");
+  for (const changes of [{agent_id: "other"}, {agent_id: null}, {recorded: false}, {generated_at: null},
+    {semantic_delta: {...delta, accepted: false}}, {semantic_delta: {...delta, obligation_id: "unknown"}},
+    {semantic_delta: {...delta, trigger_kinds: []}}, {semantic_delta: {...delta, trigger_checkpoints: []}},
+    {semantic_delta: {...delta, satisfying_outcomes: []}}, {semantic_delta: {...delta, outcomes: ["new_surface"]}}]) {
+    assert.equal(accepts(changes), false);
+  }
+  for (const change of [{source: "agent_claim"}, {agent_id: "other"}, {frontier_revision: "b".repeat(64)},
+    {frontier_revision: "unknown"}, {kind: "goal_acceptance_unbound"}]) {
+    assert.equal(accepts({}, [{...gap, ...change}]), false);
+  }
+  assert.equal(accepts({}, [gap, {generated_at: "2026-08-01T00:00:01Z"}]), false,
+    "an outcome checkpoint cannot acknowledge later ordinary Vision evidence");
+  assert.equal(accepts({}, [gap, {generated_at: ack.generated_at}]), true);
+});
+
 
 test("canonical no-follow-up restores only its exact admitted review and still owes Vision", () => {
   const id = "replan-1111111111111111", agent = "synthetic-agent";

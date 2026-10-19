@@ -6,11 +6,13 @@ import {join} from "node:path";
 import type {JsonObject} from "../../loopx/control_plane/effect_program.ts";
 import {FileAuthorityStore} from "../../loopx/control_plane/coordination/file_authority_store.ts";
 import {SqliteAuthorityStore} from "../../loopx/control_plane/coordination/sqlite_authority_store.ts";
+import {readCanonicalSnapshotFromStore, CANONICAL_SNAPSHOT_PAGE_REQUEST} from "../../loopx/control_plane/coordination/canonical_snapshot_page.ts";
 import {authorityProjectionFixture} from "./authority_projection_fixture.ts";
 import {refineGoalOutcome, projectGoalOutcomes} from "../../loopx/control_plane/goals/outcome_requirements.ts";
-import {refineGoalAcceptanceOutcome, inspectGoalAcceptance, configureGoalAcceptance} from "../../loopx/control_plane/goals/acceptance_authority.ts";
+import {refineGoalAcceptanceOutcome, inspectGoalAcceptance, configureGoalAcceptance, transitionGoalAcceptanceLifecycle} from "../../loopx/control_plane/goals/acceptance_authority.ts";
 import {observeAcceptanceOracles} from "../../loopx/control_plane/goals/acceptance_oracle.ts";
 import {projectGoalAcceptance} from "../../loopx/control_plane/goals/acceptance_contract.ts";
+import {projectReplanSemantics} from "../../loopx/control_plane/work_items/replan_semantics.ts";
 
 const goal = "tour-goal";
 const goalRef = {goal_id: goal, goal_instance_id: "ginst_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"};
@@ -20,6 +22,18 @@ function fixture() {return authorityProjectionFixture(goal, [{todo_id: "todo_tou
 function patch(extra: JsonObject = {}): JsonObject {return {outcome_id: "tour", owner_agent_id: "author", objective: "Deliver the tour",
   requirements: [{id: "opening", description: "Keep the opening"}], todo_ids: ["todo_tour"],
   source: {ref: "message:initial", summary: "The owner requested a tour with an opening"}, ...extra};}
+
+function outcomeGaps(head: JsonObject, acceptance: JsonObject = {}): JsonObject[] {
+  return projectGoalOutcomes(head, goal, acceptance)!.acceptance_gaps as JsonObject[];
+}
+
+function outcomeAck(gaps: JsonObject[]): JsonObject {
+  return {recorded: true, agent_id: "author", generated_at: "2026-08-01T00:00:00Z",
+    semantic_delta: {accepted: true, obligation_id: "replan-1111111111111111",
+      outcomes: ["new_concrete_blocker"], satisfying_outcomes: ["new_concrete_blocker"],
+      trigger_kinds: [...new Set(gaps.map(gap => gap.kind))],
+      trigger_checkpoints: gaps.slice(0, 3).map(({kind, frontier_revision}) => ({kind, frontier_revision}))}};
+}
 
 test("refinement retains original intent, accumulates requirements and cannot invent success", () => {
   const original = fixture();
@@ -44,7 +58,10 @@ test("refinement retains original intent, accumulates requirements and cannot in
     patch({requirements: [{id: "opening", description: "Remove the opening"}]}), patch({todo_ids: ["todo_missing"]}),
     {...patch(), passed: true}]) assert.throws(() => refineGoalOutcome(head, goal, null, "author", bad));
   assert.throws(() => refineGoalOutcome(head, goal, null, "other", patch()));
-  assert.throws(() => refineGoalOutcome(head, goal, goalRef, "author", patch()), /lifetime/);
+  const bound = refineGoalOutcome(head, goal, goalRef, "author", patch());
+  assert.deepEqual(bound.goal_ref, goalRef, "the first exact binding preserves the same legacy source");
+  assert.throws(() => refineGoalOutcome({...head, goal_outcomes: bound}, goal,
+    {...goalRef, goal_instance_id: "ginst_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, "author", patch()), /lifetime/);
 });
 
 test("only matching current acceptance and work coverage can qualify requirements", () => {
@@ -59,6 +76,41 @@ test("only matching current acceptance and work coverage can qualify requirement
   assert.deepEqual(states({...accepted, criteria: [{...accepted.criteria[0], oracle: {state: "recorded"}}]}), ["unverified"]);
   head.goal_acceptance_lifecycle = {schema_version: "loopx_goal_acceptance_lifecycle_v0", state: "active", goal_ref: goalRef};
   assert.deepEqual(states(accepted), ["unverified"], "legacy declarations never acquire a successor lifetime");
+});
+
+for (const provider of ["file", "sqlite"] as const) test(`${provider}: one canonical planning snapshot carries only configured oracle observation refs`, async t => {
+  const root = await mkdtemp(join(tmpdir(), "outcome-oracle-snapshot-")); t.after(() => rm(root, {recursive: true, force: true}));
+  const store = provider === "file" ? new FileAuthorityStore(root, goal) : new SqliteAuthorityStore(root, goal);
+  await store.commitAuthority({operation_id: "seed", expected_provider_revision: null, next_projection: fixture(), events: [], receipts: []});
+  const snapshot = () => readCanonicalSnapshotFromStore({schema_version: CANONICAL_SNAPSHOT_PAGE_REQUEST,
+    runtime_root: root, goal_id: goal, include_leases: false, projection_readback: null, after: null}, store);
+  const empty = await snapshot();
+  assert.equal(empty.metadata.goal_acceptance_contract, undefined);
+  assert.equal(empty.metadata.goal_acceptance_oracle_observation_basis, undefined);
+  const basis = await inspectGoalAcceptance(store, goal);
+  assert.equal((await refineGoalAcceptanceOutcome(store, {goal_id: goal, actor_agent_id: "author", operation_id: "outcome",
+    expected_provider_revision: basis.provider_revision, refinement: patch()})).status, "applied");
+  assert.equal((await snapshot()).metadata.goal_acceptance_oracle_observation_basis, undefined,
+    "ordinary outcome declarations do not authorize host artifact reads");
+  const current = await inspectGoalAcceptance(store, goal);
+  const validation_files = [{path: "check.py", sha256: "a".repeat(64)}];
+  const oracle = {kind: "owner_pinned_oracle", source_id: "tour-checker", input_refs: [], output_refs: ["tour.txt"]};
+  assert.equal((await configureGoalAcceptance(store, {goal_id: goal, actor_agent_id: null, operation_id: "checks",
+    expected_provider_revision: current.provider_revision, document: {outcome_id: "tour", criteria: [{id: "opening",
+      validation_argv: ["python", "check.py"], validation_files, oracle}]}})).status, "applied");
+  const committed = await store.loadAuthority();
+  const load = store.loadAuthority.bind(store); let sourceReads = 0;
+  store.loadAuthority = async () => {sourceReads++; return load();};
+  const observed = await snapshot();
+  assert.equal(sourceReads, 1, "oracle refs and Todo/check projections use the same authority read");
+  const contract = observed.metadata.goal_acceptance_contract;
+  assert.equal(observed.snapshot.provider_revision, committed.provider_revision);
+  assert.deepEqual(observed.metadata.goal_acceptance_oracle_observation_basis, {
+    revision: contract.revision, digest: contract.digest, criteria: [{id: "opening", validation_files, oracle}],
+  });
+  assert.ok(!JSON.stringify(contract).includes("validation_argv"), "commands remain private host data");
+  assert.equal(contract.goal_acceptance_oracle_observation_basis, undefined);
+  assert.deepEqual(await store.loadAuthority(), committed, "observation basis reads cannot rewrite authority");
 });
 
 for (const provider of ["file", "sqlite"] as const) test(`${provider}: native CAS, replay and restart retain one declaration`, async t => {
@@ -104,6 +156,69 @@ for (const provider of ["file", "sqlite"] as const) test(`${provider}: first exa
   assert.equal((await refineGoalAcceptanceOutcome(store, request)).status, "replayed");
 });
 
+for (const provider of ["file", "sqlite"] as const) test(`${provider}: recreated Goal accepts new outcomes without inheriting its predecessor`, async t => {
+  const root = await mkdtemp(join(tmpdir(), "outcome-recreation-")); t.after(() => rm(root, {recursive: true, force: true}));
+  const store = provider === "file" ? new FileAuthorityStore(root, goal) : new SqliteAuthorityStore(root, goal);
+  await store.commitAuthority({operation_id: "seed", expected_provider_revision: null, next_projection: fixture(), events: [], receipts: []});
+  const initial = await inspectGoalAcceptance(store, goal);
+  const first = {goal_id: goal, goal_ref: goalRef, actor_agent_id: "author", operation_id: "first-lifetime-outcome",
+    expected_provider_revision: initial.provider_revision, refinement: patch()};
+  assert.equal((await refineGoalAcceptanceOutcome(store, first)).status, "applied");
+  const successor = {...goalRef, goal_instance_id: "ginst_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"};
+  assert.equal((await transitionGoalAcceptanceLifecycle(store, {goal_id: goal, actor_agent_id: null,
+    operation_id: "retire", transition: {kind: "retire", goal_ref: goalRef}})).status, "applied");
+  const retiring = await inspectGoalAcceptance(store, goal, undefined, goalRef);
+  assert.equal((await refineGoalAcceptanceOutcome(store, {...first, operation_id: "during-retirement",
+    expected_provider_revision: retiring.provider_revision})).reason_code, "goal_acceptance_goal_retiring");
+  assert.equal((await transitionGoalAcceptanceLifecycle(store, {goal_id: goal, actor_agent_id: null,
+    operation_id: "successor", transition: {kind: "activate_successor", retired_goal_ref: goalRef, goal_ref: successor}})).status, "applied");
+  const current = await inspectGoalAcceptance(store, goal, undefined, successor);
+  const request = {...first, operation_id: "successor-outcome", goal_ref: successor,
+    expected_provider_revision: current.provider_revision,
+    refinement: patch({requirements: [{id: "new-scope", description: "Meet the recreated Goal's requested scope"}]})};
+  assert.equal((await refineGoalAcceptanceOutcome(store, request)).status, "applied");
+  const after = await store.loadAuthority();
+  const projected = (await inspectGoalAcceptance(store, goal, undefined, successor)).goal_acceptance_contract as JsonObject;
+  const declarations = projected.outcome_requirements as JsonObject;
+  assert.equal(declarations.current_lifetime, true);
+  assert.deepEqual(declarations.outcomes[0].requirements.map((row: JsonObject) => row.id), ["new-scope"]);
+  assert.equal((await refineGoalAcceptanceOutcome(store, first)).status, "replayed", "old receipt remains recoverable");
+  assert.deepEqual(await store.loadAuthority(), after, "old replay cannot restore predecessor declarations");
+  assert.equal((await refineGoalAcceptanceOutcome(store, {...first, operation_id: "late-predecessor",
+    expected_provider_revision: after.provider_revision})).reason_code, "goal_acceptance_goal_instance_mismatch");
+});
+
+for (const provider of ["file", "sqlite"] as const) for (const bindBy of ["refine", "lifecycle", "configure"] as const)
+  test(`${provider}: first exact ${bindBy} keeps existing legacy outcome requirements`, async t => {
+    const root = await mkdtemp(join(tmpdir(), "outcome-first-bind-")); t.after(() => rm(root, {recursive: true, force: true}));
+    const store = provider === "file" ? new FileAuthorityStore(root, goal) : new SqliteAuthorityStore(root, goal);
+    await store.commitAuthority({operation_id: "seed", expected_provider_revision: null, next_projection: fixture(), events: [], receipts: []});
+    const initial = await inspectGoalAcceptance(store, goal);
+    const legacy = {goal_id: goal, actor_agent_id: "author", operation_id: "legacy-outcome",
+      expected_provider_revision: initial.provider_revision, refinement: patch()};
+    assert.equal((await refineGoalAcceptanceOutcome(store, legacy)).status, "applied");
+    if (bindBy === "lifecycle") assert.equal((await transitionGoalAcceptanceLifecycle(store, {
+      goal_id: goal, actor_agent_id: null, operation_id: "bind", transition: {kind: "bind_existing", goal_ref: goalRef},
+    })).status, "applied");
+    if (bindBy === "configure") {
+      const basis = await inspectGoalAcceptance(store, goal);
+      assert.equal((await configureGoalAcceptance(store, {goal_id: goal, actor_agent_id: null,
+        operation_id: "configure", expected_provider_revision: basis.provider_revision, goal_ref: goalRef,
+        document: {scope: {kind: "selected_work", todo_ids: ["todo_tour"]}, objective: "Deliver the tour", non_goals: [],
+          criteria: [{id: "opening", description: "Keep the opening", validation_argv: ["true"]}],
+          bindings: [{todo_id: "todo_tour", criterion_ids: ["opening"]}]}})).status, "applied");
+    }
+    const basis = await inspectGoalAcceptance(store, goal, undefined, bindBy === "refine" ? undefined : goalRef);
+    const applied = await refineGoalAcceptanceOutcome(store, {goal_id: goal, actor_agent_id: "author", goal_ref: goalRef,
+      operation_id: "current-outcome", expected_provider_revision: basis.provider_revision,
+      refinement: {outcome_id: "tour", requirements: [{id: "appendix", description: "Keep the appendix"}],
+        source: {ref: "message:appendix", summary: "The same Goal also requires an appendix"}}});
+    assert.equal(applied.status, "applied");
+    const current = (applied.goal_acceptance_contract as JsonObject).outcome_requirements as JsonObject;
+    assert.equal(current.current_lifetime, true);
+    assert.deepEqual(current.outcomes[0].requirements.map((row: JsonObject) => row.id), ["opening", "appendix"]);
+  });
+
 
 test("host oracle freshness recomputes outcome evidence and unmet coverage", () => {
   const head = fixture(); head.goal_outcomes = refineGoalOutcome(head, goal, null, "author", patch());
@@ -118,6 +233,78 @@ test("host oracle freshness recomputes outcome evidence and unmet coverage", () 
     assert.equal(requirement.status, current ? "accepted" : "unverified");
     assert.equal((outcomes.acceptance_gaps as unknown[]).length, current ? 0 : 1);
   }
+});
+
+test("outcome checkpoint keeps bookkeeping quiet and rearms changed completed work", () => {
+  const original = fixture();
+  const head = {...original, goal_outcomes: refineGoalOutcome(original, goal, null, "author", patch())};
+  const basis = outcomeGaps(head)[0].frontier_revision;
+  const noted = {...head, goal_outcomes: refineGoalOutcome(head, goal, null, "author", {
+    outcome_id: "tour", source: {ref: "note:repeated", summary: "The same owner response is still pending"}})};
+  assert.equal(outcomeGaps(noted)[0].frontier_revision, basis, "source bookkeeping cannot buy another review");
+  const changed = authorityProjectionFixture(goal, [{todo_id: "todo_tour", role: "agent", status: "done", done: true,
+    archive_state: "active", text: "Produce a different presentation with a formal proof", task_class: "advancement_task",
+    claimed_by: "author"}], [], "native", {goal_outcomes: head.goal_outcomes});
+  assert.notEqual(outcomeGaps(changed)[0].frontier_revision, basis,
+    "unchanged Todo id/status cannot make changed work inherit an old blocker");
+});
+
+test("outcome checkpoint notices new default review evidence without treating its notes as evidence", () => {
+  const original = fixture();
+  const item = {id: "opening", conclusion: "unmet", evidence_refs: ["artifact:first-review"], note: "The introduction is absent"};
+  const head = {...original, goal_outcomes: refineGoalOutcome(original, goal, null, "author", patch({review: [item]}))};
+  const ack = outcomeAck(outcomeGaps(head));
+  const accepts = (review: JsonObject) => {
+    const revised = {...head, goal_outcomes: refineGoalOutcome(head, goal, null, "author", {
+      outcome_id: "tour", source: {ref: "review:next", summary: "Record the latest review"}, review: [review]})};
+    const gap = outcomeGaps(revised);
+    const requirement = ((projectGoalOutcomes(revised, goal, {})!.outcomes as JsonObject[])[0].requirements as JsonObject[])[0];
+    assert.equal(requirement.planning_satisfied, false);
+    assert.equal(requirement.agent_review.independently_verified, false);
+    return projectReplanSemantics({operation: "vision_ack", ack, acceptance_gaps: gap}).acknowledged;
+  };
+  assert.equal(accepts({...item, note: "The same opening is still absent"}), true);
+  assert.equal(accepts({...item, evidence_refs: ["artifact:second-review"]}), false);
+  assert.equal(accepts({...item, conclusion: "uncertain"}), false);
+});
+
+test("bounded replan checkpoints cover all same-agent outcomes and notice a fourth changed requirement", () => {
+  let head: JsonObject = fixture();
+  for (let index = 0; index < 5; index++) head = {...head,
+    goal_outcomes: refineGoalOutcome(head, goal, null, "author", patch({outcome_id: `tour-${index}`}))};
+  const gaps = outcomeGaps(head), ack = outcomeAck(gaps);
+  const accepts = (current: JsonObject) => projectReplanSemantics({operation: "vision_ack", ack,
+    acceptance_gaps: outcomeGaps(current).filter(gap => gap.agent_id === "author")}).acknowledged;
+  assert.equal(accepts(head), true, "bounded display must not strand the remaining current outcomes");
+  const peer = {...head, goal_outcomes: refineGoalOutcome(head, goal, null, "peer", patch({
+    outcome_id: "peer-tour", owner_agent_id: "peer", todo_ids: []}))};
+  assert.equal(accepts(peer), true, "a different Agent's declaration cannot reset this lane");
+  const changed = {...head, goal_outcomes: refineGoalOutcome(head, goal, null, "author", {
+    outcome_id: "tour-3", requirements: [{id: "appendix", description: "Retain the supporting appendix"}],
+    source: {ref: "message:appendix", summary: "The fourth outcome needs an appendix"}})};
+  assert.equal(accepts(changed), false, "a requirement outside three displayed triggers must rearm");
+});
+
+test("two stale oracle artifact versions remain distinct replan evidence", () => {
+  const original = fixture();
+  const head = {...original, goal_outcomes: refineGoalOutcome(original, goal, null, "author", patch())};
+  const evidence = {input_versions: [], output_versions: [{ref: "tour.txt", sha256: "a".repeat(64)}]};
+  const checks = {status: "accepted", revision: 1, digest: "d".repeat(64),
+    criteria: [{id: "opening", description: "Keep the opening", oracle: {state: "recorded"}}],
+    tasks: [{todo_id: "todo_tour", state: "ready", criterion_ids: ["opening"]}],
+    verification: {results: [{criterion_id: "opening", oracle_evidence: evidence}]}};
+  const contract = {...checks, outcome_requirements: projectGoalOutcomes(head, goal, checks)!};
+  const observed = (sha256: string) => observeAcceptanceOracles({contract,
+    observations: [{criterion_id: "opening", available: true, source_current: true,
+      input_versions: [], output_versions: [{ref: "tour.txt", sha256}]}]});
+  const stale = (value: JsonObject) => (value.outcome_requirements as JsonObject).acceptance_gaps as JsonObject[];
+  const first = observed("b".repeat(64)), second = observed("c".repeat(64));
+  assert.equal((first.criteria[0] as JsonObject).oracle.state, "stale");
+  assert.equal((second.criteria[0] as JsonObject).oracle.state, "stale");
+  const ack = outcomeAck(stale(first));
+  assert.equal(projectReplanSemantics({operation: "vision_ack", ack, acceptance_gaps: stale(observed("b".repeat(64)))}).acknowledged, true);
+  assert.equal(projectReplanSemantics({operation: "vision_ack", ack, acceptance_gaps: stale(second)}).acknowledged, false,
+    "a stale status label cannot grant the next artifact the previous blocker checkpoint");
 });
 
 
