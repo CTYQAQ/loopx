@@ -275,6 +275,10 @@ def run_codex_operation_host(
     lineage = _lineage(request)
     if not all(lineage.values()):
         raise ValueError("managed operation tools require a Todo-bound Turn")
+    launch_admission = goal_admission or FirstPartyHostGoalAdmission.for_plan(
+        registry_path=registry_path, goal_id=lineage["goal_id"],
+        planned_goal_ref=request.get("goal_ref"),
+    )
     mcp_server = normalize_codex_stdio_mcp_server(mcp_server)
     request_source = operation_request_source(operation_request_file, operation_request_sha256)
     resolved_bin = shutil.which(codex_bin)
@@ -380,6 +384,7 @@ def run_codex_operation_host(
             resume_thread_id=binding["session_id"] if binding else None,
             dynamic_tools=[OPERATION_TOOL],
             host_config=host_config,
+            launch_guard=lambda: launch_admission.launch_lifetime(operation="codex_operation_process_launch"),
             response_timeout_sec=30 if timeout_seconds is None else min(timeout_seconds, 30),
             hard_timeout_sec=timeout_seconds,
             idle_timeout_sec=180 if timeout_seconds is None else min(timeout_seconds, 180),
@@ -487,6 +492,7 @@ def run_codex_operation_host(
                if continuations else ""),
             output_schema=codex_cli_result_schema(request),
             on_event=on_event,
+            turn_start_guard=lambda: launch_admission.launch_lifetime(operation="codex_operation_turn_start"),
             **({"on_native_item": observe_child} if child_observer is not None else {}),
         )
         return result

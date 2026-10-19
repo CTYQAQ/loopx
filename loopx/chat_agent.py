@@ -10,7 +10,7 @@ import sys
 import tempfile
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -700,6 +700,7 @@ class CodexChatAgentSession:
         reasoning_effort: str | None = None,
         dynamic_tools: list[dict[str, Any]] | None = None,
         host_config: dict[str, Any] | None = None,
+        launch_guard: Callable[[], AbstractContextManager[None]] | None = None,
         _compatibility_catalog_path: Path | None = None,
     ) -> "CodexChatAgentSession":
         resolved = shutil.which(codex_bin)
@@ -808,18 +809,21 @@ class CodexChatAgentSession:
             )
         command.extend(["--listen", "stdio://"])
         try:
-            process = subprocess.Popen(
-                command,
-                cwd=str(root),
-                env=runtime_env,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                encoding="utf-8",
-                bufsize=1,
-                start_new_session=isolate_process_tree and os.name == "posix",
-            )
+            # The caller owns admission; this transport holds its fence only
+            # through spawn, not native initialization or model execution.
+            with launch_guard() if launch_guard is not None else nullcontext():
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(root),
+                    env=runtime_env,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    encoding="utf-8",
+                    bufsize=1,
+                    start_new_session=isolate_process_tree and os.name == "posix",
+                )
         except OSError as exc:
             raise CodexChatAgentError(
                 "Codex app-server could not start",
@@ -1058,6 +1062,7 @@ class CodexChatAgentSession:
                     reasoning_effort=reasoning_effort,
                     dynamic_tools=dynamic_tools,
                     host_config=host_config,
+                    launch_guard=launch_guard,
                     _compatibility_catalog_path=catalog_path,
                 )
         except Exception:
@@ -1556,6 +1561,7 @@ class CodexChatAgentSession:
         on_event: Callable[[str, dict[str, Any]], None] | None = None,
         output_schema: dict[str, Any] | None = None,
         on_native_item: Callable[[dict[str, Any]], None] | None = None,
+        turn_start_guard: Callable[[], AbstractContextManager[None]] | None = None,
     ) -> dict[str, Any]:
         text = " ".join(str(user_message or "").split())
         if not text:
@@ -1584,22 +1590,25 @@ class CodexChatAgentSession:
             image_url = str(attachment.get("data_url") or "")
             if image_url:
                 turn_input.append({"type": "image", "url": image_url, "detail": "auto"})
-        turn_result = self._request(
-            "turn/start",
-            {
-                "threadId": self.thread_id,
-                "input": turn_input,
-                "cwd": str(self.work_dir),
-                **({"model": self.model} if self.model else {}),
-                **({"effort": self.reasoning_effort} if self.reasoning_effort else {}),
-                "approvalPolicy": "never",
-                **({"permissions": self.permissions_profile} if self.permissions_profile else {}),
-                **(
-                    {"outputSchema": output_schema} if output_schema is not None else {}
-                ),
-            },
-            request_id=request_id,
-        )
+        # A running app-server is not permission for a new native Turn. Release
+        # the caller's fence after the start acknowledgement, before streaming.
+        with turn_start_guard() if turn_start_guard is not None else nullcontext():
+            turn_result = self._request(
+                "turn/start",
+                {
+                    "threadId": self.thread_id,
+                    "input": turn_input,
+                    "cwd": str(self.work_dir),
+                    **({"model": self.model} if self.model else {}),
+                    **({"effort": self.reasoning_effort} if self.reasoning_effort else {}),
+                    "approvalPolicy": "never",
+                    **({"permissions": self.permissions_profile} if self.permissions_profile else {}),
+                    **(
+                        {"outputSchema": output_schema} if output_schema is not None else {}
+                    ),
+                },
+                request_id=request_id,
+            )
         turn_id = _extract_id(turn_result, "turn", "turnId")
         self.current_turn_id = turn_id
         with self._command_items_lock:

@@ -478,6 +478,8 @@ def test_owned_app_server_process_authenticates_native_metadata_and_resumes_same
     executable = tmp_path / "fake-codex-operation"
     executable.write_text(FAKE_SERVER)
     executable.chmod(0o700)
+    (tmp_path / "registry.json").write_text(json.dumps({"schema_version": "0.2",
+        "goals": [{"id": _lineage(_request())["goal_id"], "status": "active"}]}))
     options = {
         "runtime_root": tmp_path / "runtime",
         "registry_path": tmp_path / "registry.json",
@@ -614,6 +616,8 @@ def test_owned_operation_host_reaps_descendants_on_success_and_timeout(
     executable = tmp_path / "fake-codex-operation"
     executable.write_text(FAKE_SERVER)
     executable.chmod(0o700)
+    (tmp_path / "registry.json").write_text(json.dumps({"schema_version": "0.2",
+        "goals": [{"id": _lineage(_request())["goal_id"], "status": "active"}]}))
     marker = tmp_path / "owned-child"
     monkeypatch.setenv("FAKE_OPERATION_CHILD_MARKER", str(marker))
     if hang:
@@ -665,6 +669,8 @@ def test_live_owned_app_server_native_tool_metadata(
 
     monkeypatch.setattr(codex_operation_host, "operation_tool_handler", observe)
     request = _request()
+    (tmp_path / "registry.json").write_text(json.dumps({"schema_version": "0.2",
+        "goals": [{"id": _lineage(request)["goal_id"], "status": "active"}]}))
     request["turn_envelope"]["action"]["selected_todo"]["text"] = (
         "Non-financial transport qualification only. Call loopx_operation context once. "
         "Do not use shell, create proposals, send messages or perform any external effect. "

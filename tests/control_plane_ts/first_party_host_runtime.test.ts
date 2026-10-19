@@ -49,6 +49,12 @@ test("legacy Host launch requires the original live registry witness without inv
     authority: {kind: "present", goal_id: "release", registration_status: "active", activation_state: "active"},
   };
   assert.deepEqual(decideFirstPartyHostRuntime(launch), {kind: "legacy"});
+  for (const registration_status of ["active-read-only", " ACTIVE-READ-ONLY ", "ACTIVE"]) {
+    const authority = {...launch.authority, registration_status};
+    assert.deepEqual(decideFirstPartyHostRuntime({...launch, authority}), {kind: "legacy"});
+    assert.deepEqual(decideFirstPartyHostRuntime({...launch,
+      authority: {...authority, activation_state: "stopped"}}), {kind: "reject", code: "goal_stopped"});
+  }
   for (const [authority, code] of [
     [{kind: "absent"}, "goal_not_registered"],
     [{kind: "unavailable"}, "goal_authority_unavailable"],

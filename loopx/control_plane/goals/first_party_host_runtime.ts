@@ -145,7 +145,13 @@ function legacyLaunch(facts: JsonObject): FirstPartyHostRuntimeDecision {
   if (current?.kind === "absent") return {kind: "reject", code: "goal_not_registered"};
   if (current?.kind !== "present" || typeof facts.goal_id !== "string" || !facts.goal_id
     || current.goal_id !== facts.goal_id) return {kind: "reject", code: "goal_authority_unavailable"};
-  if (current.registration_status !== "active") return {kind: "reject", code: "goal_not_registered"};
+  // Legacy registration accepts the active-* variants used by the existing
+  // Goal frontier. Source-session registration remains exact-only below.
+  const registration = typeof current.registration_status === "string"
+    ? current.registration_status.trim().toLowerCase() : "";
+  if (registration !== "active" && !registration.startsWith("active-")) {
+    return {kind: "reject", code: "goal_not_registered"};
+  }
   if (current.activation_state === "stopped") return {kind: "reject", code: "goal_stopped"};
   if (current.activation_state !== "active") return {kind: "reject", code: "goal_authority_unavailable"};
   const planned = registryWitness(facts.planned_registry_witness);
