@@ -223,6 +223,47 @@ try {
   await save.click();
   await region.getByRole("status").filter({hasText: "Result unconfirmed"}).waitFor();
   assert.equal(await text.isDisabled(), true);
+  // Optional check configuration has its own unsaved document. The same
+  // delivery gate must preserve it without enabling a write or losing the
+  // pending Outcome request alongside it. This remains a projection-only case.
+  projectedAcceptance = {...projectedAcceptance, goal_acceptance_contract: {...projectedAcceptance.goal_acceptance_contract,
+    outcome_id: outcomeId, revision: 1, digest: "c".repeat(64), objective: "Check the handoff introduction",
+    criteria: [{id: "handoff-opening", description: "Retain the handoff introduction"}],
+    status: "unverified", non_goals: [], tasks: [], held_todo_ids: [], verification: null}};
+  await refresh.click();
+  const inspection = page.locator(".delivery-check-inspection");
+  await inspection.waitFor();
+  if (await inspection.getAttribute("open") === null) await inspection.locator(":scope > summary").click();
+  const configuration = inspection.locator(".delivery-check-advanced");
+  await configuration.locator(":scope > summary").click();
+  const configurationDraft = {outcome_id: outcomeId, criteria: [
+    {id: "handoff-opening", validation_argv: ["python3", "check-tour.py", "opening"]}]};
+  await configuration.locator("input[type=file]").setInputFiles({name: "checks-draft.json", mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(configurationDraft))});
+  const configurationPreview = configuration.locator("pre");
+  const saveConfiguration = configuration.getByRole("button", {name: "Save configuration", exact: true});
+  await configurationPreview.waitFor();
+  const writesBeforeConfiguration = requests.length;
+  const retainedConfiguration = async (state, disabled) => {
+    assert.equal(await configurationPreview.count(), 1, `${state}: keep the imported check configuration`);
+    assert.deepEqual(JSON.parse(await configurationPreview.innerText()), configurationDraft);
+    assert.ok((await configurationPreview.locator("..").locator(":scope > summary").innerText()).includes("checks-draft.json"));
+    assert.equal(await saveConfiguration.isDisabled(), disabled, `${state}: configuration writes require a current basis`);
+    assert.equal(requests.length, writesBeforeConfiguration, "Configuration recovery is read-only");
+  };
+  holdDelivery = true; deliveryFails = true;
+  const configurationReadStarted = new Promise(accept => {deliveryStarted = accept;});
+  await refreshDelivery.click(); await configurationReadStarted;
+  await page.waitForFunction(button => button.disabled, await saveConfiguration.elementHandle());
+  await retainedConfiguration("delivery loading", true);
+  holdDelivery = false; releaseDelivery();
+  await page.locator(".delivery-review > [role=alert]").first().waitFor();
+  await retainedConfiguration("delivery error", true);
+  await recoverDelivery();
+  await page.waitForFunction(button => !button.disabled, await saveConfiguration.elementHandle());
+  await retainedConfiguration("delivery recovered", false);
+  assert.equal(await text.inputValue(), "This pending requirement belongs to the original lifetime");
+  assert.equal(await text.isDisabled(), true);
   const writesBeforeLifetimeChange = requests.length;
   projectedAcceptance = {...projectedAcceptance, goal_acceptance_contract: {...projectedAcceptance.goal_acceptance_contract,
     goal_ref: {goal_id: "product-launch", goal_instance_id: "instance-b"}}};
@@ -231,6 +272,7 @@ try {
   await region.getByText("Add a requirement", {exact: true}).click();
   assert.equal(await text.inputValue(), "", "A reused Goal/outcome id cannot inherit another lifetime's pending request");
   assert.equal(await rebase.count(), 0, "The old request cannot be rebased into the successor lifetime");
+  assert.equal(await configurationPreview.count(), 0, "A successor lifetime cannot inherit an imported check configuration");
   await text.fill("A draft in the selected lifetime");
   projectedAcceptance = {...projectedAcceptance, goal_acceptance_contract: {...projectedAcceptance.goal_acceptance_contract,
     outcome_requirements: {...projectedAcceptance.goal_acceptance_contract.outcome_requirements, current_lifetime: false}}};
@@ -261,7 +303,7 @@ try {
   assert.equal(requests.length, writesBeforeLifetimeChange);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({status: "PASS", boundary: "Packaged UI with real disposable SQLite/HTTP/CLI; synthetic transport and source/lifetime projections, no model or installed App",
-    checks: ["newer native outcome/older delivery snapshot", "draft and pending request/delivery loading and error", "unsubmitted draft/read failure", "committed write/lost reply/failed reconciliation", "stale basis disables rebase", "same-operation replay without duplication", "native concurrent write/explicit rebase", "synthetic lifetime change cannot rebase pending", "remote same-id source/cache/write isolation", "390px", "keyboard"]}));
+    checks: ["newer native outcome/older delivery snapshot", "draft and pending request/delivery loading and error", "unsubmitted draft/read failure", "committed write/lost reply/failed reconciliation", "stale basis disables rebase", "same-operation replay without duplication", "native concurrent write/explicit rebase", "imported check configuration/delivery loading and error", "synthetic lifetime change clears pending and imported configuration", "remote same-id source/cache/write isolation", "390px", "keyboard"]}));
 } catch (error) {
   console.error(error);
   if (diagnostic) console.error(diagnostic);

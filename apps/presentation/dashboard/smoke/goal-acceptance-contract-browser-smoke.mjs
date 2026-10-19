@@ -87,6 +87,7 @@ try {
       await page.reload({waitUntil: "networkidle"});
       const direction = page.locator(".goal-overview-direction");
       await direction.waitFor();
+      await section.waitFor();
       await openInspection();
       await direction.getByText(contract.criteria[0].description, {exact: true}).waitFor();
       await page.screenshot({path: resolve(imageDir, `${locale}-${status}.png`), animations: "disabled"});
@@ -118,7 +119,13 @@ try {
       // The native check reader is independent of the delivery-map snapshot.
       // Reload verifies both read owners; polling/recovery is covered by the
       // real SQLite/HTTP/CLI journey.
-      if (responseStatus === 200) await page.reload({waitUntil: "networkidle"});
+      if (responseStatus === 200) {
+        await page.reload({waitUntil: "networkidle"});
+        // Goal activation can finish after the page's network-idle boundary.
+        // Compare the completed delivery view, never its loading placeholder.
+        await review.locator(".delivery-chain").waitFor();
+        await page.waitForFunction(() => !document.querySelector(".delivery-review-toolbar button")?.disabled);
+      }
       await openAdvanced();
     };
     await review.locator(".delivery-chain").waitFor();

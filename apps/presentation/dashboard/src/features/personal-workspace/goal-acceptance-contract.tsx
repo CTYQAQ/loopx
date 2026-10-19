@@ -58,7 +58,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
     generation.current++; flight.current = false;
     setDocument(null); setFilename(""); setError(""); setNotice(""); setBusy(false);
     return () => {generation.current++;};
-  }, [sourceKey, canManage]);
+  }, [sourceKey]);
   async function operate(action: "adopt" | "configure" | "verify" | "clear-checks") {
     if (!canManage || flight.current || !fresh || action === "adopt" && !plan || action === "configure" && !document) return;
     const token = ++generation.current, target = goalId, context = sourceKey;
