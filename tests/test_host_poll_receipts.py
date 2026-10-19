@@ -198,7 +198,7 @@ def test_worker_observations_survive_polls_and_only_their_agent_can_clear(tmp_pa
     assert read() is None
 
 
-@pytest.mark.parametrize("damage", ["wrong-goal", "wrong-runtime", "wrong-digest", "bad-status", "bad-map", "bad-time", "invalid-utf8"])
+@pytest.mark.parametrize("damage", ["wrong-goal", "wrong-runtime", "wrong-digest", "bad-status", "bad-map", "bad-time", "invalid-utf8", "invalid-json", "wrong-schema"])
 def test_worker_observation_scope_and_damage_remain_visible_unknown(tmp_path, damage):
     goal, state = {"id": "goal-1"}, tmp_path / "state.md"
     runtime = tmp_path / "runtime"
@@ -223,12 +223,33 @@ def test_worker_observation_scope_and_damage_remain_visible_unknown(tmp_path, da
         receipt["worker_observations"] = ["damaged"]
     elif damage == "bad-time":
         row["observed_at"] = "2026-01-01T00:00:00"
-    path.write_bytes(b"\xff" if damage == "invalid-utf8" else json.dumps(receipt).encode())
+    elif damage == "wrong-schema":
+        receipt["schema_version"] = "unrecognized-receipt"
+    contents = b"\xff" if damage == "invalid-utf8" else b"{broken" if damage == "invalid-json" else json.dumps(receipt).encode()
+    path.write_bytes(contents)
     read = read_host_worker_observations(goal, state, registry_goal_digest="current-goal", runtime_root=runtime)
     assert read == {"goal_id": "goal-1", "read_status": expected, "rows": []}
-    if damage == "bad-map":
+    if damage in {"wrong-goal", "invalid-utf8", "invalid-json", "wrong-schema"}:
+        with pytest.raises(ValueError, match="unreadable"):
+            record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision())
+    else:
         record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision())
-        assert read_host_worker_observations(goal, state, registry_goal_digest="current-goal", runtime_root=runtime) == read
+    assert read_host_worker_observations(goal, state, registry_goal_digest="current-goal", runtime_root=runtime) == read
+    if damage in {"wrong-goal", "invalid-utf8", "invalid-json", "wrong-schema"}:
+        assert path.read_bytes() == contents, "A liveness poll cannot repair an unreadable source"
+
+
+def test_new_unknown_source_does_not_fall_back_to_legacy_goal_bytes(tmp_path):
+    goal, state, runtime = {"id": "goal-1"}, tmp_path / "state.md", tmp_path / "runtime"
+    worker = {"status": "replan_paused", "obligation_id": "replan-original",
+        "turn_instance_id": None, "registry_goal_digest": "current-goal", "runtime_root": str(runtime)}
+    record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision(), worker_observation=worker)
+    kwargs = {"registry_goal_digest": "current-goal", "runtime_root": runtime, "source_goal_observation_digest": None}
+    legacy = read_host_worker_observations(goal, state, **kwargs)
+    assert legacy["read_status"] == "read"  # Existing records retain their narrower original association.
+    record_host_poll_receipt(goal, state, agent_id="agent-1", decision=run_now_decision(),
+        worker_observation={**worker, "source_goal_observation_digest": None})
+    assert read_host_worker_observations(goal, state, **kwargs) == {"goal_id": "goal-1", "read_status": "stale", "rows": []}
 
 
 def test_poll_observation_keys_reuse_the_core_agent_normalizer(tmp_path):
@@ -272,6 +293,19 @@ def test_existing_sync_materialization_keeps_the_same_source_witness(tmp_path, c
         rows, *_ = merge_goal_entries(rows, [sanitize_goal_for_global(
             goal, source_registry=source, synced_at=timestamp)])
         assert host_worker_goal_observation_digest(rows[0], registry_path=mirror) == witness
+
+
+def test_worker_source_witness_rejects_a_chain_of_registry_projections(tmp_path):
+    from loopx.global_registry import sanitize_goal_for_global
+    from loopx.history import host_worker_goal_observation_digest
+
+    origin, source, mirror = (tmp_path / name for name in ("origin.json", "source.json", "global.json"))
+    goal = {"id": "goal-1", "quota": {"compute": 1}}
+    origin.write_text(json.dumps({"goals": [goal]}))
+    projected_source = sanitize_goal_for_global(goal, source_registry=origin, synced_at="first")
+    source.write_text(json.dumps({"goals": [projected_source]}))
+    twice_projected = sanitize_goal_for_global(projected_source, source_registry=source, synced_at="second")
+    assert host_worker_goal_observation_digest(twice_projected, registry_path=mirror) is None
 
 
 @pytest.mark.parametrize("change", ["source-config", "source-instance", "source-route", "source-missing", "source-unreadable", "mirror-config", "runtime", "missing-witness"])

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import {spawn} from "node:child_process";
+import {execFile, spawn} from "node:child_process";
 import {mkdtemp, readFile, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
-import {resolve} from "node:path";
+import {delimiter, dirname, resolve} from "node:path";
 import {createInterface} from "node:readline";
+import {promisify} from "node:util";
 import {resolveTestPython} from "../../scripts/test-python.mjs";
 import {outputDir, repoRoot} from "./fixture.mjs";
 import {fetchWorkspaceBackend, openWorkspacePage} from "./scenario-context.mjs";
@@ -111,11 +112,33 @@ export const researchWorkerReadbackScenario = {
                 await page.locator(".personal-refresh-control.is-done").waitFor();
               };
               const original = await readFile(authority.receipt, "utf8");
-              for (const damage of ["different-goal", "old-scope", "corrupt"]) {
+              for (const damage of ["different-goal", "old-scope", "corrupt", "invalid-utf8", "wrong-schema"]) {
                 const receipt = JSON.parse(original);
                 if (damage === "different-goal") receipt.goal_id = "unrelated-goal";
-                if (damage === "old-scope") receipt.worker_observations[authority.agent_id].registry_goal_digest = "obsolete";
-                await writeFile(authority.receipt, damage === "corrupt" ? "{broken" : JSON.stringify(receipt));
+                if (damage === "old-scope") {
+                  const observation = receipt.worker_observations[authority.agent_id];
+                  assert.equal(typeof observation.source_goal_observation_digest, "string");
+                  observation.source_goal_observation_digest = "obsolete";
+                }
+                if (damage === "wrong-schema") receipt.schema_version = "unrecognized-receipt";
+                const contents = damage === "corrupt" ? "{broken" : damage === "invalid-utf8" ? Buffer.from([0xff]) : JSON.stringify(receipt);
+                await writeFile(authority.receipt, contents);
+                if (damage !== "old-scope") {
+                  // The next ordinary CLI poll must not silently replace an
+                  // unreadable source while the original worker is unresolved.
+                  const root = dirname(authority.registry);
+                  const environment = {...process.env, PYTHONPATH: [repoRoot, process.env.PYTHONPATH].filter(Boolean).join(delimiter), HOME: resolve(root, "home"),
+                    USERPROFILE: resolve(root, "home"), TMPDIR: root, TEMP: root, TMP: root, LOOPX_USAGE_PING: "0"};
+                  for (const variable of ["CODEX_HOME", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]) delete environment[variable];
+                  const {stdout} = await promisify(execFile)(resolveTestPython(), ["-m", "loopx.cli",
+                    "--registry", authority.registry, "--runtime-root", authority.runtime, "--format", "json",
+                    "quota", "should-run", "--goal-id", authority.goal_id, "--agent-id", authority.agent_id,
+                    "--runtime-profile", "generic_cli", "--record-host-poll"],
+                  {cwd: repoRoot, env: environment, timeout: 60_000, maxBuffer: 1_000_000});
+                  assert.equal(JSON.parse(stdout).ok, true);
+                  assert.deepEqual(await readFile(authority.receipt), Buffer.from(contents));
+                  assert.equal(JSON.parse(await readFile(authority.dispatches, "utf8")), 1);
+                }
                 await refresh();
                 await region.getByRole("status").waitFor();
                 assert.match(await region.innerText(), /当前执行结果未知/u);
@@ -154,8 +177,8 @@ export const researchWorkerReadbackScenario = {
         }
       } finally { await authority.close(); }
     }
-    console.log(JSON.stringify({scenario: this.id, source: "real-file-cli-worker-http", modes: 2, locales: 2, viewports: 2,
-      actualStop: true, corruptAndStale: true, newWorkFromReadback: 0}));
-    return {coverageEntries, note: "Actual CLI worker → canonical File readback → packaged overview; paused/unknown, Chinese/English, desktop/mobile, original Stop and zero work from observation."};
+    console.log(JSON.stringify({scenario: this.id, source: "real-file-cli-worker-source-global-http", modes: 2, locales: 2, viewports: 2,
+      actualStop: true, corruptAndStale: true, unreadableSurvivesPoll: true, newWorkFromReadback: 0}));
+    return {coverageEntries, note: "Actual source CLI worker → global registry synchronization → canonical File HTTP readback → packaged overview; paused/unknown, Chinese/English, desktop/mobile, original Stop and zero work from observation."};
   },
 };

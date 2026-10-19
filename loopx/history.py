@@ -117,6 +117,10 @@ def host_worker_goal_observation_digest(goal: dict[str, Any], *, registry_path: 
                 if len(candidates) != 1:
                     return None
                 source_goal = candidates[0]
+                # A global row has one owning source. Do not accept an
+                # unverified chain of projections as that source.
+                if source_goal.get("source_registry"):
+                    return None
                 expected = preserve_attention_override({}, sanitize_goal_for_global(
                     source_goal, source_registry=source_registry, synced_at=""))
                 if preserve_attention_override({}, {**goal, "synced_at": ""}) != expected:

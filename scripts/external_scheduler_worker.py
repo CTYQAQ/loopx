@@ -300,9 +300,9 @@ def _attempt_scope(value: dict[str, Any]) -> dict[str, Any]:
 
 def _admission_scope(payload: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     agent_id = _mapping(payload.get("agent_identity")).get("agent_id")
-    # Keep the original CLI input for Core validation, then compare the same
-    # canonical identity Core returned. Do not widen CLI syntax in this driver.
-    if agent_id != normalize_todo_claimed_by(args.agent_id) or payload.get("goal_id", args.goal_id) != args.goal_id:
+    expected_agent = normalize_todo_claimed_by(args.agent_id)
+    if (not expected_agent or agent_id != expected_agent
+            or payload.get("goal_id", args.goal_id) != args.goal_id):
         raise ValueError("worker scope does not match current admission")
     runtime_root = payload.get("runtime_root")
     if (not isinstance(runtime_root, str) or not Path(runtime_root).is_absolute()
@@ -544,7 +544,7 @@ def run_worker(
         state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         # One configured state route has one live synchronous consumer. A
         # second service/cron invocation observes the owner and does no work.
-        with try_exclusive_file_lock(state_path, agent_id=args.agent_id,
+        with try_exclusive_file_lock(state_path, agent_id=normalize_todo_claimed_by(args.agent_id),
                                      operation="external_scheduler_worker") as lock:
             if lock is None:
                 _log("status=already_running next=observe_current_worker")

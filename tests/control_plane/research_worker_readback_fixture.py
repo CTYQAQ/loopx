@@ -20,8 +20,8 @@ GOAL = "successor-review-fixture"
 AGENT = "fixture-agent"
 
 
-def _write_authority(root: Path) -> tuple[Path, Path]:
-    """Prepare the same canonical File scenario without importing test modules."""
+def _write_authority(root: Path, *, provider: str = "file") -> tuple[Path, Path]:
+    """Prepare canonical worker state without importing pytest-only modules."""
     from canonical_authority_fixture import initialize_canonical_authority
     from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
     from loopx.control_plane.goals.goal_vision import compact_goal_vision_packet, normalize_goal_vision_packet
@@ -55,7 +55,7 @@ def _write_authority(root: Path) -> tuple[Path, Path]:
     }]}))
     initialize_canonical_authority(runtime, GOAL, build_todo_runtime_shadow_projection(
         goal_id=GOAL, todos=[], handoff_mode="soft_claim", leases=[],
-    ), state_path=state, provider="file")
+    ), state_path=state, provider=provider)
     return runtime, index
 
 
@@ -83,6 +83,7 @@ def serve(root: Path, mode: str) -> None:
         from managed_effect_runtime_fixture import stop_disposable_effect_runtimes
         from loopx.chat_server import ChatHTTPServer, default_chat_assets_dir, serve_chat
         from loopx.control_plane.quota.host_poll_receipts import receipt_path_for_goal
+        from loopx.global_registry import sync_project_registry_to_global
 
         # Source changes can create several runtime fingerprints. Retire all
         # verified owners before restoring the environment or removing the root.
@@ -112,6 +113,10 @@ def serve(root: Path, mode: str) -> None:
         state = json.loads(Path(args.state_file).read_text())
         original = state["replan_attempts"][0]["obligation_id"]
         receipt = receipt_path_for_goal({"id": GOAL}, root / "project" / "ACTIVE_GOAL_STATE.md")
+        synced = sync_project_registry_to_global(registry_path=Path(args.registry),
+            runtime_root_override=args.runtime_root, goal_id=GOAL)
+        assert synced["ok"] is True
+        dashboard_registry = Path(synced["global_registry"])
         output = sys.stdout
 
         class ObservableChatServer(ChatHTTPServer):
@@ -119,6 +124,7 @@ def serve(root: Path, mode: str) -> None:
                 print(json.dumps({"port": self.server_address[1], "registry": args.registry,
                     "runtime": args.runtime_root, "goal_id": GOAL, "agent_id": AGENT,
                     "obligation_id": original, "receipt": str(receipt), "dispatches": str(dispatches),
+                    "dashboard_registry": str(dashboard_registry),
                     "history": str(index)}),
                     file=output, flush=True)
                 return super().serve_forever(poll_interval)
@@ -130,7 +136,7 @@ def serve(root: Path, mode: str) -> None:
 
         signal.signal(signal.SIGTERM, terminate)
         with redirect_stdout(sys.stderr):
-            serve_chat(registry_path=Path(args.registry), runtime_root_override=runtime,
+            serve_chat(registry_path=dashboard_registry, runtime_root_override=runtime,
                 scan_roots=[root / "project"], goal_id=GOAL, host="127.0.0.1", port=0,
                 codex_bin=str(root / "no-provider-codex"), claude_bin=str(root / "no-provider-claude"),
                 kiro_cli_bin=str(root / "no-provider-kiro"), assets_dir=default_chat_assets_dir(), open_browser=False)
