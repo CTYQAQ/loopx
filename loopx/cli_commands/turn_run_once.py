@@ -768,6 +768,32 @@ def execute_turn_run_once(
         session_binding_resolver = None
         if args.host == "codex-cli":
 
+            def current_launch_decision(current_registry: Path) -> Mapping[str, Any]:
+                # Revalidate the already admitted identity through the same
+                # owner. In a global route the source is checked first, even
+                # when its mirror still advertises old quota or health.
+                current = build_live_quota_should_run_decision(
+                    collect_turn_status_payload(
+                        args, registry_path=current_registry, runtime_root_arg=runtime_root_arg,
+                    ),
+                    goal_id=args.goal_id, agent_id=args.agent_id,
+                    available_capabilities=args.available_capabilities,
+                    include_scheduler_detail=False, codex_app_current_rrule=None,
+                    registry_path=current_registry, runtime_root=runtime_root,
+                    route_source="loopx_turn_run_once",
+                    scheduler_execution_context=payload.get("scheduler_execution_context"),
+                    operator_inbox_urgency_projector=operator_inbox_urgency_projector,
+                    bounded_research_frontier_projector=project_live_explore_composition_frontier,
+                    receipt_bound_todo_id=settlement_identity.todo_id,
+                    receipt_bound_replan_obligation_id=settlement_identity.replan_obligation_id,
+                    turn_instance_id=settlement_identity.turn_instance_id,
+                    workspace_path=delivery_workspace_path, goal_ref=goal_ref,
+                )
+                return {
+                    "current": current,
+                    "planned_effective_action": payload["turn_envelope"].get("effective_action"),
+                }
+
             def run_built_in_host(
                 request: Mapping[str, Any],
             ) -> dict[str, Any]:
@@ -781,8 +807,12 @@ def execute_turn_run_once(
                     "mcp_server": args.codex_mcp_server_json,
                     "timeout_seconds": None if args.timeout_seconds is None else max(1.0, args.timeout_seconds - 5.0),
                 }
-                if goal_admission is not None:
-                    options["goal_admission"] = goal_admission
+                options["goal_admission"] = (
+                    goal_admission or FirstPartyHostGoalAdmission.for_plan(
+                        registry_path=registry_path, goal_id=args.goal_id,
+                        planned_goal_ref=goal_ref,
+                    )
+                ).with_launch_decision(current_launch_decision)
                 if getattr(args, "codex_operation_tools", False):
                     from ..control_plane.turn_driver.codex_operation_host import (
                         run_codex_operation_host,

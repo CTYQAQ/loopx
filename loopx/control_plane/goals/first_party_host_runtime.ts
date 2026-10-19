@@ -23,6 +23,7 @@ type RejectionCode =
   | "goal_stopped"
   | "stale_goal_instance"
   | "stale_goal_authority"
+  | "goal_launch_not_allowed"
   | "legacy_host_state"
   | "host_state_goal_instance_mismatch"
   | "host_state_malformed";
@@ -162,7 +163,23 @@ function legacyLaunch(facts: JsonObject): FirstPartyHostRuntimeDecision {
   if (planned.path !== observed.path || planned.sha256 !== observed.sha256) {
     return {kind: "reject", code: "stale_goal_authority"};
   }
+  const rejected = launchDecisionRejection(facts);
+  if (rejected) return rejected;
   return {kind: "legacy"};
+}
+
+function launchDecisionRejection(facts: JsonObject): FirstPartyHostRuntimeDecision | null {
+  if (!("launch_decision" in facts)) return null;
+  const launch = jsonObject(facts.launch_decision);
+  const decision = jsonObject(launch?.current);
+  // Consume the current quota owner's decision; do not reproduce its quota,
+  // health, repair, replan or scheduler policy in the Host adapter.
+  // A newly selected repair/replan is not permission to launch the old action.
+  // An already-admitted health repair keeps the quota owner's exception.
+  return decision?.should_run === true && typeof decision.status_health_ok === "boolean"
+    && typeof launch?.planned_effective_action === "string" && !!launch.planned_effective_action
+    && decision.effective_action === launch.planned_effective_action
+    ? null : {kind: "reject", code: "goal_launch_not_allowed"};
 }
 
 /**

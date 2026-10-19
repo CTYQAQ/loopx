@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -276,6 +276,7 @@ class FirstPartyHostGoalAdmission:
     source_profile: bool
     legacy_registry_witness: Mapping[str, str] | None = None
     legacy_source_admission: FirstPartyHostGoalAdmission | None = None
+    launch_decision_reader: Callable[[Path], Mapping[str, Any]] | None = None
 
     @classmethod
     def for_plan(
@@ -334,6 +335,27 @@ class FirstPartyHostGoalAdmission:
     def enabled(self) -> bool:
         return self.source_profile
 
+    def with_launch_decision(
+        self, reader: Callable[[Path], Mapping[str, Any]],
+    ) -> FirstPartyHostGoalAdmission:
+        """Bind a legacy Turn's existing read-only quota owner to launch.
+
+        Source and mirror must each read their own current authority. The
+        reader retains the original Turn/Todo/settlement identity; it cannot
+        replace the plan or issue a receipt while checking it.
+        """
+        if self.source_profile:
+            # The lifecycle-only profile has its existing exact lifetime seam;
+            # runtime admission rejects it before business/Host execution.
+            # Its quota reader takes index -> source locks and cannot be
+            # nested inside that lifetime's source guard.
+            return self
+        return replace(
+            self, launch_decision_reader=reader,
+            legacy_source_admission=(self.legacy_source_admission.with_launch_decision(reader)
+                if self.legacy_source_admission is not None else None),
+        )
+
     def _decision(
         self,
         operation: str,
@@ -341,6 +363,7 @@ class FirstPartyHostGoalAdmission:
         host_state: Mapping[str, Any] | None = None,
         launch_authority: Mapping[str, Any] | None = None,
         registry_witness: Mapping[str, str] | None = None,
+        launch_decision: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         decision = effect_runtime_result(
             "goal.first_party_host_runtime.decide",
@@ -355,6 +378,7 @@ class FirstPartyHostGoalAdmission:
                     self.goal_id,
                 ),
                 **({"host_state": host_state} if host_state is not None else {}),
+                **({"launch_decision": dict(launch_decision)} if launch_decision is not None else {}),
                 **({"goal_id": self.goal_id, "registry_path": str(self.registry_path),
                     "planned_registry_witness": self.legacy_registry_witness,
                     "registry_witness": dict(registry_witness)} if registry_witness is not None else {}),
@@ -445,6 +469,8 @@ class FirstPartyHostGoalAdmission:
             self._decision(
                 "launch", launch_authority=_legacy_launch_authority(transaction.payload_copy(), self.goal_id),
                 registry_witness=transaction.source_read_witness(),
+                launch_decision=(self.launch_decision_reader(self.registry_path)
+                    if self.launch_decision_reader is not None else None),
             )
             yield
 

@@ -1078,13 +1078,17 @@ class CodexChatAgentSession:
             ),
         )
 
-    def _write(self, payload: dict[str, Any]) -> None:
+    def _write(
+        self, payload: dict[str, Any], *,
+        write_guard: Callable[[], AbstractContextManager[None]] | None = None,
+    ) -> None:
         if self.process.stdin is None:
             raise self._runtime_error("Codex app-server input stream is closed.")
         try:
             with self._write_lock:
-                self.process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
-                self.process.stdin.flush()
+                with write_guard() if write_guard is not None else nullcontext():
+                    self.process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                    self.process.stdin.flush()
         except (BrokenPipeError, OSError) as exc:
             raise self._runtime_error(
                 "Codex app-server input stream closed unexpectedly."
@@ -1244,6 +1248,7 @@ class CodexChatAgentSession:
         *,
         request_id: int | None = None,
         deadline: float | None = None,
+        write_guard: Callable[[], AbstractContextManager[None]] | None = None,
     ) -> dict[str, Any]:
         if request_id is None:
             with self._request_id_lock:
@@ -1253,7 +1258,10 @@ class CodexChatAgentSession:
         with self._response_waiters_lock:
             self._response_waiters[request_id] = waiter
         try:
-            self._write({"id": request_id, "method": method, "params": params})
+            self._write(
+                {"id": request_id, "method": method, "params": params},
+                **({"write_guard": write_guard} if write_guard is not None else {}),
+            )
             response_deadline = time.monotonic() + self.response_timeout_sec
             deadline = min(deadline, response_deadline) if deadline is not None else response_deadline
             while True:
@@ -1590,25 +1598,26 @@ class CodexChatAgentSession:
             image_url = str(attachment.get("data_url") or "")
             if image_url:
                 turn_input.append({"type": "image", "url": image_url, "detail": "auto"})
-        # A running app-server is not permission for a new native Turn. Release
-        # the caller's fence after the start acknowledgement, before streaming.
-        with turn_start_guard() if turn_start_guard is not None else nullcontext():
-            turn_result = self._request(
-                "turn/start",
-                {
-                    "threadId": self.thread_id,
-                    "input": turn_input,
-                    "cwd": str(self.work_dir),
-                    **({"model": self.model} if self.model else {}),
-                    **({"effort": self.reasoning_effort} if self.reasoning_effort else {}),
-                    "approvalPolicy": "never",
-                    **({"permissions": self.permissions_profile} if self.permissions_profile else {}),
-                    **(
-                        {"outputSchema": output_schema} if output_schema is not None else {}
-                    ),
-                },
-                request_id=request_id,
-            )
+        # A running app-server is not permission for a new native Turn. Hold
+        # the caller's fence through its write, then release before waiting for
+        # the native acknowledgement or model output.
+        turn_result = self._request(
+            "turn/start",
+            {
+                "threadId": self.thread_id,
+                "input": turn_input,
+                "cwd": str(self.work_dir),
+                **({"model": self.model} if self.model else {}),
+                **({"effort": self.reasoning_effort} if self.reasoning_effort else {}),
+                "approvalPolicy": "never",
+                **({"permissions": self.permissions_profile} if self.permissions_profile else {}),
+                **(
+                    {"outputSchema": output_schema} if output_schema is not None else {}
+                ),
+            },
+            request_id=request_id,
+            **({"write_guard": turn_start_guard} if turn_start_guard is not None else {}),
+        )
         turn_id = _extract_id(turn_result, "turn", "turnId")
         self.current_turn_id = turn_id
         with self._command_items_lock:
