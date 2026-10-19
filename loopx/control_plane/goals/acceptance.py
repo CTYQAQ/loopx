@@ -27,6 +27,7 @@ from ..todos.completion_validation import (
 )
 from .goal_ref_validation import exact_goal_ref
 from .acceptance_oracle_io import oracle_versions, run_snapshot_oracle
+from .activation import goal_is_stopped
 
 
 _INSPECT_METHOD = "goal.acceptance.inspect"
@@ -120,7 +121,7 @@ def refine_goal_outcome(
     if "owner_agent_id" in refinement and refinement["owner_agent_id"] not in registered_agent_ids_for_goal(goal):
         raise ValueError("Outcome owner must be a registered Agent")
     # The registry's legacy omitted-status form denotes an active Goal too.
-    if goal.get("status", "active") not in {"active", "ready"}:
+    if goal.get("status", "active") not in {"active", "ready"} or goal_is_stopped(goal):
         raise ValueError("Outcome refinement requires an active Goal")
     return _result("goal.acceptance.refine", {**route, "actor_agent_id": agent_id,
         "expected_provider_revision": expected_provider_revision, "operation_id": operation_id,

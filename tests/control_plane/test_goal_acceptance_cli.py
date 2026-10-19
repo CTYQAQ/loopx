@@ -117,6 +117,28 @@ def test_outcome_refinement_retains_legacy_active_goal_admission(acceptance_goal
         assert code == 1 and "active Goal" in denied["error"], denied
         assert cli("inspect")[1] == before, "an inactive Goal cannot mutate or bypass admission through replay"
 
+    # Stop is a separate typed owner decision, including in legacy registries.
+    registry["goals"][0]["activation"] = {
+        "schema_version": "loopx_goal_activation_v1", "state": "stopped",
+    }
+    for status in ("active", None):
+        if status is None:
+            registry["goals"][0].pop("status", None)
+        else:
+            registry["goals"][0]["status"] = status
+        registry_path.write_text(json.dumps(registry), encoding="utf-8")
+        code, denied = cli(*args)
+        assert code == 1 and "active Goal" in denied["error"], denied
+        update = project / "stopped-outcome.json"
+        update.write_text(json.dumps({"outcome_id": "export",
+            "requirements": [{"id": "ordering", "description": "Retain the ordering"}],
+            "source": {"ref": "message:later", "summary": "The owner added an ordering requirement"}}), encoding="utf-8")
+        code, denied = cli("refine", "--agent-id", "agent-a", "--document", str(update),
+            "--expected-provider-revision", before["provider_revision"],
+            "--operation-id", "stopped-outcome", "--execute")
+        assert code == 1 and "active Goal" in denied["error"], denied
+        assert cli("inspect")[1] == before, "Stop rejects both saved operation replay and new refinements"
+
 
 def test_outcome_requirement_identity_survives_configure_verify_and_readback(acceptance_goal):
     project, checks_file, cli, _ = acceptance_goal
