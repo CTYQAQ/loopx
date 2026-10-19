@@ -95,7 +95,7 @@ export async function readCanonicalSnapshotFromStore(value: unknown, store: Auth
     after.snapshot.provider_revision === head.provider_revision && after.snapshot.cursor === head.cursor &&
     after.snapshot.query_sha256 === query,
   "canonical_snapshot_changed", "canonical snapshot changed; restart the complete read, never append a newer page");
-  const {projection, todoReadModel: readModel, leaseIndex: leases, acceptance} =
+  const {projection, todoReadModel: readModel, leaseIndex: leases, acceptance, oracleObservationBasis} =
     canonicalTodoCollection(head.head, goal, input.include_leases);
   const snapshot: Snapshot = {goal_id: goal, store_identity: identity.store_identity,
     provider_revision: head.provider_revision, cursor: head.cursor, query_sha256: query,
@@ -108,6 +108,7 @@ export async function readCanonicalSnapshotFromStore(value: unknown, store: Auth
   const todoStart = after?.todo_offset ?? 0, leaseStart = after?.lease_offset ?? 0;
   const metadata = {todo_read_model: readModel,
     ...(!!configuredGoalChecks(acceptance) || acceptance.outcome_requirements ? {goal_acceptance_contract: acceptance} : {}),
+    ...(oracleObservationBasis === null ? {} : {goal_acceptance_oracle_observation_basis: oracleObservationBasis}),
     ...(leases === null ? {} : {handoff_mode: head.head.handoff_mode ?? "legacy"}),
     ...(readback === null ? {} : {projection_readback: confirmProjectionReadback(readback, head.provider_revision)})};
   function result(chosenTodos: readonly string[], chosenLeases: readonly string[], guards: JsonObject): JsonObject {

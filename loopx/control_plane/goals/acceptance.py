@@ -180,6 +180,24 @@ def observe_goal_acceptance_oracles(
     }) if observations else contract
 
 
+def observe_canonical_goal_acceptance(
+    canonical: dict[str, Any], *, registry_path: Path | None, goal_id: str,
+) -> dict[str, Any] | None:
+    """Add current host observations to this exact canonical planning read.
+
+    The private basis only carries configured oracle refs. The original source
+    snapshot and its provider identity remain unchanged for historical replay.
+    """
+    acceptance = canonical.get("goal_acceptance_contract")
+    oracle_basis = canonical.get("goal_acceptance_oracle_observation_basis")
+    if oracle_basis is None:
+        return acceptance
+    if not isinstance(acceptance, dict) or not isinstance(oracle_basis, dict) or any(
+        oracle_basis.get(key) != acceptance.get(key) for key in ("revision", "digest")
+    ) or not isinstance(oracle_basis.get("criteria"), list):
+        raise ValueError("oracle observation basis does not match the canonical acceptance snapshot")
+    return observe_goal_acceptance_oracles(registry_path=registry_path, goal_id=goal_id,
+        contract=acceptance, criteria=oracle_basis["criteria"])
 
 
 def _criterion_effects(criteria: list[dict[str, Any]]) -> list[dict[str, Any]]:

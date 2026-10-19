@@ -11,6 +11,7 @@ import pytest
 from test_goal_acceptance_cli import acceptance_goal as acceptance_goal
 from test_goal_acceptance_prepared_action import conversation_check as conversation_check
 from loopx.control_plane.coordination.local_authority import read_canonical_todo_fields_if_promoted
+from loopx.control_plane.goals.goal_frontier.acceptance import acceptance_gaps_from_outcomes
 
 
 def refinement(requirements, source):
@@ -95,6 +96,12 @@ def test_native_refinement_refusals_preserve_committed_requirements(acceptance_g
         assert cli("inspect")[1] == before
 
 
+def test_typed_outcome_gaps_are_transported_only_to_their_agent():
+    gap = {"kind": "goal_outcome_uncovered", "agent_id": "author", "outcome_id": "tour", "requirement_ids": ["opening"]}
+    summary = {"goal_acceptance_contract": {"enabled": False, "outcome_requirements": {"acceptance_gaps": [gap]}}}
+    assert acceptance_gaps_from_outcomes(summary, agent_id="author") == [gap]
+    assert acceptance_gaps_from_outcomes(summary, agent_id="other") == []
+    assert acceptance_gaps_from_outcomes(summary, agent_id=None) == []
 
 
 def test_native_conversation_records_host_bound_outcome_and_reads_it(conversation_check):
@@ -121,6 +128,18 @@ def test_native_conversation_records_host_bound_outcome_and_reads_it(conversatio
     assert cli("inspect")[1] == before
 
 
+def test_native_done_work_reenters_existing_frontier_without_accepting_outcome(acceptance_goal):
+    project, _, cli, run = acceptance_goal
+    assert record(project, cli, refinement([{"id": "opening", "description": "Keep the introduction"}], "message:first"), "first")[0][0] == 0
+    code, completed = run("todo", "complete", "--goal-id", "goal-acceptance", "--agent-id", "agent-a", "--todo-id", "todo_export")
+    assert code == 0, completed
+    code, decision = run("quota", "should-run", "--goal-id", "goal-acceptance", "--agent-id", "agent-a")
+    assert code == 0, decision
+    frontier = decision["goal_frontier_projection"]
+    gap = next(g for g in frontier["acceptance_gaps"] if g["kind"] == "goal_outcome_uncovered")
+    assert gap["outcome_id"] == "tour" and gap["requirement_ids"] == ["opening"]
+    assert frontier["replan_required"] is True
+    assert cli("inspect")[1]["goal_acceptance_contract"]["outcome_requirements"]["outcomes"][0]["requirements"][0]["status"] == "unverified"
 
 
 def test_default_review_uses_one_existing_writeback_and_preserves_verification_boundary(acceptance_goal):

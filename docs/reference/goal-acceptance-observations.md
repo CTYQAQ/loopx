@@ -87,9 +87,8 @@ same feedback loop. An Agent review does
 not certify independent acceptance or complete the root Goal; requirements/work
 changes invalidate its basis and artifact edits require another review. Other
 runnable research and original budget/stop conditions retain precedence.
-The native tool and CLI provide inline context and one-call writeback.
-Automatic frontier/ACK routing and the external-host workflow are the next
-dependent slice; their delivery is qualified separately.
+See the [Agent workflow](../../skills/loopx-project/references/outcome-refinement.md)
+for inline context, one-call writeback and upgrade/adoption limits.
 
 中文：Goal 概览显示 Agent 登记的支撑成果：原始目的、累计要求、关联工作、来源，
 并区分 Agent 自查与独立检查。所有者可原地补充要求并读取原生结果；过期视图先

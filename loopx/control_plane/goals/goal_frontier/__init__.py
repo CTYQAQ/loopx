@@ -60,6 +60,7 @@ from . import outcome_continuity
 from .acceptance import (
     GOAL_ACCEPTANCE_HOLD_TRIGGERS,
     acceptance_gaps_from_held_goal_binding,
+    acceptance_gaps_from_outcomes,
     project_legacy_acceptance_hold_ack,
 )
 from ...work_items.replan_semantics_codec import project_replan_semantics
@@ -1110,6 +1111,16 @@ def derive_goal_frontier_replan_obligation_from_summaries(
         acceptance_held = any(
             gap.get("kind") in GOAL_ACCEPTANCE_HOLD_TRIGGERS for gap in compact_acceptance_gaps
         )
+        trigger_gaps = compact_acceptance_gaps[:3]
+        # Three independent holds may fill the detail slots. Preserve the
+        # canonical outcome owner's complete agent-set checkpoint as one more
+        # bounded trigger, so the same ACK can cover both sources without
+        # dropping a held Todo or acknowledging an unseen outcome revision.
+        outcome_gap = next((gap for gap in compact_acceptance_gaps
+            if gap.get("kind") == "goal_outcome_uncovered"
+            and gap.get("agent_id") == agent_id), None)
+        if outcome_gap is not None and outcome_gap not in trigger_gaps:
+            trigger_gaps.append(outcome_gap)
         rearmed_after_obligation_id = _acknowledged_replan_obligation_id(
             latest_replan_ack
         )
@@ -1138,6 +1149,8 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                             "completed_todo_ids",
                             "vision_todo_ids",
                             "frontier_revision",
+                            "outcome_id",
+                            "requirement_ids",
                             "legacy_frontier_revision",
                             "reason_code",
                             "component_checks",
@@ -1146,7 +1159,7 @@ def derive_goal_frontier_replan_obligation_from_summaries(
                         if gap.get(key) is not None
                     },
                 }
-                for gap in compact_acceptance_gaps[:3]
+                for gap in trigger_gaps
             ],
             guidance_actions=(
                 ["inspect_acceptance_binding", "select_eligible_successor", "record_evidence_gap"]
@@ -1501,6 +1514,7 @@ def build_goal_frontier_projection_context_from_status(
                 ),
             )
         )
+        + acceptance_gaps_from_outcomes(agent_todo_summary, agent_id=agent_id)
         + acceptance_gaps_from_held_goal_binding(
             agent_todo_summary, agent_todo_source_items, agent_id=agent_id,
         )

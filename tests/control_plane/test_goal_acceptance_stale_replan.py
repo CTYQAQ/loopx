@@ -4,11 +4,16 @@ import pytest
 
 from loopx.control_plane.goals.goal_frontier.acceptance import acceptance_gaps_from_held_goal_binding
 
-from loopx.control_plane.work_items.progress_observation import required_semantic_outcomes
+from loopx.control_plane.work_items.progress_observation import (
+    replan_obligation_trigger_checkpoints,
+    replan_obligation_trigger_kinds,
+    required_semantic_outcomes,
+)
 
 from loopx.control_plane.goals.goal_frontier import (
     build_goal_frontier_projection_context_from_status,
     derive_goal_frontier_replan_obligation_from_summaries,
+    replan_successor_transition_ack,
 )
 
 
@@ -176,6 +181,74 @@ def test_hold_checkpoints_survive_crowded_vision_trigger_projection():
     assert len(obligation["triggers"]) == 3
     assert obligation["triggers"][0]["kind"] == "goal_acceptance_stale"
     assert obligation["triggers"][0]["frontier_revision"] == holds[0]["frontier_revision"]
+
+
+@pytest.mark.parametrize("held_count", [0, 1, 3])
+def test_outcome_checkpoint_survives_crowded_holds_without_acknowledging_changed_evidence(held_count):
+    summary = _summary()
+    summary["open_count"] = summary["current_agent_claimed_advancement_count"] = held_count
+    summary["goal_acceptance_contract"]["tasks"] = [
+        {"todo_id": f"todo_held_{index}", "state": "stale", "applicable": True}
+        for index in range(held_count)]
+    source = [{**_source()[0], "todo_id": f"todo_held_{index}"} for index in range(held_count)]
+    holds = acceptance_gaps_from_held_goal_binding(summary, source, agent_id="agent-a")
+    crowded = [{"kind": "vision_acceptance_gap", "generated_at": "2026-09-23T08:00:00Z"}] * 3
+    # The typed owner scopes one checkpoint to all its current Agent outcomes.
+    outcomes = [{"kind": "goal_outcome_uncovered", "source": "goal_acceptance_contract",
+        "agent_id": "agent-a", "outcome_id": f"outcome-{index}", "frontier_revision": "f" * 64}
+        for index in range(5)]
+    gaps = crowded + outcomes + holds
+
+    def derive(current_gaps, ack=None):
+        return derive_goal_frontier_replan_obligation_from_summaries(
+            user_todo_summary={"open_count": 0}, agent_todo_summary=summary,
+            work_lane_contract=None, agent_id="agent-a", existing_replan_obligation=None,
+            acceptance_gaps=current_gaps, latest_replan_ack=ack)
+
+    obligation = derive(gaps)
+    assert len(obligation["triggers"]) == 4
+    assert obligation["triggers"][-1]["kind"] == "goal_outcome_uncovered"
+    checkpoints = replan_obligation_trigger_checkpoints(obligation)
+    assert len(checkpoints) == held_count + 1
+    ack = {"agent_id": "agent-a", "recorded": True, "generated_at": "2026-09-23T08:03:00Z",
+        "semantic_delta": {"accepted": True, "obligation_id": obligation["obligation_id"],
+            "outcomes": ["new_concrete_blocker"], "satisfying_outcomes": ["new_concrete_blocker"],
+            "trigger_kinds": replan_obligation_trigger_kinds(obligation),
+            "trigger_checkpoints": checkpoints}}
+    assert derive(gaps, ack) is None
+    assert derive(gaps, {**ack, "agent_id": "agent-b"}) is not None
+    for missing in checkpoints:
+        partial = {**ack, "semantic_delta": {**ack["semantic_delta"],
+            "trigger_checkpoints": [row for row in checkpoints if row != missing]}}
+        assert derive(gaps, partial) is not None, "outcome and hold evidence cannot substitute for each other"
+    changed = derive(crowded + [{**gap, "frontier_revision": "e" * 64} for gap in outcomes] + holds, ack)
+    assert changed is not None and changed["obligation_id"] != obligation["obligation_id"]
+    if holds:
+        assert derive(crowded + outcomes + [{**holds[0], "frontier_revision": "d" * 64}] + holds[1:], ack) is not None
+        assert derive(crowded + outcomes + [{**holds[0], "generated_at": "2026-09-23T08:04:00Z"}] + holds[1:], ack) is None, (
+            "a formal hold checkpoint survives display timestamps without covering newer ordinary Vision evidence")
+    assert derive([{**crowded[0], "generated_at": "2026-09-23T08:04:00Z"}] + outcomes + holds, ack) is not None
+
+
+def test_outcome_successor_checkpoint_keeps_its_canonical_agent_scope():
+    from loopx.control_plane.goals.goal_frontier import _vision_gap_acknowledged
+
+    gap = {"kind": "goal_outcome_uncovered", "source": "goal_acceptance_contract",
+        "agent_id": "agent-a", "frontier_revision": "a" * 64}
+    summary = {**_summary(), "open_count": 0, "current_agent_claimed_advancement_count": 0}
+    obligation = derive_goal_frontier_replan_obligation_from_summaries(
+        user_todo_summary={"open_count": 0}, agent_todo_summary=summary,
+        work_lane_contract=None, agent_id="agent-a", existing_replan_obligation=None,
+        acceptance_gaps=[gap])
+    successor = {"todo_id": "todo_successor", "text": "Validate the retained original introduction",
+        "role": "agent", "status": "open", "task_class": "advancement_task", "claimed_by": "agent-a",
+        "replan_obligation_id": obligation["obligation_id"], "action_kind": "validate",
+        "target_key": "outcome:original-introduction", "updated_at": "2026-09-23T08:03:00Z"}
+    ack = replan_successor_transition_ack(None, agent_id="agent-a",
+        replan_obligation=obligation, agent_todo_items=[successor])
+    assert ack["agent_id"] == "agent-a" and _vision_gap_acknowledged([gap], ack)
+    assert not _vision_gap_acknowledged([{**gap, "agent_id": "agent-b"}], ack)
+    assert not _vision_gap_acknowledged([{**gap, "frontier_revision": "b" * 64}], ack)
 
 
 @pytest.mark.parametrize("state", ["stale", "unbound"])

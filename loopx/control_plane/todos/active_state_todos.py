@@ -128,10 +128,13 @@ def active_state_todo_fields(
     if runtime_root is not None and goal_id:
         events = TodoResumeRolloutEvents(events, runtime_root=runtime_root, goal_id=goal_id)
     if canonical is not None:
+        from ..goals.acceptance import observe_canonical_goal_acceptance
+        acceptance = observe_canonical_goal_acceptance(canonical,
+            registry_path=source_registry, goal_id=goal_id)
         fields = canonical_todo_summary_fields(
             canonical["todos"],
             rollout_events=events,
-            goal_acceptance_contract=canonical.get("goal_acceptance_contract"),
+            goal_acceptance_contract=acceptance,
             goal_acceptance_work_guards=canonical.get(
                 "goal_acceptance_work_guards"
             ),

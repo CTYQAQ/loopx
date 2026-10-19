@@ -97,6 +97,26 @@ def test_complete_snapshot_preserves_archives_guards_and_leases():
     assert result["provider_revision"] == "r1"
 
 
+def test_pinned_oracle_refs_remain_bound_to_one_complete_snapshot():
+    source = [deepcopy(page) for page in pages()]
+    basis = {"revision": 2, "digest": "acceptance-a", "criteria": [{
+        "id": "opening", "validation_files": [{"path": "check.py", "sha256": "a" * 64}],
+        "oracle": {"kind": "owner_pinned_oracle", "source_id": "tour-checker",
+            "input_refs": [], "output_refs": ["tour.txt"]},
+    }]}
+    for page in source:
+        page["metadata"]["goal_acceptance_oracle_observation_basis"] = deepcopy(basis)
+    result, calls = read(source)
+    assert len(calls) == 2
+    assert result["goal_acceptance_oracle_observation_basis"] == basis
+    assert "goal_acceptance_oracle_observation_basis" not in result["goal_acceptance_contract"]
+    source[1]["metadata"]["goal_acceptance_oracle_observation_basis"]["digest"] = "acceptance-b"
+    mixed, _ = read(source)
+    assert mixed["status"] == "failed"
+    assert mixed["reason_code"] == "canonical_snapshot_result_invalid"
+    assert "todos" not in mixed
+
+
 @pytest.mark.parametrize("status", ["failed", "unavailable", "missing"])
 def test_later_page_failure_discards_all_earlier_records(status):
     source = pages()

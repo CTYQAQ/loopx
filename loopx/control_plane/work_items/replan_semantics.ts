@@ -330,11 +330,11 @@ function writebackProjection(required: SemanticOutcome[], externalReview: boolea
   return {cli_semantic_args: PROGRESS_CLI_ARGS, writeback_contract: {}};
 }
 
-/** Vision gaps use their durable run or completed-chain source timestamp.
- * Canonical acceptance holds instead have exact owner-revision checkpoints:
+/** Outcome gaps bind the canonical Agent's complete requirements/work set.
+ * Canonical acceptance holds bind their own exact owner-revision checkpoints;
  * a formal accepted obligation covers that same hold after a display edit.
- * Other later evidence, a different checkpoint and legacy ACKs retain their
- * source freshness requirements.
+ * Ordinary Vision evidence and legacy hold ACKs retain source timestamps.
+ * Every source must be covered independently by the same accepted writeback.
  */
 function acknowledgeVisionEvidence(request: JsonObject): JsonObject {
   if (!Array.isArray(request.acceptance_gaps)) {
@@ -351,6 +351,15 @@ function acknowledgeVisionEvidence(request: JsonObject): JsonObject {
   const formalObligation = typeof delta.obligation_id === "string" && /^replan-[a-f0-9]{16}$/.test(delta.obligation_id);
   const gaps = request.acceptance_gaps.map(value => {
     const gap = object(value);
+    if (gap.kind === "goal_outcome_uncovered") {
+      return gap.source === "goal_acceptance_contract" && typeof gap.agent_id === "string" &&
+        !!gap.agent_id && ack.agent_id === gap.agent_id &&
+        typeof gap.frontier_revision === "string" && BARE_SHA256_PATTERN.test(gap.frontier_revision) &&
+        formalObligation &&
+        strings(delta.trigger_kinds).includes(gap.kind) &&
+        checkpoints.some(checkpoint => checkpoint.kind === gap.kind && checkpoint.frontier_revision === gap.frontier_revision) &&
+        outcomes.some(outcome => VISION_OUTCOMES.some(known => known === outcome) && satisfying.includes(outcome));
+    }
     if (ACCEPTANCE_HOLD_TRIGGERS.has(String(gap.kind ?? ""))) {
       const currentCheckpoint = checkpoints.some(checkpoint => checkpoint.kind === gap.kind &&
         checkpoint.frontier_revision === gap.frontier_revision);

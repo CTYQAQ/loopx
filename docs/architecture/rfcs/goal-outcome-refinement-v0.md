@@ -1,11 +1,5 @@
 # RFC: Persistent Goal outcome refinement (v0)
 
-> Implementation checkpoint: this dependent slice ships cumulative declarations,
-> scoped ownership, retry/recovery, caller readback and referenced check plans.
-> The automatic frontier/ACK and same-snapshot status/refresh oracle path below
-> remains the next dependent slice. Historical combined-proposal evidence is
-> retained here; current validation is reported on each exact PR head.
-
 - Status: Implementation proposed; installed/model adoption and comparative benefit remain unqualified.
 - Owner: Core Goal acceptance and work planning (S3/R4), with S1/S5 callers.
 - Language mirror: [中文](goal-outcome-refinement-v0.zh-CN.md).

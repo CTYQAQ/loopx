@@ -424,6 +424,18 @@ export function readGoalAcceptance(head: JsonObject, goalId: string): Acceptance
   return authority.owner_matches ? authority.state : null;
 }
 
+/** Private same-snapshot host inputs for read-only freshness observation.
+ * They contain only already pinned files and oracle refs, never commands or
+ * a new result. Public summaries keep using the acceptance projection. */
+export function goalAcceptanceOracleObservationBasis(head: JsonObject, goalId: string): JsonObject | null {
+  const authority = readGoalAcceptanceAuthority(head, goalId);
+  const state = authority.kind === "legacy" ? authority.state
+    : authority.owner_matches && authority.lifecycle.state === "active" ? authority.state : null;
+  const criteria = state?.document.criteria.filter(criterion => criterion.oracle !== undefined)
+    .map(criterion => ({id: criterion.id, validation_files: criterion.validation_files, oracle: criterion.oracle!})) ?? [];
+  return state && criteria.length ? {revision: state.revision, digest: state.digest, criteria} : null;
+}
+
 export function bindGoalAcceptanceStateOwner(
   state: AcceptanceState,
   ownerGoalRef: WireExactGoalRef,
