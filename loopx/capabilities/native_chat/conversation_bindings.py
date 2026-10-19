@@ -6,16 +6,19 @@ This file stores no conversation text and creates no Goal or model thread.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import uuid
 import hashlib
 
 from ...chat_store import TERMINAL_TURN_STATES, _atomic_write_json, _read_json
 from ...control_plane.effect_runtime import EffectRuntimeRejected, effect_runtime_result
 from ...file_lock import exclusive_file_lock
+
+if TYPE_CHECKING:
+    from ...chat_store import ChatSessionStore
 
 
 class ChatConversationBindings:
@@ -29,7 +32,7 @@ class ChatConversationBindings:
         self.controller: Any | None = None
 
     def observe(self, transport_ref: str, *, audience: str | None = None) -> dict[str, Any]:
-        row = next((item for item in self.read()["bindings"] if item["transport_ref"] == transport_ref), {})
+        row: dict[str, Any] = next((item for item in self.read()["bindings"] if item["transport_ref"] == transport_ref), {})
         if audience is None:
             audience = row.get("audience", "owner")
         if audience == "group" and self._observe_group is not None:
@@ -118,7 +121,7 @@ class ChatConversationBindings:
             readback = self.read()
             if readback != result["state"]:
                 raise OSError("conversation binding publication did not verify")
-            binding = next(row for row in readback["bindings"] if row["transport_ref"] == transport_ref)
+            binding: dict[str, Any] = next(row for row in readback["bindings"] if row["transport_ref"] == transport_ref)
         if previous and previous["binding_id"] != binding["binding_id"]:
             self._stop_revoked_binding(previous["binding_id"])
         return binding
@@ -180,7 +183,7 @@ class ChatConversationBindings:
                 private_human_message: bool, session_context: dict[str, Any] | None = None,
                 group_ref: str | None = None, topic_ref: str | None = None,
                 group_human_message: bool = False, include_observation: bool = False,
-                origin: str | None = None) -> dict[str, Any]:
+                origin: str | None = None, session: dict[str, Any] | None = None) -> dict[str, Any]:
         current = self.read()
         row = next((item for item in current.get("bindings", []) if item.get("binding_id") == binding_id), None)
         if row is None:
@@ -197,6 +200,7 @@ class ChatConversationBindings:
             "source_ref": source_ref, "sender_ref": sender_ref, "private_human_message": private_human_message,
             **({"origin": origin} if origin is not None else {}),
             **({"session_context": session_context} if session_context is not None else {}),
+            **({"session": self._session_observation(session)} if session is not None else {}),
             **({"group_ref": group_ref, "topic_ref": topic_ref,
                 "group_human_message": group_human_message} if group_ref is not None or topic_ref is not None or group_human_message else {}),
         })
@@ -205,7 +209,8 @@ class ChatConversationBindings:
         # or a substitute for the next admission/delivery owner's fresh check.
         return {**selected, "observation": observation} if include_observation else selected
 
-    def _resolve_observed(self, current, row, observation, source):
+    def _resolve_observed(self, current: dict[str, Any], row: dict[str, Any],
+                          observation: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
         return self._core("collaboration.conversation.bound_context", {
             "current": current, "binding_id": row["binding_id"], "observation": observation,
             "available_projects": self.projects.available(), **source,
@@ -213,7 +218,8 @@ class ChatConversationBindings:
         })
 
     @contextmanager
-    def input_context(self, saved: dict[str, Any], *, origin: str):
+    def input_context(self, saved: dict[str, Any], *, origin: str, session: dict[str, Any],
+                      store: ChatSessionStore) -> Iterator[dict[str, Any]]:
         """Observe outside the publication fence, then retain it through enqueue.
 
         Saved fields select an identity; fresh Core checks grant it. Local Web
@@ -226,13 +232,25 @@ class ChatConversationBindings:
             source = self._session_source(saved)
         else:
             raise ValueError("unsupported bound conversation input origin")
-        observed = self.resolve(binding_id=saved["binding_id"], include_observation=True, **source)
+        observed = self.resolve(binding_id=saved["binding_id"], include_observation=True, session=session, **source)
         with exclusive_file_lock(self.path, operation="admit_bound_input"):
             current = self.read()
             if next((row for row in current.get("bindings", [])
                      if row.get("binding_id") == saved["binding_id"]), None) != observed["binding"]:
                 raise ValueError("conversation binding changed before input admission")
-            yield self._resolve_observed(current, observed["binding"], observed["observation"], source)
+            # The provider observation may have waited. Re-read canonical
+            # identity under the binding fence before Core authorizes input.
+            fresh = store.load_session(session["session_id"])
+            if fresh is None:
+                raise KeyError("chat session was not found")
+            yield self._resolve_observed(current, observed["binding"], observed["observation"],
+                {**source, "session": self._session_observation(fresh)})
+
+    @staticmethod
+    def _session_observation(session: dict[str, Any]) -> dict[str, Any]:
+        return {key: session.get(key) for key in (
+            "session_id", "goal_id", "agent_id", "executor_endpoint_id", "channel_id",
+            "session_mode", "status", "project_context", "steward_context")}
 
     def local_sessions(self, binding_id: str) -> list[dict[str, Any]]:
         """Read original targets; metadata hints never replace Core's grant.
@@ -263,10 +281,7 @@ class ChatConversationBindings:
             result = self._core("collaboration.conversation.local_sessions", {
                 "current": current, "binding_id": binding_id, "observation": observation,
                 "available_projects": self.projects.available(),
-                "sessions": [{key: session.get(key) for key in (
-                    "session_id", "goal_id", "agent_id", "executor_endpoint_id", "channel_id",
-                    "session_mode", "status", "project_context", "steward_context")}
-                    for session in sessions],
+                "sessions": [self._session_observation(session) for session in sessions],
                 **({"available_goal_ids": self.goal_scope_ids(row)} if row.get("goal_scope") == "all_registered" else {}),
             })
             # Build the lookup only after Core has rejected duplicate identity;
@@ -277,7 +292,7 @@ class ChatConversationBindings:
     def goal_scope_ids(self, binding: dict[str, Any]) -> list[str]:
         if binding.get("goal_scope") != "all_registered":
             return list(binding.get("goal_ids", []))
-        from ...registry import load_registry
+        from ...control_plane.projects.registry_codec import load_registry
         if self.controller is None or self.controller.registry_path is None:
             raise ValueError("the steward registry is unavailable")
         return [goal["id"] for goal in load_registry(self.controller.registry_path).get("goals", [])]
@@ -315,8 +330,8 @@ class ChatConversationBindings:
         return {"source_ref": saved["source_ref"], "sender_ref": saved["operator_ref"],
                 "private_human_message": True, "session_context": saved}
 
-    def session_context(self, saved: dict[str, Any]) -> dict[str, Any]:
-        return self.resolve(binding_id=saved["binding_id"], **self._session_source(saved))
+    def session_context(self, saved: dict[str, Any], *, session: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.resolve(binding_id=saved["binding_id"], session=session, **self._session_source(saved))
 
     def manager_runtime_owner(self, saved: dict[str, Any], channel_id: str) -> bool:
         """Fresh Core audience proof; saved Session text is never authority."""
@@ -356,7 +371,8 @@ class ChatConversationBindings:
         No host history, remote thread database or prior identity is discovered.
         """
         from ...attached_session import require_current_attached_session, _require_bound_host
-        from ...registry import find_registry_goal, load_registry
+        from ...control_plane.projects.registry_codec import load_registry
+        from ...registry import find_registry_goal
         if self.controller is None or self.controller.registry_path is None:
             raise ValueError("the attached Session registry is unavailable")
         session = require_current_attached_session(store=self.controller.store,
@@ -421,11 +437,14 @@ class ChatConversationBindings:
             result = self._core("collaboration.conversation.binding", params)
             if result["changed"]:
                 if session_id is not None:
+                    # agent_observation already requires this exact local controller.
+                    assert self.controller is not None
                     self.controller.store.update_session(session_id, external_conversation_binding_id=binding_id)
                 _atomic_write_json(self.path, result["state"])
             if self.read() != result["state"]:
                 raise OSError("Agent target grant publication did not verify")
-            return result["state"]
+            state: dict[str, Any] = result["state"]
+            return state
 
     def resolve_agent_target(self, selected: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
         return self._core("collaboration.conversation.agent_target", {"binding": selected["binding"],
