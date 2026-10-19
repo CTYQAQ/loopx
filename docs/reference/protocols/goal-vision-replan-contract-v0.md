@@ -673,6 +673,94 @@ not improved model decisions or net efficiency.
 应在原 Turn 和原复盘义务下补读并重新评估。读取不写入回执或扣额度，分页引用随
 决策保留到历史和下次复盘；来源核验不证明模型理解、采用或研究收益。
 
+### Source-bound comparison selection
+
+With Explore planning and `evidence_conditioned_v1` enabled, the existing
+turn-context result page can include `comparison_candidates`. Each card links
+an actionable, own-or-unclaimed canonical Todo to up to three current results
+through that Todo's explicit Explore node references. An outcome contains
+`node_id`, `finding_id`, and `source_sha256`, the digest of the full scoped
+result. These links survive into `stride_control.explore_basis`; an Agent can
+compare the actual result contents before planning further work. Planner rank
+does not grant or remove execution permission: eligible linked Todos from the
+planner's unselected pool can also supply cards. Negative findings do not
+automatically penalize, forbid or replace a route.
+
+A v2 decision may optionally copy one exact outcome and its Todo into
+`explore_review.selected_candidate`:
+
+```json
+{
+  "todo_id": "todo_current_probe",
+  "node_id": "current-question",
+  "finding_id": "current-result",
+  "source_sha256": "<64 lowercase hexadecimal characters from the source card>"
+}
+```
+
+This declaration requires `disposition: "used"`, the selected finding in
+`considered_refs`, and `retain:todo_current_probe` in the same Vision's existing
+`todo_delta`. Qualification of a fresh Vision stride decision checks the
+current source link and exact content digest; an unrelated fresh-path or
+successor outcome cannot make an invalid binding qualify as that decision.
+Changed source requires reassessment. For an enabled periodic or observed-stall
+review listed above, a standalone canonical successor ACK cannot replace the
+current evidence-linked stride decision. Other obligation sources and the
+disabled strategy keep their existing outcome gates; a successor ACK alone
+does not make an attached comparison selection an accepted decision or executed
+work.
+The optional fields share the existing Vision budget. A decision without this
+field, disabled planning, and the strategy's `off` mode retain their existing
+behavior and authority.
+
+Cards use the existing result page coordinates and limits. If a card is not
+visible, read a current global result page and attach its coordinates in
+`explore_review.result_pages`. Increasing the existing `--result-limit` to its
+maximum of 20 can expose more Todos linked to the same finding. The page's
+`omitted_comparison_candidates` reports remaining omissions; more than 20
+matching Todos on one page are not all selectable through this optional
+binding. Up to three replayed pages and three considered findings remain the
+existing upper bounds. No new pagination or scheduling protocol is created.
+
+The selection records evidence-backed **planning intent** for the retained
+Todo. It does not reserve that Todo or force the next scheduler choice. Another
+legally admitted Todo may run; its result remains attributable to its own work.
+The existing `decision_followthrough.planned_work` and scoped history distinguish
+the declared Todo from subsequent evidence, keep execution and Goal gain
+unknown without proof, and reject an execution claim supported only by
+unrelated work. An identifier or changed source digest cannot certify a new
+mechanism. The Agent must explain the mechanism, predicted benefit, evidence
+and uncertainty, then perform the chosen work and satisfy the original
+acceptance through the existing owners.
+
+The local comparison fixture exercises one original implementation Todo with
+three measured alternatives: retaining its program, searching parameters in a
+fixed representation, and generating programs from a finite arithmetic grammar.
+Each family performs 125 score calls against the same six training inputs.
+The choice uses those measured results; an additive positive control can retain
+the original program. The selected source is then deployed and executed by an
+independent pinned owner verifier on withheld inputs. This checks actual
+program adoption within the Todo, not mandatory cross-Todo scheduling or live
+provider creativity. Grammar generation CPU, token usage and money are not
+equalized by the score-call limit. The controlled Host does not read withheld
+inputs before choosing; the fixture is not an adversarial data-access sandbox.
+Keep measured choice, reasons and final verifier results in the existing
+`path_delta` and Explore findings so the shipped evidence view can show them
+beside linked Todo state.
+
+**中文：** 当前结果页可把真实可执行 Todo 与其明确关联的实验结果一起交给复盘，
+包括未进入高分候选的合法路线；排名不替代准入。可选 `selected_candidate` 精确
+绑定 Todo、节点、finding 及完整来源摘要，同时要求同一 Vision 保留该 Todo。
+错源、已变化的结果或没有保留对应工作均不能借别的后继结果混过核验。上述已启用
+的周期或停滞复核均不能用单独的后继 ACK 代替当前决策；其他义务和关闭策略时
+保留原出口边界，后继 ACK 本身也不证明比较选择已被接受或执行。分页仍沿用
+既有坐标与最多 20 项的上限，同一结果关联过多 Todo 时明确显示省略数，不能声称
+无限候选均可达。这是有来源的规划意图，不是调度命令；合法 B 任务可以执行，
+但不能凭 B 的结果声称所选 A 已执行。实际采用、机制差异和原验收仍需真实证据。
+受控实验比较停留原式、局部调参与结构语法搜索，评分调用预算相同；它证明原
+Todo 内的实际选程序、部署与独立验收，不证明付费模型创造力、完整成本或普遍
+研究收益。选择、理由和实际结果复用现有路径说明、Explore finding 与任务回读。
+
 ### Path Delta
 
 A vision packet may include a top-level `path_delta` object; `goal_path_delta_v0`
@@ -1332,12 +1420,16 @@ still rearm. Timestamp/evidence bookkeeping does not. Existing accepted ACKs
 remain readable, including predecessor recovery for historical open-count
 obligations; an outstanding pre-upgrade Turn should refresh its guard.
 
-The owned identity retains the original serialized work basis, including
-`title`/`text` and `priority`: task prose can contain substantive requirements,
-including when acceptance is disabled or covers other selected work only.
-Those edits, a new owned task, target or dependency change the review basis;
-maintenance timestamps alone do not. Actual negative experiments remain material history even when
-their score does not improve. For an unconfirmed acceptance association, its
+The owned identity excludes display `title` and `priority` from the existing
+serialized work basis. Canonical Todo `text` remains part of the requirement:
+the existing priority owner removes only its exact legacy priority prefix before
+comparison. A finite-sample requirement changed to a universal-proof requirement
+therefore opens a new long-chain review, including when acceptance is disabled
+or its selected-work scope does not cover that Todo. Display edits still change
+the full frontier freshness revision. A new owned task, target or dependency
+also changes the review basis; no prose-equivalence judgment is performed.
+Actual negative experiments remain material history even when their score does
+not improve. For an unconfirmed acceptance association, its
 hold checkpoint binds the Todo, contract revision/digest and hold state. A
 formal accepted ACK for that exact checkpoint survives later display/note
 timestamps and event IDs. A different owner revision, Todo or hold checkpoint
@@ -1345,22 +1437,19 @@ does not match it. Other newly observed vision/evidence gaps still require
 their original strict timestamp coverage; legacy ACKs without an exact
 obligation identity retain that freshness requirement.
 
-Pre-stable acceptance checkpoints included the source Todo timestamp. Readers
-derive that exact old digest from the current Todo, owner revision/digest and
-hold state, and require the original timestamp coverage before honoring its
-accepted ACK. They do not rewrite old receipts or accept an arbitrary old hash.
-An admitted original Turn can retain this source-proven legacy obligation id;
-its context and delivery references are rebuilt for that same id before use.
-Provider-first Todo reentry retains the canonical acceptance projection rather
-than dropping the hold during list filtering. A changed owner/source must be
-reviewed again. Stable checkpoints keep their display-edit continuity; the old
-timestamp-bearing format cannot certify later source edits it never recorded.
-
-任务正文可能包含实质要求，不能全局当作显示文字从长链复盘依据中删除；未启用验收
-或所改任务不在 `selected_work` 范围内时同样如此。验收 hold 的显示稳定性仍由其
-owner 版本单独约束。读取旧时间戳摘要时，仅兼容当前源事实可重建且时间覆盖有效
-的旧确认；原 Turn、复盘上下文和结算身份保持一致，不改写历史回执，不放过新的
-owner 修订。Todo 重入列表保留验收投影；旧摘要不能证明其未记录过的后续源修改。
+Before the stable hold codec, the checkpoint also included the Todo timestamp.
+The current owner can reconstruct that exact old checkpoint from the same
+canonical source and retain a matching admitted Turn's original obligation and
+receipt identity, rebuilding the original context and delivery references for
+that same id. Provider-first Todo reentry retains the same canonical acceptance
+projection while filtering public Todo lists. For a recorded old ACK followed
+by display edits, its retained
+`todo_source` must resolve to the exact store, provider revision and cursor. One
+bounded historical source read must prove the old checkpoint and the same current
+Todo, contract digest/revision and hold state before the existing typed ACK
+comparison can reuse it. Missing, unreadable or foreign sources and new owner
+revisions provide no compatibility approval. This read-time projection does not
+rewrite durable ACKs, receipts, outcome records or quota debits.
 
 长链触发范围修正：Agent lane 只在自己已认领的开放推进任务达到 15 项时触发；
 持续监控和共享未认领任务不计入该阈值，移除原 20 项已认领开放任务的触发分支。
@@ -1368,6 +1457,16 @@ owner 修订。Todo 重入列表保留验收投影；旧摘要不能证明其未
 规则不变。历史开放任务计数 checkpoint 的读取与前置义务恢复保持兼容。
 义务身份使用 typed owner 给出的 owned 实质 revision，同伴修改共享池不会让正在
 处理的义务换 ID；自己任务的实质修改仍重新触发。证据补充或更新时间不重新触发。
+`title` 和 `priority` 属于显示信息；Todo 正文仍是要求身份的一部分，只由既有
+priority owner 移除准确匹配的优先级格式前缀。有限样本改成全整数证明会产生新的
+长链复查义务，未启用验收契约或契约未覆盖该 Todo 时亦然，不以自然语言猜测等价。
+已有验收 hold 则继续绑定原 Todo、owner 契约 digest/revision 和 hold 状态。
+
+旧 hold checkpoint 含 Todo 时间戳。原准入 Turn 只在同一规范来源能重建完整旧身份时
+保留原 obligation 和 receipt。已写入的旧 ACK 若经历后续显示编辑，须用原记录的
+`todo_source` 精确核验 store、provider revision 和 cursor，并在一次有界历史读取中
+证明旧 checkpoint 与当前 owner 契约身份相同。来源缺失、不可读、异源或 owner 修改
+契约均不能借此继承 ACK；投影不改写原持久 ACK、receipt、结果或配额扣账。
 
 The Agent-lane claimed advancement total comes from the evaluated full-source
 frontier index, before bounded claimant/status display. Adding peer Todos or
