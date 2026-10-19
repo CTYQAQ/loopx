@@ -26,6 +26,9 @@ const decisionValueReview = {
   route_distance: "Name the remaining authoritative goal gap, its limiting component and the plausible headroom. " +
     "Keep the retained best artifact as the comparison anchor and check whether subsequent work actually implements the proposed mechanism change. " +
     "Compare a different approach that can affect that component. Distinguish an unexecuted intervention, failed transfer and insufficient route potential: they imply different next experiments. " +
+    "When evidence weakens the current route, generate a small set of genuinely different explanations or approaches before selecting one: consider representation, decomposition, search method or information source where relevant. " +
+    "Contrast their predictions and full costs, then choose a discriminating experiment; parameter variants of the same mechanism are not independent alternatives. " +
+    "Missing feedback is a wait or evidence gap, not proof of route failure or exhausted alternatives. " +
     "A changed auxiliary mechanism alone does not show that it addresses the gap.",
   validation_scope: "Use evidence applicable to the limiting outcome and changed mechanism. " +
     "Bind comparisons to the artifact version, input conditions and original budget, and distinguish when feedback became available from when work was submitted. " +

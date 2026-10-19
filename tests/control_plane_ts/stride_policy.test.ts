@@ -108,6 +108,11 @@ test("goal-value questions are enabled review input, not persisted decisions or 
   assert.match(work, /recovering an avoidable initial quality deficit/);
   assert.match(route, /retained best artifact/);
   assert.match(route, /subsequent work actually implements/);
+  assert.match(route, /generate a small set of genuinely different explanations or approaches/);
+  assert.match(route, /representation, decomposition, search method or information source/);
+  assert.match(route, /Contrast their predictions and full costs/);
+  assert.match(route, /parameter variants of the same mechanism are not independent alternatives/);
+  assert.match(route, /Missing feedback is a wait or evidence gap/);
   assert.match(validation, /artifact version, input conditions/);
   assert.match(validation, /feedback became available/);
   assert.match(validation, /not proof of restoration or continued execution/);
