@@ -92,9 +92,13 @@ def heartbeat_body(env: dict[str, str], turn_id: str, *, native_goal: bool,
 
 @contextmanager
 def child_process(command: list[str], *, env: dict[str, str], stdout, stderr,
-                  goal_admission=None):
+                  goal_admission=None, check_current_launch=None):
     process = None
     try:
+        if check_current_launch is not None and goal_admission is None:
+            raise ValueError("current Host launch check requires its original Goal admission")
+        if check_current_launch is not None:
+            goal_admission = goal_admission.with_launch_decision(check_current_launch)
         # Session selection may precede rendering/capture. Serialize only actual
         # launch with the existing Goal lifetime owner, never the whole model run.
         with (goal_admission.launch_lifetime(operation="codex_agent_host_launch")
@@ -113,6 +117,22 @@ def child_process(command: list[str], *, env: dict[str, str], stdout, stderr,
     finally:
         if process is not None:
             _reap_child_process(process)
+
+
+def heartbeat_launch_check(env, session_wake, *, original_quota=None):
+    """Carry the Host's real Turn inputs into the product's current quota owner."""
+    if session_wake is None:
+        return None  # Plain/native-Goal transports have no LoopX heartbeat owner.
+    from loopx.cli_commands.turn_decision import current_heartbeat_host_launch_decision
+
+    def check(registry_path):
+        return current_heartbeat_host_launch_decision(
+            registry_path=registry_path, runtime_root=Path(env["LOOPX_RUNTIME_ROOT"]),
+            project=Path(env["LOOPX_PROJECT"]), goal_id=env["LOOPX_GOAL_ID"],
+            agent_id=env["LOOPX_AGENT_ID"], turn_instance_id=env["LOOPX_TURN"],
+            original_quota=original_quota, goal_ref=session_wake.goal_ref,
+        )
+    return check
 
 
 def _reap_child_process(process):
@@ -482,7 +502,8 @@ def run_once(env: dict[str, str]) -> dict:
                         receipt["ok"] = receipt["return_code"] == 0
                     else:
                         with child_process(command, env=env, stdout=stdout, stderr=stderr,
-                                goal_admission=session_wake.admission if session_wake is not None else None) as process:
+                                goal_admission=session_wake.admission if session_wake is not None else None,
+                                check_current_launch=heartbeat_launch_check(env, session_wake)) as process:
                             if session_wake is not None:
                                 receipt["host_invoked"] = True
                             process.communicate(input=body, timeout=timeout)

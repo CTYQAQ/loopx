@@ -49,11 +49,20 @@ test("legacy Host launch requires the original live registry witness without inv
     authority: {kind: "present", goal_id: "release", registration_status: "active", activation_state: "active"},
   };
   assert.deepEqual(decideFirstPartyHostRuntime(launch), {kind: "legacy"});
-  for (const registration_status of ["active-read-only", " ACTIVE-READ-ONLY ", "ACTIVE"]) {
-    const authority = {...launch.authority, registration_status};
+  for (const status of ["active-read-only", " ACTIVE-READ-ONLY ", "ACTIVE", " ACTIVE-research "]) {
+    const authority = {...launch.authority, registration_status: status};
     assert.deepEqual(decideFirstPartyHostRuntime({...launch, authority}), {kind: "legacy"});
-    assert.deepEqual(decideFirstPartyHostRuntime({...launch,
-      authority: {...authority, activation_state: "stopped"}}), {kind: "reject", code: "goal_stopped"});
+    assert.deepEqual(decideFirstPartyHostRuntime({
+      ...launch, authority: {...authority, activation_state: "stopped"},
+    }), {kind: "reject", code: "goal_stopped"});
+    assert.deepEqual(decideFirstPartyHostRuntime({
+      ...launch, authority, registry_witness: {...witness, sha256: "b".repeat(64)},
+    }), {kind: "reject", code: "stale_goal_authority"});
+  }
+  for (const status of ["activeish", "inactive", "retired", null, 1]) {
+    assert.deepEqual(decideFirstPartyHostRuntime({
+      ...launch, authority: {...launch.authority, registration_status: status},
+    }), {kind: "reject", code: "goal_not_registered"});
   }
   for (const [authority, code] of [
     [{kind: "absent"}, "goal_not_registered"],

@@ -275,10 +275,6 @@ def run_codex_operation_host(
     lineage = _lineage(request)
     if not all(lineage.values()):
         raise ValueError("managed operation tools require a Todo-bound Turn")
-    launch_admission = goal_admission or FirstPartyHostGoalAdmission.for_plan(
-        registry_path=registry_path, goal_id=lineage["goal_id"],
-        planned_goal_ref=request.get("goal_ref"),
-    )
     mcp_server = normalize_codex_stdio_mcp_server(mcp_server)
     request_source = operation_request_source(operation_request_file, operation_request_sha256)
     resolved_bin = shutil.which(codex_bin)
@@ -300,6 +296,12 @@ def run_codex_operation_host(
     }
     if request_source is not None:
         profile["operation_request"] = request_source.profile(source_route)
+    launch_admission = goal_admission
+    if launch_admission is None:
+        launch_admission = FirstPartyHostGoalAdmission.for_plan(
+            registry_path=registry_path, goal_id=lineage["goal_id"],
+            planned_goal_ref=request.get("goal_ref"),
+        )
     profile_digest = hashlib.sha256(
         json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

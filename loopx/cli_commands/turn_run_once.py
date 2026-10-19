@@ -50,7 +50,7 @@ from ..quota import spend_quota_slot
 from ..state_refresh import refresh_state_run
 from ..control_plane.todos.path_resolution import resolve_todo_state_path
 from .turn_cadence import managed_cadence_start
-from .turn_decision import collect_turn_status_payload
+from .turn_decision import collect_turn_status_payload, current_turn_host_launch_decision
 from .turn_dsh_host import build_dsh_host_runner, build_dsh_operation_host_runner
 from .turn_rendering import build_turn_error_payload
 from .turn_post_writeback import drain_committed_turn_post_writeback_hooks
@@ -772,27 +772,14 @@ def execute_turn_run_once(
                 # Revalidate the already admitted identity through the same
                 # owner. In a global route the source is checked first, even
                 # when its mirror still advertises old quota or health.
-                current = build_live_quota_should_run_decision(
-                    collect_turn_status_payload(
-                        args, registry_path=current_registry, runtime_root_arg=runtime_root_arg,
-                    ),
-                    goal_id=args.goal_id, agent_id=args.agent_id,
-                    available_capabilities=args.available_capabilities,
-                    include_scheduler_detail=False, codex_app_current_rrule=None,
-                    registry_path=current_registry, runtime_root=runtime_root,
-                    route_source="loopx_turn_run_once",
-                    scheduler_execution_context=payload.get("scheduler_execution_context"),
+                return current_turn_host_launch_decision(
+                    args, registry_path=current_registry, runtime_root=runtime_root,
+                    identity=settlement_identity, replan_obligation_id=replan_obligation_id,
+                    planned_effective_action=payload["turn_envelope"].get("effective_action"),
+                    scheduler_execution_context=payload.get("scheduler_execution_context") or {},
                     operator_inbox_urgency_projector=operator_inbox_urgency_projector,
-                    bounded_research_frontier_projector=project_live_explore_composition_frontier,
-                    receipt_bound_todo_id=settlement_identity.todo_id,
-                    receipt_bound_replan_obligation_id=settlement_identity.replan_obligation_id,
-                    turn_instance_id=settlement_identity.turn_instance_id,
-                    workspace_path=delivery_workspace_path, goal_ref=goal_ref,
+                    turn_start_hook_dispatch=payload.get("turn_start_hook_dispatch"), goal_ref=goal_ref,
                 )
-                return {
-                    "current": current,
-                    "planned_effective_action": payload["turn_envelope"].get("effective_action"),
-                }
 
             def run_built_in_host(
                 request: Mapping[str, Any],

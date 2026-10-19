@@ -89,6 +89,18 @@ for line in sys.stdin:
 """
 
 
+def _registered_host_goal(tmp_path: Path) -> Path:
+    """Direct transport tests still require a registered live Goal at launch."""
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({
+        "schema_version": 1, "common_runtime_root": str(tmp_path / "runtime"),
+        "goals": [{"id": "fixture-goal", "status": "active", "repo": str(tmp_path),
+                   "quota": {"compute": 1, "window_hours": 24},
+                   "coordination": {"registered_agents": ["codex-fixture"]}}],
+    }))
+    return registry
+
+
 def _claimed_native_fixture(tmp_path: Path):
     from examples import operation_action_fixtures as fixtures
     from loopx.control_plane.turn_driver.codex_operation_host import operation_tool_handler
@@ -479,11 +491,9 @@ def test_owned_app_server_process_authenticates_native_metadata_and_resumes_same
     executable = tmp_path / "fake-codex-operation"
     executable.write_text(FAKE_SERVER)
     executable.chmod(0o700)
-    (tmp_path / "registry.json").write_text(json.dumps({"schema_version": "0.2",
-        "goals": [{"id": _lineage(_request())["goal_id"], "status": "active"}]}))
     options = {
         "runtime_root": tmp_path / "runtime",
-        "registry_path": tmp_path / "registry.json",
+        "registry_path": _registered_host_goal(tmp_path),
         "project": tmp_path,
         "codex_bin": str(executable),
         "model": "test-model",
@@ -645,15 +655,13 @@ def test_owned_operation_host_reaps_descendants_on_success_and_timeout(
     executable = tmp_path / "fake-codex-operation"
     executable.write_text(FAKE_SERVER)
     executable.chmod(0o700)
-    (tmp_path / "registry.json").write_text(json.dumps({"schema_version": "0.2",
-        "goals": [{"id": _lineage(_request())["goal_id"], "status": "active"}]}))
     marker = tmp_path / "owned-child"
     monkeypatch.setenv("FAKE_OPERATION_CHILD_MARKER", str(marker))
     if hang:
         monkeypatch.setenv("FAKE_OPERATION_HANG", "1")
     options = dict(
         runtime_root=tmp_path / "runtime",
-        registry_path=tmp_path / "registry.json",
+        registry_path=_registered_host_goal(tmp_path),
         project=tmp_path,
         codex_bin=str(executable),
         model="test-model",
@@ -698,8 +706,6 @@ def test_live_owned_app_server_native_tool_metadata(
 
     monkeypatch.setattr(codex_operation_host, "operation_tool_handler", observe)
     request = _request()
-    (tmp_path / "registry.json").write_text(json.dumps({"schema_version": "0.2",
-        "goals": [{"id": _lineage(request)["goal_id"], "status": "active"}]}))
     request["turn_envelope"]["action"]["selected_todo"]["text"] = (
         "Non-financial transport qualification only. Call loopx_operation context once. "
         "Do not use shell, create proposals, send messages or perform any external effect. "
@@ -708,7 +714,7 @@ def test_live_owned_app_server_native_tool_metadata(
     )
     options = dict(
         runtime_root=tmp_path / "runtime",
-        registry_path=tmp_path / "registry.json",
+        registry_path=_registered_host_goal(tmp_path),
         project=tmp_path,
         model=model,
         reasoning_effort=effort,

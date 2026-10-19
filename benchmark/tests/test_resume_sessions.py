@@ -140,6 +140,11 @@ def resume_env(tmp_path, monkeypatch):
         "benchmark.runtime.worker.heartbeat_body",
         lambda *a, **kw: "Current Todo input.",
     )
+    # This fixture isolates native conversation/lifetime transport, including
+    # deliberately unregistered identities and lifecycle-only source profiles.
+    # Real current quota/health qualification is exercised by the CLI-backed
+    # test_benchmark_current_admission and checkpoint_admission integration tests.
+    monkeypatch.setattr("benchmark.runtime.worker.heartbeat_launch_check", lambda *a, **kw: None)
     Path(env["CODEX_BIN"]).write_text(
         f"#!{__import__('sys').executable}\n"
         + """
