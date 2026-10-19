@@ -26,7 +26,7 @@ def _summary(*, ready_alternative: bool = False):
         "unclaimed_priority_open_items": [],
         "claim_scope": {"other_agent_claimed_items": []},
         "goal_acceptance_contract": {
-            "enabled": True,
+            "criteria": [{"id": "delivery", "description": "Retain the delivery result"}],
             "tasks": [
                 {"todo_id": "todo_stale", "state": "stale", "applicable": True},
             ],
@@ -44,8 +44,11 @@ def _source():
     ]
 
 
-def test_stale_binding_routes_to_bounded_replan_only_when_frontier_is_empty():
+@pytest.mark.parametrize("readback", ["legacy", "current"])
+def test_stale_binding_routes_to_bounded_replan_only_when_frontier_is_empty(readback):
     summary = _summary()
+    if readback == "legacy":
+        summary["goal_acceptance_contract"]["enabled"] = True
     gaps = acceptance_gaps_from_held_goal_binding(summary, _source(), agent_id="agent-a")
     assert [gap["vision_todo_ids"] for gap in gaps] == [["todo_stale"]]
     assert gaps[0]["generated_at"] == "2026-09-23T08:02:52Z"
@@ -64,6 +67,8 @@ def test_stale_binding_routes_to_bounded_replan_only_when_frontier_is_empty():
     ]
 
     with_alternative = _summary(ready_alternative=True)
+    if readback == "legacy":
+        with_alternative["goal_acceptance_contract"]["enabled"] = True
     assert derive_goal_frontier_replan_obligation_from_summaries(
         user_todo_summary={"open_count": 0}, agent_todo_summary=with_alternative,
         work_lane_contract=None, agent_id="agent-a", existing_replan_obligation=None,

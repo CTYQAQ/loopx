@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..acceptance_readback import configured_checks
+
 GOAL_TERMINAL_STATE_SCHEMA_VERSION = "goal_terminal_state_v0"
 GOAL_TERMINAL_SOURCE_COMPLETENESS_SCHEMA_VERSION = "goal_terminal_source_completeness_v0"
 VISION_CHECKPOINT_NO_FOLLOWUP_RESOLUTION = "record_no_followup"
@@ -114,7 +116,7 @@ def _terminal_todo_source_contract(
     }
     acceptance = (agent_todo_summary or {}).get("goal_acceptance_contract")
     acceptance_confirmed = True
-    if isinstance(acceptance, dict) and acceptance.get("enabled") is True:
+    if isinstance(acceptance, dict) and configured_checks(acceptance) is not None:
         # Todo completion runs only that Todo's criteria. The typed acceptance
         # owner separately qualifies the current contract and complete work
         # basis; a local pass/no-follow-up cannot manufacture that receipt.

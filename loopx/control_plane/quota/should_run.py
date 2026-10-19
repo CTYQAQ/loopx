@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from ..goals.acceptance_readback import configured_checks
 from .effective_action import EffectiveAction
 
 from collections.abc import Callable, Mapping
@@ -268,7 +270,7 @@ def _apply_selected_todo_guards(
         return route
     summary = prepared.agent_todo_summary or {}
     acceptance = summary.get("goal_acceptance_contract")
-    if isinstance(acceptance, dict) and acceptance.get("enabled") is True:
+    if isinstance(acceptance, dict) and configured_checks(acceptance) is not None:
         # The typed owner retains completed/archived work. A failed preflight
         # check on an empty Goal is not evidence that any work has happened;
         # preserve its initial planning. A currently accepted result can still

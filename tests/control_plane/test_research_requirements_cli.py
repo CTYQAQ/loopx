@@ -178,7 +178,8 @@ def test_empty_current_owner_contract_preserves_initial_planning(tmp_path, monke
     configured = call("goal-acceptance", "configure", "--goal-id", GOAL,
         "--document", str(document_path), "--expected-provider-revision", basis,
         "--operation-id", "initial-authorized-requirements", "--execute")["goal_acceptance_contract"]
-    assert configured["enabled"] is True and configured["tasks"] == [] and configured["verification"] is None
+    assert [criterion["id"] for criterion in configured["criteria"]] == ["finite-range"]
+    assert configured["tasks"] == [] and configured["verification"] is None
     if failed_preflight:
         prefix = [sys.executable, "-m", "loopx.cli", "--registry", str(registry),
                   "--runtime-root", str(runtime), "--format", "json"]

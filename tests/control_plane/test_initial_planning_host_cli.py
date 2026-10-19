@@ -90,6 +90,9 @@ def test_fresh_goal_without_todos_can_admit_its_first_planning(tmp_path, monkeyp
     assert packet.get("selected_todo") is None
     assert packet["should_run"] is True, json.dumps(packet)
     project, registry = tmp_path / "project", tmp_path / "registry.json"
+    # The synthetic Host produces its plan and work in this Goal project.
+    # Keep the real delivery-workspace guard independent of pytest's checkout.
+    monkeypatch.chdir(project)
     monkeypatch.setenv("PYTHONPATH", str(ROOT))
     host, request, result = project / "planning-host.py", project / "request.json", project / "result.json"
     counts, plan, work = project / "counts.jsonl", project / "plan.json", project / "work.json"

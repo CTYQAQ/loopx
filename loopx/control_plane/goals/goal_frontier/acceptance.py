@@ -12,6 +12,7 @@ from typing import Any
 from ...agents.agent_scope import agent_scope_item_claimed_by_agent_or_unclaimed
 from ...effect_runtime import CANONICAL_AUTHORITY_READ_TIMEOUT_SECONDS, effect_runtime_result
 from ...todos.contract import normalize_todo_replan_obligation_id
+from ..acceptance_readback import configured_checks
 
 GOAL_ACCEPTANCE_HOLD_TRIGGERS = frozenset({"goal_acceptance_stale", "goal_acceptance_unbound"})
 
@@ -38,7 +39,7 @@ def acceptance_gaps_from_held_goal_binding(
     if not agent_id or not isinstance(agent_todo_summary, dict):
         return []
     contract = agent_todo_summary.get("goal_acceptance_contract")
-    if not isinstance(contract, dict) or contract.get("enabled") is not True:
+    if not isinstance(contract, dict) or configured_checks(contract) is None:
         return []
     held_states = {
         task.get("todo_id"): task.get("state")

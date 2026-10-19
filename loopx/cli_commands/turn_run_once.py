@@ -778,7 +778,9 @@ def execute_turn_run_once(
                     planned_effective_action=payload["turn_envelope"].get("effective_action"),
                     scheduler_execution_context=payload.get("scheduler_execution_context") or {},
                     operator_inbox_urgency_projector=operator_inbox_urgency_projector,
-                    turn_start_hook_dispatch=payload.get("turn_start_hook_dispatch"), goal_ref=goal_ref,
+                    # Keep this Turn's already dispatched required reads at launch.
+                    turn_start_hook_dispatch=payload.get("turn_start_capability_hook_dispatch"),
+                    goal_ref=goal_ref,
                 )
 
             def run_built_in_host(

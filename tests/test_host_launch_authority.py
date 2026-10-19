@@ -12,11 +12,19 @@ from pathlib import Path
 import pytest
 
 from loopx.cli import main as cli_main
+from loopx.cli_commands import lark_inbox, turn_decision
 from loopx.configure_goal import configure_goal
 from loopx.control_plane.goals import activation_service
-from loopx.control_plane.projects.registry_codec import source_session_registry_transaction
+from loopx.control_plane.projects.registry_codec import (
+    project_registry_transaction,
+    source_session_registry_transaction,
+)
 from loopx.control_plane.turn_driver import codex_cli, codex_operation_host
 from tests.control_plane.canonical_authority_fixture import isolate_sqlite_runtime
+from tests.control_plane.test_effect_turn_live_quota_decision import (
+    _material_review_urgency,
+    _turn_start_dispatch,
+)
 from test_codex_operation_host import FAKE_SERVER
 from test_loopx_turn_codex_cli import _fake_codex, _session_files, _source_admission
 from test_loopx_turn_driver import _write_live_fixture
@@ -207,6 +215,50 @@ def test_first_normal_turn_with_declared_state_needs_no_global_registry(
     assert native_start.exists() and turn_start.exists(), payload
     assert payload["effects"]["quota_spent"] is True, payload
     assert not (runtime / "registry.global.json").exists()
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("operation_tools", [False, True])
+def test_actual_launch_keeps_same_turn_fresh_inbox_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, operation_tools: bool,
+):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    project, runtime, registry = _write_live_fixture(tmp_path, provider=provider)
+    with project_registry_transaction(registry, operation="synthetic_fresh_inbox") as tx:
+        current = tx.payload_copy()
+        current["goals"][0].setdefault("control_plane", {})["lark_event_inbox"] = {
+            "enabled": True, "config_path": ".loopx/config/inbox.json",
+        }
+        tx.commit(current)
+    monkeypatch.setattr(
+        "loopx.control_plane.quota.goal_boundary.operator_inbox_binding",
+        lambda **_kwargs: {"status": "verified", "attention_required": False},
+    )
+    monkeypatch.setattr(turn_decision, "build_lark_operator_inbox_urgency_projector",
+                        lambda **_kwargs: _material_review_urgency)
+    dispatches = []
+
+    def sync(**_kwargs):
+        dispatch = _turn_start_dispatch(commands=(f"loopx inbox drain --goal-id {GOAL}",))
+        dispatches.append(dispatch)
+        return dispatch
+
+    monkeypatch.setattr(lark_inbox, "dispatch_goal_lark_turn_start_hooks", sync)
+    host_arguments, native_start, turn_start = _host(tmp_path, monkeypatch, operation_tools)
+    code, payload = _run(registry, runtime, project, host_arguments)
+    assert code == 0, payload
+    # The shared operation server requests confirmation and returns a wait;
+    # retaining fresh reads grants no additional operation or settlement.
+    assert payload["status"] == ("stopped" if operation_tools else "committed"), payload
+    assert native_start.exists() and turn_start.exists(), payload
+    assert payload["effects"]["host_invoked"] is True, payload
+    # New material belongs to this Turn's required reads. Launch checks must
+    # retain that context without synchronizing the external source again.
+    assert len(dispatches) == 1
+    assert payload["effects"]["quota_spent"] is (not operation_tools), payload
+    index = runtime / f"goals/{GOAL}/runs/index.jsonl"
+    rows = [json.loads(line) for line in index.read_text().splitlines()] if index.exists() else []
+    assert sum(row.get("classification") == "quota_slot_spent" for row in rows) == int(not operation_tools)
 
 
 @pytest.mark.parametrize("operation_tools", [False, True])
