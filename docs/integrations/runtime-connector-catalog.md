@@ -91,6 +91,96 @@ receipts or infer work completion from stdout.
 Stop signals and subprocess cleanup keep their existing behavior. This adapter
 does not override admission or reinterpret task eligibility.
 
+First-party Codex CLI and benchmark Hosts also recheck their captured Goal
+authority at the actual process-launch boundary, including checkpoint resumes.
+The operation-equipped Codex app-server path uses the same admission at process
+creation and again before sending `turn/start`. The existing authority writer
+lock covers each launch/send boundary and is released before waiting for a
+provider response. A Goal stopped after session selection therefore cannot start
+a new Host or replace its saved session with an empty, unlaunched result.
+
+Source-session admission retains its exact Goal lifetime checks. Executable
+legacy registries instead compare their original registry byte witness under
+the existing registry writer lock and reuse the registry owner's legal active
+states, including `active-read-only`. This does not relax source-session status
+or identity checks. A changed registry requires a fresh plan, including when an unrelated registry
+configuration change invalidated the old witness. When a legacy global
+projection declares its source registry, launch checks both the original source
+and the projection in the existing source-then-projection writer-lock order.
+A committed source stop still rejects launch if projection synchronization
+failed and left an active mirror. Missing or cyclic source routes cannot grant
+launch permission. This conservative check does
+not create an exact Goal instance identity: byte-identical legacy replacement
+remains indistinguishable. Generic shell commands still require their own Host
+to provide an equivalent launch boundary.
+
+Codex operation tools 路径在创建 app-server 和发送 `turn/start` 前复用同一
+准入检查；只在这两个边界持有原 owner 的锁，等待模型响应前释放。这样 Stop
+既不会被另一条 Host 路径绕过，也不会被长时间持锁拖延。legacy 的合法
+`active-*` 状态复用原注册表规则，source-session 的生命周期校验保持严格。
+
+The executable `turn run-once` path also reruns its existing current quota and
+health decision under those same locks, against the actual source registry and
+the original Turn/Todo/replan selection. It creates no replacement receipt.
+Both plain exec and operation-tools launch obey that owner's refusal when
+mirror quota is stale or source state becomes unavailable. Benchmark heartbeat
+execution and heartbeat/turn initial planning reuse this quota owner before
+native process creation. Initial planning does not need a prior heartbeat
+receipt or Todo. An interrupted checkpoint source continuation carries its
+actual held guard's Turn and nonempty event ID into the same current decision,
+preserving the complete original settlement identity when present. It does not
+derive these inputs from prompt text or reuse the enclosing wake's Turn.
+The native session continues with the original selection and settlement rules.
+
+The existing health owner checks the current registry's declared `state_file`
+even when no global registry is available. A missing declared state therefore
+reaches the quota decision on local source routes; undeclared initial setup
+does not create a missing-state finding, and a global copy of the same finding
+is deduplicated. Launch follows that owner's decision, including any lawful
+health-repair action, rather than treating every health finding as an
+unconditional refusal.
+
+The launch reread retains the required inbox reads already dispatched for that
+same Turn. They cover only the material observed by that dispatch; later material
+still passes through the current quota owner's decision. If launch is refused,
+completed preflight synchronization remains reported, while the refusal itself
+creates no model Turn or quota debit.
+
+This full decision callback is qualified for executable legacy local, source
+and source-to-global routes. Source-session admission retains its separate
+lifecycle-only boundary; this qualification does not enable its CLI execution.
+Benchmark `plain`, `native-goal` and `loopx-goal` modes keep their existing owners
+and are outside this quota callback. Restoring an archived checkpoint uses the
+destination Goal's current guard, without importing the source Goal's claims,
+Turn or spend authority. A Todo-bound guard that owes closeout returns to its
+original process without capture or restart; completing that work is not a new
+checkpoint opportunity.
+
+可执行的 `turn run-once` 在同一锁范围内，使用真实 source 注册表重新运行既有
+quota/health 决策，并保持原 Turn、Todo、重规划选择；不会创建替代回执。
+原 quota/health owner 拒绝当前工作时，普通 exec 与 operation tools 都不能借
+旧镜像额度或新出现的源状态缺失启动。
+benchmark 的 heartbeat 执行，以及 heartbeat/turn 初始规划，也在创建原生进程
+前复用同一 quota owner；初始规划不要求已有 heartbeat 回执或 Todo。同一次 wake
+中被中断的 checkpoint 源会话，直接携带被截留 guard 的原 Turn、非空 event ID
+和已有的完整结算身份重新读取当前资格，不从提示文字提取身份，也不改用外层 wake 的
+Turn；原生会话按原选择和结算规则继续。
+当前注册表已声明的 `state_file` 由原健康检查 owner 核验，即使没有 global 注册表，
+状态缺失也会进入 quota 决策。尚未声明状态的初始设置不会因此产生缺失报告，global
+中的同一报告按原规则去重。启动遵守原 owner 的决定，也保留其允许的健康修复动作，
+不把所有健康异常都改成无条件拒绝。
+
+启动前重读保留同一 Turn 已派发的 inbox 必读结果，覆盖范围仅限该次派发实际
+观察到的材料；之后新增的材料仍由当前 quota owner 判断。启动被拒绝时，已完成
+的前置同步仍须如实报告；拒绝本身不会创建模型 Turn 或配额扣减。
+
+完整决策验证覆盖当前可执行的 legacy 本地、source 和 source/global 路径。
+source-session 保留独立的生命周期边界，这项验证不会启用其 CLI 执行；benchmark
+的 `plain`、`native-goal`、`loopx-goal` 模式继续使用各自原 owner，不属于这个 quota
+回调。从归档 checkpoint 恢复时，使用目的 Goal 的当前 guard，不导入源 Goal 的
+claim、Turn 或扣额权限。已有待结算义务的 Todo-bound guard 直接返回原进程继续
+收尾，不捕获或重启；完成这项工作不构成新的 checkpoint 机会。
+
 ## External Tool Extension Candidates
 
 An MCP server can play two different roles around LoopX:
