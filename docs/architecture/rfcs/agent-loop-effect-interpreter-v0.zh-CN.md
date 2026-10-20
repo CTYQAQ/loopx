@@ -329,6 +329,14 @@ R5 短包投影也完整保留已有 CLI 结算计划，包括 effect identity�
 envelope 投影，Codex CLI 保持关闭隔离；这不代表安装态 heartbeat/App 或模型收益
 已验收。
 
+有界规划上下文现在保持内联，不再因短包预算压力而强制读取整份决策；既有 owner 的
+3 KiB 限制保留。共享 DSH/cloud adapter 传递签名内容，历史引用同时保留原捕获路由和
+哈希。thin renderer 仅在存在 `agent_context.detail_ref` 时要求能力补读，不能把也用于
+完整上下文的 `delivery=projected` 当作省略标志。原始来源与实际 Host 输入 oracle 通过
+File/SQLite CLI 和无模型 DSH 子进程覆盖开启／关闭、历史引用及签名拒绝。8 KiB 警告
+保持；选择默认形态前须计算 packet 与必要补读／源 IO。真实模型行为、安装采用及以下
+三项验收仍未完成。
+
 第一批收敛的当前源码路径核对：
 
 | 执行事实 | 既有 owner／投影 | 保留的边界 |

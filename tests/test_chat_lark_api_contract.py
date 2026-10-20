@@ -983,3 +983,193 @@ def test_manager_connection_opens_audience_session_only_on_execute(
     from loopx.capabilities.manager_context import evidence_goal_scope
     observed = evidence_goal_scope(tmp_path / "runtime", manager_channel(provider="lark", audience="mew\0oc_public_fixture"), registry_path=registry_path)
     assert observed == (["goal-alpha"] if execute and not scope_failure else None)
+
+
+def test_manager_scope_reads_policy_from_coordination_root_when_chat_root_overrides(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    from loopx.capabilities.machine_configuration.builtins import (
+        build_builtin_machine_configuration_registry,
+    )
+    from loopx.capabilities.machine_configuration.store import (
+        configure_machine_configuration,
+    )
+    from loopx.capabilities.manager_context import configure_evidence_scope
+    from loopx.chat_manager import (
+        manager_channel,
+        manager_connection_executor_endpoint,
+    )
+
+    chat_root = tmp_path / "chat-runtime"
+    coordination_root = tmp_path / "registered-runtime"
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "common_runtime_root": str(coordination_root),
+                "goals": [
+                    {"id": "goal-alpha", "repo": str(tmp_path)},
+                    {"id": "goal-beta", "repo": str(tmp_path)},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    channel = manager_channel(
+        provider="lark", audience="mew\0oc_public_fixture"
+    )
+    machine_configuration = {
+        "schema_version": "loopx_machine_configuration_v0",
+        "namespaces": {
+            "steward_executor": {
+                "schema_version": "steward_executor_machine_defaults_v0",
+                "executor_endpoint": "dsh",
+                "executor_model": None,
+                "executor_reasoning_effort": None,
+            }
+        },
+    }
+    machine_registry = build_builtin_machine_configuration_registry()
+    preview = configure_machine_configuration(
+        runtime_root=chat_root,
+        configuration=machine_configuration,
+        registry=machine_registry,
+        execute=False,
+    )
+    configure_machine_configuration(
+        runtime_root=chat_root,
+        configuration=machine_configuration,
+        registry=machine_registry,
+        execute=True,
+        expected_plan_revision=str(preview["plan_revision"]),
+    )
+    configure_evidence_scope(
+        coordination_root,
+        registry_path,
+        channel=channel,
+        goal_ids=["goal-alpha", "goal-beta"],
+        goal_scope="all_registered",
+        execute=True,
+    )
+
+    executor_endpoint, _source = manager_connection_executor_endpoint(chat_root)
+    assert executor_endpoint == "dsh"
+    target_payload = {
+        "schema_version": "loopx_goal_channel_provider_targets_v0",
+        "targets": {
+            "manager-target": {
+                "name": "manager-target",
+                "enabled": True,
+                "identity": {"sender_profile": "mew"},
+                "channel": {"chat_id": "oc_public_fixture"},
+            }
+        },
+    }
+    binding_payloads = {
+        "goal-alpha": {
+            "bindings": {
+                "goal-alpha": {
+                    "goal_id": "goal-alpha",
+                    "agent_id": executor_endpoint,
+                    "session_id": "manager-session",
+                    "enabled": True,
+                    "target_ref": "manager-target",
+                    "routing": {
+                        "conversation_kind": "manager",
+                        "ingress_mode": "session_queue",
+                    },
+                    "connector": {
+                        "schema_version": "agent_external_connector_v0",
+                        "goal_ref": "goal-alpha",
+                        "agent_ref": executor_endpoint,
+                        "provider_kind": "lark",
+                        "source_kind": "group_message",
+                        "source_ref": "oc_public_fixture",
+                        "capture_policy": "configured_source_all",
+                        "ingress_policy": "session_queue",
+                        "response_policy": "topic_reply",
+                        "lifecycle": "connected",
+                        "capabilities": ["response_write", "response_readback"],
+                        "session_ref": "manager-session",
+                    },
+                }
+            }
+        }
+    }
+    snapshot = {
+        "target_payload": target_payload,
+        "binding_payloads": binding_payloads,
+    }
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "index.html").write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(chat_server, "build_lark_goal_topic_runtime_snapshot", lambda **_: snapshot)
+    monkeypatch.setattr(
+        chat_server,
+        "resolve_lark_cli_for_runtime",
+        lambda **_: LarkCliResolution(
+            None, False, "missing", None, "lark_cli_not_installed"
+        ),
+    )
+    entered = threading.Event()
+    captured: list[ChatHTTPServer] = []
+
+    class Server(ChatHTTPServer):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            captured.append(self)
+
+        def serve_forever(self, *args: Any, **kwargs: Any) -> None:
+            entered.set()
+            super().serve_forever(*args, **kwargs)
+
+    monkeypatch.setattr(chat_server, "ChatHTTPServer", Server)
+    worker = threading.Thread(
+        target=chat_server.serve_chat,
+        kwargs={
+            "registry_path": registry_path,
+            "runtime_root_override": chat_root,
+            "scan_roots": [tmp_path],
+            "host": "127.0.0.1",
+            "port": 0,
+            "assets_dir": assets,
+            "open_browser": False,
+        },
+        daemon=True,
+    )
+    worker.start()
+    try:
+        assert entered.wait(8)
+        server = captured[0]
+        assert server.runtime_root == chat_root
+        assert server.runtime_controller.coordination_runtime_root == coordination_root
+        session = {
+            "session_id": "manager-session",
+            "goal_id": "goal-alpha",
+            "agent_id": executor_endpoint,
+            "channel_id": channel,
+        }
+        resolver = server.runtime_controller.manager_scope_resolver
+        assert resolver(session) == ["goal-alpha", "goal-beta"]
+        configure_evidence_scope(
+            chat_root,
+            registry_path,
+            channel=channel,
+            goal_ids=["goal-alpha", "goal-beta"],
+            goal_scope="all_registered",
+            execute=True,
+        )
+        configure_evidence_scope(
+            coordination_root,
+            registry_path,
+            channel=channel,
+            goal_ids=["goal-alpha"],
+            execute=True,
+        )
+        assert resolver(session) == ["goal-alpha"]
+    finally:
+        if captured:
+            captured[0].shutdown()
+        worker.join(8)
+    assert not worker.is_alive()

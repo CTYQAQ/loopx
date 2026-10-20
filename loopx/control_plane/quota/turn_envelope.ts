@@ -10,7 +10,7 @@ import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { projectTurnStartUnavailableContext } from "../capability_hooks.ts";
 import { requireJsonObject } from "../runtime_decode.ts";
 import { projectPendingCapabilityIntent } from "../work_items/pending_capability_intent.ts";
-import { measureTurnEnvelope, turnEnvelopeBudgetBytes, TURN_ENVELOPE_SECTION_TARGETS } from "./turn_envelope_budget.ts";
+import { measureTurnEnvelope, TURN_ENVELOPE_SECTION_TARGETS } from "./turn_envelope_budget.ts";
 export { TURN_ENVELOPE_BUDGET_BYTES } from "./turn_envelope_budget.ts";
 
 export const TURN_ENVELOPE_SCHEMA_VERSION = "loopx_turn_envelope_v0";
@@ -722,7 +722,7 @@ function actionProjection(payload: JsonObject, protocolActionFields: JsonObject)
     payload, action, user, schedulerValue, protocolActionFields,
   );
   const context = object(interaction.agent_context);
-  if (Object.keys(context).length > 0) projection.agent_context = context;
+  if (Object.keys(context).length > 0) projection.agent_context = structuredClone(context);
   const workContext = object(object(interaction.agent_channel).work_context);
   const selectedTodoContextIsAlreadyInAction = workContext.complete === true
     && workContext.selected_todo_ref === "selected_todo"
@@ -776,22 +776,9 @@ function turnActionProjection(payload: JsonObject, protocolActionFields: JsonObj
     action.planning_horizon = compactHorizon;
     projection.action = action;
   }
-  const context = object(projection.agent_context);
-  // Guidance must not crowd out the actionable contract. Preserve a signed
-  // content reference to the existing full-decision route under budget pressure.
-  // Leave room for the CLI's indented JSON and envelope metadata too: a compact
-  // payload can fit the wire-byte ceiling while its emitted form exceeds the
-  // public TurnEnvelope character budget.
-  if (Object.keys(context).length > 0
-    && Buffer.byteLength(JSON.stringify(projection), "utf8") > turnEnvelopeBudgetBytes(projection) - 2_200) {
-    projection.agent_context = {
-      schema_version: context.schema_version, phase: context.phase, scope: context.scope,
-      target: "coordinator", authority: "guidance_only", delivery: "projected",
-      content_hash: canonicalHash(context),
-      detail_ref: "full_decision.interaction_contract.agent_context",
-      instruction: "Use the envelope detail_ref command to read capability context before planning.",
-    };
-  }
+  // The context owner already bounds these contributions. Replacing them with
+  // a reference makes a small contribution require the entire saved decision.
+  // Keep the content; the existing envelope budget still reports its cost.
   return projection;
 }
 

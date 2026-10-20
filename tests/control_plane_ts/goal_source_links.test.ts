@@ -19,6 +19,17 @@ test('ambiguous original ids and invalid namespaces are refused', () => {
   ]) assert.throws(() => projectGoalSourceLinks(input));
 });
 
+test('source namespaces retain the existing bare lowercase digest format', () => {
+  for (const namespace of ['0'.repeat(64), '0123456789abcdef'.repeat(4)]) {
+    const result = projectGoalSourceLinks({local_goal_ids: ['research-parent'], links: [{...link(), namespace}]});
+    assert.equal((result.goals as {source_access: {namespace: string}}[])[0].source_access.namespace, namespace);
+  }
+  for (const namespace of ['A'.repeat(64), 'g'.repeat(64), 'a'.repeat(63), 'a'.repeat(65),
+    'sha256:' + 'a'.repeat(64)]) {
+    assert.throws(() => projectGoalSourceLinks({local_goal_ids: ['research-parent'], links: [{...link(), namespace}]}));
+  }
+});
+
 test('a removed parent hides only its retained reference', () => {
   const other = {...link(), goal_id: 'other-solver', parent_goal_id: 'other-parent', namespace: 'b'.repeat(64)};
   assert.deepEqual(projectGoalSourceLinks({local_goal_ids: ['other-parent'], links: [link(), other]}).goals,

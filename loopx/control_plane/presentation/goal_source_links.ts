@@ -1,5 +1,6 @@
 /** Local organization of existing source Goals, never execution registration. */
 import type {JsonObject} from "../effect_program.ts";
+import {BARE_SHA256_PATTERN} from "../content_digest.ts";
 import {requireJsonObject, requireNonEmptyString} from "../runtime_decode.ts";
 
 export function projectGoalSourceLinks(input: JsonObject): JsonObject {
@@ -14,7 +15,7 @@ export function projectGoalSourceLinks(input: JsonObject): JsonObject {
     const parent = requireNonEmptyString(link.parent_goal_id, "parent Goal");
     const namespace = requireNonEmptyString(link.namespace, "source namespace");
     const label = requireNonEmptyString(link.label, "source label");
-    if (!/^[a-f0-9]{64}$/.test(namespace)) {
+    if (!BARE_SHA256_PATTERN.test(namespace)) {
       throw new Error("Invalid source identity");
     }
     // Parent lifecycle is owned elsewhere. A retained reference must not

@@ -12,6 +12,11 @@ The treatment selects the existing `evidence_conditioned_v1` replan strategy;
 an explicitly conflicting strategy is rejected. This is a combined treatment,
 not an isolated estimate of the contribution of any one component.
 
+The standalone heartbeat `research_loop=True` stage/evidence entry retains
+existing Host admission and does not install a per-provider-request guard.
+The coordinated native treatment requires the composed C1 request-admission
+entry, which checks ordinary Host admission before each actual provider send.
+
 The entry creates an initial-candidate Todo and a separate deferred research
 Todo using existing `todo_done`/successor semantics. Finishing the candidate
 releases real optimization work; it cannot by itself close that work. The
@@ -215,6 +220,9 @@ legal closeout to manufacture a successful long run.
 这一显式处理将初始候选、持续研究、等待准入、执行证据与复盘接在既有
 Goal/Todo/Host/Explore 上。候选完成只释放后续研究；本次没有包含默认全 Goal
 验收工作线，也没有重新启动历史运行或长测。
+
+独立的 `research_loop=True` 阶段/证据入口沿用既有 Host 准入，不安装逐次 provider
+请求守卫；上述原生组合需要 C1 请求准入入口在每次实际 provider 发送前检查。
 
 原生真正打包后保存操作 ID 和不可变快照；接受提交后读取真实提交 ID、轮次和
 原生归档。归档哈希与所选文件清单哈希分别保存并验证关系。结果晚到时始终指向
