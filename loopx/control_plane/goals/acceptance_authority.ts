@@ -1,4 +1,4 @@
-import {bindGoalOutcomesStateOwner, goalOutcomeCheckBasis, refineGoalOutcome} from "./outcome_requirements.ts";
+import {bindGoalOutcomesStateOwner, GoalOutcomeValidationError, goalOutcomeCheckBasis, refineGoalOutcome} from "./outcome_requirements.ts";
 /** Acceptance effects use the existing canonical head, CAS and operation journal.
  * Only trusted local owner/host adapters may invoke these mutation exports. */
 import {isAbsolute} from "node:path";
@@ -564,6 +564,7 @@ async function local(value: unknown, kind: "inspect" | "configure" | "verify" | 
       ? error.message : null;
     const result = {...failure(taskReason ?? (error instanceof AuthorityStoreProtocolError ? "goal_acceptance_invalid_request" : "goal_acceptance_effect_failed"),
       error instanceof Error ? error.message : "acceptance effect failed"),
+      ...(error instanceof GoalOutcomeValidationError ? {error_detail: error.message} : {}),
       decision_read_from_provider: false, legacy_fallback_used: false, ...localAuthorityOpenFailure(error)};
     return store ? {...result, source_authority: authorityStoreSourceAuthority(store)} : result;
   }

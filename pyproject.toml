@@ -35,6 +35,13 @@ public-source-reader = [
 deepseek-harness = [
   "deepseek-harness-sdk==0.1.5rc1",
 ]
+# Selected unit tests only; integration, lint and full-suite validation use test.
+test-core = [
+  "distlib>=0.3.9,<1; sys_platform == 'win32'",
+  "jsonschema>=4.23,<5",
+  "pyyaml>=6,<7",
+  "pytest>=9.0.3,<10",
+]
 test = [
   "distlib>=0.3.9,<1; sys_platform == 'win32'",
   "docker==7.2.0",

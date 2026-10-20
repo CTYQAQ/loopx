@@ -22,8 +22,12 @@ interface OutcomeState extends JsonObject {
   schema_version: typeof GOAL_OUTCOMES_SCHEMA; goal_id: string;
   goal_ref: WireExactGoalRef | null; revision: number; outcomes: Outcome[];
 }
+/** Only fixed rule text and validator-owned labels belong in public detail.
+ * Caller values and arbitrary provider/IO errors must never use this marker. */
+export class GoalOutcomeValidationError extends AuthorityStoreProtocolError {}
+
 function requireValue(condition: unknown, reason: string): asserts condition {
-  if (!condition) throw new AuthorityStoreProtocolError(reason);
+  if (!condition) throw new GoalOutcomeValidationError(reason);
 }
 function text(value: unknown, label: string, max = 512): string {
   requireValue(typeof value === "string" && value === value.trim() && !!value && value.length <= max && !value.includes("\0"), `${label} must be bounded nonempty text`);

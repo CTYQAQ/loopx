@@ -547,6 +547,8 @@ def render_state_refresh_markdown(payload: dict[str, Any]) -> str:
         )
     if payload.get("error"):
         lines.append(f"- error: {payload.get('error')}")
+        if payload.get("error_detail"):
+            lines.append(f"- detail: {payload['error_detail']}")
         return "\n".join(lines)
 
     repair_delta = (

@@ -32,6 +32,16 @@ from .activation import goal_is_stopped
 
 _INSPECT_METHOD = "goal.acceptance.inspect"
 
+
+class GoalAcceptanceRejected(ValueError):
+    """Carry owner-qualified detail through the existing CLI error boundary."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(code)
+        self.code = code
+        self.payload = {"error_detail": detail}
+
+
 def _routing(
     registry_path: Path,
     goal_id: str,
@@ -76,13 +86,17 @@ def _result(
         "planned",
         "no_change",
     }:
-        raise ValueError(
-            str(
-                value.get("reason_code")
-                or value.get("reason")
-                or "Goal acceptance authority is unavailable"
-            )
+        reason = str(
+            value.get("reason_code")
+            or value.get("reason")
+            or "Goal acceptance authority is unavailable"
         )
+        detail = value.get("error_detail")
+        if isinstance(value.get("reason_code"), str) and isinstance(detail, str) and detail:
+            # This field is emitted only for typed, fixed-rule validation.
+            # Never promote the generic reason, which can contain private IO.
+            raise GoalAcceptanceRejected(reason, detail)
+        raise ValueError(reason)
     return value
 
 
