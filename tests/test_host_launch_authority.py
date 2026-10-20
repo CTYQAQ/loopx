@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
+import os
+import signal
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -20,6 +24,8 @@ from loopx.control_plane.projects.registry_codec import (
     source_session_registry_transaction,
 )
 from loopx.control_plane.turn_driver import codex_cli, codex_operation_host
+from loopx.control_plane.goals.first_party_host_admission import FirstPartyHostGoalAdmission
+from loopx.control_plane.turn_driver import host_process_transport
 from tests.control_plane.canonical_authority_fixture import isolate_sqlite_runtime
 from tests.control_plane.test_effect_turn_live_quota_decision import (
     _material_review_urgency,
@@ -32,6 +38,129 @@ from test_loopx_turn_driver import _write_live_fixture
 
 GOAL = "loopx-turn-fixture"
 AGENT = "codex-fixture"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Controlled POSIX bridge suspension")
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("boundary", ["startup", "body", "spawn"])
+def test_plain_host_bridge_backpressure_cannot_strand_the_stop_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, boundary: str,
+):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    project, runtime, source = _write_live_fixture(tmp_path, provider=provider)
+    admission = FirstPartyHostGoalAdmission.for_plan(
+        registry_path=source, goal_id=GOAL, planned_goal_ref=None)
+    entered, stopping = threading.Event(), threading.Event()
+    bridge, completed, stopped = [], {}, {}
+    launched = tmp_path / "host-started"
+    real_popen = host_process_transport.subprocess.Popen
+
+    def pause_bridge(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        if any(str(arg).endswith("host_process_bridge.ts") for arg in args[0]):
+            # Pause only this test's actual Node bridge before it can consume
+            # the request. Its process group and pipes remain real.
+            if boundary == "startup":
+                os.kill(process.pid, signal.SIGSTOP)
+            bridge.append(process)
+        return process
+
+    monkeypatch.setattr(host_process_transport.subprocess, "Popen", pause_bridge)
+    environment = dict(os.environ)
+    if boundary != "startup":
+        preload = tmp_path / "pause-bridge.mjs"
+        preload.write_text('process.stdin.once("data", () => process.kill(process.pid, "SIGSTOP"));')
+        environment["NODE_OPTIONS"] = f"--import={preload}"
+
+    @contextlib.contextmanager
+    def guard():
+        with admission.launch_lifetime(operation="synthetic_bridge_backpressure"):
+            entered.set()
+            yield
+
+    def run():
+        try:
+            completed["result"] = host_process_transport.run_host_process(
+                [sys.executable, "-c", f"from pathlib import Path;Path({str(launched)!r}).touch()"],
+                project=project, input_text="界" * (128 if boundary == "spawn" else 1024 * 1024),
+                timeout_seconds=1, launch_guard=guard, environment=environment)
+        except Exception as error:
+            completed["error"] = error
+
+    def stop():
+        stopping.set()
+        try:
+            stopped["result"] = activation_service.set_goal_activation_state(
+                registry_path=source, runtime_root_override=str(runtime), goal_id=GOAL,
+                state="stopped", reason="Synthetic Stop during bridge dispatch.",
+                actor_kind="owner", execute=True)
+        except Exception as error:
+            stopped["error"] = error
+
+    runner = threading.Thread(target=run)
+    stopper = threading.Thread(target=stop)
+    runner.start()
+    try:
+        assert entered.wait(10)
+        stopper.start()
+        assert stopping.wait(1)
+        runner.join(timeout=4)
+        stopper.join(timeout=1)
+        bounded = not runner.is_alive() and not stopper.is_alive()
+    finally:
+        # A pre-fix failure must not leave a suspended owned process or block
+        # the test session. This deliberate recovery is never success evidence.
+        for process in bridge:
+            if process.poll() is None:
+                os.kill(process.pid, signal.SIGCONT)
+        runner.join(timeout=15)
+        if stopper.ident is not None:
+            stopper.join(timeout=15)
+    assert bounded, "bridge request delivery stranded the Goal Stop writer"
+    assert isinstance(completed.get("error"), TimeoutError), completed
+    assert stopped["result"]["readback"]["verified"] is True, stopped
+    assert all(process.poll() is not None for process in bridge)
+    assert not launched.exists(), "a timed-out bridge launched a late Host"
+
+
+def test_plain_host_bridge_preserves_slow_healthy_unicode_delivery(tmp_path, monkeypatch):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    project, _runtime, source = _write_live_fixture(tmp_path, provider="file")
+    admission = FirstPartyHostGoalAdmission.for_plan(
+        registry_path=source, goal_id=GOAL, planned_goal_ref=None)
+    preload = tmp_path / "slow-bridge.mjs"
+    preload.write_text('process.stdin.once("data", () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200));')
+    text = "界🙂\n" * 70000
+    output = []
+    started = time.monotonic()
+    observed = host_process_transport.run_host_process(
+        [sys.executable, "-c", "import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())"],
+        project=project, input_text=text, timeout_seconds=10,
+        on_stdout=output.append, environment=dict(os.environ, NODE_OPTIONS=f"--import={preload}"),
+        launch_guard=lambda: admission.launch_lifetime(operation="synthetic_slow_bridge"))
+    assert time.monotonic() - started >= 1.2
+    assert observed["outcome"] == "exited" and observed["returncode"] == 0, observed
+    assert "".join(output).strip() == hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Controlled POSIX bridge cancellation")
+def test_plain_host_bridge_does_not_certify_unconfirmed_cleanup(tmp_path, monkeypatch):
+    from loopx.control_plane.turn_driver.host_process_transport import execution_host_drain
+
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    project, runtime, source = _write_live_fixture(tmp_path, provider="file")
+    admission = FirstPartyHostGoalAdmission.for_plan(
+        registry_path=source, goal_id=GOAL, planned_goal_ref=None)
+    preload = tmp_path / "unresponsive-bridge.mjs"
+    preload.write_text('process.stdin.once("data", () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000));')
+    record = runtime / "unconfirmed-host.json"
+    with pytest.raises(RuntimeError, match="cleanup unconfirmed"):
+        host_process_transport.run_host_process(
+            [sys.executable, "-c", "pass"], project=project, input_text="界" * 1024 * 1024,
+            timeout_seconds=1, environment=dict(os.environ, NODE_OPTIONS=f"--import={preload}",
+                LOOPX_HOST_PROCESS_RECORD=str(record)),
+            launch_guard=lambda: admission.launch_lifetime(operation="synthetic_unresponsive_bridge"))
+    assert execution_host_drain(record) == "unattributable"
 
 
 def _cli(registry: Path, runtime: Path, *arguments: str):

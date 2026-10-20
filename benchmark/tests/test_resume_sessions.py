@@ -229,8 +229,10 @@ def test_timeout_keeps_the_observed_session_for_next_heartbeat(tmp_path, monkeyp
     observed_sessions = []
 
     @contextmanager
-    def timeout_after_session_event(command, *, env, stdout, stderr):
-        with real_child_process(command, env=env, stdout=stdout, stderr=stderr) as process:
+    def timeout_after_session_event(command, *, env, stdout, stderr, goal_admission=None,
+                                    check_current_launch=None):
+        with real_child_process(command, env=env, stdout=stdout, stderr=stderr,
+                goal_admission=goal_admission, check_current_launch=check_current_launch) as process:
             def communicate(*, input, timeout):
                 assert timeout == 1
                 # Inject the timeout after the real child publishes its native

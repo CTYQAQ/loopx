@@ -99,14 +99,22 @@ lock covers each launch/send boundary and is released before waiting for a
 provider response. A Goal stopped after session selection therefore cannot start
 a new Host or replace its saved session with an empty, unlaunched result.
 
-For operation-host `turn/start`, native stdin delivery has a one-second ceiling
-and also respects any shorter original response/idle/hard deadline. Waiting
-for another native writer consumes that allowance before acquiring the Goal
-fence. Backpressure or an interrupted partial send cancels and reaps the same
+For operation-host `turn/start`, native stdin delivery and response share the
+original response/idle/hard deadline. Waiting for another native writer consumes
+that allowance before acquiring the Goal fence; there is no separate one-second
+ceiling on a healthy send. Backpressure or an interrupted partial send cancels and reaps the same
 native peer and drains the writer before releasing the fence; it cannot leave
 a sender to deliver that Turn after Stop. This is a dispatch timeout, not proof
 of non-acceptance or permission to replay. Successful large and Unicode inputs
 retain the full original text stream; no new input-size truncation is applied.
+
+The guarded ordinary-Host bridge also bounds readiness, request delivery and
+spawn observation within the original explicit command deadline. Without a
+command deadline, only this handoff has a 30-second safety budget; a successfully
+spawned Host still runs to natural completion. Cancellation retains the Goal
+fence until the same bridge reports no launch or completes its Host cleanup and
+is reaped. Missing cleanup evidence is an explicit supervision failure, not a
+certificate that an unobserved Host stopped or permission to replay.
 
 Source-session admission retains its exact Goal lifetime checks. Executable
 legacy registries instead compare their original registry byte witness under
@@ -127,10 +135,15 @@ Codex operation tools 路径在创建 app-server 和发送 `turn/start` 前复�
 准入检查；只在这两个边界持有原 owner 的锁，等待模型响应前释放。这样 Stop
 既不会被另一条 Host 路径绕过，也不会被长时间持锁拖延。legacy 的合法
 `active-*` 状态复用原注册表规则，source-session 的生命周期校验保持严格。
-`turn/start` 的原生 stdin 发送最多占用一秒，并遵守更短的原 response、idle、hard
-期限；等待其他原生写入也计入该界限。背压或部分发送中断时，先取消并回收同一个
+`turn/start` 的原生 stdin 发送与响应共享原 response、idle、hard 期限；等待其他
+原生写入也计入该界限，不再对正常发送额外施加一秒上限。背压或部分发送中断时，先取消并回收同一个
 原生进程、等待写入线程退出，再释放 Goal 锁，避免 Stop 后迟到派发。这类超时不
 证明请求从未受理，也不授权重放；正常的大输入和 Unicode 文本完整保留，不截断。
+
+普通 Host 的受控 bridge 也在原显式命令期限内完成 ready、请求发送和 spawn 观察。
+没有命令期限时，仅交接阶段有 30 秒安全预算；成功启动后仍等待 Host 自然结束。
+取消时继续持有 Goal 锁，直到同一个 bridge 报告未启动，或完成 Host 清理并被回收。
+缺少清理证据会明确报监督失败，不能据此证明未观察到的 Host 已停止，也不授权重放。
 
 The executable `turn run-once` path also reruns its existing current quota and
 health decision under those same locks, against the actual source registry and
