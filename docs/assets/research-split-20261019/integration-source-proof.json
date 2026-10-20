@@ -1,0 +1,639 @@
+{
+  "schema_version": "loopx_split_integration_object_verification_v1",
+  "verified_at": "2026-10-20T00:31:24.126743+00:00",
+  "repository": "https://github.com/loopx-project/loopx",
+  "scope": "Current public Git objects, exact two-file patch parity, unchanged UI/build source inputs, and source-owner supplied-candidate preview; no new product test or UI execution",
+  "declared_validation_base": "45d742088a3f7896a0a008761f68d2437398bcd1",
+  "historical_integration": {
+    "head": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2",
+    "tree": "cb8b1777655d7f37e3571b5087d6cd4db286dbbd"
+  },
+  "current_integration": {
+    "head": "fe3b1f7b382e30cdf691cbf0067a5d4e2f5b3b0b",
+    "tree": "6bbf110b1cb2535975b2389558a86dff73792926",
+    "parents": [
+      "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2",
+      "7368ca0286d503a93e50b26ab24755a5fb429b2f"
+    ]
+  },
+  "updated_source_heads": {
+    "A3": "da24c787a8f5af23341e3cb4eb82f5e8848fb5cf",
+    "C1": "360c6ef158484bced0d943d63c9beb7ff35aaf7d",
+    "C2": "1b243b9ac1aa056fc43d576bcb0758de8a924370",
+    "C3": "7368ca0286d503a93e50b26ab24755a5fb429b2f"
+  },
+  "ancestry": {
+    "declared_base_retained": true,
+    "historical_integration_retained": true,
+    "each_updated_source_retained": {
+      "A3": true,
+      "C1": true,
+      "C2": true,
+      "C3": true
+    }
+  },
+  "exact_patch_parity": {
+    "changed_paths": [
+      "loopx/control_plane/heartbeat/task_body.py",
+      "tests/control_plane/test_heartbeat_prompt_support.py"
+    ],
+    "same_bytes": true,
+    "patch_sha256": "f489fab5cb23911ddbc61e53e40e7dcabe5fa5625d3d888cd7f993f2f887a0db",
+    "blobs": [
+      {
+        "path": "loopx/control_plane/heartbeat/task_body.py",
+        "old_integration_blob": "59adeecaedad69866ff4056436e0c34f3549c63a",
+        "old_source_blob": "59adeecaedad69866ff4056436e0c34f3549c63a",
+        "new_source_blob": "295e939b3e9cc4e618e62ff81aa291b1a32cf503",
+        "new_integration_blob": "295e939b3e9cc4e618e62ff81aa291b1a32cf503"
+      },
+      {
+        "path": "tests/control_plane/test_heartbeat_prompt_support.py",
+        "old_integration_blob": "ab13197435566be3be24e25ed7c2da96e87ba848",
+        "old_source_blob": "ab13197435566be3be24e25ed7c2da96e87ba848",
+        "new_source_blob": "09ea2c8a9199f62d9127790cd9efb27d4d0ba185",
+        "new_integration_blob": "09ea2c8a9199f62d9127790cd9efb27d4d0ba185"
+      }
+    ]
+  },
+  "unchanged_ui_build_inputs": [
+    {
+      "path": "apps/presentation/dashboard",
+      "tracked": true,
+      "before_object": "4eb48b483cba389a83815a7fbe679e1a72409c5e",
+      "after_object": "4eb48b483cba389a83815a7fbe679e1a72409c5e"
+    },
+    {
+      "path": "examples/personal-workspace-browser",
+      "tracked": true,
+      "before_object": "87f1a6f0c3ee5eca999753391704038c3fffcbed",
+      "after_object": "87f1a6f0c3ee5eca999753391704038c3fffcbed"
+    },
+    {
+      "path": "loopx/web",
+      "tracked": false,
+      "before_object": null,
+      "after_object": null
+    },
+    {
+      "path": "loopx/presentation",
+      "tracked": true,
+      "before_object": "b185fc268e1db884da27dc498fd1270ecc002e46",
+      "after_object": "b185fc268e1db884da27dc498fd1270ecc002e46"
+    },
+    {
+      "path": "loopx/chat_server.py",
+      "tracked": true,
+      "before_object": "a7a5399df127f9dd41f3fe2eb93736d168b8610c",
+      "after_object": "a7a5399df127f9dd41f3fe2eb93736d168b8610c"
+    },
+    {
+      "path": "loopx/chat_store.py",
+      "tracked": true,
+      "before_object": "3fc5e2dbf642ca58cc7beea2339e11e876767b49",
+      "after_object": "3fc5e2dbf642ca58cc7beea2339e11e876767b49"
+    },
+    {
+      "path": "tests/control_plane/research_worker_readback_fixture.py",
+      "tracked": true,
+      "before_object": "4d7ae5ba7dff2b108db651e3fad647f16f819a3e",
+      "after_object": "4d7ae5ba7dff2b108db651e3fad647f16f819a3e"
+    },
+    {
+      "path": "package.json",
+      "tracked": true,
+      "before_object": "6a72f215b112659929fb20f8c4a2b951740b3f7f",
+      "after_object": "6a72f215b112659929fb20f8c4a2b951740b3f7f"
+    },
+    {
+      "path": "package-lock.json",
+      "tracked": true,
+      "before_object": "b931bffe41438891651eba24259e0e9a779f5c50",
+      "after_object": "b931bffe41438891651eba24259e0e9a779f5c50"
+    },
+    {
+      "path": "pyproject.toml",
+      "tracked": true,
+      "before_object": "3b7ec04079ea69ffcef4f2004f481db278f0a369",
+      "after_object": "3b7ec04079ea69ffcef4f2004f481db278f0a369"
+    },
+    {
+      "path": "tsconfig.control-plane.json",
+      "tracked": true,
+      "before_object": "72e0c2b7bd833d7e8285eb19867fcb03168480ec",
+      "after_object": "72e0c2b7bd833d7e8285eb19867fcb03168480ec"
+    }
+  ],
+  "all_other_tracked_entries_unchanged": true,
+  "source_chain_signoffs": {
+    "base": "dc45c128d630cd8f043690a9a00251615d7d13b4",
+    "head": "7368ca0286d503a93e50b26ab24755a5fb429b2f",
+    "unique_commits": 18,
+    "matching_author_signoffs": 18,
+    "scope": "Commit-message author/signoff identity check; not cryptographic attestation, CI success, review approval, or merge authorization",
+    "commits": [
+      {
+        "commit": "70ab394b57b82186cf1c552b47e3170e3a55646b",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "bdee6973fc0cc256efb1abf55513393af3460877",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "b74eb21b84eaab63509c4cbc54f04d44736b93d5",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "b813ae0064bffc72caf5c561c27a0e5f41816e14",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "c49bc360fb7a6ae25ef4e8f52a5bb07fbe76f15e",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "dee55e1bc963f9ba1dc4b5f221579f1057e6096e",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "9d905ca3866444ee58836790a53959ab2849a2b1",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "bb972c1f7d38bddfb13c68f039a1b0c02881930b",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "12863fe54b9be0223c7d8c8e0e4c462b7aea01f7",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "e02915d0d1800aab577b46db87e479240a2f7086",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "d90774d242d610cc6b9b89d2ed16417e2d303fd4",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "4742ba78a1afd0e8a0eee962afed3f42cc02e8d2",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "ce9f90ded5477c22bc8f14021a2377833e23dfaf",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "a083bbf70880f09975e5f44fee67a60251ffbab3",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "da24c787a8f5af23341e3cb4eb82f5e8848fb5cf",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "360c6ef158484bced0d943d63c9beb7ff35aaf7d",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "1b243b9ac1aa056fc43d576bcb0758de8a924370",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      },
+      {
+        "commit": "7368ca0286d503a93e50b26ab24755a5fb429b2f",
+        "author": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "committer": {
+          "name": "song",
+          "email": "liusongstep@gmail.com"
+        },
+        "signed_off_by": [
+          {
+            "name": "Codex",
+            "email": "codex@openai.com"
+          },
+          {
+            "name": "song",
+            "email": "liusongstep@gmail.com"
+          }
+        ],
+        "author_has_matching_signoff": true
+      }
+    ]
+  },
+  "formal_reconcile": {
+    "producer": "loopx/capabilities/integration_branch/core.py",
+    "producer_blob": "f5654c39a91561f701cb022f79fa708a6d4dae42",
+    "entrypoint": "configure_integration_branch / integration_branch_status / sync_integration_branch(candidate_ref=published_head, execute=False)",
+    "python_version": "3.12.14",
+    "new_plan_only": true,
+    "previous_sync_receipt_restored": false,
+    "status_before": "drifted",
+    "drift_reasons": [
+      {
+        "kind": "never_synced"
+      }
+    ],
+    "preview_status": "preview_ready",
+    "candidate_source": "supplied",
+    "executed": false,
+    "updated": false,
+    "candidate_sha": "fe3b1f7b382e30cdf691cbf0067a5d4e2f5b3b0b",
+    "candidate_tree_sha": "6bbf110b1cb2535975b2389558a86dff73792926",
+    "observed_upstream": "fe3b1f7b382e30cdf691cbf0067a5d4e2f5b3b0b",
+    "full_cli_bootstrap_exercised": false
+  },
+  "evidence_limits": [
+    "Original build, packaged UI, native-test and formal in_sync receipts are historical and were not regenerated.",
+    "Current main e4190c30d7f94886dddd8e06b899664df34120f9 is 52 commits beyond declared main45d; this candidate is not claimed synchronized or qualified against current main.",
+    "UI equality is tracked-source-input equality, not a new browser run or recovery of deleted built assets.",
+    "The restored Git repository is bounded, shallow and sparse; the complete selected source range and required merge ancestry were available and verified.",
+    "Read-only public Git network access required approved execution outside the default network sandbox; no GitHub writes were performed by this verifier."
+  ],
+  "all_published_source_heads_retained": {
+    "derivation": "Every selected head is present in the independently verified complete source range dc45..C3; C3 is the integration's second parent.",
+    "sources": [
+      {
+        "pr": 6881,
+        "stage": "ci",
+        "head": "70ab394b57b82186cf1c552b47e3170e3a55646b",
+        "retained": true
+      },
+      {
+        "pr": 6882,
+        "stage": "b1",
+        "head": "bdee6973fc0cc256efb1abf55513393af3460877",
+        "retained": true
+      },
+      {
+        "pr": 6883,
+        "stage": "b2",
+        "head": "b74eb21b84eaab63509c4cbc54f04d44736b93d5",
+        "retained": true
+      },
+      {
+        "pr": 6884,
+        "stage": "b3",
+        "head": "b813ae0064bffc72caf5c561c27a0e5f41816e14",
+        "retained": true
+      },
+      {
+        "pr": 6885,
+        "stage": "b4",
+        "head": "9d905ca3866444ee58836790a53959ab2849a2b1",
+        "retained": true
+      },
+      {
+        "pr": 6889,
+        "stage": "b5",
+        "head": "bb972c1f7d38bddfb13c68f039a1b0c02881930b",
+        "retained": true
+      },
+      {
+        "pr": 6897,
+        "stage": "a1",
+        "head": "12863fe54b9be0223c7d8c8e0e4c462b7aea01f7",
+        "retained": true
+      },
+      {
+        "pr": 6898,
+        "stage": "a2",
+        "head": "e02915d0d1800aab577b46db87e479240a2f7086",
+        "retained": true
+      },
+      {
+        "pr": 6899,
+        "stage": "a3",
+        "head": "da24c787a8f5af23341e3cb4eb82f5e8848fb5cf",
+        "retained": true
+      },
+      {
+        "pr": 6900,
+        "stage": "c1",
+        "head": "360c6ef158484bced0d943d63c9beb7ff35aaf7d",
+        "retained": true
+      },
+      {
+        "pr": 6901,
+        "stage": "c2",
+        "head": "1b243b9ac1aa056fc43d576bcb0758de8a924370",
+        "retained": true
+      },
+      {
+        "pr": 6902,
+        "stage": "c3",
+        "head": "7368ca0286d503a93e50b26ab24755a5fb429b2f",
+        "retained": true
+      }
+    ]
+  }
+}

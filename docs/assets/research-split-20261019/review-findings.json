@@ -1,0 +1,53 @@
+{
+  "scope": "Static review on fixed source commits; no new execution; no remote review resolutions",
+  "findings": [
+    {
+      "pr": 6882,
+      "head": "bdee6973fc0cc256efb1abf55513393af3460877",
+      "priority": "P2",
+      "url": "https://github.com/loopx-project/loopx/pull/6882#discussion_r4317963822",
+      "finding": "Brief test uses stale 10500 JSON budget while both selected B1 owner and its base use 10800/9000. Align with this slice's owner; do not copy later Outcome-expanded limits.",
+      "assessment": "Independent static comparison confirmed; no new execution."
+    },
+    {
+      "pr": 6882,
+      "head": "bdee6973fc0cc256efb1abf55513393af3460877",
+      "priority": "P2",
+      "url": "https://github.com/loopx-project/loopx/pull/6882#discussion_r4317963831",
+      "finding": "One-Host-dispatch worker postcondition requires B4 attempt deduplication, absent from B1. Preserve B1 canonical identity/ACK/settlement/rearm assertions and qualify external worker behavior in owning B4.",
+      "assessment": "Independent static ownership assessment; no new execution."
+    },
+    {
+      "pr": 6882,
+      "head": "bdee6973fc0cc256efb1abf55513393af3460877",
+      "priority": "P2",
+      "url": "https://github.com/loopx-project/loopx/pull/6882#discussion_r4317963835",
+      "finding": "New inline metadata pruning increases builder complexity. Foundation has an independently confirmed semantically identical extraction that can be isolated into B1.",
+      "assessment": "Independent source comparison; review's numerical ratchet run not rerun."
+    },
+    {
+      "pr": 6883,
+      "head": "b74eb21b84eaab63509c4cbc54f04d44736b93d5",
+      "priority": "P2",
+      "url": "https://github.com/loopx-project/loopx/pull/6883#discussion_r4317970461",
+      "finding": "Scoped admission additions increase quota route complexity. Refactor within existing owner while preserving Stop/health/quota/original receipt and independent-work priorities.",
+      "assessment": "Independent static scope assessment; numerical review run not rerun."
+    },
+    {
+      "pr": 6884,
+      "head": "b813ae0064bffc72caf5c561c27a0e5f41816e14",
+      "priority": "P1",
+      "url": "https://github.com/loopx-project/loopx/pull/6884#discussion_r4318530017",
+      "finding": "Synchronous stdin write/flush holds Goal writer and precedes response deadline setup. A peer that stops reading can block send and Stop lock acquisition. Bound/cancel send within original launch lifetime and reclaim the owning process after partial failure before releasing it.",
+      "assessment": "Independent static control-flow confirmation; review's File/SQLite backpressure executions not rerun."
+    },
+    {
+      "pr": 6884,
+      "head": "b813ae0064bffc72caf5c561c27a0e5f41816e14",
+      "priority": "P2",
+      "url": "https://github.com/loopx-project/loopx/pull/6884#discussion_r4318530024",
+      "finding": "Native Host launch admission setup adds complexity. Refactor within current owner preserving operation/plain-session admission and compatibility.",
+      "assessment": "Independent static scope assessment; numerical review run not rerun."
+    }
+  ]
+}

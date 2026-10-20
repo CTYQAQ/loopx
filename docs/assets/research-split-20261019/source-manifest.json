@@ -1,0 +1,123 @@
+{
+  "source_observation_window": {
+    "started_at": "2026-10-20T00:14:01.892Z",
+    "completed_at": "2026-10-20T00:15:28.653Z"
+  },
+  "sources": [
+    {
+      "stage": "ci",
+      "number": 6881,
+      "branch": "codex/split-ci-release-qualification",
+      "head": "70ab394b57b82186cf1c552b47e3170e3a55646b",
+      "tree": "e8afca42488b42087677b9f43f023830f15fa363",
+      "base": "main",
+      "observed_state": "merged"
+    },
+    {
+      "stage": "b1",
+      "number": 6882,
+      "branch": "codex/split-research-acceptance",
+      "head": "bdee6973fc0cc256efb1abf55513393af3460877",
+      "tree": "63db02e374cd2a78e0032a67ff1a2438ebe596cc",
+      "base": "main",
+      "observed_state": "open"
+    },
+    {
+      "stage": "b2",
+      "number": 6883,
+      "branch": "codex/split-research-dependency-wait",
+      "head": "b74eb21b84eaab63509c4cbc54f04d44736b93d5",
+      "tree": "46947851efef8bc88360bbffcd1e5b6a7eb094ca",
+      "base": "codex/split-research-acceptance",
+      "observed_state": "open"
+    },
+    {
+      "stage": "b3",
+      "number": 6884,
+      "branch": "codex/split-research-host-launch",
+      "head": "b813ae0064bffc72caf5c561c27a0e5f41816e14",
+      "tree": "6bc3ae78c271e1d9783d50e3d729c34bb97d2330",
+      "base": "codex/split-research-dependency-wait",
+      "observed_state": "open"
+    },
+    {
+      "stage": "b4",
+      "number": 6885,
+      "branch": "codex/split-research-worker-readback",
+      "head": "9d905ca3866444ee58836790a53959ab2849a2b1",
+      "tree": "24afb2e36986222fca85c5c6a54a80ad6ea9cfc9",
+      "base": "codex/split-research-host-launch",
+      "observed_state": "open"
+    },
+    {
+      "stage": "b5",
+      "number": 6889,
+      "branch": "codex/split-research-evidence-decision",
+      "head": "bb972c1f7d38bddfb13c68f039a1b0c02881930b",
+      "tree": "b067c8346897afc8b31d879463c5b437213e7d83",
+      "base": "codex/split-research-worker-readback",
+      "observed_state": "open"
+    },
+    {
+      "stage": "a1",
+      "number": 6897,
+      "branch": "codex/split-outcomes-acceptance-v2",
+      "head": "12863fe54b9be0223c7d8c8e0e4c462b7aea01f7",
+      "tree": "a29a86f30e62b60c9f0465698dee781546fbeccb",
+      "base": "codex/split-research-evidence-decision",
+      "observed_state": "open"
+    },
+    {
+      "stage": "a2",
+      "number": 6898,
+      "branch": "codex/split-outcomes-recovery",
+      "head": "e02915d0d1800aab577b46db87e479240a2f7086",
+      "tree": "a09cff6b7aa922177095b1eb35df2dab9505f94a",
+      "base": "codex/split-outcomes-acceptance-v2",
+      "observed_state": "open"
+    },
+    {
+      "stage": "a3",
+      "number": 6899,
+      "branch": "codex/split-outcomes-feedback",
+      "head": "da24c787a8f5af23341e3cb4eb82f5e8848fb5cf",
+      "tree": "09f610e6617332ddf552215297a6d37d85dda378",
+      "base": "codex/split-outcomes-recovery",
+      "observed_state": "open"
+    },
+    {
+      "stage": "c1",
+      "number": 6900,
+      "branch": "codex/split-native-request-admission",
+      "head": "360c6ef158484bced0d943d63c9beb7ff35aaf7d",
+      "tree": "62c79242da7699b746b0c278da7e1ad993b435ca",
+      "base": "codex/split-outcomes-feedback",
+      "observed_state": "open"
+    },
+    {
+      "stage": "c2",
+      "number": 6901,
+      "branch": "codex/split-research-execution-evidence",
+      "head": "1b243b9ac1aa056fc43d576bcb0758de8a924370",
+      "tree": "c7817a52772708aa4312231de88e401fcac6fabd",
+      "base": "codex/split-native-request-admission",
+      "observed_state": "open"
+    },
+    {
+      "stage": "c3",
+      "number": 6902,
+      "branch": "codex/split-native-feedback-recovery",
+      "head": "7368ca0286d503a93e50b26ab24755a5fb429b2f",
+      "tree": "df9693895da652952e461c8f46b69b24d03e4965",
+      "base": "codex/split-research-execution-evidence",
+      "observed_state": "open"
+    }
+  ],
+  "observed_main": "e4190c30d7f94886dddd8e06b899664df34120f9",
+  "declared_validation_base": "45d742088a3f7896a0a008761f68d2437398bcd1",
+  "integration": {
+    "verified_at": "2026-10-20T00:31:24.126743+00:00",
+    "head": "fe3b1f7b382e30cdf691cbf0067a5d4e2f5b3b0b",
+    "tree": "6bbf110b1cb2535975b2389558a86dff73792926"
+  }
+}

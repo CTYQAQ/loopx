@@ -1,0 +1,256 @@
+{
+  "schema": "research_split_landing_snapshot_v1",
+  "observation_window": {
+    "started_at": "2026-10-20T00:14:01.892Z",
+    "completed_at": "2026-10-20T00:15:28.653Z"
+  },
+  "repository": "loopx-project/loopx",
+  "first_slice": {
+    "number": 6881,
+    "state": "merged",
+    "merged_by": "loopx-agent",
+    "merged_at": "2026-10-19T18:12:37Z",
+    "merge_commit": "7f52528c9553088409253a8d37f24a37c91ad8da"
+  },
+  "next_slice": {
+    "number": 6882,
+    "base": "main",
+    "base_change_event": "automatic_base_change_succeeded",
+    "base_change_at": "2026-10-19T18:12:40Z",
+    "review": "changes_requested",
+    "unresolved_threads": 3
+  },
+  "rows": [
+    {
+      "pr": 6784,
+      "head": "b16aeb372d1033c1c7d17f3bf536b28db30a01cb",
+      "base": "main",
+      "state": "open",
+      "ci": "failed",
+      "pending": 6,
+      "review": "changes_requested",
+      "threads": 5
+    },
+    {
+      "pr": 6838,
+      "head": "eac81014fd3a8842ddd420d7908657af107c6787",
+      "base": "main",
+      "state": "open",
+      "ci": "failed",
+      "pending": 0,
+      "review": "changes_requested",
+      "threads": 3
+    },
+    {
+      "pr": 6881,
+      "head": "70ab394b57b82186cf1c552b47e3170e3a55646b",
+      "base": "main",
+      "state": "merged",
+      "ci": "failed",
+      "pending": 0,
+      "review": "approved",
+      "threads": 0
+    },
+    {
+      "pr": 6882,
+      "head": "bdee6973fc0cc256efb1abf55513393af3460877",
+      "base": "main",
+      "state": "open",
+      "ci": "failed",
+      "pending": 0,
+      "review": "changes_requested",
+      "threads": 3
+    },
+    {
+      "pr": 6883,
+      "head": "b74eb21b84eaab63509c4cbc54f04d44736b93d5",
+      "base": "codex/split-research-acceptance",
+      "state": "open",
+      "ci": "failed",
+      "pending": 0,
+      "review": "changes_requested",
+      "threads": 1
+    },
+    {
+      "pr": 6884,
+      "head": "b813ae0064bffc72caf5c561c27a0e5f41816e14",
+      "base": "codex/split-research-dependency-wait",
+      "state": "open",
+      "ci": "failed",
+      "pending": 0,
+      "review": "changes_requested",
+      "threads": 2
+    },
+    {
+      "pr": 6885,
+      "head": "9d905ca3866444ee58836790a53959ab2849a2b1",
+      "base": "codex/split-research-host-launch",
+      "state": "open",
+      "ci": "failed",
+      "pending": 6,
+      "review": "pending",
+      "threads": 0
+    },
+    {
+      "pr": 6889,
+      "head": "bb972c1f7d38bddfb13c68f039a1b0c02881930b",
+      "base": "codex/split-research-worker-readback",
+      "state": "open",
+      "ci": "failed",
+      "pending": 6,
+      "review": "pending",
+      "threads": 0
+    },
+    {
+      "pr": 6897,
+      "head": "12863fe54b9be0223c7d8c8e0e4c462b7aea01f7",
+      "base": "codex/split-research-evidence-decision",
+      "state": "open",
+      "ci": "failed",
+      "pending": 6,
+      "review": "pending",
+      "threads": 0
+    },
+    {
+      "pr": 6898,
+      "head": "e02915d0d1800aab577b46db87e479240a2f7086",
+      "base": "codex/split-outcomes-acceptance-v2",
+      "state": "open",
+      "ci": "pending",
+      "pending": 6,
+      "review": "pending",
+      "threads": 0
+    },
+    {
+      "pr": 6899,
+      "head": "da24c787a8f5af23341e3cb4eb82f5e8848fb5cf",
+      "base": "codex/split-outcomes-recovery",
+      "state": "open",
+      "ci": "pending",
+      "pending": 25,
+      "review": "pending",
+      "threads": 0
+    },
+    {
+      "pr": 6900,
+      "head": "360c6ef158484bced0d943d63c9beb7ff35aaf7d",
+      "base": "codex/split-outcomes-feedback",
+      "state": "open",
+      "ci": "pending",
+      "pending": 23,
+      "review": "pending",
+      "threads": 0
+    },
+    {
+      "pr": 6901,
+      "head": "1b243b9ac1aa056fc43d576bcb0758de8a924370",
+      "base": "codex/split-native-request-admission",
+      "state": "open",
+      "ci": "pending",
+      "pending": 4,
+      "review": "pending",
+      "threads": 0
+    },
+    {
+      "pr": 6902,
+      "head": "7368ca0286d503a93e50b26ab24755a5fb429b2f",
+      "base": "codex/split-research-execution-evidence",
+      "state": "open",
+      "ci": "pending",
+      "pending": 3,
+      "review": "pending",
+      "threads": 0
+    }
+  ],
+  "repaired_head_windows": [
+    {
+      "pr": 6899,
+      "head": "da24c787a8f5af23341e3cb4eb82f5e8848fb5cf",
+      "windows_powershell": {
+        "id": 118380113592,
+        "name": "windows-powershell",
+        "status": "in_progress",
+        "conclusion": null,
+        "url": "https://github.com/loopx-project/loopx/actions/runs/39346007745/job/118380113592"
+      },
+      "other_windows": []
+    },
+    {
+      "pr": 6900,
+      "head": "360c6ef158484bced0d943d63c9beb7ff35aaf7d",
+      "windows_powershell": {
+        "id": 118380332599,
+        "name": "windows-powershell",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/loopx-project/loopx/actions/runs/39346016651/job/118380332599"
+      },
+      "other_windows": []
+    },
+    {
+      "pr": 6901,
+      "head": "1b243b9ac1aa056fc43d576bcb0758de8a924370",
+      "windows_powershell": {
+        "status": "not_observed",
+        "conclusion": null
+      },
+      "other_windows": [
+        {
+          "id": 118378712499,
+          "name": "Windows desktop",
+          "status": "in_progress",
+          "conclusion": null,
+          "url": "https://github.com/loopx-project/loopx/actions/runs/39346026345/job/118378712499"
+        }
+      ]
+    },
+    {
+      "pr": 6902,
+      "head": "7368ca0286d503a93e50b26ab24755a5fb429b2f",
+      "windows_powershell": {
+        "status": "not_observed",
+        "conclusion": null
+      },
+      "other_windows": []
+    }
+  ],
+  "observed_new_reviews": [
+    {
+      "pr": 6838,
+      "by": "loopx-agent",
+      "state": "CHANGES_REQUESTED",
+      "url": "https://github.com/loopx-project/loopx/pull/6838#pullrequestreview-5576033594"
+    },
+    {
+      "pr": 6882,
+      "by": "loopx-agent",
+      "state": "CHANGES_REQUESTED",
+      "url": "https://github.com/loopx-project/loopx/pull/6882#pullrequestreview-5576675959"
+    },
+    {
+      "pr": 6883,
+      "by": "loopx-agent",
+      "state": "CHANGES_REQUESTED",
+      "url": "https://github.com/loopx-project/loopx/pull/6883#pullrequestreview-5576683683"
+    },
+    {
+      "pr": 6884,
+      "by": "loopx-agent",
+      "state": "CHANGES_REQUESTED",
+      "url": "https://github.com/loopx-project/loopx/pull/6884#pullrequestreview-5577355009"
+    }
+  ],
+  "observed_main": "e4190c30d7f94886dddd8e06b899664df34120f9",
+  "overlap": {
+    "foundation_pr": 6784,
+    "head": "b16aeb372d1033c1c7d17f3bf536b28db30a01cb",
+    "retained_source_prs": [
+      6882,
+      6897,
+      6898,
+      6899
+    ],
+    "qualification": "The current consolidated foundation and its split equivalents overlap. Select one landing carrier; any later successor must retain only its own incremental change."
+  },
+  "scope_note": "Current-head snapshot, not an all-green or final approval claim. Merged #6881 and automatic B1 base change were performed by the observed external actor, not by this audit. A PR base_sha is not used as a current-main observation."
+}

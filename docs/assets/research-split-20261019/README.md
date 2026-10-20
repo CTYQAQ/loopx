@@ -34,3 +34,7 @@ The original complete paused/unknown scenario passed on the same commit. Publish
 The complete research-history functional scenario passed, but its new Chinese captures lacked CJK glyph coverage. A font-complete capture remains outstanding and those images are not included as qualified visuals. The first Outcome fixture bootstrap failed within its unchanged 90-second deadline; the later successful run used normal import caches after explicit prewarm. No cold-start, installed-app, external-model or benchmark benefit claim is made.
 
 The landing order and current review blockers are maintained in [PR #6838](https://github.com/loopx-project/loopx/pull/6838).
+
+## Current landing plan and source verification
+
+[How this PR sequence enters main](MERGE-PLAN.md) records the current base, review blockers and overlap with the updated foundation. [Final integration verification](integration-source-proof.json) records commit `fe3b1f7b382e30cdf691cbf0067a5d4e2f5b3b0b`, exact two-file source parity, unchanged tracked UI/build inputs, 18 author/signoff matches and the official owner's candidate preview. The declared qualification base remains frozen; a new `in_sync` receipt and latest-main qualification are not claimed.
