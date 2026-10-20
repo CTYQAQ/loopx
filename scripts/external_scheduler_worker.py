@@ -523,7 +523,7 @@ def run_worker(
             sleep(max(5, interval_minutes * 60))
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, sleep: Callable[[float], None] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Scheduler-hint-aware external shell_worker for generic CLI loops.",
     )
@@ -588,7 +588,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.registry = str(global_registry_path())
         except ValueError as exc:
             parser.error(str(exc))
-    return run_worker(args)
+    return run_worker(args) if sleep is None else run_worker(args, sleep=sleep)
 
 
 if __name__ == "__main__":
