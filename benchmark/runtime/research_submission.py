@@ -203,7 +203,10 @@ def prepare_submission(root: Path, archive: Path, *, history_reader=None, wait_t
                 raise ValueError("native_acceptance_unknown_no_resubmit")
             return dict(action="submit", operation_id=intent["operation_id"], archive_path=intent["archive_path"])
         before = _fresh_history(packet, history_reader=history_reader)
-        raw = read_archive(archive.absolute(), root=archive.parent.resolve())
+        # Native temporary directories can have a platform alias. Canonicalize
+        # only that parent; resolving the leaf would accept archive symlinks.
+        parent = archive.parent.resolve(strict=True)
+        raw = read_archive(parent / archive.name, root=parent)
         operation_id = uuid.uuid4().hex
         snapshot = root / "snapshots" / (operation_id + ".tar.gz")
         write_bytes_atomic(snapshot, raw, create_only=True)

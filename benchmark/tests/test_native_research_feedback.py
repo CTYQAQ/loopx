@@ -393,7 +393,8 @@ def test_archive_manifest_rejects_ambiguous_paths_links_and_matches_probe_hash()
 
 
 @pytest.mark.parametrize("lose_reply", [False, True])
-def test_actual_native_submit_script_archives_once_and_recovers_lost_reply(tmp_path, lose_reply):
+@pytest.mark.parametrize("aliased_parent", [False, True])
+def test_actual_native_submit_script_archives_once_and_recovers_lost_reply(tmp_path, lose_reply, aliased_parent):
     native = pytest.importorskip("sforge.harness.evolve_scripts")
     with native_http(tmp_path, immediately_complete=True, lose_reply=lose_reply) as (state, release, observer, root):
         workspace = tmp_path / "workspace"
@@ -408,9 +409,15 @@ def test_actual_native_submit_script_archives_once_and_recovers_lost_reply(tmp_p
         script.write_text(instrument_submit_script(generated,
             [sys.executable, "-m", "benchmark.runtime.research_submission"], str(root)))
         script.chmod(0o755)
+        native_tmp = tmp_path / "native-tmp"
+        native_tmp.mkdir()
+        if aliased_parent:
+            alias = tmp_path / "native-tmp-alias"
+            alias.symlink_to(native_tmp, target_is_directory=True)
+            native_tmp = alias
         env = dict(os.environ, SFORGE_JUDGE_URL=observer.judge_url, SFORGE_TOKEN="synthetic-token",
             SFORGE_PATCH_DIR=str(workspace), SFORGE_SUBMIT_PATHS="candidate.py",
-            PYTHONPATH=str(Path(__file__).resolve().parents[2]), NO_PROXY="127.0.0.1")
+            PYTHONPATH=str(Path(__file__).resolve().parents[2]), NO_PROXY="127.0.0.1", TMPDIR=str(native_tmp))
         first = subprocess.run([str(script)], cwd=workspace, env=env, capture_output=True, text=True, timeout=30)
         assert (first.returncode != 0) == lose_reply, first.stderr
         assert state["posts"] == 1
@@ -427,6 +434,47 @@ def test_actual_native_submit_script_archives_once_and_recovers_lost_reply(tmp_p
             assert "Reading existing submission: submission-1" in recovered.stdout
             assert state["posts"] == 1, "recovery never creates a second native opportunity"
             assert json.loads(intent_file.read_bytes())["operation_id"] == intent["operation_id"]
+
+
+@pytest.mark.parametrize("invalid_archive", ["leaf_symlink", "oversized", "moved"])
+def test_submission_parent_alias_preserves_archive_integrity_checks(tmp_path, monkeypatch, invalid_archive):
+    from benchmark.edgebench.research_feedback import MAX_ARCHIVE_BYTES
+
+    with native_http(tmp_path) as (state, _release, _observer, root):
+        physical = tmp_path / "physical"
+        physical.mkdir()
+        alias = tmp_path / "alias"
+        alias.symlink_to(physical, target_is_directory=True)
+        archive = physical / "packaged.tar.gz"
+        archive.write_bytes(archive_bytes({"candidate.py": b"original"}))
+        expected = "native_archive_size_or_type"
+        if invalid_archive == "leaf_symlink":
+            target = physical / "target.tar.gz"
+            archive.rename(target)
+            archive.symlink_to(target)
+            expected = "native_archive_not_physical"
+        elif invalid_archive == "oversized":
+            with archive.open("r+b") as stream:
+                stream.truncate(MAX_ARCHIVE_BYTES + 1)
+        else:
+            original_open = os.open
+
+            def move_after_open(path, flags, *args, **kwargs):
+                descriptor = original_open(path, flags, *args, **kwargs)
+                if Path(path) == archive:
+                    replacement = physical / "replacement.tar.gz"
+                    replacement.write_bytes(archive_bytes({"candidate.py": b"replacement"}))
+                    replacement.replace(archive)
+                return descriptor
+
+            monkeypatch.setattr(os, "open", move_after_open)
+            expected = "native_archive_moved"
+        with pytest.raises(ValueError, match=expected):
+            prepare_submission(root, alias / archive.name,
+                history_reader=lambda: {"run_id": state["run_id"], "entries": []})
+        assert not (root / "intents").exists()
+        assert not (root / "snapshots").exists()
+        assert state["posts"] == 0
 
 
 def test_native_client_hook_requires_the_observed_packaging_boundaries():
