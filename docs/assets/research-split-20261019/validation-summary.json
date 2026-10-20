@@ -1,0 +1,199 @@
+{
+  "schema": "research_split_validation_summary_v1",
+  "recorded_at_utc": "2026-10-20 00:22:10 UTC",
+  "repository": "loopx-project/loopx",
+  "provenance": "Summary of actual tool-observed executions on 2026-10-19. Original temporary raw logs were subsequently reclaimed by the execution environment; this document is not a reconstructed raw receipt.",
+  "raw_local_logs_available": false,
+  "captured_source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2",
+  "captured_source_tree": "cb8b1777655d7f37e3571b5087d6cd4db286dbbd",
+  "frozen_main_base": "45d742088a3f7896a0a008761f68d2437398bcd1",
+  "source_data": "synthetic",
+  "images": [
+    {
+      "name": "outcomes-first-desktop.png",
+      "sha": "451ba1d0d66b932c85ffab5c6b232978234b3dcb",
+      "sha256": "999dcf2b592edb55d16b9657ec56200835391a11651804370dfaea70dbddd80d",
+      "bytes": 129349,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2"
+    },
+    {
+      "name": "outcomes-first-narrow.png",
+      "sha": "bc7c500ef6758ab2b1469dc5dc94e11ef5a7486d",
+      "sha256": "a36bb2a6abb7707c58421e5535f63630ec4ad552d4be2f9e0151cf12ea030904",
+      "bytes": 63976,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2"
+    },
+    {
+      "name": "outcomes-draft-loading.png",
+      "sha": "b9949635d8e0827003ca81310391fcc8fb09ee60",
+      "sha256": "2fe64ec58fc56706bc05324f577d472336e15ddb4e917e14d334b3dc9c6cc3d8",
+      "bytes": 126611,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2"
+    },
+    {
+      "name": "outcomes-pending-loading.png",
+      "sha": "7e3b2c7f53e164f38827a2247eaec0fde7e820f6",
+      "sha256": "58b419b9097c2f5e7e2be0669f30ad990e14be0679d67f2e1cabbc017336db17",
+      "bytes": 128096,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2"
+    },
+    {
+      "name": "outcomes-read-failure-desktop.png",
+      "sha": "3f53ad7cc9f7fce2302a20c5ce5d4980a0d2237a",
+      "sha256": "21f51174d2f8bd58123da3e868648c31d8ddd05818654bb102be055ad33243f9",
+      "bytes": 128116,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2"
+    },
+    {
+      "name": "outcomes-read-failure-narrow.png",
+      "sha": "178385b6b6f4c433f0195f2e78918ba5652c431f",
+      "sha256": "fccc3e99ad15041a3f9bb6dd096ba1492ea468b6a2eeecc7e3b5c5efbb8f9284",
+      "bytes": 60537,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2"
+    },
+    {
+      "name": "worker-paused-desktop.png",
+      "sha": "b58a81c8a39417f6b706906845c79673a9315156",
+      "sha256": "46d51ba0301b75af513e77680d7085bf4561170b4b236102eca9628ddd931b81",
+      "bytes": 135067,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2"
+    },
+    {
+      "name": "worker-unknown-narrow.png",
+      "sha": "ab4cc5b1089a5790b5bb6270c8634b044c4d2f8a",
+      "sha256": "9c38e4141958f0f3ca7e57d1fd77666f4e9385b77358193caa329233a6f598e3",
+      "bytes": 60060,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2"
+    }
+  ],
+  "checks": [
+    {
+      "name": "control-plane TypeScript",
+      "result": "passed",
+      "wall_seconds": 50.754,
+      "tree": "cb8b1777655d7f37e3571b5087d6cd4db286dbbd",
+      "scope": "Local integration candidate with tree verified equal to published d1dc8."
+    },
+    {
+      "name": "standard Chat packaged build including Dashboard TypeScript",
+      "result": "passed",
+      "wall_seconds": 131.93,
+      "tree": "cb8b1777655d7f37e3571b5087d6cd4db286dbbd",
+      "ui_bundle_manifest_sha256": "80090a23928a2fb16131e56788f74a170edd67df94524c0ecfb2f2836377e0e0"
+    },
+    {
+      "name": "packaged Goal Outcome recovery",
+      "result": "passed",
+      "wall_seconds": 97.616,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2",
+      "scope": "Original complete scenario with real disposable SQLite authority, native HTTP and CLI; lost response replay, explicit concurrent rebase, draft/pending/read failure preservation, keyboard and narrow viewport. Source/lifetime tail uses synthetic projections."
+    },
+    {
+      "name": "independent normal first viewport capture v2",
+      "result": "passed",
+      "wall_seconds": 41.605,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2",
+      "viewports": [
+        {
+          "width": 1440,
+          "height": 1000
+        },
+        {
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "fresh_browser_contexts": true,
+      "scroll_top": 0,
+      "scope": "No horizontal overflow or browser page errors. Existing empty-Session preparation returned real 424 agent_endpoint_unavailable; no Goal/refinement/send action."
+    },
+    {
+      "name": "packaged worker readback",
+      "result": "passed",
+      "wall_seconds": 126.422,
+      "scenario_seconds": 116.498,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2",
+      "scope": "Paused/unknown, zh/en, desktop/narrow, real File authority/CLI/HTTP, stale and invalid receipts, read polling, read-only navigation and actual Stop. Published images use legible English captures."
+    },
+    {
+      "name": "packaged research history",
+      "result": "passed",
+      "wall_seconds": 116.004,
+      "scenario_seconds": 108.035,
+      "source_commit": "d1dc8ebfe7ff0ce888c8e7a6b7a5051413f29af2",
+      "scope": "Original full functional scenario including grouped graph, pointer hit, execution methods, unknown costs, negative/native outcome, analysis race/error, locale/mobile and read-only navigation.",
+      "visual_limitation": "Chinese screenshot capture lacked CJK glyph coverage. No new Chinese screenshot from that run is presented as visually qualified; a font-complete recapture remains outstanding."
+    },
+    {
+      "name": "A3 owner/replan TypeScript",
+      "result": "passed",
+      "files_passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "wall_seconds": 15.53,
+      "source_commit": "07a4a81ee3cb25423b7504153576b2e4976c4205",
+      "scope": "Test files, not individual assertion count."
+    },
+    {
+      "name": "A3 mixed Outcome continuity File and SQLite",
+      "result": "passed",
+      "parameters_passed": 2,
+      "pytest_seconds": 1347.13,
+      "source_commit": "07a4a81ee3cb25423b7504153576b2e4976c4205",
+      "scope": "Five Outcomes, three owner-held Todos, complete checkpoint, new generation, original Turn/obligation settlement, wrong selector rejection and idempotent single quota use; no model invocation."
+    },
+    {
+      "name": "C1 original backpressured POST / Goal Stop File parameter",
+      "result": "passed",
+      "parameters_passed": 1,
+      "pytest_seconds": 31.05,
+      "scope": "Original frozen C1 entrypoint; real 131085-byte body, original one-second timeout, Stop admission release and native liveness. Not the full final-head matrix."
+    },
+    {
+      "name": "C2 original candidate through real execution SQLite parameter",
+      "result": "passed",
+      "parameters_passed": 1,
+      "pytest_seconds": 338.81,
+      "source_commit": "17b7c4d6e1315482212a0c34e1c350ca3bce2be9",
+      "scope": "Real two-step probe, execution evidence in Explore/context/history, wrong SHA rejection, replan and distinct later five-step experiment. File parameter not rerun."
+    },
+    {
+      "name": "C3 original feedback recovery SQLite parameter",
+      "result": "passed",
+      "parameters_passed": 1,
+      "pytest_seconds": 65.65,
+      "scope": "Frozen original C3: real probe, native POST, original Todo/Turn wait, late zero score, changed five-step experiment and ordinary settlement. File parameter and full replay/concurrency matrix not rerun."
+    },
+    {
+      "name": "A3 Markdown diagnostics budget repair",
+      "result": "passed",
+      "published_source_commit": "da24c787a8f5af23341e3cb4eb82f5e8848fb5cf",
+      "tested_tree": "09f610e6617332ddf552215297a6d37d85dda378",
+      "targeted_tests_passed": 19,
+      "pytest_seconds": 19.72,
+      "baseline_regression": {
+        "failed": 2,
+        "passed": 3,
+        "pytest_seconds": 3.29
+      },
+      "carrier_rows": 12,
+      "cli_invocations": 24,
+      "carrier_wall_seconds": 5.042,
+      "scope": "Identical resolved/active state path rendered once; optional None pre-quota diagnostic omitted. Distinct/unresolved paths and present commands retained. JSON outputs byte-identical; task body, semantic rules and original 4200/6200 ceilings unchanged.",
+      "windows_status": "Original failure was 6332 > 6200. The same 118-character path formatter saves 160 characters, projecting 6172; this projection is not a Windows CI pass."
+    }
+  ],
+  "retained_failures": [
+    "Original packaged Outcome cold bootstrap timed out within the unchanged 90-second fixture window; 92.463 seconds total. A later run after explicit ordinary import-cache prewarm passed. Cold-start qualification is not claimed.",
+    "First-viewport capture v1 used an overbroad GET-only observer and failed. v2 corrected only the local observer to match existing empty-Session preparation; original product scenario was unchanged.",
+    "Historical B4 paused run reported stopped=false; unchanged retry passed, but the first failure's cause is not asserted.",
+    "Historical C1 header timeout cause was not established; the original focused File test subsequently passed."
+  ],
+  "not_run_or_not_claimed": [
+    "Complete latest-head Python/provider/native replay and concurrent matrix.",
+    "A1 feedback CLI test rerun after test-only v2 assertion migration.",
+    "Installed application, remote SSH, real external model adoption, comparative benchmark quality or cost benefit.",
+    "Latest main integration qualification, final pull-request approval or all-green current CI.",
+    "Reconstructed canonical Goal/Todo closeout or quota settlement from unavailable authority."
+  ]
+}
