@@ -1134,6 +1134,15 @@ class CodexChatAgentSession:
             with write_guard():
                 process = self.process
                 try:
+                    if time.monotonic() >= dispatch_deadline:
+                        # Canonical admission itself can consume the remaining
+                        # budget. No writer started, but this Session still
+                        # retires its peer before releasing the launch fence.
+                        try:
+                            force_terminate_process(process, process_tree_owned=self.process_tree_owned)
+                        except Exception as error:
+                            raise RuntimeError("native input receiver cleanup unconfirmed") from error
+                        raise TimeoutError("native input dispatch deadline expired")
                     write_process_stdin_before_deadline(
                         process, frame, deadline=dispatch_deadline,
                         cancel_and_reap=lambda: force_terminate_process(

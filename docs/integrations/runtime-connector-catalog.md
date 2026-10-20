@@ -107,6 +107,8 @@ native peer and drains the writer before releasing the fence; it cannot leave
 a sender to deliver that Turn after Stop. This is a dispatch timeout, not proof
 of non-acceptance or permission to replay. Successful large and Unicode inputs
 retain the full original text stream; no new input-size truncation is applied.
+If current admission consumes the remaining request deadline before a writer
+starts, the Session owner still retires that same peer inside the launch fence.
 
 The guarded ordinary-Host bridge also bounds readiness, request delivery and
 spawn observation within the original explicit command deadline. Without a
@@ -139,6 +141,7 @@ Codex operation tools 路径在创建 app-server 和发送 `turn/start` 前复�
 原生写入也计入该界限，不再对正常发送额外施加一秒上限。背压或部分发送中断时，先取消并回收同一个
 原生进程、等待写入线程退出，再释放 Goal 锁，避免 Stop 后迟到派发。这类超时不
 证明请求从未受理，也不授权重放；正常的大输入和 Unicode 文本完整保留，不截断。
+当前资格检查在写入开始前耗尽原请求期限时，会话 owner 仍在启动锁内回收同一个进程。
 
 普通 Host 的受控 bridge 也在原显式命令期限内完成 ready、请求发送和 spawn 观察。
 没有命令期限时，仅交接阶段有 30 秒安全预算；成功启动后仍等待 Host 自然结束。

@@ -230,8 +230,9 @@ def test_native_process_is_reaped_if_launch_guard_exit_is_interrupted(tmp_path, 
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_backpressured_native_turn_drains_before_stop_writer_is_released(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
+@pytest.mark.parametrize("dispatch_window", ["write_backpressure", "admission_deadline"])
+def test_native_turn_dispatch_failure_drains_before_stop_writer_is_released(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, dispatch_window: str,
 ) -> None:
     """A full stdin pipe cannot hold Stop or deliver a late native Turn."""
     runtime, registry, _, turns, arguments = _fixture(tmp_path, monkeypatch, provider)
@@ -266,6 +267,12 @@ def test_backpressured_native_turn_drains_before_stop_writer_is_released(
                 return
             entered.set()
             try:
+                if dispatch_window == "admission_deadline":
+                    # Expiry can occur in canonical admission before the first
+                    # write. The Session owner still retires its original peer
+                    # before releasing the fence; no helper-side partial write
+                    # is needed to expose this boundary.
+                    time.sleep(1.1)
                 yield
             finally:
                 drained_before_release.append(sessions[0].process.poll() is not None)
