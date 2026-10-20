@@ -50,7 +50,7 @@ class ResearchRequestGuard:
                 "bound_native_session_id": session_wake.session_id}
 
     def lifetime(self, request):
-        # Capture before the gateway connects. A delayed request must not borrow
+        # Capture before inbound body reads or connection. A delayed request must not borrow
         # a checkpoint continuation's replacement process or held Turn binding.
         with self.lock:
             owner, process = self.admission, self.process

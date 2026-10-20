@@ -301,6 +301,65 @@ def test_pending_connection_cannot_borrow_a_rebound_process_or_turn(tmp_path, mo
     assert finished[0]["loopx_turn_id"] == env["LOOPX_TURN"], "failed request retains its original Turn"
 
 
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_pending_inbound_body_cannot_borrow_a_rebound_process_or_turn(tmp_path, monkeypatch, provider):
+    env, session, initial, _registry = _admitted_owner(tmp_path, monkeypatch, provider)
+    reading = threading.Event()
+    gateway_port = []
+    original_setup = gateway_module.BaseHTTPRequestHandler.setup
+
+    class ObservedReader:
+        def __init__(self, stream, handler):
+            self.stream, self.handler = stream, handler
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def read(self, length):
+            if gateway_port and self.handler.server.server_port == gateway_port[0]:
+                reading.set()
+            return self.stream.read(length)
+
+    def setup(handler):
+        original_setup(handler)
+        handler.rfile = ObservedReader(handler.rfile, handler)
+
+    monkeypatch.setattr(gateway_module.BaseHTTPRequestHandler, "setup", setup)
+    wake = tmp_path / "inbound-rebound-wake"
+    wake.mkdir()
+    receipt = {"turn_id": "wake-inbound-rebound"}
+    with _recording_upstream() as (url, upstream), _native_process() as original, _native_process() as replacement:
+        env["OPENAI_BASE_URL"] = url
+        guard = ResearchRequestGuard(env, receipt, wake)
+        with guard.serve():
+            guard.bind(original, env, session, original_quota=initial)
+            target = gateway_module.urlsplit(guard.base_url)
+            gateway_port.append(target.port)
+            with socket.create_connection((target.hostname, target.port), timeout=30) as client:
+                # The request has entered the real handler, but its body has
+                # not arrived. No registry lock may span this receive wait.
+                client.sendall(b"POST /responses HTTP/1.0\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{")
+                assert reading.wait(10), "request never reached inbound body read"
+                guard.bind(replacement, env, session, original_quota=initial)
+                client.sendall(b"}")
+                response = b""
+                while chunk := client.recv(4096):
+                    response += chunk
+            assert response.startswith(b"HTTP/1.0 409"), response
+            assert not upstream and replacement.poll() is None
+            original.wait(timeout=5)
+            assert not guard.refused and "request_admission_refused" not in receipt
+            guard.bind(replacement, env, session, original_quota=initial)
+            next_response = {}
+            _send(guard, next_response)
+            assert next_response == {"status": 200} and replacement.poll() is None
+    events = [json.loads(line) for line in (wake / "provider-requests.jsonl").read_text().splitlines()]
+    finished = [event for event in events if event["event"] == "finished"]
+    assert [event["forwarded"] for event in finished] == [False, True]
+    assert finished[0]["loopx_turn_id"] == env["LOOPX_TURN"]
+    assert finished[0]["refusal_code"] == "research_request_without_live_owner"
+
+
 def test_current_admission_failure_stays_latched_across_rebinding(tmp_path):
     @contextmanager
     def unavailable(**_kwargs):

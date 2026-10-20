@@ -184,7 +184,7 @@ def serve_runner_owned_provider_gateway(
     caller owns the stronger process/filesystem boundary between this gateway
     and the agent runtime.
 
-    A request_lifetime factory captures the caller binding before connection
+    A request_lifetime factory captures the caller binding before inbound body reads or connection
     setup; its context is entered only for the admitted POST send. The factory
     must not retain authority locks while DNS/TCP/CONNECT/TLS can block.
     Guarded headers and body share a one-second send budget; response reads
@@ -233,7 +233,6 @@ def serve_runner_owned_provider_gateway(
             if content_length < 0 or content_length > max_request_bytes:
                 self._json_error(413, "provider_gateway_request_size_invalid")
                 return
-            body = self.rfile.read(content_length)
             request_id = "request-" + uuid.uuid4().hex
             observed = {"request_id": request_id, "path": requested.path,
                 # Only explicitly received transport identities; no inference
@@ -243,30 +242,34 @@ def serve_runner_owned_provider_gateway(
                 "upstream_request_id": None, "forwarded": False, "status": None,
                 "response_bytes": 0}
             started = time.monotonic()
-            upstream_path = f"{upstream.path.rstrip('/')}{requested.path}"
-            if requested.query:
-                upstream_path = f"{upstream_path}?{requested.query}"
-            if proxy is not None and upstream.scheme == "http":
-                upstream_path = f"{upstream.scheme}://{upstream.netloc}{upstream_path}"
-            headers = {
-                key: value
-                for key, value in self.headers.items()
-                if key.lower()
-                not in {
-                    *_HOP_BY_HOP_HEADERS,
-                    *_CLIENT_CREDENTIAL_HEADERS,
-                    "content-length",
-                    "host",
-                }
-            }
-            headers["Authorization"] = f"Bearer {token}"
-            headers["Content-Length"] = str(len(body))
-            if observe_request is not None:
-                headers["X-LoopX-Request-Id"] = request_id
-            connection = _upstream_connection(upstream, timeout_sec=request_timeout_sec, proxy=proxy)
+            connection = None
             response_started = False
             try:
+                # Bind before the inbound body can wait, as well as before
+                # DNS/TCP/TLS. Receiving bytes never holds the authority lock.
                 lifetime = request_lifetime(observed) if request_lifetime is not None else nullcontext()
+                body = self.rfile.read(content_length)
+                upstream_path = f"{upstream.path.rstrip('/')}{requested.path}"
+                if requested.query:
+                    upstream_path = f"{upstream_path}?{requested.query}"
+                if proxy is not None and upstream.scheme == "http":
+                    upstream_path = f"{upstream.scheme}://{upstream.netloc}{upstream_path}"
+                headers = {
+                    key: value
+                    for key, value in self.headers.items()
+                    if key.lower()
+                    not in {
+                        *_HOP_BY_HOP_HEADERS,
+                        *_CLIENT_CREDENTIAL_HEADERS,
+                        "content-length",
+                        "host",
+                    }
+                }
+                headers["Authorization"] = f"Bearer {token}"
+                headers["Content-Length"] = str(len(body))
+                if observe_request is not None:
+                    headers["X-LoopX-Request-Id"] = request_id
+                connection = _upstream_connection(upstream, timeout_sec=request_timeout_sec, proxy=proxy)
                 if request_lifetime is not None:
                     # Pin the request's owner before any slow connection work,
                     # then leave DNS/TCP/CONNECT/TLS outside its authority lock.
@@ -310,7 +313,8 @@ def serve_runner_owned_provider_gateway(
                 else:
                     self.close_connection = True
             finally:
-                connection.close()
+                if connection is not None:
+                    connection.close()
                 if observe_request is not None:
                     observe_request({**observed, "event": "finished", "elapsed_seconds": time.monotonic() - started})
 
