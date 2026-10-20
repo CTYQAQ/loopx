@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..control_plane.goals.acceptance import (
+    GoalAcceptanceRejected,
     configure_goal_acceptance,
     refine_goal_outcome,
     inspect_goal_acceptance,
@@ -52,7 +53,10 @@ def register_goal_acceptance_command(subparsers: Any, add_format: Any) -> None:
 def render_goal_acceptance(payload: dict[str, Any]) -> str:
     lines = ["# Goal acceptance", "", f"- ok: {payload.get('ok')}"]
     if payload.get("error"):
-        return "\n".join([*lines, f"- error: {payload['error']}"])
+        lines.append(f"- error: {payload['error']}")
+        if payload.get("error_detail"):
+            lines.append(f"- detail: {payload['error_detail']}")
+        return "\n".join(lines)
     if payload.get("provider_revision"):
         lines.append(f"- provider revision: {payload['provider_revision']}")
     contract = payload.get("goal_acceptance_contract") or {}
@@ -166,6 +170,9 @@ def handle_goal_acceptance_command(
             else 0
         )
     except (OSError, TypeError, ValueError, RuntimeError) as exc:
-        payload, code = {"ok": False, "error": str(exc)}, 1
+        payload, code = {
+            "ok": False, "error": str(exc),
+            **({"error_code": exc.code, **exc.payload} if isinstance(exc, GoalAcceptanceRejected) else {}),
+        }, 1
     print_payload(payload, output_format(args), render_goal_acceptance)
     return code

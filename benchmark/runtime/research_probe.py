@@ -129,13 +129,6 @@ def run_probe(*, command: list[str], candidate_files: list[Path], output: Path,
             record.write(json.dumps(result, ensure_ascii=False, allow_nan=False) + "\n")
             record.flush()
             os.fsync(record.fileno())
-    feedback_root = os.environ.get("LOOPX_RESEARCH_FEEDBACK_ROOT")
-    if feedback_root:
-        from .research_submission import register_probe
-
-        # The observation must be fully persisted before it becomes a source
-        # for matching a later native accepted archive/released result.
-        register_probe(Path(feedback_root), result, {"candidate_sha256": before, "files": files})
     return result
 
 

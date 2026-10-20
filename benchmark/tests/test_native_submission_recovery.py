@@ -1,10 +1,9 @@
-"""Native public HTTP + exact tar snapshots, with bounded synthetic evaluations."""
+"""Native submission recovery over real local HTTP and pinned native scripts."""
 from __future__ import annotations
 
 from contextlib import contextmanager
 from email.parser import BytesParser
 from email.policy import default
-import gzip
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
@@ -22,11 +21,10 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from benchmark.edgebench.research_feedback import SCHEMA, NativeResearchFeedback, archive_manifest, canonical_json
-from benchmark.runtime.research_submission import (
-    bind_execution_observations, declared_wait_packet, instrument_submit_script,
-    mark_dispatched, prepare_submission, record_response, record_result,
-    register_probe, synchronize_intents,
+from benchmark.runtime.submission_receipts import SCHEMA, NativeSubmissionReceipts, canonical_json
+from benchmark.runtime.submission_recovery import (
+    instrument_submit_script, mark_dispatched, prepare_submission,
+    record_response, record_result, synchronize_intents,
 )
 
 
@@ -38,17 +36,6 @@ def archive_bytes(files):
             entry.size = len(data)
             archive.addfile(entry, io.BytesIO(data))
     return stream.getvalue()
-
-
-def probe_record(source=b"original"):
-    files = [{"path": "candidate.py", "sha256": hashlib.sha256(source).hexdigest()}]
-    digest = hashlib.sha256(json.dumps(files, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    observation = dict(schema_version="explore_execution_observation_v0", candidate_sha256=digest,
-        input_revision="synthetic-public-v1", planned_method_id="local-search", executed_method_id="local-search",
-        change_reason=None, elapsed_seconds=0.4, limit_seconds=30.0, search_iterations=2,
-        stop_reason="process_exit:0; solver_report:search_cap", exit_code=0,
-        evidence_refs=["probe:synthetic", "source:" + digest])
-    return observation, {"candidate_sha256": digest, "files": files}
 
 
 class LocalCopyBackend:
@@ -130,8 +117,8 @@ def native_http(tmp_path, *, immediately_complete=False, lose_reply=False):
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    root = tmp_path / "feedback"
-    observer = NativeResearchFeedback(trial=trial, run_id=state["run_id"], task_id=state["task_id"],
+    root = tmp_path / "recovery"
+    observer = NativeSubmissionReceipts(trial=trial, run_id=state["run_id"], task_id=state["task_id"],
         judge_url=f"http://127.0.0.1:{server.server_port}", remote_root=str(root))
     observer.bind({"SFORGE_TOKEN": "synthetic-token"})
     observer.update(LocalCopyBackend(), None)
@@ -151,69 +138,8 @@ def submit_fixture(observer, raw):
     return response.json()
 
 
-def test_late_negative_result_binds_original_selected_manifest_not_current_files(tmp_path):
-    with native_http(tmp_path) as (state, release, observer, root):
-        raw = archive_bytes({"candidate.py": b"original", **{f"data/{i}.txt": b"x" for i in range(35)}})
-        accepted = submit_fixture(observer, raw)
-        old, manifest = probe_record()
-        register_probe(root, old, manifest)
-        new, new_manifest = probe_record(b"new workspace")
-        register_probe(root, new, new_manifest)
-        pending = observer.update(LocalCopyBackend(), None)
-        assert state["result_reads"] == 0, "pending public history must not read a result"
-        assert "result_ref" not in pending["records"][0]
-        assert "candidate_sha256" not in pending["records"][0], "a large full archive is not a 32-file probe"
-        (tmp_path / "candidate.py").write_text("new workspace")
-        release(accepted["submission_id"], score=0)
-        completed = observer.update(LocalCopyBackend(), None)
-        [bound] = bind_execution_observations(root, completed)
-        assert bound["execution_observation"]["result_candidate_sha256"] == old["candidate_sha256"]
-        assert bound["archive_sha256"] == hashlib.sha256(raw).hexdigest()
-        assert bound["archive_sha256"] != old["candidate_sha256"]
-        assert bound["result_summary"]["score"] == 0
-        assert completed == observer.poll(), "unchanged results retain their first observation identity"
-        assert (tmp_path / "candidate.py").read_text() == "new workspace"
-
-
-@pytest.mark.parametrize("corruption", ["invalid-gzip", "truncated-gzip", "invalid-deflate", "bad-crc"])
-def test_malformed_native_error_archive_does_not_block_independent_probe_binding(tmp_path, corruption):
-    with native_http(tmp_path) as (state, release, observer, root):
-        observation, manifest = probe_record()
-        register_probe(root, observation, manifest)
-        # Native admission accepts opaque bytes; failed archive listing releases
-        # an error while retaining those exact bytes, without a source manifest.
-        archive = archive_bytes({"candidate.py": b"original"})
-        if corruption == "invalid-gzip":
-            invalid = b"not-a-tar-gzip"
-        elif corruption == "truncated-gzip":
-            invalid = archive[:len(archive) // 2]
-        else:
-            # Keep the tar header in one gzip member so decompression/CRC
-            # errors surface during member reads, after tarfile.open returns.
-            unpacked = gzip.decompress(archive)
-            first = bytearray(gzip.compress(unpacked[:512]))
-            if corruption == "bad-crc":
-                first[-8] ^= 1
-                following = gzip.compress(unpacked[512:])
-            else:
-                following = archive[:10] + b"\x07" + archive[-8:]  # Reserved deflate block type.
-            invalid = bytes(first) + following
-        failed = submit_fixture(observer, invalid)
-        release(failed["submission_id"], status="error")
-        good = submit_fixture(observer, archive)
-        release(good["submission_id"])
-        packet = observer.update(LocalCopyBackend(), None)
-        failed_record = next(row for row in packet["records"] if row["submission_id"] == failed["submission_id"])
-        assert failed_record["status"] == "error" and failed_record["result_ref"]
-        assert failed_record["attribution_status"] == "verified", "the native archive/result identity remains evidence"
-        assert "candidate_sha256" not in failed_record, "invalid tar bytes cannot qualify a source manifest"
-        [bound] = bind_execution_observations(root, packet)
-        assert bound["submission_id"] == good["submission_id"]
-        assert bound["execution_observation"]["result_candidate_sha256"] == observation["candidate_sha256"]
-
-
-@pytest.mark.parametrize("per_run_limit", [False, True], ids=["aggregate", "run-task"])
-def test_native_capacity_refusal_allows_an_explicit_later_submission(tmp_path, monkeypatch, per_run_limit):
+@contextmanager
+def native_judge(tmp_path, monkeypatch, **limits):
     native = pytest.importorskip("sforge.harness.judge_server")
     pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
@@ -224,8 +150,7 @@ def test_native_capacity_refusal_allows_an_explicit_later_submission(tmp_path, m
     monkeypatch.setattr(native, "create_backend_from_config", lambda _config: SimpleNamespace(backend_name="synthetic"))
     monkeypatch.setattr(native.JudgeState, "load_tasks", lambda state: setattr(state, "tasks", {task_id: task}))
     config = SForgeConfig(log_dir=tmp_path / "judge", tasks_dir=tmp_path / "tasks",
-        judge_max_concurrent=1, judge_max_pending=0,
-        judge_max_outstanding_per_run=1 if per_run_limit else None)
+        judge_max_concurrent=1, judge_max_pending=0, **limits)
     with TestClient(native.create_app(config)) as client:
         state = client.app.state.judge
         token = state.register_session(task_id, run_id)
@@ -233,7 +158,15 @@ def test_native_capacity_refusal_allows_an_explicit_later_submission(tmp_path, m
             response = client.get("/api/v1/history", params={"token": token})
             response.raise_for_status()
             return response.json()
-        root = tmp_path / "feedback"
+        yield native, state, client, token, history
+
+
+@pytest.mark.parametrize("per_run_limit", [False, True], ids=["aggregate", "run-task"])
+def test_native_capacity_refusal_allows_an_explicit_later_submission(tmp_path, monkeypatch, per_run_limit):
+    with native_judge(tmp_path, monkeypatch, judge_max_outstanding_per_run=1 if per_run_limit else None) as (
+            _native, state, client, token, history):
+        run_id, task_id = "synthetic-run", "synthetic-task"
+        root = tmp_path / "recovery"
         root.mkdir()
         (root / "native.json").write_bytes(canonical_json(dict(
             schema_version=SCHEMA, run_id=run_id, task_id=task_id, records=[])))
@@ -260,15 +193,82 @@ def test_native_capacity_refusal_allows_an_explicit_later_submission(tmp_path, m
         assert not state.submissions and history()["entries"] == [], "neither response handling nor prepare resubmits"
 
 
+@pytest.mark.parametrize("refusal", ["budget", "cooldown"])
+def test_native_round_refusal_allows_an_explicit_later_prepare(tmp_path, monkeypatch, refusal):
+    with native_judge(tmp_path, monkeypatch) as (native, state, client, token, history):
+        root = tmp_path / "recovery"
+        root.mkdir()
+        (root / "native.json").write_bytes(canonical_json(dict(schema_version=SCHEMA,
+            run_id="synthetic-run", task_id="synthetic-task", records=[])))
+        archive = tmp_path / "packaged.tar.gz"
+        archive.write_bytes(archive_bytes({"candidate.py": b"original"}))
+        prepared = prepare_submission(root, archive, history_reader=history)
+        mark_dispatched(root, prepared["operation_id"])
+        if refusal == "budget":
+            state.tokens[token]["max_agent_submissions"] = 0
+        else:
+            # A fixed provider clock proves refusal without a timing race.
+            monkeypatch.setattr(native, "time", SimpleNamespace(time=lambda: 1000))
+            state.tokens[token].update(submission_cooldown=60, last_agent_submit_at=1000)
+        response = client.post("/api/v1/submit", data={"token": token},
+            files={"archive": ("submission.tar.gz", Path(prepared["archive_path"]).read_bytes())})
+        assert response.status_code == 429
+        intent = record_response(root, prepared["operation_id"], response.status_code, response.json())
+        assert intent["acceptance"] == "rejected"
+        later = prepare_submission(root, archive, history_reader=history)
+        assert later["operation_id"] != prepared["operation_id"]
+        assert state.resolve_token(token)["next_agent"] == 1
+        assert not state.submissions and history()["entries"] == []
+
+
+@pytest.mark.parametrize("error_type,http_status", [(ValueError, 404), (KeyError, 401)])
+def test_native_error_after_admission_cannot_be_mistaken_for_a_safe_rejection(tmp_path, monkeypatch, error_type, http_status):
+    with native_judge(tmp_path, monkeypatch) as (_native, state, client, token, history):
+        root = tmp_path / "recovery"
+        root.mkdir()
+        (root / "native.json").write_bytes(canonical_json(dict(schema_version=SCHEMA,
+            run_id="synthetic-run", task_id="synthetic-task", records=[])))
+        archive = tmp_path / "packaged.tar.gz"
+        archive.write_bytes(archive_bytes({"candidate.py": b"original"}))
+        prepared = prepare_submission(root, archive, history_reader=history)
+        mark_dispatched(root, prepared["operation_id"])
+
+        def fail_after_recording(*_args, **_kwargs):
+            assert state.resolve_token(token)["next_agent"] == 2
+            assert len(state.submissions) == 1
+            assert len(state.get_run_history("synthetic-run", "synthetic-task")["entries"]) == 1
+            raise error_type("synthetic interruption after native admission")
+
+        monkeypatch.setattr(state._executor, "submit", fail_after_recording)
+        response = client.post("/api/v1/submit", data={"token": token},
+            files={"archive": ("submission.tar.gz", Path(prepared["archive_path"]).read_bytes())})
+        assert response.status_code == http_status
+        intent = record_response(root, prepared["operation_id"], response.status_code, response.json())
+        assert intent["acceptance"] == "unknown"
+        with pytest.raises(ValueError, match="native_acceptance_unknown_no_resubmit"):
+            prepare_submission(root, archive, history_reader=history)
+        assert state.resolve_token(token)["next_agent"] == 2
+        assert len(state.submissions) == 1 and len(history()["entries"]) == 1
+        assert len(list((root / "intents").glob("*.json"))) == 1
+
+
 @pytest.mark.parametrize("http_status,response", [
     (503, {"detail": "Service Unavailable"}),
     (503, {"detail": "Judge capacity full; retry this snapshot later; acceptance unknown"}),
     (500, {"detail": "Judge capacity full; retry this snapshot later"}),
     (502, {"detail": "Bad Gateway"}),
     (503, {"detail": {"message": "Judge capacity full; retry this snapshot later"}}),
+    (400, {"detail": "Bad Request"}),
+    (401, {"detail": "Invalid token"}),
+    (403, {"detail": "Forbidden"}),
+    (404, {"detail": "Not Found"}),
+    (413, {"detail": "Content Too Large"}),
+    (429, {"detail": "Too Many Requests"}),
+    (429, {"detail": "Submission budget exhausted (1/2 used)"}),
+    (429, {"detail": "Submission cooldown active — wait 1s before next submission."}),
 ])
 def test_unproven_server_failure_cannot_allow_resubmission(tmp_path, http_status, response):
-    root = tmp_path / "feedback"
+    root = tmp_path / "recovery"
     root.mkdir()
     (root / "native.json").write_bytes(canonical_json(dict(schema_version=SCHEMA,
         run_id="synthetic-run", task_id="synthetic-task", records=[])))
@@ -296,19 +296,27 @@ def test_lost_reply_recovers_same_operation_and_never_resubmits(tmp_path):
         # Simulate response loss: there is no record_response call.
         with pytest.raises(ValueError, match="unknown_no_resubmit"):
             prepare_submission(root, archive)
+        pending = observer.update(LocalCopyBackend(), None)
+        assert "archive_sha256" not in pending["records"][0]
+        with pytest.raises(ValueError, match="unknown_no_resubmit"):
+            prepare_submission(root, archive)
+        assert state["posts"] == 1
+        release(accepted["submission_id"])
         packet = observer.update(LocalCopyBackend(), None)
         [intent] = synchronize_intents(root, packet)
         assert intent["operation_id"] == operation
         assert intent["submission_id"] == accepted["submission_id"]
         archive.write_bytes(archive_bytes({"candidate.py": b"newer"}))
         recovered = prepare_submission(root, archive)
-        assert recovered == dict(action="recover", operation_id=operation, submission_id=accepted["submission_id"])
+        assert recovered["action"] == "recover" and recovered["operation_id"] == operation
+        assert recovered["submission_id"] == accepted["submission_id"]
+        assert recovered["archive_sha256"] == hashlib.sha256(Path(initial["archive_path"]).read_bytes()).hexdigest()
         assert state["posts"] == 1
         with pytest.raises(ValueError, match="already_dispatched"):
             mark_dispatched(root, operation)
 
 
-def test_ambiguous_archives_remain_unknown_and_duplicate_native_ids_cannot_release(tmp_path):
+def test_ambiguous_archives_and_duplicate_native_ids_cannot_recover(tmp_path):
     with native_http(tmp_path) as (state, release, observer, root):
         source = tmp_path / "packaged.tar.gz"
         source.write_bytes(archive_bytes({"candidate.py": b"original"}))
@@ -316,7 +324,8 @@ def test_ambiguous_archives_remain_unknown_and_duplicate_native_ids_cannot_relea
             history_reader=lambda: {"run_id": state["run_id"], "entries": []})
         mark_dispatched(root, prepared["operation_id"])
         for _ in range(2):
-            submit_fixture(observer, source.read_bytes())
+            accepted = submit_fixture(observer, source.read_bytes())
+            release(accepted["submission_id"])
         packet = observer.update(LocalCopyBackend(), None)
         [intent] = synchronize_intents(root, packet)
         assert intent["acceptance"] == "unknown"
@@ -326,70 +335,7 @@ def test_ambiguous_archives_remain_unknown_and_duplicate_native_ids_cannot_relea
         state["entries"].append(dict(state["entries"][0]))
         duplicate = observer.poll()
         rows = [row for row in duplicate["records"] if row["submission_id"] == "submission-1"]
-        assert all(row["attribution_status"] == "unknown" and "result_ref" not in row for row in rows)
-
-
-def test_pending_acceptance_can_register_wait_before_host_poll_without_result_attribution(tmp_path):
-    with native_http(tmp_path) as (state, release, observer, root):
-        archive = tmp_path / "packaged.tar.gz"
-        archive.write_bytes(archive_bytes({"candidate.py": b"original"}))
-        prepared = prepare_submission(root, archive, wait_todo_id="requested-work",
-            history_reader=lambda: {"run_id": state["run_id"], "entries": []})
-        mark_dispatched(root, prepared["operation_id"])
-        receipt = submit_fixture(observer, archive.read_bytes())
-        intent = record_response(root, prepared["operation_id"], 200, receipt)
-        [row] = declared_wait_packet(root, intent)["records"]
-        assert row["accepted_record"] and row["status"] == "queued"
-        assert row["submission_id"] == receipt["submission_id"]
-        assert row["attribution_status"] == "unknown" and "result_ref" not in row
-        assert observer.snapshot()["records"] == [], "the receipt fills only this explicitly requested wait"
-
-
-def test_failure_to_publish_control_effect_retries_and_restart_preserves_release_time(tmp_path):
-    with native_http(tmp_path, immediately_complete=True) as (state, release, observer, root):
-        submit_fixture(observer, archive_bytes({"candidate.py": b"original"}))
-        attempts = []
-        def after_publish(*_args):
-            attempts.append(True)
-            if len(attempts) == 1:
-                raise RuntimeError("synthetic control writeback interruption")
-        observer.after_publish = after_publish
-        with pytest.raises(RuntimeError, match="control writeback"):
-            observer.update(LocalCopyBackend(), None)
-        completed = observer.update(LocalCopyBackend(), None)
-        assert len(attempts) == 2
-        duplicate = observer.update(LocalCopyBackend(), None)
-        assert duplicate == completed and len(attempts) == 2
-        restarted = NativeResearchFeedback(trial=observer.trial, run_id=state["run_id"],
-            task_id=state["task_id"], judge_url=observer.judge_url, remote_root=str(root))
-        try:
-            restarted.bind({"SFORGE_TOKEN": "synthetic-token"})
-            assert restarted.poll() == completed
-        finally:
-            restarted.close()
-
-
-def test_mismatched_released_details_and_native_symlink_stay_unattributed(tmp_path):
-    with native_http(tmp_path, immediately_complete=True) as (state, release, observer, root):
-        receipt = submit_fixture(observer, archive_bytes({"candidate.py": b"original"}))
-        state["results"][receipt["submission_id"]]["report"]["task_id"] = "unrelated-task"
-        [row] = observer.poll()["records"]
-        assert row["attribution_status"] == "unknown" and "result_ref" not in row
-        archive = observer.trial / "submissions" / "agent-1" / "submission.tar.gz"
-        outside = tmp_path / "untrusted.tar.gz"
-        archive.rename(outside)
-        archive.symlink_to(outside)
-        [row] = observer.poll()["records"]
-        assert row["reason"] == "native_archive_not_physical" and "archive_sha256" not in row
-
-
-def test_archive_manifest_rejects_ambiguous_paths_links_and_matches_probe_hash():
-    observation, _ = probe_record()
-    digest, _ = archive_manifest(archive_bytes({"./candidate.py": b"original"}), ["candidate.py"])
-    assert digest == observation["candidate_sha256"]
-    for files in ({"candidate.py": b"x", "./candidate.py": b"y"}, {"../candidate.py": b"x"}):
-        with pytest.raises(ValueError, match="ambiguous_archive_member"):
-            archive_manifest(archive_bytes(files))
+        assert all(not row["accepted_record"] and "archive_sha256" not in row for row in rows)
 
 
 @pytest.mark.parametrize("lose_reply", [False, True])
@@ -407,7 +353,7 @@ def test_actual_native_submit_script_archives_once_and_recovers_lost_reply(tmp_p
                                       'STATE_FILE="' + str(tmp_path / "display.json") + '"')
         script = tmp_path / "sforge-submit"
         script.write_text(instrument_submit_script(generated,
-            [sys.executable, "-m", "benchmark.runtime.research_submission"], str(root)))
+            [sys.executable, "-m", "benchmark.runtime.submission_recovery"], str(root)))
         script.chmod(0o755)
         native_tmp = tmp_path / "native-tmp"
         native_tmp.mkdir()
@@ -425,8 +371,10 @@ def test_actual_native_submit_script_archives_once_and_recovers_lost_reply(tmp_p
         intent = json.loads(intent_file.read_bytes())
         archive = observer.trial / "submissions" / "agent-1" / "submission.tar.gz"
         assert archive.read_bytes() == Path(intent["archive_path"]).read_bytes()
+        assert not list(native_tmp.iterdir()), "the native EXIT trap cleans the first call"
         if lose_reply:
             observer.update(LocalCopyBackend(), None)
+            assert state["result_reads"] == 0, "the receipt bridge never fetches an evaluation result"
             (workspace / "candidate.py").write_bytes(b"newer workspace")
             recovered = subprocess.run([str(script)], cwd=workspace, env=env,
                 capture_output=True, text=True, timeout=30)
@@ -434,11 +382,22 @@ def test_actual_native_submit_script_archives_once_and_recovers_lost_reply(tmp_p
             assert "Reading existing submission: submission-1" in recovered.stdout
             assert state["posts"] == 1, "recovery never creates a second native opportunity"
             assert json.loads(intent_file.read_bytes())["operation_id"] == intent["operation_id"]
+            assert all(value in recovered.stderr for value in (
+                intent["operation_id"], "submission-1", intent["archive_sha256"]))
+            assert not list(native_tmp.iterdir()), "recovery cleans its unused package before native result reading"
+            state["lose_reply"] = False
+            second = subprocess.run([str(script)], cwd=workspace, env=env,
+                capture_output=True, text=True, timeout=30)
+            assert second.returncode == 0, second.stderr
+            assert state["posts"] == 2, "after reading the old result a new call submits current bytes"
+            second_archive = observer.trial / "submissions" / "agent-2" / "submission.tar.gz"
+            with tarfile.open(second_archive) as native_archive:
+                assert native_archive.extractfile("candidate.py").read() == b"newer workspace"
 
 
 @pytest.mark.parametrize("invalid_archive", ["leaf_symlink", "oversized", "moved"])
 def test_submission_parent_alias_preserves_archive_integrity_checks(tmp_path, monkeypatch, invalid_archive):
-    from benchmark.edgebench.research_feedback import MAX_ARCHIVE_BYTES
+    from benchmark.runtime.submission_receipts import MAX_ARCHIVE_BYTES
 
     with native_http(tmp_path) as (state, _release, _observer, root):
         physical = tmp_path / "physical"
@@ -482,18 +441,6 @@ def test_native_client_hook_requires_the_observed_packaging_boundaries():
         instrument_submit_script("#!/bin/sh\nexit 0\n", [sys.executable, "-m", "fixture"], "/synthetic")
 
 
-def test_ambiguous_record_does_not_prevent_an_independent_verified_result(tmp_path):
-    from benchmark.runtime.research_feedback_wait import _records
-    with native_http(tmp_path, immediately_complete=True) as (state, release, observer, root):
-        submit_fixture(observer, archive_bytes({"candidate.py": b"first"}))
-        independent = submit_fixture(observer, archive_bytes({"candidate.py": b"second"}))
-        state["entries"].append(dict(state["entries"][0]))
-        packet = observer.poll()
-        accepted = _records(packet)
-        assert set(accepted) == {independent["submission_id"]}
-        assert accepted[independent["submission_id"]][1]["result_ref"]
-
-
 def test_malformed_terminal_feedback_cannot_make_a_retry_submit_again(tmp_path):
     with native_http(tmp_path) as (state, release, observer, root):
         source = tmp_path / "packaged.tar.gz"
@@ -510,21 +457,157 @@ def test_malformed_terminal_feedback_cannot_make_a_retry_submit_again(tmp_path):
         assert state["posts"] == 1
 
 
-def test_accepted_archive_identity_cannot_be_replaced_after_first_observation(tmp_path):
-    with native_http(tmp_path, immediately_complete=True) as (state, release, observer, root):
-        submit_fixture(observer, archive_bytes({"candidate.py": b"original"}))
-        original = observer.update(LocalCopyBackend(), None)
-        native_archive = observer.trial / "submissions" / "agent-1" / "submission.tar.gz"
-        native_archive.write_bytes(archive_bytes({"candidate.py": b"changed after acceptance"}))
-        [changed] = observer.update(LocalCopyBackend(), None)["records"]
-        assert changed["attribution_status"] == "unknown"
-        assert changed["reason"] == "native_accepted_archive_changed"
-        assert "result_ref" not in changed
-        restarted = NativeResearchFeedback(trial=observer.trial, run_id=state["run_id"],
-            task_id=state["task_id"], judge_url=observer.judge_url, remote_root=str(root))
+@pytest.mark.parametrize("receipt_available", [False, True])
+def test_direct_native_result_only_finishes_a_matching_recovered_operation(tmp_path, receipt_available):
+    with native_http(tmp_path, immediately_complete=True) as (state, _release, observer, root):
+        source = tmp_path / "packaged.tar.gz"
+        source.write_bytes(archive_bytes({"candidate.py": b"original"}))
+        def history():
+            return {"run_id": state["run_id"], "entries": state["entries"]}
+        prepared = prepare_submission(root, source, history_reader=history)
+        mark_dispatched(root, prepared["operation_id"])
+        accepted = submit_fixture(observer, Path(prepared["archive_path"]).read_bytes())
+        # No response hook: the native acceptance reply was lost.
+        if receipt_available:
+            observer.update(LocalCopyBackend(), None)
+        result = observer.session.get(observer.judge_url + "/api/v1/result/" + accepted["submission_id"], timeout=5)
+        result.raise_for_status()
+        record_result(root, accepted["submission_id"], result.json())
+        intent = json.loads((root / "intents" / (prepared["operation_id"] + ".json")).read_bytes())
+        assert intent["result_observed"] is receipt_available
+        source.write_bytes(archive_bytes({"candidate.py": b"next candidate"}))
+        if receipt_available:
+            later = prepare_submission(root, source, history_reader=history)
+            assert later["action"] == "submit" and later["operation_id"] != prepared["operation_id"]
+        else:
+            with pytest.raises(ValueError, match="native_acceptance_unknown_no_resubmit"):
+                prepare_submission(root, source, history_reader=history)
+        assert state["posts"] == 1
+
+
+def test_replacement_before_dispatch_submits_current_bytes_and_retires_the_old_operation(tmp_path):
+    with native_http(tmp_path) as (state, _release, observer, root):
+        source = tmp_path / "packaged.tar.gz"
+        old_bytes = archive_bytes({"candidate.py": b"A"})
+        source.write_bytes(old_bytes)
+        def history():
+            return {"run_id": state["run_id"], "entries": state["entries"]}
+        first = prepare_submission(root, source, history_reader=history)
+        assert prepare_submission(root, source, history_reader=history)["operation_id"] == first["operation_id"]
+        current_bytes = archive_bytes({"candidate.py": b"B"})
+        source.write_bytes(current_bytes)
+        current = prepare_submission(root, source, history_reader=history)
+        assert current["operation_id"] != first["operation_id"]
+        assert Path(first["archive_path"]).read_bytes() == old_bytes
+        with pytest.raises(ValueError, match="native_prepared_operation_retired"):
+            mark_dispatched(root, first["operation_id"])
+        mark_dispatched(root, current["operation_id"])
+        submit_fixture(observer, Path(current["archive_path"]).read_bytes())
+        assert (observer.trial / "submissions" / "agent-1" / "submission.tar.gz").read_bytes() == current_bytes
+        assert state["posts"] == 1
+
+
+@pytest.mark.parametrize("winner", ["replacement", "dispatch"])
+def test_contending_process_rechecks_prepared_operation_under_the_dispatch_lock(tmp_path, monkeypatch, winner):
+    from benchmark.runtime import submission_recovery
+
+    with native_http(tmp_path) as (state, _release, observer, root):
+        source = tmp_path / "packaged.tar.gz"
+        original_bytes = archive_bytes({"candidate.py": b"A"})
+        source.write_bytes(original_bytes)
+        def history():
+            return {"run_id": state["run_id"], "entries": state["entries"]}
+        first = prepare_submission(root, source, history_reader=history)
+        next_bytes = archive_bytes({"candidate.py": b"B"})
+        source.write_bytes(next_bytes)
+        write = submission_recovery._atomic
+        contender = None
+
+        def launch_contender_while_locked(path, value):
+            nonlocal contender
+            entering = value.get("retired_before_dispatch") if winner == "replacement" else value.get("dispatch_started")
+            if path.stem == first["operation_id"] and entering and contender is None:
+                args = (["dispatched", "--operation-id", first["operation_id"]] if winner == "replacement"
+                        else ["prepare", "--archive", str(source)])
+                contender = subprocess.Popen([sys.executable, "-c",
+                    "import sys; from benchmark.runtime.submission_recovery import main; "
+                    "print('ready', flush=True); raise SystemExit(main(sys.argv[1:]))",
+                    "--root", str(root), *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                assert contender.stdout.readline().strip() == "ready"
+            return write(path, value)
+
+        monkeypatch.setattr(submission_recovery, "_atomic", launch_contender_while_locked)
         try:
-            restarted.bind({"SFORGE_TOKEN": "synthetic-token"})
-            assert restarted.poll()["records"][0]["reason"] == "native_accepted_archive_changed"
+            if winner == "replacement":
+                current = prepare_submission(root, source, history_reader=history)
+                mark_dispatched(root, current["operation_id"])
+                submitted = Path(current["archive_path"]).read_bytes()
+                expected_reason = "native_prepared_operation_retired"
+            else:
+                mark_dispatched(root, first["operation_id"])
+                submitted = Path(first["archive_path"]).read_bytes()
+                expected_reason = "native_acceptance_unknown_no_resubmit"
+            assert contender is not None
+            _stdout, stderr = contender.communicate(timeout=10)
+            assert contender.returncode == 1 and expected_reason in stderr
+            submit_fixture(observer, submitted)
+            assert submitted == (next_bytes if winner == "replacement" else original_bytes)
+            assert state["posts"] == 1
         finally:
-            restarted.close()
-        assert Path(original["records"][0]["archive_path"]).read_bytes() != native_archive.read_bytes()
+            if contender is not None and contender.poll() is None:
+                contender.kill()
+                contender.communicate(timeout=5)
+
+
+def test_two_clients_of_the_same_prepared_snapshot_cannot_both_dispatch(tmp_path):
+    with native_http(tmp_path) as (state, _release, observer, root):
+        source = tmp_path / "packaged.tar.gz"
+        source.write_bytes(archive_bytes({"candidate.py": b"same candidate"}))
+        prepared = prepare_submission(root, source,
+            history_reader=lambda: {"run_id": state["run_id"], "entries": []})
+        command = [sys.executable, "-m", "benchmark.runtime.submission_recovery", "--root", str(root),
+                   "dispatched", "--operation-id", prepared["operation_id"]]
+        children = [subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    for _ in range(2)]
+        try:
+            outputs = [child.communicate(timeout=10) for child in children]
+            assert sorted(child.returncode for child in children) == [0, 1]
+            assert sum("native_operation_already_dispatched" in stderr for _, stderr in outputs) == 1
+            submit_fixture(observer, Path(prepared["archive_path"]).read_bytes())
+            assert state["posts"] == 1
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                    child.communicate(timeout=5)
+
+
+def test_crash_after_retiring_prepared_work_cannot_revive_its_stale_dispatch(tmp_path, monkeypatch):
+    from benchmark.runtime import submission_recovery
+
+    with native_http(tmp_path) as (state, _release, observer, root):
+        source = tmp_path / "packaged.tar.gz"
+        source.write_bytes(archive_bytes({"candidate.py": b"A"}))
+        def history():
+            return {"run_id": state["run_id"], "entries": state["entries"]}
+        first = prepare_submission(root, source, history_reader=history)
+        current_bytes = archive_bytes({"candidate.py": b"B"})
+        source.write_bytes(current_bytes)
+        write = submission_recovery._atomic
+
+        def fail_new_intent(path, value):
+            if value["operation_id"] != first["operation_id"]:
+                raise OSError("synthetic interruption after retirement")
+            return write(path, value)
+
+        monkeypatch.setattr(submission_recovery, "_atomic", fail_new_intent)
+        with pytest.raises(OSError, match="after retirement"):
+            prepare_submission(root, source, history_reader=history)
+        with pytest.raises(ValueError, match="native_prepared_operation_retired"):
+            mark_dispatched(root, first["operation_id"])
+        monkeypatch.setattr(submission_recovery, "_atomic", write)
+        current = prepare_submission(root, source, history_reader=history)
+        mark_dispatched(root, current["operation_id"])
+        submit_fixture(observer, Path(current["archive_path"]).read_bytes())
+        assert (observer.trial / "submissions" / "agent-1" / "submission.tar.gz").read_bytes() == current_bytes
+        assert state["posts"] == 1

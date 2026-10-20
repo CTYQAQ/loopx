@@ -59,27 +59,15 @@ async def prepare_research_continuation(runtime, environment, *, cwd):
 
 def research_execution_guidance() -> str:
     return (
-        "\nResearch-loop execution evidence:\n"
-        "The initial candidate and ongoing research are separate canonical Todos. Do not close the "
-        "research successor merely because the candidate passes tests. Preserve the original objective "
-        "and existing Stop/budget/blocked conditions. Before the first native submission, run a relevant "
-        "local candidate check and retain actual resource observations, including unknown measurements. "
-        "Use `loopx-research-probe --help` for the local probe wrapper: it pins "
-        "explicit candidate files, measures runtime and enforces the selected local limit. A solver can "
-        "write search_iterations and stop_reason as JSON to LOOPX_RESEARCH_DIAGNOSTICS; absent values "
-        "remain unknown, and solver reports are not independently verified. This is not another "
-        "evaluation or a requirement to use every available second. Attach the emitted "
-        "execution_observation in the normal Explore result writeback. Preserve its input revision "
-        "and evidence refs. On the native EdgeBench adapter, probes register automatically and released "
-        "results are matched to the actual accepted archive; do not fill result attribution from the "
-        "current workspace. An unknown match cannot justify adoption or rollback. "
-        "Record changed method ids and the reason when "
-        "actual implementation differs from the proposal. Resolve this evidence at the next replan. "
-        "If the current Todo requires that external result, use `sforge-submit --wait-todo TODO_ID` "
-        "or `loopx-research-feedback wait --todo-id TODO_ID --submission-id SUBMISSION_ID`; "
-        "the native accepted receipt creates the specific dependency and the runner observes it. "
-        "Independent useful work remains runnable. When all useful work is waiting, return to the "
-        "existing scheduler; do not repeatedly call a model to inspect unchanged feedback. "
-        "If a submission response is lost, repeat the same submit entrypoint to recover its original "
-        "operation and native ID; unresolved acceptance stays unknown without another evaluation.\n"
+        '\nResearch-loop execution evidence:\nThe initial candidate and ongoing research are separate canonical Todos. '
+        'Do not close the research successor merely because the candidate passes tests. Preserve the original '
+        'objective and existing Stop/budget/blocked conditions. Before the first native submission, run a relevant '
+        'local candidate check and retain actual resource observations, including unknown measurements. Use '
+        '`loopx-research-probe --help` for the local probe wrapper: it pins explicit candidate files, measures '
+        'runtime and enforces the selected local limit. A solver can write search_iterations and stop_reason as JSON '
+        'to LOOPX_RESEARCH_DIAGNOSTICS; absent values remain unknown, and solver reports are not independently '
+        'verified. This is not another evaluation or a requirement to use every available second. Attach the emitted '
+        'execution_observation in the normal Explore result writeback. Preserve its input revision and evidence '
+        'refs. Record changed method ids and the reason when actual implementation differs from the proposal. '
+        'Resolve this evidence at the next replan.\n'
     )

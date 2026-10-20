@@ -491,6 +491,22 @@ test("another lane or retired Goal instance never supplies current decision evid
     .decision_followthrough as JsonObject).previous_decision as JsonObject).goal_ref, currentRef);
 });
 
+test("stall frontier projects its current strategy through the shared outcome owner", () => {
+  for (const kind of ["typed_progress_repeat", "no_progress_streak", "repeated_action_loop"]) {
+    const obligation = {...request.obligation, triggers: [{kind}],
+      replan_context: {stride_strategy: "off"}};
+    const enabled = projectReplanContext({...request, obligation, stride_strategy: "evidence_conditioned_v1"});
+    assert.ok(((enabled.uncovered_frontier as JsonObject).required_any_of as string[])
+      .includes("fresh_vision_path_outcome"));
+    const off = projectReplanContext({...request, obligation, stride_strategy: "off"});
+    assert.equal(((off.uncovered_frontier as JsonObject).required_any_of as string[])
+      .includes("fresh_vision_path_outcome"), false);
+    const restricted = projectReplanContext({...request, stride_strategy: "evidence_conditioned_v1",
+      obligation: {...obligation, satisfying_semantic_outcomes: ["new_runnable_successor"]}});
+    assert.deepEqual((restricted.uncovered_frontier as JsonObject).required_any_of, ["new_runnable_successor"]);
+  }
+});
+
 test("strategy off preserves context identity and selection despite decision transport facts", () => {
   const rows = [reviewed(), subsequent(1)];
   const ordinary = projectReplanContext({...request, rows});

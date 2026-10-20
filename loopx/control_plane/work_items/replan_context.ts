@@ -577,7 +577,12 @@ export function projectReplanContext(value: unknown): JsonObject {
       ? (obligation.triggers as JsonObject[]).find(trigger => trigger.progress_baseline)?.progress_baseline
       : null
   ) ?? null;
-  const frontier = {baseline, required_any_of: obligation ? requiredSemanticOutcomes(obligation) : []};
+  const strideStrategy = normalizeStrideStrategy(request.stride_strategy);
+  // This context has not been attached yet. Project outcomes with its current
+  // effective strategy through the same owner used by requirements/writeback.
+  const frontier = {baseline, required_any_of: obligation ? requiredSemanticOutcomes({
+    ...obligation, replan_context: {stride_strategy: strideStrategy},
+  }) : []};
   const prefix = request.read_prefix === undefined ? "loopx" : requireNonEmptyString(request.read_prefix, "read_prefix");
   const groups = new Map<string, {row: JsonObject; count: number; first: unknown}>();
   for (const row of evidence) {
@@ -626,7 +631,6 @@ export function projectReplanContext(value: unknown): JsonObject {
     ? [String((row.progress_observation as JsonObject).fingerprint)] : []));
   const ledger = [...coverage].filter(([key]) => selectedCoverage.has(key)).map(([, value]) => value);
   const core = projectCoreGoal(request.goal_facts);
-  const strideStrategy = normalizeStrideStrategy(request.stride_strategy);
   const exploreBasis = strideStrategy !== "off" ? projectStrideExploreBasis(request.explore_context, goal, agent) : null;
   const followthrough = agent && strideStrategy !== "off"
     ? decisionFollowthrough(rows, request.goal_facts, request.from_full_index === true, request.todo_items) : null;

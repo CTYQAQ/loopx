@@ -98,6 +98,23 @@ for inline context, one-call writeback and upgrade/adoption limits.
 Goal 完成；要求／工作变化使依据过期，产物修改后须重新核对。既有可执行研究及
 原始预算／停止条件保持权威。
 
+Native `goal-acceptance` and outcome-update `refresh-state` rejections retain
+their stable error code. A known outcome validation rule also supplies optional
+`error_detail`, such as `source ref must be an opaque identifier`, in JSON and
+Markdown. This detail contains fixed rule text, never the rejected value or
+provider/IO context. Validation rejection writes nothing: after confirming that
+result, correct the document and retry its operation with the still-current
+provider revision. An uncertain write still follows the original receipt and
+recovery rules. Successful operations and unmarked failures keep their existing
+behavior.
+
+中文：原生 `goal-acceptance` 和成果更新 `refresh-state` 拒绝保留稳定错误码。
+已知成果校验规则还会在 JSON 与 Markdown 中提供可选 `error_detail`，例如
+`source ref must be an opaque identifier`。详情只包含固定规则，不回显被拒值或
+provider/IO 上下文。校验拒绝不写入状态；确认这一结果后，修正文档并沿用原操作和
+仍有效的 provider revision 重试。写入结果不确定时继续遵循原有回执与恢复规则。
+成功操作和未标记错误保持既有行为。
+
 <a id="owner-authorized-contract-v0"></a>
 
 ## Executable checks within default acceptance

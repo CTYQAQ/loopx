@@ -94,65 +94,6 @@ def test_invalid_solver_report_cannot_hide_a_host_timeout(tmp_path, monkeypatch)
     assert (tmp_path / "observation.json.diagnostics-error.json").is_file()
 
 
-def test_persisted_probe_auto_registers_and_binds_late_native_feedback(tmp_path, monkeypatch):
-    from benchmark.runtime import research_submission
-    from benchmark.tests.test_native_research_feedback import (
-        LocalCopyBackend, archive_bytes, native_http, submit_fixture,
-    )
-
-    register = research_submission.register_probe
-    registrations = []
-
-    def register_after_persist(root, observed, manifest):
-        assert json.loads((tmp_path / "observation.json").read_text()) == observed
-        assert json.loads((tmp_path / "observation.json.candidate.json").read_text()) == manifest
-        registrations.append(root)
-        return register(root, observed, manifest)
-
-    monkeypatch.setattr(research_submission, "register_probe", register_after_persist)
-    with native_http(tmp_path) as (_state, release, observer, root):
-        monkeypatch.setenv("LOOPX_RESEARCH_FEEDBACK_ROOT", str(root))
-        observed = probe(tmp_path, monkeypatch)
-        assert registrations == [root]
-        [registered] = list((root / "probes").glob("*.json"))
-        assert json.loads(registered.read_text())["observation"] == observed
-        assert "result_ref" not in observed, "a completed local probe does not invent a native result"
-        source = tmp_path / "candidate.py"
-        accepted = submit_fixture(observer, archive_bytes({"candidate.py": source.read_bytes()}))
-        pending = observer.update(LocalCopyBackend(), None)
-        assert research_submission.bind_execution_observations(root, pending) == []
-        source.write_text("print('newer candidate')")
-        release(accepted["submission_id"], score=0)
-        packet = observer.update(LocalCopyBackend(), None)
-        [bound] = research_submission.bind_execution_observations(root, packet)
-        assert bound["submission_id"] == accepted["submission_id"]
-        assert bound["execution_observation"]["result_candidate_sha256"] == observed["candidate_sha256"]
-        assert source.read_text() == "print('newer candidate')"
-
-
-def test_probe_without_feedback_root_does_not_register(tmp_path, monkeypatch):
-    from benchmark.runtime import research_submission
-
-    monkeypatch.delenv("LOOPX_RESEARCH_FEEDBACK_ROOT", raising=False)
-
-    def unexpected(*_args):
-        raise AssertionError("feature-off probe must not create a native registration")
-
-    monkeypatch.setattr(research_submission, "register_probe", unexpected)
-    assert probe(tmp_path, monkeypatch)["exit_code"] == 0
-
-
-def test_registration_failure_preserves_the_completed_observation(tmp_path, monkeypatch):
-    feedback_root = tmp_path / "unavailable-feedback"
-    feedback_root.write_text("an existing non-directory")
-    monkeypatch.setenv("LOOPX_RESEARCH_FEEDBACK_ROOT", str(feedback_root))
-    with pytest.raises(FileExistsError):
-        probe(tmp_path, monkeypatch)
-    observed = json.loads((tmp_path / "observation.json").read_text())
-    assert observed["exit_code"] == 0 and observed["elapsed_seconds"] > 0
-    assert observed["search_iterations"] == 2
-
-
 def test_probe_cli_preserves_a_failed_candidate_exit_and_its_observation(tmp_path):
     candidate = tmp_path / "candidate.py"
     candidate.write_text("raise SystemExit(3)")

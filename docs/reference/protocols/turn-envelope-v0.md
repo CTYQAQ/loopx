@@ -94,6 +94,12 @@ permitted. Downgrading code must preserve journals and captures; deleting them
 is not rollback. This transport qualification does not establish live model,
 packaged App/Lark or overall convergence acceptance.
 
+Repair and replan diagnostics remain in the journal's typed `host_result`,
+including its summary and follow-up action. They do not implicitly replace Todo
+notes or evidence, even when settlement succeeds. Semantic refusal and cached
+result recovery must preserve that task context; explicit Todo lifecycle
+operations retain their existing authority and validation.
+
 中文：原生 `turn run-once --execute` 在启动 Host 前保存完整原始决策，实际短包详情
 与失败重试均读取该快照，预览不写入。Turn 身份来自原 journal，不伪造 heartbeat
 准入记录。旧观察不授予新权限；缺失、损坏或身份／哈希不符时拒绝重新启动 Host。
@@ -147,6 +153,22 @@ only that saved observation may satisfy the missing context, never a fresh quota
 guard. Missing or invalid evidence holds dependent planning while independent
 work retains its authority. Capture validation and later mutation checks remain
 with their existing owners; prompt delivery does not prove model adoption.
+
+For admitted replans, the shared DSH/cloud adapter also carries the signed
+`replan_action_packet` and the original capture route/signature. Read that saved
+decision's `autonomous_replan_obligation.replan_context` before choosing the
+semantic outcome, preserving the existing full Goal read. Missing or invalid
+original evidence holds dependent replanning; never rerun admission to replace
+it. Return the typed candidate rather than executing the packet's writeback
+commands: the outer Turn executor owns state, quota and scheduler effects.
+This repairs an adapter omission without adding an evidence-read receipt or
+changing non-replan requests.
+
+中文：已准入的重规划通过共享 DSH/cloud adapter 传递签名 action packet，以及原捕获
+路由和签名。选择语义结果前从原决策读取既有 replan context，保留完整 Goal 必读；
+来源缺失或无效时暂停依赖它的重规划，不能重跑准入替代。返回 typed candidate，
+不执行 packet 内写回命令；状态、quota 和 scheduler 效果仍归外层 Turn executor。
+本修复不增加补读回执，也不改变非重规划请求。
 
 The unchanged public multi-subagent CLI fixture grows by 1,147 JSON characters
 and UTF-8 bytes when this context replaces its reference. Its differential
