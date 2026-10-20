@@ -302,7 +302,9 @@ def test_pending_connection_cannot_borrow_a_rebound_process_or_turn(tmp_path, mo
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_pending_inbound_body_cannot_borrow_a_rebound_process_or_turn(tmp_path, monkeypatch, provider):
+@pytest.mark.parametrize("receive_boundary", ["headers", "body"])
+def test_pending_inbound_request_cannot_borrow_a_rebound_process_or_turn(
+        tmp_path, monkeypatch, provider, receive_boundary):
     env, session, initial, _registry = _admitted_owner(tmp_path, monkeypatch, provider)
     reading = threading.Event()
     gateway_port = []
@@ -316,9 +318,17 @@ def test_pending_inbound_body_cannot_borrow_a_rebound_process_or_turn(tmp_path, 
             return getattr(self.stream, name)
 
         def read(self, length):
-            if gateway_port and self.handler.server.server_port == gateway_port[0]:
+            if (receive_boundary == "body" and gateway_port
+                    and self.handler.server.server_port == gateway_port[0]):
                 reading.set()
             return self.stream.read(length)
+
+        def readline(self, *args):
+            line = self.stream.readline(*args)
+            if (receive_boundary == "headers" and line.startswith(b"POST /responses ")
+                    and gateway_port and self.handler.server.server_port == gateway_port[0]):
+                reading.set()
+            return line
 
     def setup(handler):
         original_setup(handler)
@@ -338,10 +348,15 @@ def test_pending_inbound_body_cannot_borrow_a_rebound_process_or_turn(tmp_path, 
             with socket.create_connection((target.hostname, target.port), timeout=30) as client:
                 # The request has entered the real handler, but its body has
                 # not arrived. No registry lock may span this receive wait.
-                client.sendall(b"POST /responses HTTP/1.0\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{")
-                assert reading.wait(10), "request never reached inbound body read"
+                prefix = b"POST /responses HTTP/1.0\r\nHost: localhost\r\nContent-Len"
+                suffix = b"gth: 2\r\n\r\n{}"
+                if receive_boundary == "body":
+                    prefix += b"gth: 2\r\n\r\n{"
+                    suffix = b"}"
+                client.sendall(prefix)
+                assert reading.wait(10), "request never reached inbound receive wait"
                 guard.bind(replacement, env, session, original_quota=initial)
-                client.sendall(b"}")
+                client.sendall(suffix)
                 response = b""
                 while chunk := client.recv(4096):
                     response += chunk
@@ -358,6 +373,35 @@ def test_pending_inbound_body_cannot_borrow_a_rebound_process_or_turn(tmp_path, 
     assert [event["forwarded"] for event in finished] == [False, True]
     assert finished[0]["loopx_turn_id"] == env["LOOPX_TURN"]
     assert finished[0]["refusal_code"] == "research_request_without_live_owner"
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_connection_capture_does_not_apply_post_admission_to_unadmitted_routes(tmp_path, monkeypatch, provider):
+    env, session, initial, registry = _admitted_owner(tmp_path, monkeypatch, provider)
+    wake = tmp_path / "capture-only-wake"
+    wake.mkdir()
+    receipt = {"turn_id": "wake-capture-only"}
+    with _recording_upstream() as (url, upstream), _native_process() as process:
+        env["OPENAI_BASE_URL"] = url
+        guard = ResearchRequestGuard(env, receipt, wake)
+        with guard.serve():
+            guard.bind(process, env, session, original_quota=initial)
+            with project_registry_transaction(registry, operation="fixture_stop_before_non_model_request") as transaction:
+                payload = transaction.payload_copy()
+                payload["goals"][0]["activation"] = {"schema_version": "loopx_goal_activation_v1", "state": "stopped",
+                    "updated_at": "2026-01-01T00:00:00Z", "reason": "Synthetic Stop before route checks"}
+                transaction.commit(payload)
+            for path, body, status in (("/models", None, 405), ("/not-a-model-route", b"{}", 404)):
+                with pytest.raises(urllib.error.HTTPError) as response:
+                    urllib.request.urlopen(urllib.request.Request(guard.base_url + path, data=body), timeout=10)
+                assert response.value.code == status
+            assert process.poll() is None and not guard.refused and not guard.admission_error
+            assert "request_admission_refused" not in receipt and not upstream
+            # A real model POST still consumes current Stop, after capture.
+            response = {}
+            _send(guard, response)
+            assert response == {"status": 409} and guard.refused
+            process.wait(timeout=5)
 
 
 def test_current_admission_failure_stays_latched_across_rebinding(tmp_path):

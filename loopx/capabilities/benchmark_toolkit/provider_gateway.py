@@ -11,6 +11,7 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import socket
 import sys
 import threading
 import time
@@ -19,6 +20,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 from urllib.parse import SplitResult, urlsplit
 
 
@@ -184,9 +186,11 @@ def serve_runner_owned_provider_gateway(
     caller owns the stronger process/filesystem boundary between this gateway
     and the agent runtime.
 
-    A request_lifetime factory captures the caller binding before inbound body reads or connection
-    setup; its context is entered only for the admitted POST send. The factory
-    must not retain authority locks while DNS/TCP/CONNECT/TLS can block.
+    A request_lifetime factory captures the caller binding when a connection is
+    accepted, before request lines, headers, bodies or upstream connections can
+    wait. It receives the request ID first; parsed metadata is added before its
+    context is entered for an admitted POST. Capture must retain no authority
+    locks and perform no admission effects; those belong in the context.
     Guarded headers and body share a one-second send budget; response reads
     still use request_timeout_sec, as do unguarded requests.
     """
@@ -202,9 +206,34 @@ def serve_runner_owned_provider_gateway(
     if request_timeout_sec <= 0 or max_request_bytes <= 0:
         raise ValueError("gateway limits must be positive")
     admitted_paths = _validated_allowed_paths(allowed_paths)
+    bindings: dict[socket.socket, tuple[dict[str, Any], AbstractContextManager | Exception]] = {}
+    bindings_lock = threading.Lock()
+
+    class GatewayServer(ThreadingHTTPServer):
+        def get_request(self):
+            connection, address = super().get_request()
+            if request_lifetime is not None:
+                observed = {"request_id": "request-" + uuid.uuid4().hex}
+                try:
+                    captured = request_lifetime(observed)
+                except Exception as error:
+                    captured = error
+                with bindings_lock:
+                    bindings[connection] = observed, captured
+            return connection, address
+
+        def shutdown_request(self, request):
+            with bindings_lock:
+                bindings.pop(request, None)
+            super().shutdown_request(request)
 
     class GatewayHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.0"
+
+        def setup(self) -> None:
+            with bindings_lock:
+                self.captured_binding = bindings.pop(self.request, None)
+            super().setup()
 
         def log_message(self, _format: str, *args: object) -> None:
             return
@@ -233,21 +262,23 @@ def serve_runner_owned_provider_gateway(
             if content_length < 0 or content_length > max_request_bytes:
                 self._json_error(413, "provider_gateway_request_size_invalid")
                 return
-            request_id = "request-" + uuid.uuid4().hex
-            observed = {"request_id": request_id, "path": requested.path,
+            observed = (self.captured_binding[0] if self.captured_binding is not None
+                else {"request_id": "request-" + uuid.uuid4().hex})
+            request_id = observed["request_id"]
+            observed.update({"path": requested.path,
                 # Only explicitly received transport identities; no inference
                 # from timestamps, messages, tokens or request body contents.
                 "client_request_id": _observed_id(self.headers.get("x-client-request-id") or self.headers.get("x-request-id")),
                 **_native_request_identity(self.headers),
                 "upstream_request_id": None, "forwarded": False, "status": None,
-                "response_bytes": 0}
+                "response_bytes": 0})
             started = time.monotonic()
             connection = None
             response_started = False
             try:
-                # Bind before the inbound body can wait, as well as before
-                # DNS/TCP/TLS. Receiving bytes never holds the authority lock.
-                lifetime = request_lifetime(observed) if request_lifetime is not None else nullcontext()
+                lifetime = self.captured_binding[1] if self.captured_binding is not None else nullcontext()
+                if isinstance(lifetime, Exception):
+                    raise lifetime
                 body = self.rfile.read(content_length)
                 upstream_path = f"{upstream.path.rstrip('/')}{requested.path}"
                 if requested.query:
@@ -321,7 +352,7 @@ def serve_runner_owned_provider_gateway(
         def do_GET(self) -> None:
             self._json_error(405, "provider_gateway_method_not_admitted")
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), GatewayHandler)
+    server = GatewayServer(("127.0.0.1", 0), GatewayHandler)
     server.daemon_threads = True
     thread = threading.Thread(
         target=server.serve_forever,

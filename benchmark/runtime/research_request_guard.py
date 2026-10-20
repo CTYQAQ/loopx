@@ -50,15 +50,12 @@ class ResearchRequestGuard:
                 "bound_native_session_id": session_wake.session_id}
 
     def lifetime(self, request):
-        # Capture before inbound body reads or connection. A delayed request must not borrow
-        # a checkpoint continuation's replacement process or held Turn binding.
+        # Pure capture at connection acceptance, before any inbound read. The
+        # POST context below owns validation and effects; an idle socket or GET
+        # must neither hold authority nor latch a refusal for the running wake.
         with self.lock:
             owner, process = self.admission, self.process
             request.update(self.binding)
-        try:
-            self._require_live_binding(owner, process)
-        except Exception as error:
-            self._reject(request, owner, process, error)
         return self._bound_lifetime(request, owner, process)
 
     def _require_live_binding(self, owner, process):
