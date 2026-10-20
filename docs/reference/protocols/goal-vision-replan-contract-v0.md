@@ -538,6 +538,25 @@ resolve the execution gap or name the changed inputs/new uncertainty first.
 A `verify` action names the grow-or-switch decision its result will inform;
 repeated checking without new information is not a default continuation policy.
 
+When evidence weakens the current route, the existing `route_distance` guidance
+asks for a small set of genuinely different explanations or approaches before
+selecting an experiment: representation, decomposition, search method or
+information source as applicable. Contrast predictions and full costs, preserve
+the qualified incumbent, and choose a comparison that can change the next
+decision. Parameter variants alone are not distinct mechanisms. Missing feedback
+is a wait/evidence gap, not evidence that a route failed or alternatives were
+exhausted. This is opt-in Agent guidance in the existing axes/reasons and
+`next_probe`, not a new proposal field, forced pivot, branch scheduler, permission
+or automatic experiment launch. A larger portfolio or a recorded switch does
+not establish adoption or benefit; subsequent evidence must still qualify both.
+
+当证据削弱当前路线时，现有 `route_distance` 指引要求先提出少量真正不同的解释或
+方法，再选择实验；可考虑表征、问题分解、搜索机制或信息来源。比较各自预测和
+完整成本，保留已验证的当前最佳产物，选择能改变下一步决策的对照。相同机制的
+参数变体不算不同路线；缺少反馈属于等待或证据缺口，不证明路线失败或其他方法
+已经穷尽。这仅补充启用策略后的既有轴、理由与 `next_probe` 指引，不增加字段、
+强制转向、分支调度或执行权限。记录了切换或更多候选，不等于执行或效果已经成立。
+
 When a prior accepted decision is delivered, `previous_review` references its
 exact `replan-decision-*` id and separately records:
 
@@ -582,14 +601,22 @@ adopted it. Existing v2 decisions without pages and historical v1 reads retain
 their behavior. Other detail routes are not supplemental citation sources.
 
 The typed owner validates shape, references and declared provenance before the
-fresh Vision path exit. When an enabled Goal reaches a periodic review, every
+fresh Vision path exit. When an enabled Goal reaches a periodic review or an
+existing observed-stall review (`typed_progress_repeat`, `no_progress_streak`,
+`repeated_action_loop`, `external_progress_review_drift`), every
 accepted exit must also record a current `agent_vision.stride_decision`: a new
 progress observation, runnable successor, blocker or coverage-backed terminal
 result cannot silently replace that decision. The typed outcome remains legal
 and retains its own evidence gate. The decision references both the due
 obligation and its delivered review context. A terminal review may attach it to
 an evidence-linked `stop` path. A Todo successor transition alone cannot settle
-the due review. Other replan sources retain their existing exit policies.
+the review. An evidence-linked `continue` or `no_change` decision can retain useful
+unfinished work without manufacturing a new progress identifier or successor.
+Explicit acceptance/capability outcome restrictions still apply. Other replan
+sources retain their existing exit policies; `off` retains the prior stall exits.
+This changes the completeness of an enabled review, not stall detection, cadence,
+authority or the choice of action.
+
 All attachment text counts toward the existing
 1,800-character Vision budget. The live packet exposes field limits. Legacy
 recorded declarations and old explicit off-mode attachments retain transport
@@ -617,11 +644,16 @@ revision 与具体 finding，说明采用、暂缓、无适用证据或读取不
 按原 Turn 身份重新审视；不开额外执行权或配额。机器校验提案结构与引用，不能证明
 模型判断正确或已提升收益。两种历史 v1 决策保留原义读取兼容，但不能完成新的
 启用策略复盘；数据格式更新不增加可选策略版本。
-策略启用且周期复盘到期时，所有可接受出口都须记录绑定本次义务的
+策略启用且周期复盘到期，或既有停滞复核触发时（`typed_progress_repeat`、
+`no_progress_streak`、`repeated_action_loop`、`external_progress_review_drift`），
+所有可接受出口都须记录绑定本次义务的
 `agent_vision.stride_decision`。新进展、可执行后续任务、阻塞或有覆盖证据的终止
 仍可作为结果，但不能代替复盘决定；决定须引用本次义务及交付的复盘上下文，
 单独创建后续 Todo 也不能结算到期义务。
-终止时可把决定附在有证据的 `stop` 路径上。其他 replan 来源沿用原有出口规则。
+终止时可把决定附在有证据的 `stop` 路径上。有证据的 `continue` 或 `no_change`
+可以保留尚未完成的有用工作，不必编造新进展标识或后续任务；验收和能力 owner
+显式限定的结果仍须遵守。其他 replan 来源和 `off` 模式的停滞出口保持原规则。
+这补齐启用后的复核内容，不改变停滞检测、周期、权限或替 Agent 选择动作。
 
 The same opt-in strategy covers ordinary engineering, organizing and maintenance.
 `grow` expands a coherent accepted deliverable, including related integration,
@@ -640,6 +672,94 @@ not improved model decisions or net efficiency.
 其他 Agent 产出的证据。来源变化、不可用、伪造成员或按节点筛选的页面会被拒绝，
 应在原 Turn 和原复盘义务下补读并重新评估。读取不写入回执或扣额度，分页引用随
 决策保留到历史和下次复盘；来源核验不证明模型理解、采用或研究收益。
+
+### Source-bound comparison selection
+
+With Explore planning and `evidence_conditioned_v1` enabled, the existing
+turn-context result page can include `comparison_candidates`. Each card links
+an actionable, own-or-unclaimed canonical Todo to up to three current results
+through that Todo's explicit Explore node references. An outcome contains
+`node_id`, `finding_id`, and `source_sha256`, the digest of the full scoped
+result. These links survive into `stride_control.explore_basis`; an Agent can
+compare the actual result contents before planning further work. Planner rank
+does not grant or remove execution permission: eligible linked Todos from the
+planner's unselected pool can also supply cards. Negative findings do not
+automatically penalize, forbid or replace a route.
+
+A v2 decision may optionally copy one exact outcome and its Todo into
+`explore_review.selected_candidate`:
+
+```json
+{
+  "todo_id": "todo_current_probe",
+  "node_id": "current-question",
+  "finding_id": "current-result",
+  "source_sha256": "<64 lowercase hexadecimal characters from the source card>"
+}
+```
+
+This declaration requires `disposition: "used"`, the selected finding in
+`considered_refs`, and `retain:todo_current_probe` in the same Vision's existing
+`todo_delta`. Qualification of a fresh Vision stride decision checks the
+current source link and exact content digest; an unrelated fresh-path or
+successor outcome cannot make an invalid binding qualify as that decision.
+Changed source requires reassessment. For an enabled periodic or observed-stall
+review listed above, a standalone canonical successor ACK cannot replace the
+current evidence-linked stride decision. Other obligation sources and the
+disabled strategy keep their existing outcome gates; a successor ACK alone
+does not make an attached comparison selection an accepted decision or executed
+work.
+The optional fields share the existing Vision budget. A decision without this
+field, disabled planning, and the strategy's `off` mode retain their existing
+behavior and authority.
+
+Cards use the existing result page coordinates and limits. If a card is not
+visible, read a current global result page and attach its coordinates in
+`explore_review.result_pages`. Increasing the existing `--result-limit` to its
+maximum of 20 can expose more Todos linked to the same finding. The page's
+`omitted_comparison_candidates` reports remaining omissions; more than 20
+matching Todos on one page are not all selectable through this optional
+binding. Up to three replayed pages and three considered findings remain the
+existing upper bounds. No new pagination or scheduling protocol is created.
+
+The selection records evidence-backed **planning intent** for the retained
+Todo. It does not reserve that Todo or force the next scheduler choice. Another
+legally admitted Todo may run; its result remains attributable to its own work.
+The existing `decision_followthrough.planned_work` and scoped history distinguish
+the declared Todo from subsequent evidence, keep execution and Goal gain
+unknown without proof, and reject an execution claim supported only by
+unrelated work. An identifier or changed source digest cannot certify a new
+mechanism. The Agent must explain the mechanism, predicted benefit, evidence
+and uncertainty, then perform the chosen work and satisfy the original
+acceptance through the existing owners.
+
+The local comparison fixture exercises one original implementation Todo with
+three measured alternatives: retaining its program, searching parameters in a
+fixed representation, and generating programs from a finite arithmetic grammar.
+Each family performs 125 score calls against the same six training inputs.
+The choice uses those measured results; an additive positive control can retain
+the original program. The selected source is then deployed and executed by an
+independent pinned owner verifier on withheld inputs. This checks actual
+program adoption within the Todo, not mandatory cross-Todo scheduling or live
+provider creativity. Grammar generation CPU, token usage and money are not
+equalized by the score-call limit. The controlled Host does not read withheld
+inputs before choosing; the fixture is not an adversarial data-access sandbox.
+Keep measured choice, reasons and final verifier results in the existing
+`path_delta` and Explore findings so the shipped evidence view can show them
+beside linked Todo state.
+
+**中文：** 当前结果页可把真实可执行 Todo 与其明确关联的实验结果一起交给复盘，
+包括未进入高分候选的合法路线；排名不替代准入。可选 `selected_candidate` 精确
+绑定 Todo、节点、finding 及完整来源摘要，同时要求同一 Vision 保留该 Todo。
+错源、已变化的结果或没有保留对应工作均不能借别的后继结果混过核验。上述已启用
+的周期或停滞复核均不能用单独的后继 ACK 代替当前决策；其他义务和关闭策略时
+保留原出口边界，后继 ACK 本身也不证明比较选择已被接受或执行。分页仍沿用
+既有坐标与最多 20 项的上限，同一结果关联过多 Todo 时明确显示省略数，不能声称
+无限候选均可达。这是有来源的规划意图，不是调度命令；合法 B 任务可以执行，
+但不能凭 B 的结果声称所选 A 已执行。实际采用、机制差异和原验收仍需真实证据。
+受控实验比较停留原式、局部调参与结构语法搜索，评分调用预算相同；它证明原
+Todo 内的实际选程序、部署与独立验收，不证明付费模型创造力、完整成本或普遍
+研究收益。选择、理由和实际结果复用现有路径说明、Explore finding 与任务回读。
 
 ### Path Delta
 
@@ -1165,6 +1285,29 @@ another uncovered binding. When there is no other selectable advancement, quota/
 `resume_condition`, and `automatic_resume=true`. The ordinary
 `vision_acceptance_gap` is deferred while that read model is active, so the
 agent can remain quiet instead of inventing duplicate successor work.
+
+For a single exact successor without a bound heartbeat Turn, the scheduler can
+keep inexpensive source rechecks alive beyond the unchanged-poll limit when
+the resume owner supplies positive pending evidence. Alongside the existing
+clock-backed `resume_at` case, `todo_done` requires an identified, unarchived
+source of the supported task class that is still open or deferred.
+`monitor_changed` requires the exact open Monitor, the successor's matching
+generation baseline, and a current generation that has not advanced. The
+Monitor source must also carry a valid next-due time, the runtime clock
+observation, and explicit expiry evidence: either no expiry or an expiry later
+than both the observation and the next due time. These source facts are
+projected before compaction, including explicit null values that distinguish
+known absence of expiry or archival from missing evidence.
+
+This quiet path grants no delivery or spend. Missing sources, incomplete proof,
+an unscheduled or expired Monitor, and an existing Turn or settlement binding
+retain their original supervision. Supplying a new Turn id to a quota command
+is a bound operation, not an unbound scheduler recheck. Monitor-only waits keep
+their existing schedule-based cadence caps; when a Monitor becomes due, fresh
+quota admission must select its work before quiet waiting. A material poll then
+advances the original generation fence so the successor can resume. Goal stop,
+user gates and independently runnable advancement retain their existing
+priority.
 
 This is a read model, not a stored vision or todo lifecycle state. When the
 condition becomes ready, normal open-todo or deferred-successor routing resumes
