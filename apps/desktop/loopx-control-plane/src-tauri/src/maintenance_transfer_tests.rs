@@ -77,10 +77,16 @@ impl Server {
                         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                         body.len()
                     );
+                    if path.starts_with("/feed/") && mode == "manual-headers" {
+                        pause(&done, Duration::from_secs(34));
+                    }
                     if stream.write_all(headers.as_bytes()).is_err() {
                         return;
                     }
                     if path.starts_with("/feed/") {
+                        if mode == "manual-body" {
+                            pause(&done, Duration::from_secs(34));
+                        }
                         let _ = stream.write_all(body);
                     } else if mode == "body-stall" {
                         let _ = stream.write_all(&body[..2]);
@@ -190,6 +196,41 @@ fn native_feed_keeps_its_short_deadline() {
     .unwrap();
     assert_eq!(error, "update_check_timeout");
     assert!(start.elapsed() < Duration::from_secs(3));
+}
+
+fn assert_manual_feed_window(mode: &str) {
+    let app = app(KEY);
+    let server = Server::new();
+    let start = Instant::now();
+    let update = tauri::async_runtime::block_on(find_update(
+        app.handle(),
+        "stable",
+        server.feed(mode),
+        Duration::from_secs(45),
+    ))
+    .unwrap()
+    .unwrap();
+    let elapsed = start.elapsed();
+    assert!(elapsed > Duration::from_secs(30));
+    assert!(elapsed < Duration::from_secs(48));
+    let bytes = tauri::async_runtime::block_on(download_update(&update, |_, _| {})).unwrap();
+    assert_eq!(bytes, BODY);
+    eprintln!(
+        "manual {mode} feed: {:.3}s; signed archive still downloads",
+        elapsed.as_secs_f64()
+    );
+}
+
+#[test]
+#[ignore = "real manual feed response headers arrive after the archive idle deadline"]
+fn manual_feed_headers_keep_the_original_forty_five_second_window() {
+    assert_manual_feed_window("manual-headers");
+}
+
+#[test]
+#[ignore = "real manual feed body arrives after the archive idle deadline"]
+fn manual_feed_body_keeps_the_original_forty_five_second_window() {
+    assert_manual_feed_window("manual-body");
 }
 
 #[test]

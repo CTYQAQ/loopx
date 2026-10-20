@@ -714,7 +714,14 @@ async fn find_update<R: tauri::Runtime>(
     timeout: Duration,
 ) -> Result<Option<Update>, String> {
     let channel = channel.to_owned();
-    app.updater_builder()
+    // The native updater retains this callback for both check and download.
+    // Enable the archive-only policy after check completes, so its connection
+    // and idle limits cannot shorten the feed's own request deadline. Each
+    // returned Update (and its clones) retains only this request's marker.
+    let archive_client = std::sync::Arc::new(AtomicBool::new(false));
+    let configure_archive = archive_client.clone();
+    let update = app
+        .updater_builder()
         .version_comparator(move |current, remote| {
             crate::prepared_update::is_newer(
                 &current.to_string(),
@@ -725,16 +732,22 @@ async fn find_update<R: tauri::Runtime>(
         .endpoints(vec![url])
         .map_err(|_| "update_unavailable")?
         .timeout(timeout)
-        .configure_client(|client| {
-            client
-                .connect_timeout(Duration::from_secs(10))
-                .read_timeout(Duration::from_secs(30))
+        .configure_client(move |client| {
+            if configure_archive.load(Ordering::Acquire) {
+                client
+                    .connect_timeout(Duration::from_secs(10))
+                    .read_timeout(Duration::from_secs(30))
+            } else {
+                client
+            }
         })
         .build()
         .map_err(|_| "update_unavailable")?
         .check()
         .await
-        .map_err(|error| check_error(error).to_string())
+        .map_err(|error| check_error(error).to_string())?;
+    archive_client.store(true, Ordering::Release);
+    Ok(update)
 }
 
 async fn install_verified_app(
