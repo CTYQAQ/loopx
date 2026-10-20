@@ -41,8 +41,15 @@ def write_process_stdin_before_deadline(
 
     def write() -> None:
         try:
+            # Starting a thread is not dispatch: it may first run after expiry.
+            if time.monotonic() >= deadline:
+                raise TimeoutError("native input dispatch deadline expired")
             stream.write(text)
             stream.flush()
+            # A set Event can be observed after an expired wait. Qualify the
+            # actual completion here, not when the caller is next scheduled.
+            if time.monotonic() >= deadline:
+                raise TimeoutError("native input dispatch deadline expired")
         except BaseException as exc:
             failures.append(exc)
         finally:
