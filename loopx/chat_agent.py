@@ -1123,28 +1123,29 @@ class CodexChatAgentSession:
         self, frame: str, write_guard: Callable[[], AbstractContextManager[None]], *,
         deadline: float | None,
     ) -> None:
-        from .extensions.process_runtime import write_process_stdin_before_deadline
+        from .extensions.process_runtime import force_terminate_process, write_process_stdin_before_deadline
 
-        # One frame has at most one second under the Goal's launch fence.
-        # A shorter original RPC/Turn deadline still wins. Waiting for another
-        # native writer spends this allowance before any authority is acquired.
-        dispatch_deadline = min(
-            time.monotonic() + 1.0,
-            deadline if deadline is not None else time.monotonic() + self.response_timeout_sec,
-        )
+        # Serialization, delivery and response share the original RPC/Turn
+        # deadline. No shorter send budget may reject an otherwise valid frame.
+        dispatch_deadline = deadline if deadline is not None else time.monotonic() + self.response_timeout_sec
         if not self._write_lock.acquire(timeout=max(0, dispatch_deadline - time.monotonic())):
             raise self._timeout_error("response_timeout", "Codex input dispatch timed out.")
         try:
             with write_guard():
+                process = self.process
                 try:
                     write_process_stdin_before_deadline(
-                        self.process, frame, deadline=dispatch_deadline,
-                        cancel_and_reap=self.close,
+                        process, frame, deadline=dispatch_deadline,
+                        cancel_and_reap=lambda: force_terminate_process(
+                            process, process_tree_owned=self.process_tree_owned,
+                        ),
                     )
                 except TimeoutError as exc:
                     raise self._timeout_error(
                         "response_timeout", "Codex input dispatch timed out."
                     ) from exc
+                except RuntimeError as exc:
+                    raise self._runtime_error("Codex native input cleanup could not be confirmed.") from exc
         finally:
             self._write_lock.release()
 

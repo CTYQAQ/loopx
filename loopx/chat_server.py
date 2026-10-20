@@ -1817,7 +1817,8 @@ def serve_chat(
         return authorized_manager_goal_ids(
             build_lark_goal_topic_runtime_snapshot(
                 registry_path=server.registry_path, runtime_root_override=server.runtime_root_override,
-            ), session, runtime_root=runtime_root, registry_path=resolved_registry_path,
+            ), session, runtime_root=server.runtime_controller.coordination_runtime_root,
+            registry_path=resolved_registry_path, executor_runtime_root=runtime_root,
         )
 
     server.runtime_controller = ChatRuntimeController(

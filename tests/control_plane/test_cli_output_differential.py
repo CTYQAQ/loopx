@@ -1249,6 +1249,42 @@ def test_agent_context_v4_migration_is_bounded_and_one_time(previous):
     assert not compare_cli_output_receipts(_receipt(candidate), _receipt(reverse))["ok"]
 
 
+def test_inline_context_transition_is_bounded_one_time_and_fixture_scoped():
+    base = _row(
+        row_id="variant/quota_should_run_turn_envelope_multi_subagent/small/json",
+        qualification_policy="explicit_opt_in_cold_path",
+        action_signature_coverages=["turn_envelope_action_dimensions_v4"],
+        json_shape_paths=["$.agent_context.detail_ref", "$.agent_context.content_hash"],
+    )
+    candidate = {**base, "json_shape_paths": [
+        "$.agent_context.contributions[]", "$.agent_context.failures",
+    ]}
+    for metric in ("chars", "utf8_bytes", "compact_payload_chars"):
+        candidate[metric] = base[metric] + 1_280
+    result = compare_cli_output_receipts(_receipt(base), _receipt(candidate))
+    assert result["ok"]
+    assert "reference to inline" in " ".join(result["rows"][0]["review_signals"])
+    for metric in ("chars", "utf8_bytes", "compact_payload_chars"):
+        assert not compare_cli_output_receipts(
+            _receipt(base), _receipt({**candidate, metric: candidate[metric] + 1}),
+        )["ok"]
+    # The new baseline, a missing reference/hash, partial context, wrong surface,
+    # reversed delivery, or another coverage must not inherit this allowance.
+    for changed_base, changed_head in (
+        ({**base, "json_shape_paths": candidate["json_shape_paths"]}, candidate),
+        ({**base, "json_shape_paths": ["$.agent_context.detail_ref"]}, candidate),
+        (base, {**candidate, "json_shape_paths": ["$.agent_context.failures"]}),
+        ({**base, "row_id": "surface/status/small/json"},
+         {**candidate, "row_id": "surface/status/small/json"}),
+        ({**base, "json_shape_paths": candidate["json_shape_paths"]},
+         {**candidate, "json_shape_paths": base["json_shape_paths"]}),
+        (base, {**candidate, "action_signature_coverages": ["turn_envelope_action_dimensions_v5"]}),
+    ):
+        assert not compare_cli_output_receipts(_receipt(changed_base), _receipt(changed_head))["ok"]
+    grown = {**candidate, "chars": candidate["chars"] + 1_280}
+    assert not compare_cli_output_receipts(_receipt(candidate), _receipt(grown))["ok"]
+
+
 def test_public_multi_subagent_probe_reaches_v4_producer(tmp_path):
     import runpy
     from pathlib import Path

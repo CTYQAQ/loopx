@@ -471,6 +471,17 @@ shape merely because of its size. Optional memory participation now has one
 compact, signed envelope projection; the Codex CLI adapter preserves default-off
 isolation. This does not qualify installed heartbeat/App adoption or model value.
 
+Bounded planning context now remains inline instead of forcing a full-decision
+read under envelope budget pressure. Its existing owner retains the 3 KiB bound;
+the shared DSH/cloud adapter transports the signed contribution and, for saved
+historical references, the original capture route and hash. The thin renderer
+requires capability detail only for an actual `agent_context.detail_ref`, since
+`delivery=projected` also describes complete context. Source and actual Host-input
+oracles cover enabled/off, historical references and signature refusal through
+File/SQLite CLI and a protocol-only DSH subprocess. Keep the 8 KiB warning and
+count packet plus necessary detail/source IO before choosing a default. Live
+model behavior, installed adoption and the three acceptances below remain open.
+
 Current source-path audit for the first convergence slice:
 
 | Execution fact | Existing owner / projection | Remaining boundary |

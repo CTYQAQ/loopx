@@ -129,13 +129,40 @@ command retain that explicit choice. Quota's existing explicit flag is unchanged
 
 With that display opt-in, execute its guard, read the short action/contract/writeback fields, and use
 `detail_ref.full_decision` to read the **same invocation** when selection, replan,
-capability context or truncation requires detail. Replan history remains with the
+an `agent_context.detail_ref` or truncation requires detail. Replan history remains with the
 existing owner; this option neither invents another history store nor chooses a
 strategy. The renderer rejects full/compact/brief modes, missing Turn identity,
 native Goal-owned Turns and invalid roots. Stable bootstrap prompts cannot pin a
 Turn. Omit `--turn-envelope` to use the ordinary dispatcher, including when
 checkpoint capture remains enabled. Captured files retain the full decision in
 both display modes.
+
+Capability planning context stays inline under the existing context owner's
+3 KiB bound, including when the envelope exceeds its diagnostic budget. Read it
+before planning; it is guidance, not permission. `delivery=projected` also labels
+complete context and does not itself require a detail read. The shared DSH/cloud
+Host adapter transports this signed context. For historical context with a
+`detail_ref`, it also retains the original capture route and source signature;
+only that saved observation may satisfy the missing context, never a fresh quota
+guard. Missing or invalid evidence holds dependent planning while independent
+work retains its authority. Capture validation and later mutation checks remain
+with their existing owners; prompt delivery does not prove model adoption.
+
+The unchanged public multi-subagent CLI fixture grows by 1,147 JSON characters
+and UTF-8 bytes when this context replaces its reference. Its differential
+allows 1,280 only for that reference-to-inline transition (133 headroom);
+absolute ceilings, line limits, later inline growth and the 8 KiB production
+diagnostic remain unchanged. This is an output qualification, not a full-cost SLO.
+
+中文：同一公开 multi-subagent CLI 夹具恢复完整内联后增加 1,147 个 JSON 字符／UTF-8
+字节；差分仅对该引用转内联的一次变化给予 1,280（余量 133），绝对上限、行数、后续
+内联增长检查及生产 8 KiB 诊断不改；这不是完整成本 SLO 验收。
+
+中文：能力规划上下文由既有 owner 限制在 3 KiB 内，短包超出诊断预算时仍完整内联。
+规划前读取它，但它不授予权限。`delivery=projected` 也用于完整上下文，不能仅据该值
+要求补读。共享 DSH/cloud Host 传递签名上下文；历史 `detail_ref` 保留原捕获路由与
+源签名，只能补读原观察，不能重跑 quota。证据缺失或失效时暂停依赖它的规划，独立
+工作保留原权限。捕获及后续写入校验仍归原 owner；输入到达不证明模型实际采用。
 
 中文：捕获和模型输入投影独立。`--decision-output-root` 仅保存完整决策，
 `--decision-handoff-socket` 仅保留检查点交接；二者均不隐式开启 TurnEnvelope。

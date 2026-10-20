@@ -73,6 +73,33 @@ const protocolActionFields = {
   agent_action: "advance one bounded segment",
 };
 
+test("budget pressure retains complete independent planning context", () => {
+  const source = payload();
+  const context = {
+    schema_version: "loopx_agent_context_v0", phase: "before_plan",
+    scope: {goal_id: source.goal_id, agent_id: "agent-ts", todo_id: "todo-1"},
+    target: "coordinator", authority: "guidance_only", delivery: "projected",
+    contributions: [{hook_id: "fixture.planning", capability_id: "fixture-planning",
+      revision: "1", guidance: ["Inspect original evidence.\nKeep the complete acceptance tail."],
+      facts: {live_availability: "not_observed"}, source_refs: ["fixture:evidence"]}],
+    failures: [],
+  };
+  (source.interaction_contract as JsonObject).agent_context = context;
+  source.goal_boundary = {execution_profile: {padding: "x".repeat(8_000)}};
+  const original = structuredClone(source);
+  const envelope = buildTurnEnvelope({payload: source, protocol_action_fields: protocolActionFields,
+    scheduler_execution_args: ""});
+  assert.deepEqual(envelope.agent_context, context);
+  assert.equal((envelope.agent_context as JsonObject).detail_ref, undefined);
+  assert.equal((envelope.compaction as JsonObject).within_budget, false);
+  assert.deepEqual(quotaActionSignatureDocument(source, protocolActionFields),
+    turnEnvelopeActionSignatureDocument(envelope));
+  const signature = structuredClone(turnEnvelopeActionSignatureDocument(envelope));
+  ((envelope.agent_context as JsonObject).contributions as JsonObject[])[0].guidance = ["Skip evidence."];
+  assert.notDeepEqual(turnEnvelopeActionSignatureDocument(envelope), signature);
+  assert.deepEqual(source, original);
+});
+
 test("vision closeout obligations survive projection and signature mutation", () => {
   const source = payload();
   const audit = {

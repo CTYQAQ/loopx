@@ -44,7 +44,7 @@ def _scheduled_writer(monkeypatch, *, late_start=False, late_flush=False):
         process_runtime, "threading",
         SimpleNamespace(Event=threading.Event, Thread=ScheduledThread),
     )
-    return SimpleNamespace(stdin=Stream()), writes, cancellations, clock
+    return SimpleNamespace(stdin=Stream(), poll=lambda: 0), writes, cancellations, clock
 
 
 def test_native_stdin_rejects_writer_starting_after_absolute_deadline(monkeypatch):
