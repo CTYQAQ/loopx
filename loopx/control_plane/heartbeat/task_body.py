@@ -682,13 +682,23 @@ P0 blocked: admitted P1/P2; no wait spend.
 {policy_tail}"""
 def render_heartbeat_generator_inputs_markdown(payload: dict[str, Any]) -> str:
     interface_budget = payload.get("interface_budget") if isinstance(payload.get("interface_budget"), dict) else {}
+    active_state = payload.get("active_state")
+    resolved_active_state = payload.get("resolved_active_state")
+    state_lines = [
+        f"- active_state: `{active_state}`",
+        f"- active_state_source: `{payload.get('active_state_source')}`",
+    ]
+    # Keep both route identities and the complete path without printing an
+    # identical long native path twice. Different or unresolved routes stay explicit.
+    if active_state is not None and active_state == resolved_active_state:
+        state_lines[0] = f"- active_state = resolved_active_state: `{active_state}`"
+    else:
+        state_lines.append(f"- resolved_active_state: `{resolved_active_state}`")
     lines = [
         "## Generator Inputs",
         "",
         f"- goal_id: `{payload.get('goal_id')}`",
-        f"- active_state: `{payload.get('active_state')}`",
-        f"- active_state_source: `{payload.get('active_state_source')}`",
-        f"- resolved_active_state: `{payload.get('resolved_active_state')}`",
+        *state_lines,
         f"- compact: `{payload.get('compact')}`",
         f"- brief: `{payload.get('brief')}`",
         f"- thin: `{payload.get('thin')}`",
@@ -715,10 +725,13 @@ def render_heartbeat_generator_inputs_markdown(payload: dict[str, Any]) -> str:
                 f"- thin_prompt_command: `{payload.get('thin_prompt_command')}`",
             ]
         )
+    if payload.get("pr_review_pre_quota_command") is not None:
+        lines.append(
+            "- pr_review_pre_quota_command: "
+            f"`{payload['pr_review_pre_quota_command']}`"
+        )
     lines.extend(
         [
-            "- pr_review_pre_quota_command: "
-            f"`{payload.get('pr_review_pre_quota_command')}`",
             f"- quota_guard_command: `{payload.get('quota_guard_command')}`",
             f"- quota_spend_command: `{payload.get('quota_spend_command')}`",
             f"- cli_preflight: `{payload.get('cli_preflight')}`",

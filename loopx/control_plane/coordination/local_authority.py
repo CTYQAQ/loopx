@@ -7,6 +7,8 @@ fails closed instead of consulting the legacy Markdown projection.
 
 from __future__ import annotations
 
+from ..goals.acceptance_readback import configured_checks
+
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
@@ -403,7 +405,7 @@ def canonical_todo_summary_fields(
     todos = canonical_todo_items(todos)
     # These are native authority decisions, not persisted Todo fields. Keep the
     # records visible while every summary/selection uses the same work guard.
-    if goal_acceptance_contract and goal_acceptance_contract.get("enabled") is True:
+    if goal_acceptance_contract and configured_checks(goal_acceptance_contract) is not None:
         guards = goal_acceptance_work_guards or {}
         todos = [{**item, "goal_acceptance_guard": guards[item["todo_id"]]}
             if item.get("todo_id") in guards else item for item in todos]
@@ -427,7 +429,7 @@ def canonical_todo_summary_fields(
         )
         if summary:
             if role == "agent":
-                if goal_acceptance_contract and goal_acceptance_contract.get("enabled") is True:
+                if goal_acceptance_contract and (configured_checks(goal_acceptance_contract) is not None or goal_acceptance_contract.get("outcome_requirements")):
                     summary["goal_acceptance_contract"] = goal_acceptance_contract
                 archived_done = count_advancement_todos(
                     [

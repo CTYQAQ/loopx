@@ -85,9 +85,14 @@ def heartbeat_body(env: dict[str, str], turn_id: str, *, native_goal: bool,
         raise RuntimeError("formal LoopX heartbeat renderer is not ready")
     if not native_goal and payload.get("turn_instance_id") != turn_id:
         raise RuntimeError("heartbeat Turn identity mismatch")
-    return payload["task_body"].replace(
+    body = payload["task_body"].replace(
         "$HOME/.codex/loopx/registry.global.json", env["LOOPX_REGISTRY"]
     )
+    if env.get("LOOPX_RESEARCH_LOOP") == "1":
+        from .research_loop import research_execution_guidance
+
+        body += research_execution_guidance()
+    return body
 
 
 @contextmanager

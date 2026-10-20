@@ -790,7 +790,8 @@ def _continuation_instruction_migration(
     base: dict[str, Any], candidate: dict[str, Any],
 ) -> tuple[dict[Metric, int], list[str]]:
     """Qualify only reviewed instruction transitions on their actual carriers."""
-    surface = str(base["row_id"]).split("/")[1]
+    row_id = str(base["row_id"])
+    surface = row_id.split("/")[1]
     before = base.get("continuation_instructions") or {}
     after = candidate.get("continuation_instructions") or {}
 
@@ -822,6 +823,17 @@ def _continuation_instruction_migration(
             # text in brief; retain authority/recovery clauses. Once present,
             # ordinary growth limits resume; no new line or shape allowance.
             chars += 512
+    if row_id.startswith((
+        "surface/heartbeat_prompt_thin/",
+        "variant/heartbeat_prompt_brief/",
+        "variant/heartbeat_prompt_compact/",
+        "variant/heartbeat_prompt_full/",
+    )) and migrated("outcome_refinement"):
+        # The complete outcome paragraph adds 523 chars/bytes in all four
+        # matched heartbeat modes. Bound that one-time addition, including
+        # a boolean budget diagnostic's single-character variation; later
+        # growth, other surfaces, lines and shapes receive no new allowance.
+        chars += 544
     if not chars:
         return {}, []
     return {
