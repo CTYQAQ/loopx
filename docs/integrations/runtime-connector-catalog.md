@@ -84,8 +84,8 @@ observe-only polls retain their interval, and failed wakes retain error backoff.
 Commands that finish without more useful work may opt into
 `--wake-stop-exit-code <1..255>`: that explicit child exit ends the worker
 normally, without Todo completion or quota spend. Omit the option to preserve
-ordinary nonzero-exit failure/backoff behavior. Timeout and output-limit
-failures cannot be converted into a normal stop by this option. The caller owns
+ordinary nonzero-exit failure/backoff behavior outside automatic replan. Timeout
+and output-limit failures cannot be converted into a normal stop by this option. The caller owns
 the meaning of its chosen code; the generic worker does not parse provider
 receipts or infer work completion from stdout.
 Stop signals and subprocess cleanup keep their existing behavior. This adapter
@@ -209,6 +209,93 @@ source-session 保留独立的生命周期边界，这项验证不会启用其 C
 回调。从归档 checkpoint 恢复时，使用目的 Goal 的当前 guard，不导入源 Goal 的
 claim、Turn 或扣额权限。已有待结算义务的 Todo-bound guard 直接返回原进程继续
 收尾，不捕获或重启；完成这项工作不构成新的 checkpoint 机会。
+
+### Persistent replan attempts and truthful readback
+
+The same configured worker state route now has one live consumer and retains
+automatic replan dispatch attempts across restarts. A successful child exit
+does not resolve the original replan obligation: if fresh Core admission still
+names that obligation, the worker reports `replan_paused`, leaves the Goal
+incomplete, and does not dispatch another semantic review. Cadence resets,
+new observation contexts and intervening independent work do not erase the
+attempt. Original Todo lifecycle and receipt-bound settlement remain under
+their existing owners; they are not another semantic replan opportunity.
+
+An interrupted, timed-out or otherwise failed replan is retained as
+`replan_outcome_unknown`. A new obligation ID cannot make that original work
+safe to repeat. When the original admission actually supplied a settlement
+identity and the configured Host preserved it, the worker reads that exact
+Turn through the existing settlement owner. Only verified complete settlement
+permits further current work. Pending recovery stays on its original identity.
+An opaque unbound shell command supplies no such proof; use its original Host
+recovery and preserve the worker state. The worker does not infer a Turn from
+stdout or the latest log row, and deleting the state is not a recovery method.
+
+The existing host-poll receipt also publishes the worker's last paused or
+unknown observation in the Goal overview. It identifies the original Agent and
+obligation, retains a real Turn only when supplied by admission, and links to
+the Goal's tasks and dependencies. This observation is readback, not current
+admission or proof that a provider stopped charging. The page explicitly keeps
+complete costs unknown. A missing, corrupt or differently scoped association
+cannot display the old operation as current. Reading the observation and
+opening tasks do not dispatch work; the existing Stop control still uses the
+Goal lifecycle owner.
+
+Ordinary `--record-host-poll` distinguishes an absent receipt from an unreadable
+one. It may create an absent receipt, but preserves unreadable JSON, UTF-8,
+schema or Goal association bytes and reports the observation write as
+unsuccessful while returning the current quota decision.
+Readback therefore continues to show uncertainty after the next liveness poll.
+An explicit worker observation can restore its known original attempt; clearing
+an unreadable receipt cannot stand in for that evidence. This does not resolve
+the attempt or authorize another dispatch.
+
+New attempts also capture `source_goal_observation_digest`: a readback witness of the full
+source Goal and its registry route. The writer and reader share the existing
+source-to-global projection transformation, so synchronization metadata does
+not invalidate an observation. A changed source, Goal instance, configuration
+or runtime still makes it stale. The quota cache keeps its original full-row
+digest. Older observations retain their original, narrower raw-registry check;
+missing source proof is never reconstructed as current execution authority.
+
+The shared projection owner also preserves `preserve_attention_override`
+semantics: with the complete source Goal unchanged, mirror `synced_at` updates
+and the merge owner's consumption of `clear_attention_override` do not invalidate
+the observation. An older attempt can gain this stronger observation witness
+only while its original raw registry proof still matches. Lost proof is not
+guessed or rebound, and the durable attempt is never rewritten by this upgrade.
+
+普通存活轮询可以创建缺失的回执，但不能覆盖无法读取的回执。损坏的 JSON、
+UTF-8、schema 或 Goal 关联仍保留在原位置，观察写入明确失败，当前 quota 判断
+正常返回，页面继续显示未知。原 worker 可从持久 attempt 恢复观测，
+但这不证明原操作已经结束，
+也不允许再次派发。
+新观测绑定完整 source Goal 和原注册表路径，正常同步到 global 后仍可显示原
+Agent、义务和观测时间。同步时间变化不改变该来源；来源、实例、配置或运行环境
+真正变化时仍显示过期/未知。旧记录沿用原关联检查，不把缺失的来源证明补造成权限。
+投影继续复用 `preserve_attention_override` 等原合并规则；完整 source Goal 未变时，
+镜像的 `synced_at` 更新及合并过程中消费的 `clear_attention_override` 不使观察过期。
+只有旧 attempt 的原 raw registry 证明仍匹配，才可补强它的观察来源；不猜测重绑
+丢失的证明，也不因此改写持久派发身份。
+
+Scope includes the registry, runtime, Goal and Agent. Exact GoalRef is retained
+when supplied; executable legacy Goals keep their existing alias scope.
+Agent spelling follows Core's canonical identity in admission matching, the
+default state route, lock and observation. An accepted uppercase Agent alias
+and its canonical spelling therefore resume the same attempt. The original
+CLI input still goes to Core for its normal validation.
+Missing or newly supplied lifecycle metadata cannot reset an old attempt.
+Legacy alias reuse has no exact recreation guarantee. State corruption or
+write failure refuses a new wake. Separate state routes and distributed Hosts
+still require their existing shared execution/lease authority; the local lock
+is not a distributed exactly-once guarantee.
+
+This is a dispatch brake on existing replan work, not a new review model or
+provider budget. The configured Host still owns provider retries and token
+limits; `--wake-timeout-seconds` bounds this worker's process only when supplied,
+and the process output byte limit is not a token allowance. Unknown in-flight
+provider usage remains unknown. Ordinary admitted long work can use successive
+wakes, and a real negative experiment remains evidence for the original owner.
 
 ## External Tool Extension Candidates
 
