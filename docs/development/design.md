@@ -81,6 +81,11 @@ Owner-facing state follows four rules:
   "executing", "running") requires an observed active worker, session or turn.
   A stored status, a registration or a count is not activity; unknown stays
   visibly unknown.
+  Aggregate mixed Agent lanes without letting one unreadable lane erase
+  another's observed activity. Distinguish a recent ended turn from execution.
+  Show missing coverage neutrally beside the Goal state, with each affected
+  Agent, host and read failure available through the shared contextual help.
+  A cadence miss is an older observation, not proof of a stopped worker.
 - **Group by responsibility.** Collaboration surfaces place work under the
   member, Agent or owner responsible for it, so one glance shows who is doing
   what and who is blocked. Work with no resolvable owner goes into an explicit
