@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from ..turn_identity import normalize_turn_instance_id
 from .quota_capture import bind_capture_selection_transport, capture_decision, handoff_decision, prepare_decision_capture
 from ..usage_goal import observe_quota_result
 
@@ -18,6 +19,7 @@ from ..capabilities.repository_change_window import (
     repository_delivery_interaction_hook,
 )
 from ..control_plane.effect_runtime import EffectRuntimeRejected
+from ..control_plane.coordination.local_authority import CanonicalAuthorityRequired
 from ..control_plane.capability_hooks import InteractionProjectionHookRegistration
 from ..control_plane.goals.first_party_host_admission import (
     capture_first_party_host_goal_ref,
@@ -737,6 +739,35 @@ def handle_quota_command(
             payload = build_quota_plan(status_payload, mode=args.quota_command)
         if cache_metadata:
             payload["status_projection_cache"] = cache_metadata
+    except CanonicalAuthorityRequired as exc:
+        payload = quota_failure_payload(
+            args, registry_path=registry_path, runtime_root_arg=runtime_root_arg,
+            error=exc,
+        )
+        if args.quota_command == "monitor-poll" and args.execute:
+            # Ordinary status intentionally refuses unmigrated Goals. Recover
+            # only the existing Monitor transaction, using its typed owner and
+            # frozen admission rather than manufacturing a healthy current view.
+            from ..paths import effective_runtime_root
+
+            try:
+                root = effective_runtime_root(registry_path, runtime_root_arg)
+                payload = record_quota_monitor_poll_for_cli(
+                    args, registry_path=registry_path, runtime_root=root,
+                    status_payload={"runtime_root": str(root)},
+                    turn_instance_id=normalize_turn_instance_id(args.turn_instance_id),
+                    goal_ref=_quota_goal_ref(args, registry_path=registry_path),
+                    scheduler_execution_context=None,
+                    operator_inbox_urgency_projector=lambda **_kwargs: {},
+                    status_reloader=lambda: {},
+                    monitor_poll_recorder=record_quota_monitor_poll,
+                    original_receipt_only=True,
+                )
+            except Exception as recovery_error:  # noqa: BLE001 - same typed CLI fail-safe boundary.
+                payload = quota_failure_payload(
+                    args, registry_path=registry_path, runtime_root_arg=runtime_root_arg,
+                    error=recovery_error,
+                )
     except QuotaCommandValidationError as exc:
         # Only typed CLI validation diagnostics are public-safe by contract.
         payload = quota_validation_failure_payload(

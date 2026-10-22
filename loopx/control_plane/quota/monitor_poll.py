@@ -821,14 +821,22 @@ def record_quota_monitor_poll_for_decision(
         )
     if execute and (safe_todo_id or safe_target_key) and not use_current_task_lease:
         from ..coordination.local_authority import (
+            CanonicalAuthorityRequired,
             read_canonical_todos_if_promoted,
         )
 
-        # Refuse unmigrated or unavailable authority before quota admission.
-        read_canonical_todos_if_promoted(
-            runtime_root=runtime_root,
-            goal_id=goal_id,
-        )
+        # Selected-provider failure always refuses. Only an existing transaction
+        # may reach the typed recovery owner before fresh canonical admission;
+        # file existence routes the request, never validates its receipt.
+        try:
+            read_canonical_todos_if_promoted(
+                runtime_root=runtime_root,
+                goal_id=goal_id,
+            )
+        except CanonicalAuthorityRequired:
+            if not _monitor_poll_receipt_path(runtime_root, goal_id, effect_id).exists():
+                raise
+            recovery_effect_id = effect_id
     decision = _decision_packet(
         before,
         goal_id=goal_id,

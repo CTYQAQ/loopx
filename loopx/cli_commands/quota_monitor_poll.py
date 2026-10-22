@@ -60,17 +60,16 @@ def record_quota_monitor_poll_for_cli(
     status_reloader: Callable[[], dict[str, object]],
     monitor_poll_recorder: Callable[..., dict[str, object]],
     goal_ref: Mapping[str, object] | None = None,
+    original_receipt_only: bool = False,
 ) -> dict[str, object]:
     """Execute the monitor-poll CLI request with receipt-bound settlement identity."""
-    return monitor_poll_recorder(
-        status_payload,
+    arguments = dict(
         goal_id=args.goal_id,
         registry_path=registry_path,
         execute=bool(args.execute),
         source=args.source,
         reason_summary=args.reason_summary,
         agent_id=args.agent_id,
-        available_capabilities=args.available_capabilities,
         todo_id=args.todo_id,
         target_key=args.target_key,
         result_hash=args.result_hash,
@@ -99,6 +98,24 @@ def record_quota_monitor_poll_for_cli(
             turn_instance_id=turn_instance_id,
             goal_ref=goal_ref,
         ),
+    )
+    if original_receipt_only:
+        from ..control_plane.quota.monitor_poll import record_quota_monitor_poll_for_decision
+
+        # No current execution is admitted when normal reads require migration.
+        # The typed transaction must find its exact retained admission/receipt;
+        # the recorder refuses a missing original before reserving fresh work.
+        before = {"goal_id": args.goal_id, "should_run": False,
+                  "state": "blocked_health", "agent_identity": {"agent_id": args.agent_id}}
+        settlement_todo_id = arguments.pop("receipt_bound_todo_id")
+        return record_quota_monitor_poll_for_decision(
+            before, status_payload, **arguments,
+            settlement_todo_id=settlement_todo_id,
+            after_decision=lambda _status: before, render_markdown=lambda _payload: "",
+        )
+    return monitor_poll_recorder(
+        status_payload, **arguments,
+        available_capabilities=args.available_capabilities,
         scheduler_execution_context=scheduler_execution_context,
         operator_inbox_urgency_projector=operator_inbox_urgency_projector,
         bounded_research_frontier_projector=project_live_explore_composition_frontier,
