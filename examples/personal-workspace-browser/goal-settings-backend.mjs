@@ -16,7 +16,7 @@ export async function startAuthority({unsettled = true} = {}) {
     "  <!-- loopx:todo todo_id=todo_old role=agent status=done -->\n";
   await writeFile(resolve(root, "state.md"), source);
   await writeFile(resolve(root, "registry.json"), JSON.stringify({
-    common_runtime_root: resolve(root, "runtime"), goals: [{id: "multi-agent-projection",
+    common_runtime_root: resolve(root, "runtime"), goals: [{id: "multi-agent-projection", display_name: "Multi Agent Projection",
       repo: root, state_file: "state.md", coordination: {registered_agents: ["agent-a"]}}],
   }));
   const leases = resolve(root, "runtime/goals/multi-agent-projection/task-leases");
@@ -33,6 +33,9 @@ server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
 server.registry_path = Path(sys.argv[1]) / "registry.json"
 server.runtime_root = Path(sys.argv[1]) / "runtime"
 server.runtime_root_override = str(server.runtime_root)
+server.selected_goal_id = None
+server.scan_roots = []
+server.limit = 20
 server.verbose = False
 print(server.server_port, flush=True)
 server.serve_forever()

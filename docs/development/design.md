@@ -223,6 +223,13 @@ Choose a default treatment by the user's task, before choosing components:
 | Definitions, methodology and routine provenance | One named contextual entry for the related region | Shared help or existing details, without repeating it inside every row |
 | Failure, stale evidence, unknown result, missing permission or consequential cost | A concise marker at the affected item/action, including disagreement that changes trust | Cause, recovery instructions and full evidence |
 
+README product illustrations and evidence diagrams belong in the default reading
+flow, with concise captions and material evidence limits. Fold supporting
+explanations, setup instructions and source detail after the visual; do not hide
+the illustration inside those disclosures when simplifying the page.
+README 的产品配图与证据图应默认展示，并保留简短图注和必要的证据边界；详细解释、
+配置步骤与来源说明可在图后折叠，精简页面时不要把图一起隐藏。
+
 Repeated items must not default to a stack of full documents. For example, a
 supporting-outcome list must not render every requirement, Agent review and
 independent-check explanation before the reader reaches the next main region.

@@ -259,7 +259,8 @@ export const navigationSortingScenario = {
       await remote.getByRole("button", { name: /^(Tasks|任务)$/, current: "page" }).waitFor({ state: "visible" });
       if (await remote.getByRole("button", { name: "Goal 设置", exact: true }).count()) throw new Error("Remote Goal exposed local capability settings");
       await remote.getByRole("button", { name: "概览", exact: true }).click();
-      await remote.locator(".goal-overview-source-note").waitFor({ state: "visible" });
+      await remote.getByRole("group", { name: "工作视图", exact: true }).getByRole("button", { name: "关系图", exact: true }).click();
+      await remote.getByText("此来源仅提供同步的状态与验收观察，交付链需要实时本机来源。", { exact: true }).waitFor({ state: "visible" });
       if (await remote.locator(".delivery-review").count()) throw new Error("Remote Overview queried the local delivery source");
       await remote.getByRole("button", { name: "任务", exact: true }).click();
       await remote.locator(".personal-object-list", { hasText: "进行中" }).locator("button").first().click();

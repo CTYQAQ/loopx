@@ -1,4 +1,5 @@
-import {ArrowUpRight, ChevronDown} from "lucide-react";
+import {useId, useRef, useState} from "react";
+import {ArrowUpRight, ChevronDown, X} from "lucide-react";
 import {TRAJECTORY_METRICS} from "../../../../../../loopx/control_plane/capabilities/trajectory_assessment_types.js";
 import type {AssessmentCitation, AssessmentVerdict, TrajectoryAssessment, TrajectoryEpisode, TrajectoryInput, TrajectoryMetric, TrajectorySolverUsage} from "../../../../../../loopx/control_plane/capabilities/trajectory_assessment_types.js";
 import type {TrajectoryNativeOutcomes} from "../../../../../../loopx/control_plane/capabilities/trajectory_native_outcomes.js";
@@ -83,43 +84,47 @@ function NativeResults({native, zh, onCitation}: {native: ResearchProgressPack["
   </section>;
 }
 
-export function ResearchProgress({pack: p, packs, selectedId, zh, onSelect, onCitation}: {pack: ResearchProgressPack | null; packs: Pick<ResearchProgressPack, "pack_id" | "title">[]; selectedId: string; zh: boolean; onSelect: (id: string) => void; onCitation: (citation: AssessmentCitation, origin?: HTMLButtonElement) => void}) {
-  const measured = p?.solver_usage, usage = measured?.projection, result = p?.result;
-  const incomplete = usage?.incomplete_turn;
+function ResearchMetrics({pack: p, zh, onCitation}: {pack: ResearchProgressPack & {result: TrajectoryAssessment}; zh: boolean; onCitation: (citation: AssessmentCitation, origin?: HTMLButtonElement) => void}) {
+  const [selected, setSelected] = useState<TrajectoryMetric | null>(null);
+  const panelId = useId(), panel = useRef<HTMLDivElement>(null);
+  const origin = useRef<HTMLButtonElement | null>(null);
+  const result = p.result;
   const number = (n: number) => new Intl.NumberFormat(zh ? "zh-CN" : "en", {maximumFractionDigits: 1}).format(n);
   const percent = (n: number) => new Intl.NumberFormat(zh ? "zh-CN" : "en", {style: "percent", maximumFractionDigits: 0}).format(n);
-  const duration = (s: number) => `${number(s / 60)} ${zh ? "分钟" : "min"}`;
-  const stamp = (s: string) => new Intl.DateTimeFormat(zh ? "zh-CN" : "en", {timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false}).format(new Date(s));
-  return <section className="research-progress" aria-label={zh ? "长程效果与用量" : "Long-horizon results and usage"}>
-    <header><div className="research-progress-heading"><div className="research-progress-title"><h3>{zh ? "研究效果判读" : "Research effectiveness"}</h3><ContextHelp label={zh ? "指标说明" : "About these metrics"}>
-      {p ? <p>{p.title}</p> : null}
-      <p>{zh ? "分析器判读未校准，仅限所选片段；范围外或未捕获的工作未纳入。数字为“是 / 适用片段”，未知仍在分母中；点选指标可看依据。" : "Uncalibrated judgments of selected episodes only; work outside this scope or not captured is excluded. Counts are yes / eligible episodes, including unknowns. Select a metric for evidence."}</p>
-      <p>{zh ? "不适用来自原始片段的明确取样规则，不算“否”或“未知”；展开指标可看被排除的片段。" : "Ineligible episodes follow the source's explicit selection, not a no or unknown judgment. Expand a metric to identify them."}</p>
-      <p>{zh ? "收益检验的“是”不保证收益为正；无益重复的“是”表示发现问题。六项分别判断，不合成总分、成功率或原生收益。" : "Yes for benefit testing does not imply positive utility; yes for repetition identifies a problem. The six judgments are not a total score, success rate or native utility."}</p>
-      <p>{p?.selection.exhaustive ? (zh ? "仅覆盖声明的固定分析范围，不等于覆盖全部研究。" : "Covers the declared fixed analysis scope, not necessarily the whole study.") : p?.selection.population_episodes == null ? (zh ? "定向抽样，全程覆盖未知。" : "Purposive sample; whole-run coverage is unknown.") : (zh ? "定向抽样，不代表全程。" : "Purposive sample, not the whole run.")}</p>
-      <p>{zh ? "原生测量缺失时保持未采集；分析器判读不能补成实际收益。完整取样规则与版本在“来源与用量”中。" : "Missing native measurements remain uncaptured; judgments cannot supply realized utility. Full selection rules and revisions are under Sources and usage."}</p>
-    </ContextHelp></div>{p ? <p className="research-progress-scope" data-pack-id={p.pack_id}>{number(p.episode_count)} {zh ? "个片段" : "episodes"} · {p.selection.exhaustive ? (zh ? "固定范围" : "Fixed scope") : (zh ? "定向抽样" : "Purposive sample")}{result ? (zh ? " · 未校准" : " · Uncalibrated") : ""}</p> : null}</div>{packs.length > 1 ? <label>{zh ? "评估范围" : "Evaluation scope"}<select value={selectedId} onChange={e => onSelect(e.target.value)}>{packs.map(pack => <option key={pack.pack_id} value={pack.pack_id}>{pack.title}</option>)}</select></label> : null}</header>
-    {p ? <>
-      {p.applicability === "historical" ? <p className="research-progress-warning" role="status">{zh ? "历史分析：来源或方法已变化，不能当作当前判断。" : "Historical analysis: the source or method changed; these are not current judgments."}</p> : null}
-      {p.native_outcomes ? <RetainedImprovement native={p.native_outcomes} zh={zh} onCitation={onCitation}/> : null}
-      {result ? <div className="research-process-counts">
-        <div className="research-effect-metrics" key={p.pack_id}>
-          {TRAJECTORY_METRICS.map(metric => {
-            const label = metricCopy[metric], row = result.metrics.find(item => item.metric === metric);
-            const assessments = result.assessments.filter(item => item.metric === metric);
-            // Format declared eligibility only when the complete episode list
-            // is present. Counts or missing assessments cannot establish exclusion.
-            const excluded = row && p.episodes?.length === p.episode_count
-              ? p.episodes.filter(episode => !episode.eligible_metrics.includes(metric)) : [];
-            const notes = [row?.no ? `${zh ? "否" : "No"} ${number(row.no)}` : "", row?.unknown ? `${zh ? "未知" : "Unknown"} ${number(row.unknown)}` : "", excluded.length ? `${zh ? "不适用" : "Ineligible"} ${number(excluded.length)}` : ""].filter(Boolean);
-            const unavailable = !row ? (zh ? "没有此指标记录" : "No metric record") : !row.eligible && !excluded.length ? (zh ? "不适用" : "N/A") : "";
-            return <details className="research-effect-metric" data-metric={metric} key={metric}>
-              <summary aria-label={[label[zh ? 0 : 1], row?.eligible ? `${number(row.yes)} / ${number(row.eligible)} ${zh ? "是 / 适用片段" : "yes / eligible episodes"}` : unavailable, ...notes].filter(Boolean).join(" · ")}><span className="research-effect-title">{label[zh ? 0 : 1]}<ChevronDown size={13} aria-hidden/></span>
-                <strong className="research-effect-number">{row?.eligible ? <>{number(row.yes)}<span> / {number(row.eligible)}</span></> : "—"}</strong>
-                {unavailable ? <span className="research-effect-verdict">{unavailable}</span> : null}
-                {notes.length ? <small>{notes.join(" · ")}</small> : null}
-              </summary>
-              <div className="research-effect-evidence">
+  const rows = TRAJECTORY_METRICS.map(metric => {
+    const label = metricCopy[metric], row = result.metrics.find(item => item.metric === metric);
+    const assessments = result.assessments.filter(item => item.metric === metric);
+    // Only complete, declared eligibility can establish exclusions.
+    const excluded = row && p.episodes?.length === p.episode_count
+      ? p.episodes.filter(episode => !episode.eligible_metrics.includes(metric)) : [];
+    const notes = [row?.no ? `${zh ? "否" : "No"} ${number(row.no)}` : "", row?.unknown ? `${zh ? "未知" : "Unknown"} ${number(row.unknown)}` : "", excluded.length ? `${zh ? "不适用" : "Ineligible"} ${number(excluded.length)}` : ""].filter(Boolean);
+    const unavailable = !row ? (zh ? "没有此指标记录" : "No metric record") : !row.eligible && !excluded.length ? (zh ? "不适用" : "N/A") : "";
+    return {metric, label, row, assessments, excluded, notes, unavailable};
+  });
+  const active = rows.find(item => item.metric === selected);
+  const close = () => {setSelected(null); origin.current?.focus({preventScroll: true}); origin.current?.scrollIntoView({block: "nearest"});};
+  return <div className="research-process-counts">
+    <div className="research-effect-metrics">
+      {rows.map(({metric, label, row, notes, unavailable}) => <button type="button" className="research-effect-metric" data-metric={metric} key={metric}
+        aria-expanded={metric === selected} aria-controls={metric === selected ? panelId : undefined}
+        aria-label={[label[zh ? 0 : 1], row?.eligible ? `${number(row.yes)} / ${number(row.eligible)} ${zh ? "是 / 适用片段" : "yes / eligible episodes"}` : unavailable, ...notes].filter(Boolean).join(" · ")}
+        onClick={event => {
+          if (selected === metric) {close(); return;}
+          origin.current = event.currentTarget; setSelected(metric);
+          requestAnimationFrame(() => {panel.current?.focus({preventScroll: true}); panel.current?.scrollIntoView({block: "nearest"});});
+        }}>
+        <span className="research-effect-title">{label[zh ? 0 : 1]}<ChevronDown size={13} aria-hidden/></span>
+        <strong className="research-effect-number">{row?.eligible ? <>{number(row.yes)}<span> / {number(row.eligible)}</span></> : "—"}</strong>
+        {unavailable ? <span className="research-effect-verdict">{unavailable}</span> : null}
+        {notes.length ? <small>{notes.join(" · ")}</small> : null}
+      </button>)}
+    </div>
+    {active ? <div className="research-effect-evidence" id={panelId} ref={panel} role="region" tabIndex={-1} aria-labelledby={`${panelId}-heading`}
+      key={active.metric} onKeyDown={event => {if (event.key === "Escape") {event.stopPropagation(); close();}}}>
+      <header className="research-effect-detail-heading"><h4 id={`${panelId}-heading`}>{active.label[zh ? 0 : 1]}</h4><button type="button" onClick={close} aria-label={zh ? "收起指标详情" : "Close metric details"}><X size={16} aria-hidden/></button></header>
+      {(() => {
+        const {metric, label, row, assessments, excluded} = active;
+        return <>
                 <div className="research-effect-help"><span>{zh ? "逐项判读" : "Episode judgments"}</span><ContextHelp label={`${label[zh ? 0 : 1]} · ${zh ? "判读口径" : "Interpretation"}`}>
                   <p>{label[zh ? 2 : 3]}</p>
                   {metric === "benefit_test" ? <p>{zh ? "“是”只表示做过收益检验，不保证收益为正；“否”不是收益为零。" : "Yes means utility was tested, not that utility improved. No is not zero utility."}</p> : null}
@@ -142,11 +147,33 @@ export function ResearchProgress({pack: p, packs, selectedId, zh, onSelect, onCi
                   </details>;
                 })}</div>
                 {!row?.eligible ? <p>{zh ? "所选片段没有此指标的适用判读；未记作零。" : "No eligible judgment for this metric in the selected episodes; not recorded as zero."}</p> : null}
-              </div>
-            </details>;
-          })}
-        </div>
-      </div> : <p className="research-effect-empty" role="status">{zh ? "所选范围尚未分析" : "No analysis for the selected scope"}</p>}
+
+        </>;
+      })()}
+    </div> : null}
+  </div>;
+}
+
+export function ResearchProgress({pack: p, packs, selectedId, zh, onSelect, onCitation}: {pack: ResearchProgressPack | null; packs: Pick<ResearchProgressPack, "pack_id" | "title">[]; selectedId: string; zh: boolean; onSelect: (id: string) => void; onCitation: (citation: AssessmentCitation, origin?: HTMLButtonElement) => void}) {
+  const measured = p?.solver_usage, usage = measured?.projection, result = p?.result;
+  const incomplete = usage?.incomplete_turn;
+  const number = (n: number) => new Intl.NumberFormat(zh ? "zh-CN" : "en", {maximumFractionDigits: 1}).format(n);
+  const duration = (s: number) => `${number(s / 60)} ${zh ? "分钟" : "min"}`;
+  const stamp = (s: string) => new Intl.DateTimeFormat(zh ? "zh-CN" : "en", {timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false}).format(new Date(s));
+  return <section className="research-progress" aria-label={zh ? "长程效果与用量" : "Long-horizon results and usage"}>
+    <header><div className="research-progress-heading"><div className="research-progress-title"><h3>{zh ? "研究效果判读" : "Research effectiveness"}</h3><ContextHelp label={zh ? "指标说明" : "About these metrics"}>
+      {p ? <p>{p.title}</p> : null}
+      <p>{zh ? "分析器判读未校准，仅限所选片段；范围外或未捕获的工作未纳入。数字为“是 / 适用片段”，未知仍在分母中；点选指标可看依据。" : "Uncalibrated judgments of selected episodes only; work outside this scope or not captured is excluded. Counts are yes / eligible episodes, including unknowns. Select a metric for evidence."}</p>
+      <p>{zh ? "不适用来自原始片段的明确取样规则，不算“否”或“未知”；展开指标可看被排除的片段。" : "Ineligible episodes follow the source's explicit selection, not a no or unknown judgment. Expand a metric to identify them."}</p>
+      <p>{zh ? "收益检验的“是”不保证收益为正；无益重复的“是”表示发现问题。六项分别判断，不合成总分、成功率或原生收益。" : "Yes for benefit testing does not imply positive utility; yes for repetition identifies a problem. The six judgments are not a total score, success rate or native utility."}</p>
+      <p>{p?.selection.exhaustive ? (zh ? "仅覆盖声明的固定分析范围，不等于覆盖全部研究。" : "Covers the declared fixed analysis scope, not necessarily the whole study.") : p?.selection.population_episodes == null ? (zh ? "定向抽样，全程覆盖未知。" : "Purposive sample; whole-run coverage is unknown.") : (zh ? "定向抽样，不代表全程。" : "Purposive sample, not the whole run.")}</p>
+      <p>{zh ? "原生测量缺失时保持未采集；分析器判读不能补成实际收益。完整取样规则与版本在“来源与用量”中。" : "Missing native measurements remain uncaptured; judgments cannot supply realized utility. Full selection rules and revisions are under Sources and usage."}</p>
+    </ContextHelp></div>{p ? <p className="research-progress-scope" data-pack-id={p.pack_id}>{number(p.episode_count)} {zh ? "个片段" : "episodes"} · {p.selection.exhaustive ? (zh ? "固定范围" : "Fixed scope") : (zh ? "定向抽样" : "Purposive sample")}{result ? (zh ? " · 未校准" : " · Uncalibrated") : ""}</p> : null}</div>{packs.length > 1 ? <label>{zh ? "评估范围" : "Evaluation scope"}<select value={selectedId} onChange={e => onSelect(e.target.value)}>{packs.map(pack => <option key={pack.pack_id} value={pack.pack_id}>{pack.title}</option>)}</select></label> : null}</header>
+    {p ? <>
+      {p.applicability === "historical" ? <p className="research-progress-warning" role="status">{zh ? "历史分析：来源或方法已变化，不能当作当前判断。" : "Historical analysis: the source or method changed; these are not current judgments."}</p> : null}
+      {p.native_outcomes ? <RetainedImprovement native={p.native_outcomes} zh={zh} onCitation={onCitation}/> : null}
+      {result ? <ResearchMetrics key={`${p.pack_id}:${result.analysis_key}:${zh}`} pack={{...p, result}} zh={zh} onCitation={onCitation}/>
+        : <p className="research-effect-empty" role="status">{zh ? "所选范围尚未分析" : "No analysis for the selected scope"}</p>}
       <details className="research-progress-basis"><summary>{zh ? "来源与用量" : "Sources and usage"}<span>{p.native_outcomes ? "" : (zh ? " · 原生测量未采集" : " · Native measurements uncaptured")}{zh ? " · 完整成本未知" : " · Total cost unknown"}</span></summary>
         <section className="research-usage" aria-label={zh ? "求解用量" : "Solver usage"}>
           <div className="research-usage-heading"><h4>{zh ? "求解用量" : "Solver usage"}</h4><ContextHelp label={zh ? "用量范围与成本" : "Usage scope and cost"}>

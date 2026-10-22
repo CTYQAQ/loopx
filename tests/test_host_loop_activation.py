@@ -27,7 +27,10 @@ from loopx.host_loop_activation import (
     normalize_agent_type,
     scheduler_command_binding_for_agent_type,
 )
-from loopx.project_prompt import render_accountable_progress_refresh_command
+from loopx.project_prompt import (
+    render_accountable_progress_refresh_command,
+    render_cli_command_prefix,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -367,7 +370,7 @@ def test_heartbeat_prompt_commands_keep_explicit_runtime_root() -> None:
         registered_agents=["runtime-agent"],
     )
 
-    command_prefix = f"loopx --runtime-root {runtime_root}"
+    command_prefix = render_cli_command_prefix(runtime_root=runtime_root)
 
     assert payload["quota_guard_command"].startswith(
         f"{command_prefix} --format json quota should-run "
@@ -385,7 +388,7 @@ def test_heartbeat_prompt_commands_keep_explicit_runtime_root() -> None:
         f"{command_prefix} heartbeat-prompt "
     )
     assert '"$HOME/.codex/loopx/registry.global.json"' not in payload["task_body"]
-    assert f"--runtime-root {runtime_root}" in payload["task_body"]
+    assert command_prefix in payload["task_body"]
 
 
 @pytest.mark.parametrize(

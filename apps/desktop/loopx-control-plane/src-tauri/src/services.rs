@@ -264,6 +264,28 @@ impl ServiceSet {
     }
 }
 
+// Ownership transfer (adopt, update handoff, stop) is exercisable without a
+// real runtime: the set owns exactly the groups a test hands it, so a reclaim
+// is observable on the same job objects production uses.
+#[cfg(test)]
+pub(crate) fn owned_set_for_test(children: Vec<GroupChild>) -> ServiceSet {
+    ServiceSet {
+        owned: children
+            .into_iter()
+            .map(|child| OwnedService {
+                child,
+                kind: ServiceKind::Status,
+            })
+            .collect(),
+        runtime: SelectedRuntime {
+            executable: String::new(),
+            identity: None,
+        },
+        last_recovery_attempt: None,
+        healed: false,
+    }
+}
+
 /// One service's connection attempt. The child this App spawned travels with
 /// the outcome even when the attempt failed, so `ServiceSet` can stop it
 /// instead of leaking a process that no longer has an owner.

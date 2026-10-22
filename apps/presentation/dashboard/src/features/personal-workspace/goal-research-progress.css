@@ -8,7 +8,9 @@
 .research-progress select { min-width: 0; max-width: 400px; min-height: 44px; border: 1px solid var(--pw-line); border-radius: 6px; padding: 8px; background: var(--pw-bg); color: var(--pw-text); font: inherit; }
 .research-progress p, .research-progress small { color: var(--pw-muted); font-size: var(--text-caption); line-height: var(--leading-prose); }
 .research-progress summary { min-height: 44px; padding-block: 12px; cursor: pointer; font-size: var(--text-caption); }
-.research-retained-improvement { margin-block-start: 20px; }
+.research-retained-improvement { display: flex; align-items: center; flex-wrap: wrap; gap: 0 20px; margin-block-start: 12px; }
+.research-retained-improvement details { flex: 1; min-width: 180px; }
+.research-retained-improvement details[open] { flex-basis: 100%; }
 .research-retained-improvement h4 { margin: 0; font-size: var(--text-body); font-weight: 500; }
 .research-retained-improvement summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; list-style: none; }
 .research-retained-improvement summary::-webkit-details-marker { display: none; }
@@ -23,21 +25,23 @@
 .research-retained-improvement dd button:hover { text-decoration: underline; }
 .research-retained-improvement summary:focus-visible, .research-retained-improvement dd button:focus-visible { outline: 2px solid var(--pw-blue); outline-offset: 2px; }
 .research-effect-metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px 24px; margin-block-start: 12px; }
-.research-effect-metric { min-width: 0; }
-.research-effect-metric[open] { grid-column: 1 / -1; }
-.research-effect-metric > summary { display: flex; flex-direction: column; align-items: stretch; gap: 6px; list-style: none; }
-.research-effect-metric > summary::-webkit-details-marker { display: none; }
-.research-effect-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--pw-muted); font-size: var(--text-body); line-height: var(--leading-body); }
+.research-effect-metric { min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px; border: 0; border-block-end: 2px solid transparent; border-radius: 4px 4px 0 0; background: transparent; color: var(--pw-text); font: inherit; text-align: start; cursor: pointer; }
+.research-effect-metric:hover { background: var(--pw-hover); }
+.research-effect-metric[aria-expanded="true"] { border-block-end-color: var(--pw-blue); background: var(--pw-hover); }
+.research-effect-metric:focus-visible, .research-effect-evidence:focus-visible { outline: 2px solid var(--pw-blue); outline-offset: 2px; }
+.research-effect-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--pw-text); font-size: var(--text-body); line-height: var(--leading-body); }
 .research-effect-title svg { flex-shrink: 0; }
-.research-effect-metric[open] .research-effect-title svg { transform: rotate(180deg); }
+.research-effect-metric[aria-expanded="true"] .research-effect-title svg { transform: rotate(180deg); }
 .research-effect-number { order: -1; font-size: var(--text-title); font-weight: 600; font-variant-numeric: tabular-nums; line-height: var(--leading-title); }
 .research-effect-number > span { font-size: var(--text-body); font-weight: 400; color: var(--pw-muted); }
 .research-effect-verdict { font-size: var(--text-caption); }
 .research-effect-metric small { font-size: var(--text-caption); }
-.research-effect-evidence { padding-block-end: 12px; }
-.research-effect-metric[open] > summary { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
-.research-effect-metric[open] .research-effect-number { order: 0; }
-.research-effect-metric[open] > summary > small { margin-inline-start: auto; }
+.research-effect-evidence { border-block-start: 1px solid var(--pw-line); padding-block: 12px; margin-block-start: 8px; }
+.research-effect-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.research-effect-evidence .research-effect-detail-heading h4 { font-size: var(--text-lead); margin: 0; }
+.research-effect-detail-heading > button { display: grid; place-items: center; width: 44px; height: 44px; background: transparent; border: 0; border-radius: 4px; color: var(--pw-text); cursor: pointer; }
+.research-effect-detail-heading > button:hover { background: var(--pw-hover); }
+.research-effect-detail-heading > button:focus-visible { outline: 2px solid var(--pw-blue); outline-offset: 2px; }
 .research-effect-help { display: flex; align-items: center; gap: 4px; padding-block: 4px 12px; color: var(--pw-muted); font-size: var(--text-caption); }
 .research-assessments { border-block-start: 1px solid var(--pw-line); }
 .research-assessment { border-block-end: 1px solid var(--pw-line); }

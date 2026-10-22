@@ -99,6 +99,7 @@ export function WorkspaceSettingsPage({
   const tab = tabs.find(item => item.key === requestedTab)?.key ?? tabs[0].key;
   const selectedGoal = scope === "goal" ? goals.find(item => item.goalId === initialGoalId) : undefined;
   const editableGoal = selectedGoal && !selectedGoal.sourceAccess?.readOnly ? selectedGoal : undefined;
+  const canonicalSettingsReady = editableGoal?.loadState !== "loading" && editableGoal?.loadError !== "authority";
   const [ownershipRefresh, setOwnershipRefresh] = useState(0);
   const navigate = (nextScope: "machine" | "goal", nextGoalId?: string, nextTab?: SettingsPage) => {
     onNavigate({kind: "settings", scope: nextScope,
@@ -248,15 +249,15 @@ export function WorkspaceSettingsPage({
           />
         ) : null}
         {tab === "ownership" && editableGoal ? <div key={editableGoal.goalId}>
-              <GoalOwnershipSettings goalId={editableGoal.goalId} onChanged={onChanged} refreshKey={ownershipRefresh} />
+              {canonicalSettingsReady ? <GoalOwnershipSettings goalId={editableGoal.goalId} onChanged={onChanged} refreshKey={ownershipRefresh} /> : null}
               <GoalStorageSettings goalId={editableGoal.goalId} onChanged={() => {
                 setOwnershipRefresh(value => value + 1);
                 onChanged();
               }} />
-              <GoalAmendmentSettings goalId={editableGoal.goalId} />
+              {canonicalSettingsReady ? <><GoalAmendmentSettings goalId={editableGoal.goalId} />
               <GoalObjectiveSettings goalId={editableGoal.goalId} />
               <GoalDirectionSettings goalId={editableGoal.goalId} />
-              <GoalAcceptanceContractSection goalId={editableGoal.goalId} current canManage management copy={goalAcceptanceContractCopy[locale]} />
+              <GoalAcceptanceContractSection goalId={editableGoal.goalId} current canManage management copy={goalAcceptanceContractCopy[locale]} /></> : null}
         </div> : null}
         {tab === "capabilities" && (scope === "machine" || editableGoal) ? <ConfigurationBackupSettings key={`${scope}:${initialGoalId ?? ""}`} goalId={scope === "goal" ? editableGoal!.goalId : null} /> : null}
         {tab === "cadence" && editableGoal ? <AutomationCadenceSettings key={editableGoal.goalId} goal={editableGoal} /> : null}

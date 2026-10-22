@@ -64,9 +64,6 @@ engineering, research and operations. Human authorization still governs protecte
 | Manage personal projects, schedules and decisions in one place | [Personal Agent Workspace](#meet-the-personal-agent-workspace) |
 | Let agents collaborate and deliver verifiable results | [Agent collaboration guide](docs/product/use-cases/cross-runtime/README.md) |
 
-<details>
-<summary>How the control plane works and where it fits</summary>
-
 LoopX keeps the durable control state in one compact layer:
 
 <picture>
@@ -82,6 +79,9 @@ another agent framework or a provider-specific orchestration runtime.
   <source media="(max-width: 640px)" srcset="docs/assets/control-plane-board.en.mobile.svg">
   <img src="docs/assets/control-plane-board.en.svg" alt="One turn is a governed state transition—not just a timer." width="1200">
 </picture>
+
+<details>
+<summary>How the control plane works and where it fits</summary>
 
 A useful mental model is an
 **[agent-native Kanban for long-running work](docs/development/control-plane-course/00-concept-primer.md)**.
@@ -160,13 +160,16 @@ native desktop previews from the [current release](https://github.com/loopx-proj
 they reuse the same loopback services and Goal state. Apple Silicon macOS supports
 signed App updates that pair the shell with its bundled runtime, plus repair and
 recovery. Python 3.11+ is required; the App is ad-hoc signed, not notarized.
-Windows preview installers currently use manual updates and a separately installed CLI.
+Windows NSIS preview installers support the same signed update flow on the main
+channel, with a separately installed CLI; the stable channel and MSI installs stay
+manual, App rollback and repair are unavailable, and the installer carries no
+Authenticode certificate (Windows may show a SmartScreen prompt).
 [Desktop installation, updates, and source development](apps/desktop/loopx-control-plane/README.md).
+
+<img src="docs/assets/personal-workspace/capability-1.0.webp" alt="Real Workspace recording: configure child-task capacity and allowed responsibility domains" width="960">
 
 <details>
 <summary>Capability settings and reproducible workspace scenarios</summary>
-
-<img src="docs/assets/personal-workspace/capability-1.0.webp" alt="Real Workspace recording: configure child-task capacity and allowed responsibility domains" width="960">
 
 From a source checkout, run `python -m demo.workspace serve` to explore a community
 event, a home-energy comparison, and a neighborhood website release. Each has four
@@ -335,9 +338,6 @@ time, not continuous model execution or unattended production autonomy. Open
 each visual to inspect the public-safe task graph, evidence branches, and
 cross-turn decisions; each case states its source and reproducibility boundary.
 
-<details>
-<summary>Earlier 200+ hour project trajectories: OpenViking and ML experiments</summary>
-
 ### Open-Source Issue Fix
 
 **200+ hour public contribution arc: PR delivery and reusable fix knowledge
@@ -347,6 +347,9 @@ evolve together.**
   <img src="docs/assets/long-running-loop-openviking-trajectory.png" alt="Open-source issue-fix trajectory linking focused PR delivery with reusable LoopX capabilities" width="760">
 </a>
 
+<details>
+<summary>Contribution sources and evidence boundary</summary>
+
 LoopX's creator uses this path as an
 [OpenViking contributor](https://github.com/volcengine/OpenViking/pulls?q=is%3Apr+author%3Ahuangruiteng).
 The represented public contribution sequence spans more than 200 elapsed hours
@@ -355,6 +358,8 @@ from its first PR creation to the latest represented review or update. The
 repository context, revision-stamped fix knowledge, and reviewer-facing
 preferences separate; linked PRs plus current checkout source and tests remain
 authoritative.
+
+</details>
 
 ### Auto ML Experiment
 
@@ -369,8 +374,6 @@ visible in one graph.**
 The redacted public-safe graph preserves decision lineage across that 200+ hour
 elapsed window. It is an owner-run showcase, not a claim of continuous compute,
 independent reproduction, or a production result.
-
-</details>
 
 ### Used In Real Projects
 

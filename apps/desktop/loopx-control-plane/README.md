@@ -17,6 +17,12 @@ checks its current official channel and downloads a newer App in the background.
 It verifies the updater signature and prepares the archive locally. The next
 normal open verifies that archive again and installs it before starting services;
 ordinary background preparation never replaces or restarts an active workspace.
+Windows NSIS installs follow the signed-update journey on the main channel: the
+App checks on launch, verifies the minisign signature, runs the installer
+passively and restarts automatically. On Windows the stable channel, MSI
+installs and App rollback/repair remain manual or unavailable for now, and the
+installer carries no Authenticode certificate, so Windows may show a SmartScreen
+prompt.
 An offline or failed check keeps the installed App usable; it does not certify
 that the App is current. Main points to the latest complete signed build,
 not arbitrary Git HEAD. Builds without the updater need a one-time replacement.

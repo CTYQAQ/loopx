@@ -364,7 +364,8 @@ def test_original_saved_findings_keep_full_text_associations_and_source_fences(w
 
     # Malformed/wrong-Goal evidence fails closed and invalidates previous pages.
     events = log.read_text().splitlines()
-    wrong = json.loads(events[-1]); wrong['goal_id'] = 'unrelated'
+    wrong = json.loads(events[-1])
+    wrong['goal_id'] = 'unrelated'
     log.write_text('\n'.join([*events[:-1], json.dumps(wrong)]))
     with pytest.raises(HTTPError) as corrupt:
         request(endpoint + query)
@@ -377,12 +378,15 @@ def test_original_saved_findings_keep_full_text_associations_and_source_fences(w
 
     # The prepared source adapter serves the same finding shape as the real App.
     source_server = RuntimeWorkspaceServer(GoalSource.parse(raw), w['tmp_path'])
-    worker = Thread(target=source_server.serve_forever, daemon=True); worker.start()
+    worker = Thread(target=source_server.serve_forever, daemon=True)
+    worker.start()
     try:
         with urlopen(f'http://127.0.0.1:{source_server.server_port}' + endpoint + query + '&view=findings', timeout=30) as response:
             assert json.load(response)['items'] == first['items']
     finally:
-        source_server.shutdown(); worker.join(timeout=5); source_server.server_close()
+        source_server.shutdown()
+        worker.join(timeout=5)
+        source_server.server_close()
 
     request('/api/chat/goal-sources', {'parent_goal_id': 'research-owner',
         'goal_id': 'solver-goal', 'source_namespace': namespace})

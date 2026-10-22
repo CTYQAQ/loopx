@@ -16,6 +16,12 @@ async function importSettled(browser, url, provider) {
   let applyCount = 0;
   try {
     const connect = () => openWorkspacePage(browser, url, {beforeGoto: async (_api, page) => {
+      await page.route(/\/status\.json(?:\?|$)/, async route => {
+        const query = new URL(route.request().url()).searchParams;
+        if (query.has("view") || query.has("goal_id")) {
+          await route.fulfill({response: await fetchWorkspaceBackend(route, authority.url)});
+        } else await route.fallback();
+      });
       await page.route(/\/api\/chat\/goal-(storage|ownership)(?:[/?]|$)/, async route => {
         const parsed = new URL(route.request().url());
         const response = await fetchWorkspaceBackend(route, authority.url);
@@ -27,12 +33,26 @@ async function importSettled(browser, url, provider) {
     }});
     context = await connect();
     let {page} = context;
+    let recoveryOpened = false;
     async function open() {
       const existing = page.getByRole("region", {name: "Goal 数据存储"});
       if (await existing.isVisible()) return existing;
       const navigation = page.getByRole("button", {name: "打开 Goal 导航", exact: true});
       if (await navigation.isVisible()) await navigation.click();
       await page.locator(".personal-goal-link", {hasText: "Multi Agent Projection"}).click();
+      const recovery = page.getByRole("button", {name: "检查存储升级", exact: true});
+      if (!recoveryOpened || await recovery.isVisible()) {
+        await recovery.waitFor();
+        await page.getByText("此 Goal 使用旧版存储，需要检查并迁移后才能恢复状态读取。", {exact: true}).waitFor();
+        await page.screenshot({path: resolve(outputDir, `goal-storage-recovery-${provider}.png`), animations: "disabled"});
+        await page.setViewportSize({width: 390, height: 844});
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
+        await page.screenshot({path: resolve(outputDir, `goal-storage-recovery-${provider}-mobile.png`), animations: "disabled"});
+        await recovery.focus();
+        await page.keyboard.press("Enter");
+        recoveryOpened = true;
+        return page.getByRole("region", {name: "Goal 数据存储"});
+      }
       await page.getByRole("button", {name: "Goal 设置", exact: true}).click();
       await page.getByRole("button", {name: "任务所有权", exact: true}).click();
       return page.getByRole("region", {name: "Goal 数据存储"});
@@ -92,7 +112,7 @@ async function importSettled(browser, url, provider) {
     assert.equal(await readFile(resolve(authority.root, "state.md"), "utf8"), authority.source);
     await panel.scrollIntoViewIfNeeded();
     await page.screenshot({path: resolve(outputDir, `goal-storage-import-${provider}-mobile.png`), animations: "disabled"});
-    assert.equal(context.errors.filter(e => !e.includes("ERR_FAILED")).length, 0, context.errors.join("; "));
+    assert.equal(context.errors.filter(e => !e.includes("ERR_FAILED") && !e.includes("503")).length, 0, context.errors.join("; "));
   } finally { await context?.close(); await authority.close(); }
 }
 
@@ -104,6 +124,12 @@ const goalStorageScenario = {
     let writes = 0;
     try {
       context = await openWorkspacePage(browser, url, {beforeGoto: async (_api, page) => {
+        await page.route(/\/status\.json(?:\?|$)/, async route => {
+          const query = new URL(route.request().url()).searchParams;
+          if (query.has("view") || query.has("goal_id")) {
+            await route.fulfill({response: await fetchWorkspaceBackend(route, authority.url)});
+          } else await route.fallback();
+        });
         await page.route(/\/api\/chat\/goal-(storage|ownership)(?:[/?]|$)/, async route => {
           if (route.request().method() !== "GET") writes++;
           await route.fulfill({response: await fetchWorkspaceBackend(route, authority.url)});
@@ -114,8 +140,7 @@ const goalStorageScenario = {
         const existing = page.getByRole("region", {name: language === "zh" ? "Goal 数据存储" : "Goal data storage"});
         if (await existing.isVisible()) return existing;
         await page.locator(".personal-goal-link", {hasText: "Multi Agent Projection"}).click();
-        await page.getByRole("button", {name: language === "zh" ? "Goal 设置" : "Goal settings", exact: true}).click();
-        await page.getByRole("button", {name: language === "zh" ? "任务所有权" : "Task ownership", exact: true}).click();
+        await page.getByRole("button", {name: language === "zh" ? "检查存储升级" : "Review storage upgrade", exact: true}).click();
         return page.getByRole("region", {name: language === "zh" ? "Goal 数据存储" : "Goal data storage"});
       }
       let panel = await open();

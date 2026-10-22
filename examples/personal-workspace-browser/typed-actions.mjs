@@ -1021,6 +1021,8 @@ export const typedActionsScenario = {
         throw new Error(`Work-Agent filter did not consistently filter task cards: ${filteredText}`);
       }
       const runtimeSelector = page.getByRole("combobox", { name: "选择聊天 Runtime" });
+      if (await runtimeSelector.count()) throw new Error("Tasks view exposed a Chat executor without its composer");
+      await page.getByRole("button", { name: "对话", exact: true }).click();
       if (!await runtimeSelector.count()) throw new Error("Chat runtime selector is not explicitly labelled independently from work-Agent lanes");
       await goalButton.click();
       await tasksTab.click();
@@ -1709,9 +1711,10 @@ export const typedActionsScenario = {
 
       const previewCountBeforeAnalysis = api.actionPreviews.length;
       const turnCountBeforeAnalysis = api.turnRequests.length;
-      await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: /^(Tasks|任务)$/ }).click();
       await composer.fill("做一次只读分析：判断刚刚新增的 Todo 是否与当前 Goal 一致，并在当前 Chat 返回两点理由。不要修改状态。");
       await page.getByRole("button", { name: "发送", exact: true }).click();
+      await page.locator(".personal-message-pending").waitFor({state: "hidden"});
+      await page.getByRole("navigation", { name: "Goal 视图" }).getByRole("button", { name: /^(Tasks|任务)$/ }).click();
       const taskConversationReceipt = page.getByRole("region", { name: "最近对话" });
       await taskConversationReceipt.getByText("对话有新回复", { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
       await taskConversationReceipt.getByRole("button", { name: "转为任务草稿", exact: true }).waitFor({ state: "visible" });
@@ -1944,9 +1947,11 @@ export const typedActionsScenario = {
         await page.getByRole("button", { name: "关闭", exact: true }).click();
       }
       api.nextActionPreviewDelayMs = 900;
+      await goalNavigation.getByRole("button", { name: /^(Chat|对话)$/ }).click();
       const conversationRuntime = page.getByRole("combobox", { name: "选择聊天 Runtime" });
       const conversationAgentId = await conversationRuntime.getAttribute("data-value");
       if (conversationAgentId !== "codex") throw new Error(`Quick Todo actor fixture requires the selected Codex Runtime, got ${conversationAgentId}`);
+      await goalNavigation.getByRole("button", { name: /^(Tasks|任务)$/ }).click();
       const claimedTask = taskCards.filter({ hasText: "Monitor ArcticDB #3179 LoopX comment" });
       const unassignedTask = taskCards.filter({ hasText: "todo todo_1596c3a678bb" });
       if (await claimedTask.count() !== 1 || await unassignedTask.count() !== 1) {

@@ -16,7 +16,7 @@ const server = createServer(async (req, res) => {
   const relative = url.pathname === "/chat/" ? "/chat/index.html" : url.pathname;
   const base = url.pathname.startsWith("/boot/") ? resolve(root, "apps/desktop/loopx-control-plane/static") : resolve(root, "loopx/web");
   const path = resolve(base, `.${url.pathname.startsWith("/boot/") ? url.pathname.slice(5) : relative}`);
-  if (!path.startsWith(`${base}/`)) { res.writeHead(403).end(); return; }
+  if (!path.startsWith(`${base}/`) && !path.startsWith(`${base}\\`)) { res.writeHead(403).end(); return; }
   try { res.setHeader("Content-Type", types[extname(path)] ?? "application/octet-stream"); res.end(await readFile(path)); }
   catch { res.writeHead(404).end(); }
 });
@@ -47,6 +47,7 @@ try {
   let checkUpToDate = false;
   let statusFailure = false;
   let environmentTelemetry = null;
+  let platform = "macos";
   let delayedStatus = null;
   function delayNextStatus(phase) {
     delayedStatus = {
@@ -65,6 +66,7 @@ try {
         runtime_selection: structuredClone(nativeRuntimeSelection),
         startup: structuredClone(startupTiming),
         app_version: "0.5.4",
+        platform,
         rollback_available: rollbackAvailable,
         environment: structuredClone(environmentTelemetry),
       };
@@ -365,6 +367,29 @@ try {
   await page.getByText("高级选项", { exact: true }).click();
   assert.equal(await page.getByRole("button", { name: "修复当前版本", exact: true }).isEnabled(), true, "legacy native status retains its available repair action");
 
+  // The feed publishes Windows NSIS updates on main only. Stable must name the
+  // manual installer path; main may promise the launch-time installation.
+  platform = "windows";
+  nativeState = { phase: "idle", details: {} };
+  await page.reload();
+  await page.getByRole("button", { name: "更新 LoopX", exact: true }).click();
+  const stableIdle = page.locator(".personal-update-panel").getByRole("status");
+  await page.getByText(/Windows 稳定版与 MSI 安装需手动运行新的签名安装包/).waitFor();
+  assert.doesNotMatch(await stableIdle.innerText(), /启动时检查并安装/, "stable must not promise launch-time installation");
+  await page.screenshot({ path: resolve(output, "update-idle-windows-stable.png") });
+  nativeState = { phase: "idle", details: { channel: "main" } };
+  await page.reload();
+  await page.getByRole("button", { name: "更新 LoopX", exact: true }).click();
+  await page.getByText(/main 预览版会在启动时检查并安装已签名的 Windows NSIS 更新/).waitFor();
+  await page.getByText("0.5.4 · main 预览版", { exact: true }).waitFor();
+  nativeState = { phase: "idle", details: {} };
+  await page.evaluate(() => localStorage.setItem("loopx-pw-locale", "en"));
+  await page.reload();
+  await page.getByRole("button", { name: "Update LoopX", exact: true }).click();
+  await page.getByText(/in-App automatic updates currently ship on the main preview channel/).waitFor();
+  await page.evaluate(() => localStorage.setItem("loopx-pw-locale", "zh-CN"));
+  platform = "macos";
+
   const missing = await browser.newPage();
   await missing.route("**/assets/*.js", (route) => route.abort());
   await missing.goto(`${origin}/chat/`);
@@ -479,6 +504,11 @@ try {
     assert.equal(await page.locator(selector).isEnabled(), true, `${selector} remains usable after service failure`);
   }
   await page.screenshot({ path: resolve(output, "startup-recovery.png") });
+
+  nativeRuntimeSelection = { explicit: false, remembered: true, bundled_repair_available: false };
+  await page.getByText("运行时已安装，但服务尚未连接。可检查更新；连接仍会自动重试。").waitFor();
+  assert.equal(await page.locator("#repair").isEnabled(), false, "boot fallback must match the disabled repair control");
+  nativeRuntimeSelection = undefined;
 
   // A snapshot stuck in a terminal phase must turn the main status line into
   // its error projection (fresh Mac without Python 3.11+: installer exit 2),

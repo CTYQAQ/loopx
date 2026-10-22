@@ -2851,7 +2851,9 @@ export function PersonalWorkspacePage({
               <section className="personal-manager-greeting" role="status" data-testid="goal-status-loading">
                 <div><strong>{t(selectedGoal.loadState === "error" ? "startup.goalError" : "startup.goalLoading")}</strong>
                 <p>{t(selectedGoal.loadError ? `startup.error.${selectedGoal.loadError}` : "startup.independent")}</p>
-                {selectedGoal.loadState === "error" ? <button className="min-h-11 rounded-md border px-3 py-2 text-sm" type="button" onClick={() => void callbacks.onRefresh?.("missing")}>{t("startup.retry")}</button> : null}</div>
+                {selectedGoal.loadState === "error" ? selectedGoal.loadError === "authority" && !readOnly ?
+                  <button className="min-h-11 rounded-md border px-3 py-2 text-sm" type="button" onClick={() => openSettings({goalId: selectedGoal.goalId, kind: "settings", tab: "ownership"})}>{t("startup.storageSettings")}</button>
+                  : <button className="min-h-11 rounded-md border px-3 py-2 text-sm" type="button" onClick={() => void callbacks.onRefresh?.("missing")}>{t("startup.retry")}</button> : null}</div>
               </section>
             ) : selectedGoal ? (
               <GoalWorkspacePanels key={`${researchReadSourceUrl ?? statusSourceControl?.activeSource.statusUrl ?? "/status.json"}:${selectedGoal.goalId}`}

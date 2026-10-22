@@ -26,6 +26,7 @@ from .control_plane.effect_runtime import (
     EffectRuntimeStartupError,
     effect_runtime_request_scope,
 )
+from .control_plane.coordination.local_authority import LocalCoordinationAuthorityUnavailable
 from .control_plane.runtime.public_safety import (
     public_safe_compact_text,
     validate_public_safe_value,
@@ -336,6 +337,15 @@ class ChatStatusRequestMixin(ExtensionPresentationRequestMixin):
                 )
             )
         except Exception as exc:  # noqa: BLE001 - do not expose local projection failures.
+            # The storage owner already exposes inspection and reviewed import.
+            # Preserve its typed refusal, not private paths or migration payloads.
+            if isinstance(exc, LocalCoordinationAuthorityUnavailable) and exc.code == "canonical_authority_required":
+                self._send_error(
+                    "This Goal needs a storage upgrade. Open its storage settings to review recovery.",
+                    status=503,
+                    error_code=exc.code,
+                )
+                return
             self._send_error(
                 "LoopX status could not be projected for the workspace.",
                 status=500,

@@ -67,11 +67,16 @@ def test_exact_copies_share_one_complete_source_without_changing_signed_action(w
 def test_different_contracts_are_retained_in_full(change):
     source = packet(False)
     changed = source["autonomous_replan_obligation"]["replan_context"]["core_goal"]["acceptance_contract"]
-    if change == "revision": changed["revision"] = 4
-    if change == "scope": changed["scope"] = {"kind": "selected_work"}
-    if change == "failure": changed["verification"]["failures"] += ["New failure"]
-    if change == "type": changed["verification"]["passed"] = 0  # False == 0 in Python
-    if change == "source": changed["sources"][0]["ref"] = "message:corrected"
+    if change == "revision":
+        changed["revision"] = 4
+    if change == "scope":
+        changed["scope"] = {"kind": "selected_work"}
+    if change == "failure":
+        changed["verification"]["failures"] += ["New failure"]
+    if change == "type":
+        changed["verification"]["passed"] = 0  # False == 0 in Python
+    if change == "source":
+        changed["sources"][0]["ref"] = "message:corrected"
     shared = _reference_inline_goal_acceptance(source)
     assert shared["autonomous_replan_obligation"]["replan_context"]["core_goal"]["acceptance_contract"] == changed
     assert "acceptance_contract_ref" not in shared["autonomous_replan_obligation"]["replan_context"]["core_goal"]

@@ -136,6 +136,8 @@ export const researchHistoryScenario = {
     let holdCitation = false, failedCitation = false, citationStarted, releaseCitation;
     let unavailableAnalysis = false, episodeMetadataLimit = null, comparisonFixture = false;
     let analysisWrites = 0, localizedFixture = false, continuationFixture = false, equivalentContinuation = false;
+    let unavailableTask = false;
+    const taskReads = [];
     try {
       context = await openWorkspacePage(browser, url, {collectCoverage, beforeGoto: async (_, page) => {
         await page.route("**/api/chat/research-analysis**", async route => {
@@ -211,10 +213,16 @@ export const researchHistoryScenario = {
           if (query.get("view") === "findings") findingReads.push({goal: query.get("goal_id"), cursor: query.get("cursor")});
           if (unavailable) return route.fulfill({status: 503, json: {error: "Isolated history transport unavailable"}});
           const response = await fetchWorkspaceBackend(route, owner.base);
+          if (response.status() === 409) return route.fulfill({response});
           assert.equal(response.status(), 200);
           const value = await response.json();
           if (new URL(route.request().url()).searchParams.get("view") === "history") pages.push(value);
           await route.fulfill({response, json: value});
+        });
+        await page.route("**/api/chat/todo/detail?*", async route => {
+          taskReads.push(new URL(route.request().url()).searchParams.get("goal_id"));
+          if (unavailableTask) return route.fulfill({status: 503, json: {error: "Synthetic task source unavailable"}});
+          await route.fulfill({response: await fetchWorkspaceBackend(route, owner.base)});
         });
       }});
       const {page, api} = context;
@@ -357,6 +365,24 @@ export const researchHistoryScenario = {
       await evidence.getByRole("button", {name:"下一页",exact:true}).click();
       await reader.waitFor();
       assert(findingReads.at(-1).cursor, "Exercise an actual later findings page");
+      const findingGoal = findingReads.at(-1).goal;
+      // Evict the saved snapshot through the production cache, without a timer
+      // or a mocked expiry response. Refresh must offer a usable recovery path.
+      for (let i = 0; i < 8; i++) {
+        const response = await fetch(`${owner.base}/api/chat/explore-results?goal_id=${encodeURIComponent(findingGoal)}&view=findings`);
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).goal_id, findingGoal);
+      }
+      await evidence.getByRole("button", {name: "刷新证据"}).click();
+      await evidence.getByRole("alert").waitFor();
+      assert.equal(await reader.count(), 0, "Expired evidence cannot remain visible as current");
+      await evidence.getByRole("button", {name: "刷新证据"}).click();
+      await reader.waitFor();
+      assert.equal(findingReads.at(-1).cursor, null, "Retry starts a new snapshot instead of replaying the expired cursor");
+      assert.equal(await reader.locator("h4").textContent(), selectedFinding);
+      await evidence.getByRole("button", {name: "下一页", exact: true}).click();
+      await reader.waitFor();
+      assert(findingReads.at(-1).cursor, "Recovered pagination still reaches later findings");
       const graphCapture = JSON.parse(await readFile(resolve(repoRoot,'apps/presentation/dashboard/src/data/fixtures/edgebench-graph-checkpoint-history.json')));
       const readsBeforeSwitch = findingReads.length;
       await page.locator('.personal-goal-link',{hasText:graphCapture.display_name}).click();
@@ -551,15 +577,16 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await progress.getByRole('heading', {name: '研究效果判读', exact: true}).click();
       await help.waitFor({state: 'hidden'});
       assert.match(await effects.locator('[data-metric="evidence_adoption"]').innerText(), /1 \/ 2.*未知 1/s);
-      assert.doesNotMatch(await effects.locator('[data-metric="evidence_adoption"] > summary').innerText(), /不适用/,
+      assert.doesNotMatch(await effects.locator('[data-metric="evidence_adoption"]').innerText(), /不适用/,
         'An unknown eligible episode stays in the denominator, not in exclusions');
       await page.setViewportSize({width: 1280, height: 900});
       const benefitMetric = effects.locator('[data-metric="benefit_test"]');
+      const metricDetail = progress.locator('.research-effect-evidence');
       assert.match(await benefitMetric.innerText(), /0 \/ 1/);
       await page.setViewportSize({width: 1440, height: 1000});
       await progress.evaluate(element => element.scrollIntoView({block: 'start'}));
       await page.screenshot({path: resolve(outputDir, 'research-effect-viewport.png'), animations: 'disabled'});
-      const metricGeometry = await effects.locator('.research-effect-metric > summary').evaluateAll(elements => elements.map(element => ({
+      const metricGeometry = await effects.locator('.research-effect-metric').evaluateAll(elements => elements.map(element => ({
         top: Math.round(element.getBoundingClientRect().top),
         labelSize: parseFloat(getComputedStyle(element.querySelector('.research-effect-title')).fontSize),
         numberSize: parseFloat(getComputedStyle(element.querySelector('.research-effect-number')).fontSize),
@@ -576,24 +603,32 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await page.screenshot({path: resolve(outputDir, 'research-effect-mobile-viewport.png'), animations: 'disabled'});
       await page.setViewportSize({width: 1280, height: 900});
       await page.screenshot({path: resolve(outputDir, 'research-eligibility-desktop.png'), animations: 'disabled'});
-      assert.match(await benefitMetric.locator(':scope > summary').innerText(), /不适用 1/,
+      assert.match(await benefitMetric.innerText(), /不适用 1/,
         'The sample includes a second episode explicitly excluded from this metric');
-      await benefitMetric.locator(':scope > summary').click();
-      await benefitMetric.locator('.research-assessment > summary').click();
-      assert.match(await benefitMetric.innerText(), /original-objective utility was not tested/);
-      assert.match(await benefitMetric.locator('.research-effect-excluded').innerText(), /Was the later decision informed by this evidence\?/,
+      const metricPositions = () => effects.locator('.research-effect-metric').evaluateAll(items => items.map(item => ({x: item.offsetLeft, y: item.offsetTop, width: item.offsetWidth})));
+      const closedPositions = await metricPositions();
+      await benefitMetric.focus(); await benefitMetric.press('Enter');
+      assert.deepEqual(await metricPositions(), closedPositions, 'Reading evidence must not reorder or resize any of the six comparable metrics');
+      assert.equal(await metricDetail.evaluate(element => element === document.activeElement), true, 'Keyboard opening reaches the evidence region');
+      assert.equal(await effects.locator('[aria-expanded="true"]').count(), 1);
+      await metricDetail.press('Escape');
+      assert.equal(await benefitMetric.evaluate(element => element === document.activeElement), true, 'Escape returns to the same metric');
+      await benefitMetric.press('Enter');
+      await metricDetail.locator('.research-assessment > summary').click();
+      assert.match(await metricDetail.innerText(), /original-objective utility was not tested/);
+      assert.match(await metricDetail.locator('.research-effect-excluded').innerText(), /Was the later decision informed by this evidence\?/,
         'One expansion identifies the declared exclusion rather than requiring the selection-rule prose');
-      await benefitMetric.locator('.research-effect-excluded').scrollIntoViewIfNeeded();
+      await metricDetail.locator('.research-effect-excluded').scrollIntoViewIfNeeded();
       await page.screenshot({path: resolve(outputDir, 'research-eligibility-detail.png'), animations: 'disabled'});
       await page.setViewportSize({width: 390, height: 844});
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
-      await benefitMetric.locator('.research-effect-excluded').scrollIntoViewIfNeeded();
+      await metricDetail.locator('.research-effect-excluded').scrollIntoViewIfNeeded();
       await page.screenshot({path: resolve(outputDir, 'research-eligibility-mobile.png'), animations: 'disabled'});
       await page.setViewportSize({width: 1280, height: 900});
       assert.match(await effects.locator('[data-metric="evidence_adoption"]').innerText(), /未知 1/);
 
       assert.equal(await history.getByRole("region", {name: "轨迹深度分析", exact: true}).count(), 0, "Expanding existing effects never opens or executes model analysis");
-      const sourceTrigger = benefitMetric.getByRole('button', {name: /source.*行 1–2/});
+      const sourceTrigger = metricDetail.getByRole('button', {name: /source.*行 1–2/});
       await sourceTrigger.click();
       const citedOriginal = history.getByRole('region', {name: '引用原文', exact: true});
       await citedOriginal.getByText(/Diagnostic measurements/).waitFor();
@@ -605,7 +640,7 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       });
       await sourceReached();
       await citedOriginal.press('Escape');
-      await page.waitForFunction(() => document.activeElement?.closest('[data-metric="benefit_test"]'));
+      await page.waitForFunction(() => document.activeElement?.closest('.research-effect-evidence'));
       assert(await sourceTrigger.evaluate(element => element === document.activeElement), 'Closing the source returns to the exact citation trigger');
       await page.setViewportSize({width: 390, height: 844});
       holdCitation = true;
@@ -663,20 +698,20 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
         episodeMetadataLimit = limit;
         await page.reload({waitUntil: 'networkidle'});
         await progress.locator(`.research-progress-scope[data-pack-id="${"a".repeat(64)}"]`).waitFor();
-        assert.match(await benefitMetric.locator(':scope > summary').innerText(), /0 \/ 1/);
-        assert.doesNotMatch(await benefitMetric.locator(':scope > summary').innerText(), /不适用/,
+        assert.match(await benefitMetric.innerText(), /0 \/ 1/);
+        assert.doesNotMatch(await benefitMetric.innerText(), /不适用/,
           'Partial or absent metadata cannot establish exclusions from the arithmetic count gap');
-        assert.match(await effects.locator('[data-metric="evidence_adoption"] > summary').innerText(), /未知 1/);
+        assert.match(await effects.locator('[data-metric="evidence_adoption"]').innerText(), /未知 1/);
       }
       episodeMetadataLimit = null;
       await page.evaluate(() => localStorage.setItem('loopx-pw-locale', 'en'));
       await page.reload({waitUntil: 'networkidle'});
       const englishBenefit = page.locator('.research-progress [data-metric="benefit_test"]');
       await englishBenefit.waitFor();
-      assert.match(await englishBenefit.locator(':scope > summary').innerText(), /Ineligible 1/);
-      await englishBenefit.locator(':scope > summary').focus();
-      await englishBenefit.locator(':scope > summary').press('Enter');
-      assert.match(await englishBenefit.locator('.research-effect-excluded').innerText(), /Was the later decision informed/);
+      assert.match(await englishBenefit.innerText(), /Ineligible 1/);
+      await englishBenefit.focus();
+      await englishBenefit.press('Enter');
+      assert.match(await page.locator('.research-progress .research-effect-excluded').innerText(), /Was the later decision informed/);
       await page.evaluate(() => localStorage.setItem('loopx-pw-locale', 'zh-CN'));
       await page.reload({waitUntil: 'networkidle'});
       await progress.locator(`.research-progress-scope[data-pack-id="${"a".repeat(64)}"]`).waitFor();
@@ -705,11 +740,12 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await page.screenshot({path: resolve(outputDir, "research-native-outcomes-desktop.png"), animations: "disabled"});
       await nativeResults.getByRole('button', {name: /首次提交.*查看原始证据/}).click();
       await citedOriginal.waitFor();
+      await citedOriginal.getByText(/Synthetic original evidence/).waitFor();
       assert.match(await citedOriginal.innerText(), /Synthetic original evidence/);
       await citedOriginal.press('Escape');
       await history.getByRole('button', {name: '关闭分析', exact: true}).click();
       await basis.locator(':scope > summary').click();
-      await benefitMetric.locator(':scope > summary').click();
+      await benefitMetric.click();
       assert.match(await progress.innerText(), /0 \/ 1/);
       assert.match(await progress.innerText(), /1 \/ 2/);
       await page.setViewportSize({width:1280,height:900});
@@ -803,9 +839,9 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await progress.locator('.research-progress-basis > summary').click();
       assert.equal(await analysis.count(), 0, "Changing a factual scope preserves the closed analysis panel");
       assert.match(await progress.innerText(), /不适用|N\/A/);
-      assert.match(await effects.locator('[data-metric="benefit_test"] > summary').innerText(), /不适用 1/,
+      assert.match(await effects.locator('[data-metric="benefit_test"]').innerText(), /不适用 1/,
         'A wholly ineligible metric preserves its explicitly excluded sample count');
-      assert.doesNotMatch(await effects.locator('[data-metric="discrimination"] > summary').innerText(), /不适用/,
+      assert.doesNotMatch(await effects.locator('[data-metric="discrimination"]').innerText(), /不适用/,
         'An all-unknown but eligible metric has no declared exclusion');
       assert.doesNotMatch(await progress.innerText(), /0%/);
       assert.equal(await nativeResults.count(), 0, 'A missing native capture cannot borrow the previous scope');
@@ -837,7 +873,21 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       // backend must keep their measurements discoverable with zero events.
       const emptyFixture = resolve(temporary, "empty.json");
       await writeFile(emptyFixture, JSON.stringify({goal_id: goal, display_name: "Synthetic empty Explore history", events: []}));
-      emptyOwner = await startHistoryOwner(emptyFixture);
+      const linkedGoal = "linked-reading";
+      const linkedEvents = JSON.parse(execFileSync(resolveTestPython(), ["-c", `
+import json
+from loopx.capabilities.explore.result_log import build_explore_node_event, build_explore_finding_event
+print(json.dumps([
+    build_explore_node_event(goal_id='linked-reading', node_id='question', title='Read complete evidence', node_kind='question', summary='Fixed synthetic input'),
+    build_explore_finding_event(goal_id='linked-reading', node_id='question', finding_id='observation', title='A negative observation', status='refuted', summary='The change did not improve the original objective.', evidence_refs=['artifact:synthetic-input'], agent_id='researcher')]))
+`], {cwd: repoRoot, encoding: "utf8"}));
+      const completeTask = "Preserve every original requirement. " + "The input, negative evidence and unknown results stay distinct. ".repeat(15) + "FINAL_ACCEPTANCE: verify the complete stored source.";
+      const taskFixture = resolve(temporary, "linked-tasks.json");
+      await writeFile(taskFixture, JSON.stringify({goal_id: linkedGoal, display_name: "Synthetic linked-task reading", events: linkedEvents,
+        todos: [{schema_version: "todo_item_v0", todo_id: "todo_linked_reading", index: 1, role: "agent", status: "open", done: false,
+          archive_state: "active", source_section: "Agent Todo", claimed_by: "researcher", task_class: "advancement_task",
+          text: completeTask, explore_result_node_refs: ["question"]}]}));
+      emptyOwner = await startHistoryOwner([emptyFixture, taskFixture]);
       const previousOwner = owner; owner = emptyOwner; await previousOwner.close();
       await page.reload({waitUntil: "networkidle"});
       await history.getByRole("status").filter({hasText: "0 / 0"}).waitFor();
@@ -848,19 +898,19 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await progress.locator(`.research-progress-scope[data-pack-id="${"a".repeat(64)}"]`).waitFor();
       await page.reload({waitUntil: "networkidle"});
       const comparison = progress.locator('[data-metric="goal_alignment"]');
-      await comparison.locator(':scope > summary').click();
-      assert.match(await comparison.locator(':scope > summary').innerText(), /1 \/ 4.*未知 3/s);
-      const rows = comparison.locator('.research-assessment');
+      await comparison.click();
+      assert.match(await comparison.innerText(), /1 \/ 4.*未知 3/s);
+      const rows = metricDetail.locator('.research-assessment');
       assert.equal(await rows.count(), 4);
       assert.deepEqual(await rows.locator(':scope > summary').allTextContents(), [
         'variant-alpha证据不足', 'variant-beta证据不足', 'variant-gamma证据不足', 'edge-aware有依据',
       ], 'Comparable identities and judgments precede repeated questions, reasons and citations');
       assert.equal(await rows.locator('.research-assessment-body:visible').count(), 0);
-      assert.equal(await comparison.locator('.research-effect-citations button:visible').count(), 0);
-      const interpretation = comparison.getByRole('button', {name: '目标关联 · 判读口径', exact: true});
+      assert.equal(await metricDetail.locator('.research-effect-citations button:visible').count(), 0);
+      const interpretation = metricDetail.getByRole('button', {name: '目标关联 · 判读口径', exact: true});
       await interpretation.focus();
-      await comparison.getByRole('tooltip').waitFor({state: 'visible'});
-      assert.match(await comparison.getByRole('tooltip').innerText(), /25%.*25%–100%/s);
+      await metricDetail.getByRole('tooltip').waitFor({state: 'visible'});
+      assert.match(await metricDetail.getByRole('tooltip').innerText(), /25%.*25%–100%/s);
       await page.keyboard.press('Escape');
       await page.setViewportSize({width: 1440, height: 1000});
       await progress.scrollIntoViewIfNeeded();
@@ -880,9 +930,18 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await comparison.scrollIntoViewIfNeeded();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await page.screenshot({path: resolve(outputDir, 'research-assessment-comparison-mobile.png'), animations: 'disabled'});
+      const narrowPositions = await metricPositions();
+      await effects.locator('[data-metric="information_gain"]').click();
+      assert.deepEqual(await metricPositions(), narrowPositions, 'Narrow metric navigation preserves the comparison band');
+      assert.equal(await metricDetail.count(), 1, 'One metric evidence region replaces the previous selection');
+      assert.equal(await comparison.getAttribute('aria-expanded'), 'false');
+      await comparison.click();
       await rows.last().locator(':scope > summary').click();
       await rows.last().getByText(/Synthetic evidence connects/).waitFor();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      await page.screenshot({path: resolve(outputDir, 'research-assessment-expanded-mobile.png'), animations: 'disabled'});
+      await metricDetail.getByRole('button', {name: '收起指标详情', exact: true}).click();
+      assert.equal(await comparison.evaluate(element => element === document.activeElement), true);
       localizedFixture = true;
       await page.reload({waitUntil: 'networkidle'});
       await history.getByRole('button', {name: '查看分析', exact: true}).click();
@@ -972,6 +1031,7 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       // association endpoint. Unknown links must never be presented as zero.
       await page.route("**/api/chat/explore-results?*", route => {
         const query = new URL(route.request().url()).searchParams;
+        if (query.get("goal_id") === linkedGoal) return route.fallback();
         if (query.get("view") === "history") return route.fallback();
         assert.equal(query.get("view"), "findings");
         return route.fulfill({json: {ok: true, goal_id: query.get("goal_id"), total: 2, next_cursor: null,
@@ -996,6 +1056,27 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await sourceBody.scrollIntoViewIfNeeded();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await page.screenshot({path: resolve(outputDir, "source-saved-findings-mobile.png"), animations: "disabled"});
+      // The association list is a bounded preview; expansion must read the
+      // canonical Task, including requirements beyond the preview's limit.
+      await page.setViewportSize({width: 1440, height: 1000});
+      await page.locator('.personal-goal-link', {hasText: "Synthetic linked-task reading"}).click();
+      await page.getByText("Read saved findings", {exact: true}).click();
+      await sourceBody.waitFor();
+      await sourceBody.getByText("Linked tasks · 1", {exact: true}).click();
+      const linkedTask = sourceBody.locator('.explore-linked-tasks details');
+      assert.equal(taskReads.length, 0, "Collapsed associations perform no Task reads");
+      assert.doesNotMatch(await linkedTask.innerText(), /FINAL_ACCEPTANCE/);
+      unavailableTask = true;
+      await linkedTask.locator('summary').focus(); await linkedTask.locator('summary').press('Enter');
+      await linkedTask.getByRole('alert').waitFor();
+      assert.equal(await linkedTask.locator('.explore-finding-raw').count(), 0, "An unavailable source cannot label a preview as the complete request");
+      unavailableTask = false;
+      await linkedTask.getByRole('button', {name: "Retry", exact: true}).click();
+      await linkedTask.locator('.explore-finding-raw').waitFor();
+      assert.equal(await linkedTask.locator('.explore-finding-raw').textContent(), completeTask);
+      assert(taskReads.every(value => value === linkedGoal), "Each detail read stays bound to the selected Goal");
+      await page.setViewportSize({width: 390, height: 844});
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       assert.equal(analysisWrites, 0, "Cached, reload, switch and keyboard reading never request execution");
       assert.equal(api.turnRequests.length, 0, "Reading the graph cannot start an Agent");
       return {note: "Three unchanged real checkpoint histories through production HTTP + packaged UI; per-Goal complete pagination, genuine negative evidence, no invented edges, reload/back/forward, mobile and failed refresh. Separate synthetic coincident-target regression; no benchmark qualification or model dispatch.",
