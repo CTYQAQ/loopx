@@ -150,6 +150,13 @@ expected public tag is `vX.Y.Z` for that version.
 
 Before moving `stable`, maintainers should:
 
+- run the complete packaged Personal Workspace journey against the exact
+  candidate before publishing a release, including every catalog scenario and
+  the companion flows in `npm run smoke:personal-workspace-packaged`;
+  installation, upgrade and Host checks alone do not qualify the page. The
+  `install_upgrade_host` result uses `release_install_upgrade_host_summary_v1`
+  and requires `packaged_frontend_passed=true` as well as the three existing
+  checks. Missing, failed or skipped page validation holds release readiness;
 - bump `loopx.__version__` and `pyproject.toml` together when user-visible
   release behavior changes;
 - before freezing the candidate, align the existing canonical help catalog,

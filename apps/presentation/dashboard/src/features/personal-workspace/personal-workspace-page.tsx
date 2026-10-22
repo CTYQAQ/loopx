@@ -1189,8 +1189,13 @@ export function PersonalWorkspacePage({
     setSelection(target);
   }
   useEffect(() => {
-    const restore = () => setSelectionState({scope: currentSelectionScope.current.scope,
-      value: readSettingsRoute(new URL(window.location.href))});
+    const restore = () => {
+      const target = readSettingsRoute(new URL(window.location.href));
+      // Task history has its own route reader. Leaving settings may clear its
+      // selection, but an unrelated history event must not clear a restored task.
+      setSelectionState(current => target ? {scope: currentSelectionScope.current.scope, value: target}
+        : current?.value?.kind === "settings" ? null : current);
+    };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, []);
