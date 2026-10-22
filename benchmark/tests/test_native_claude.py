@@ -3,13 +3,14 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import PurePosixPath
 import shlex
 import subprocess
 
 import pytest
 
 from sforge.harness.config import SForgeConfig
-from benchmark.runtime.sforge_claude import NativeClaudeWorker
+from benchmark.runtime.sforge_claude import NativeClaudeDockerBackend, NativeClaudeWorker
 
 
 def worker(tmp_path):
@@ -65,17 +66,18 @@ def test_native_stop_hook_is_executable_under_private_umask(tmp_path):
                     reason="Explicit isolated Docker qualification required")
 def test_real_upload_checks_agent_permissions(tmp_path):
     import docker
-    from sforge.harness.backend.docker_backend import DockerBackend
     import uuid
-    backend = DockerBackend(docker.from_env())
+    backend = NativeClaudeDockerBackend(docker.from_env())
     image = backend.client.images.get("python:3.12-slim")
     handle = backend.create_container(image.id, "claude-install-" + uuid.uuid4().hex[:10],
                                       cpu_limit=1, mem_limit="256m")
     backend.start_container(handle)
     old = os.umask(0o077)
     try:
+        # A different UID exposes private-upload failures hidden by matching UIDs.
+        agent_uid = 12001 if os.getuid() != 12001 else 12002
         assert backend.exec_run(handle, ["sh", "-ec",
-            "useradd -m agent; mkdir -p /home/agent/.claude; "
+            f"useradd -m -u {agent_uid} agent; mkdir -p /home/agent/.claude; "
             "printf '#!/bin/sh\\nexit 0\\n' > /usr/local/bin/sforge-submit; "
             "chmod 0600 /usr/local/bin/sforge-submit"], user="root").exit_code == 0
         agent = worker(tmp_path)
@@ -84,6 +86,16 @@ def test_real_upload_checks_agent_permissions(tmp_path):
             "/usr/local/bin/sforge-submit; printf '{}' | /tmp/sforge-stop-hook.sh"], user="agent")
         assert observed.exit_code == 0
         assert json.loads(observed.output)["decision"] == "block"
+        prompt = tmp_path / "prompt.md"
+        prompt.write_text("Synthetic task instruction")
+        backend.copy_to_container(handle, prompt, PurePosixPath("/tmp/unrelated-private.md"))
+        assert backend.exec_run(handle, ["cat", "/tmp/unrelated-private.md"],
+                                user="agent").exit_code != 0
+        backend.copy_to_container(handle, prompt, PurePosixPath("/tmp/agent_prompt.md"))
+        readback = backend.exec_run(handle, ["cat", "/tmp/agent_prompt.md"], user="agent")
+        assert readback.exit_code == 0 and readback.output == "Synthetic task instruction"
+        assert backend.exec_run(handle, ["cat", "/tmp/agent_prompt.md"],
+                                user="nobody").exit_code != 0
         assert json.loads((tmp_path / "claude-install.json").read_text())["installation_verified"]
     finally:
         os.umask(old)

@@ -19,12 +19,13 @@ if __name__ == "__main__":
 
 
 def main(argv=None):
-    from sforge.harness.backend.docker_backend import DockerBackend
     from sforge.harness.benchmark import load_benchmark
     from sforge.harness.config import SForgeConfig
     from sforge.harness.run_agent import run_agent
     from sforge.harness.task_spec import make_task_spec
-    from benchmark.runtime.sforge_claude import CLAUDE_EFFORTS, NativeClaudeWorker
+    from benchmark.runtime.sforge_claude import (
+        CLAUDE_EFFORTS, NativeClaudeDockerBackend, NativeClaudeWorker,
+    )
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", required=True)
@@ -70,7 +71,7 @@ def main(argv=None):
     os.umask(0o077)
     # Admission, total deadline, submission limits, scoring, auto-resume and
     # cleanup are native provider responsibilities. No extra model loop here.
-    result = run_agent(task_spec=task, agent=agent, config=config, backend=DockerBackend(),
+    result = run_agent(task_spec=task, agent=agent, config=config, backend=NativeClaudeDockerBackend(),
         run_id=args.run_id, model=args.model, timeout=args.timeout,
         judge_url=args.judge_url, eval_interval=0, disable_auto_eval=True,
         disable_stop_hook=False, disable_auto_resume=False,

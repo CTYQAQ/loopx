@@ -9,12 +9,18 @@ The ordinary benchmark runner and existing experiments are unchanged.
 The transport installs an operator-supplied native Claude binary with an explicit
 SHA-256 and version. It reuses SForge's native Stop hook. Both that script and
 `sforge-submit` receive explicit agent-readable executable modes, even when the
-operator runs with umask 077. Python belongs here as an existing provider
+operator runs with umask 077. The Docker transport assigns the uploaded task
+prompt to the agent with mode 0600, including when host and container UIDs
+differ; unrelated uploads retain their original permissions.
+Python belongs here as an existing provider
 transport, not a second control-plane decision owner.
 
 Select a clean runner revision and freeze the SForge source with the existing
 source-admission workflow. Prepare an isolated judge, task directory, log
-directory, run identity and resource admission before invoking the runner:
+directory, run identity and resource admission before invoking the runner.
+Verify judge connectivity from both the host and container: SForge maps
+`host.docker.internal` to loopback for host registration. A judge listening only
+on the Docker bridge therefore needs its reachable bridge address as the URL:
 
 ```bash
 # Supply ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN through private environment

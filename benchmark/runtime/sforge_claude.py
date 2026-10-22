@@ -12,9 +12,23 @@ import re
 import shlex
 
 from sforge.harness.agent.claude_code import ClaudeCodeAgent
+from sforge.harness.backend.docker_backend import DockerBackend
 
 # Native CLI vocabulary, local to this provider transport.
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
+class NativeClaudeDockerBackend(DockerBackend):
+    """Assign the native prompt upload to its reader across host UID boundaries."""
+
+    def copy_to_container(self, handle, src, dst):
+        super().copy_to_container(handle, src, dst)
+        if dst == PurePosixPath("/tmp/agent_prompt.md"):
+            result = self.exec_run(handle, ["/bin/sh", "-ec",
+                "chown agent:agent /tmp/agent_prompt.md; "
+                "chmod 0600 /tmp/agent_prompt.md"], user="root")
+            if result.exit_code:
+                raise RuntimeError("Could not assign native prompt to agent")
 
 
 class NativeClaudeWorker(ClaudeCodeAgent):
