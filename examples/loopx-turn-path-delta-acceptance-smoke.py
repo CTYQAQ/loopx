@@ -233,14 +233,33 @@ def _run_records(runtime: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in index.read_text(encoding="utf-8").splitlines()]
 
 
+def assert_unpromoted_replan_preserves_todo_authority() -> None:
+    with tempfile.TemporaryDirectory(prefix="loopx-turn-unpromoted-replan-") as directory:
+        root = Path(directory)
+        project, runtime, workspace, registry = _write_fixture(root)
+        state = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
+        original_state = state.read_bytes()
+        assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL_ID) is None
+        result = _run_turn(
+            registry=registry, runtime=runtime, project=project,
+            workspace=workspace, host=_write_host(root), mode="material",
+        )
+        # Planning-only settlement does not grant a Todo writer or promote legacy
+        # state. The synthetic Host marker is the independently validated effect.
+        assert result["status"] == "committed", result
+        assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL_ID) is None
+        assert state.read_bytes() == original_state
+        assert (project / MARKER).with_suffix(".calls").read_text().splitlines() == ["material"]
+
+
 def assert_canonical_turn_path_delta(provider: str) -> None:
     with tempfile.TemporaryDirectory(prefix=f"loopx-turn-path-delta-{provider}-") as directory:
         root = Path(directory)
         project, runtime, workspace, registry = _write_fixture(root)
         host = _write_host(root)
-        # Select and import the provider before the Turn. Normal execution may
-        # initialize the default authority; it is not an unpromoted-write
-        # refusal probe. Canonical outage/refusal has its own boundary tests.
+        # Select the provider explicitly to test canonical Todo preservation.
+        # The separate unpromoted case covers planning without a delivery Task;
+        # it must neither initialize Todo authority nor mutate the legacy state.
         assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL_ID) is None
         calls = (project / MARKER).with_suffix(".calls")
         assert not calls.exists()
@@ -310,6 +329,7 @@ def assert_canonical_turn_path_delta(provider: str) -> None:
 
 
 def main() -> int:
+    assert_unpromoted_replan_preserves_todo_authority()
     for provider in ("file", "sqlite"):
         assert_canonical_turn_path_delta(provider)
     print("loopx-turn-path-delta-acceptance-smoke ok")
