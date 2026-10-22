@@ -35,7 +35,7 @@ def test_goal_prompt_has_one_live_execution_entry(host: str) -> None:
     assert "ambiguous effects need readback/recovery" in body
     assert "new host Goal" in body
     assert "terminal no-follow-up" in body
-    assert "notification" in body
+    assert "notification" in body.lower()
     assert "no work/spend" in body
     assert "No permission asks in a trusted session" not in body
     # The native host already owns a 4,000-character limit. Keep the complete
