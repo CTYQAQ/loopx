@@ -25,7 +25,7 @@ from loopx.status import collect_status
 fixture = runpy.run_path('tests/test_delivery_review.py')
 with tempfile.TemporaryDirectory() as directory:
     registry, runtime = fixture['make_project'](Path(directory))
-    print(json.dumps(collect_status(registry_path=registry, runtime_root_override=str(runtime), scan_roots=[], limit=20, goal_id='release-demo', include_public_boundary_scan=False)))
+    print(json.dumps(collect_status(registry_path=registry, runtime_root_override=str(runtime), limit=20, goal_id='release-demo')))
 `], { cwd: root, encoding: "utf8" }));
 if (payload) payload.run_history.goals[0].acceptance_observation = acceptance;
 const server = packaged
@@ -159,6 +159,14 @@ try {
     payload.run_history.goals[0].acceptance_observation = acceptance;
     await page.reload({waitUntil: "networkidle"});
     const review = page.locator(".delivery-review");
+    const openEvidence = async () => {
+      const evidence = page.locator(".goal-overview-evidence");
+      if (await evidence.count() && await evidence.getAttribute("open") === null) {
+        await evidence.locator(":scope > summary").focus();
+        await page.keyboard.press("Enter");
+      }
+    };
+    await openEvidence();
     const refresh = review.getByRole("button", { name: locale === "en" ? "Refresh snapshot" : "刷新快照", exact: true });
     const exportButton = review.getByRole("button", { name: locale === "en" ? "Export delivery snapshot" : "导出交付快照", exact: true });
     const openAdvanced = async () => {
@@ -181,6 +189,7 @@ try {
       // real SQLite/HTTP/CLI journey.
       if (responseStatus === 200) {
         await page.reload({waitUntil: "networkidle"});
+        await openEvidence();
         // Goal activation can finish after the page's network-idle boundary.
         // Compare the completed delivery view, never its loading placeholder.
         await review.locator(".delivery-chain").waitFor();
