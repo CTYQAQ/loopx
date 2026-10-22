@@ -86,6 +86,7 @@ export const goalWorkspaceM2Scenario = {
       await page.locator('.personal-context-drawer').waitFor();
       await now.locator('[data-todo-id="showcase-reconcile"][aria-pressed="true"]').waitFor();
       assert.equal(await now.locator('[data-todo-id="showcase-reconcile"]').getAttribute('aria-pressed'),'true');
+      await page.screenshot({path:resolve(outputDir,'task-history-restored-desktop.png'),animations:'disabled'});
       await page.goForward({waitUntil:"domcontentloaded"});
       await page.waitForURL(value => !value.searchParams.has("todo"));
       await page.locator('.personal-context-drawer').waitFor({state:"hidden"});
@@ -96,6 +97,11 @@ export const goalWorkspaceM2Scenario = {
       await page.screenshot({path:resolve(outputDir,'goal-workspace-m2-mobile.png'),animations:'disabled'});
       // An enabled contract uses the native acceptance disclosure; the
       // fallback direction button only exists without a contract or plan.
+      const evidence = page.locator(".goal-overview-evidence");
+      if (await evidence.getAttribute("open") === null) {
+        await evidence.locator(":scope > summary").focus();
+        await page.keyboard.press("Enter");
+      }
       const inspection = page.locator(".goal-overview .delivery-check-inspection");
       const criteria = inspection.locator(".goal-overview-criteria");
       await page.locator(".goal-overview .delivery-acceptance-contract .goal-overview-objective").waitFor({state:"visible"});
@@ -120,6 +126,7 @@ export const goalWorkspaceM2Scenario = {
       await railDialog.waitFor({state:"hidden"});
       await page.locator('.personal-context-drawer').waitFor();
       assert.equal(new URL(page.url()).searchParams.get("todo"),"showcase-map-columns");
+      await page.screenshot({path:resolve(outputDir,'task-history-restored-narrow.png'),animations:'disabled'});
       await page.locator('.personal-drawer-close').click();
       await page.setViewportSize({width:1440,height:1000});
       scale = true;

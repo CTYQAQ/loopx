@@ -68,12 +68,13 @@ export const replanCadenceScenario = {
         if (!settled.ok()) throw new Error(await settled.text());
       }
 
-      async function openMachineCadence() {
-        await page.getByRole("button", { name: "设置", exact: true }).click();
+      async function selectMachineCadence() {
+        await page.getByRole("radio", { name: "本机设置", exact: true }).check();
         await page.locator(".personal-settings-tabs").getByRole("button", { name: "能力中心", exact: true }).click();
         await page.getByRole("navigation", { name: "机器能力目录" }).getByRole("button", { name: /Goal 复盘与步幅/ }).click();
       }
-      await openMachineCadence();
+      await page.getByRole("button", { name: "设置", exact: true }).click();
+      await selectMachineCadence();
       const unit = page.getByLabel(/^复核计数依据/);
       const count = page.getByLabel("两次复核间的数量", { exact: true });
       const strategy = page.getByLabel(/^步幅策略/);
@@ -90,7 +91,7 @@ export const replanCadenceScenario = {
       const preview = await request(base + "/preview", legacy);
       await request(base + "/apply", { ...legacy, expected_plan_revision: preview.plan_revision });
       await page.reload({ waitUntil: "networkidle" });
-      await openMachineCadence();
+      await selectMachineCadence();
       await waitForInputValue(count, "2");
       if (await unit.inputValue() !== "completed_todos" || await count.inputValue() !== "2") throw new Error("Legacy cadence was reinterpreted");
       let stored = (await request(base)).machine_configuration.namespaces.todo_replan_cadence;
@@ -110,7 +111,7 @@ export const replanCadenceScenario = {
       if (stored.count_unit !== "effective_turns" || stored.count !== 3 || "completed_todos" in stored) throw new Error("Migration did not persist the selected unit");
       if (stored.stride_strategy !== "evidence_conditioned_v1" || stored.schema_version !== "todo_replan_cadence_machine_defaults_v2") throw new Error("Machine stride version not recorded");
       await page.screenshot({ path: resolve(outputDir, "replan-cadence-machine.png"), animations: "disabled" });
-      await page.getByRole("radio", { name: "单个 Goal", exact: true }).check();
+      await page.getByRole("radio", { name: "Goal 设置", exact: true }).check();
       await page.getByRole("combobox", { name: "目标 Goal", exact: true }).selectOption("multi-agent-projection");
       await page.getByRole("navigation", { name: "Goal 能力目录" }).getByRole("button", { name: /Goal 复盘与步幅/ }).click();
       await waitForInputValue(count, "3");
@@ -148,11 +149,15 @@ export const replanCadenceScenario = {
       }
       async function reopenGoalCadence() {
         await page.reload({ waitUntil: "networkidle" });
-        await page.getByRole("button", { name: "设置", exact: true }).click();
-        await page.locator(".personal-settings-tabs").getByRole("button", { name: "能力中心", exact: true }).click();
-        await page.getByRole("radio", { name: "单个 Goal", exact: true }).check();
-        await page.getByRole("combobox", { name: "目标 Goal", exact: true }).selectOption("multi-agent-projection");
-        await page.getByRole("navigation", { name: "Goal 能力目录" }).getByRole("button", { name: /Goal 复盘与步幅/ }).click();
+        const english = await page.locator("html").getAttribute("lang") === "en";
+        const settings = page.getByRole("region", { name: english ? "Settings" : "设置", exact: true });
+        await settings.waitFor();
+        if (!await settings.getByRole("radio", { name: english ? "One Goal" : "Goal 设置", exact: true }).isChecked()
+          || await settings.getByRole("combobox", { name: english ? "Target Goal" : "目标 Goal", exact: true }).inputValue() !== "multi-agent-projection") {
+          throw new Error("Reload did not restore the explicit Goal settings target");
+        }
+        await settings.getByRole("navigation", { name: english ? "Goal capability catalog" : "Goal 能力目录" })
+          .getByRole("button", { name: english ? /Goal review and stride/ : /Goal 复盘与步幅/ }).click();
       }
       // Default context is visible to the Agent without an owner setup step.
       // Advanced opt-out persists without pinning cadence or changing stride.
@@ -270,12 +275,7 @@ export const replanCadenceScenario = {
       if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error("Cadence editor overflowed");
       await page.setViewportSize({ width: 1512, height: 982 });
       await page.evaluate(() => localStorage.setItem("loopx-pw-locale", "en"));
-      await page.reload({ waitUntil: "networkidle" });
-      await page.getByRole("button", { name: "Settings", exact: true }).click();
-      await page.locator(".personal-settings-tabs").getByRole("button", { name: "Capability Center", exact: true }).click();
-      await page.getByRole("radio", { name: "One Goal", exact: true }).check();
-      await page.getByRole("combobox", { name: "Target Goal", exact: true }).selectOption("multi-agent-projection");
-      await page.getByRole("navigation", { name: "Goal capability catalog" }).getByRole("button", { name: /Goal review and stride/ }).click();
+      await reopenGoalCadence();
       const englishUnit = page.getByLabel(/^Review after/);
       const englishCount = page.getByLabel("Number between reviews", { exact: true });
       const englishStrategy = page.getByLabel(/^Stride strategy/);
@@ -296,12 +296,7 @@ export const replanCadenceScenario = {
       await request(base + "/apply", { ...remove, expected_plan_revision: removalPreview.plan_revision });
       const inherited = (await readGoalCadence()).effective_configuration;
       if (inherited.source !== "capability_default" || inherited.configuration.count_unit !== "effective_turns" || inherited.configuration.count !== 6) throw new Error("Removing device policy did not restore product default");
-      await page.reload({ waitUntil: "networkidle" });
-      await page.getByRole("button", { name: "Settings", exact: true }).click();
-      await page.locator(".personal-settings-tabs").getByRole("button", { name: "Capability Center", exact: true }).click();
-      await page.getByRole("radio", { name: "One Goal", exact: true }).check();
-      await page.getByRole("combobox", { name: "Target Goal", exact: true }).selectOption("multi-agent-projection");
-      await page.getByRole("navigation", { name: "Goal capability catalog" }).getByRole("button", { name: /Goal review and stride/ }).click();
+      await reopenGoalCadence();
       await waitForInputValue(englishCount, "6");
       if (await englishUnit.inputValue() !== "effective_turns" || await englishStrategy.inputValue() !== "off") throw new Error("Goal editor did not restore product defaults");
       await englishCount.fill("5");
