@@ -928,6 +928,14 @@ path, and canary route rather than as a user-facing release baseline.
   work. Asset availability is separate from native Windows execution or a new
   full-tree qualification of later source changes.
 
+- `v2.1.0` preview at commit `a65c71f789459c12b68d6feeec233fbb99f65c91`:
+  the [original release](https://github.com/loopx-project/loopx/releases/tag/v2.1.0)
+  remains a prerelease. Python publication stopped at the packaged-page checks;
+  its desktop artifacts and earlier source-only checks do not establish complete
+  package readiness. During that hold, the stable source and signed desktop
+  feed were retained or restored to the qualified `v2.0.0` baseline. The immutable
+  preview and failed evidence remain part of the release history.
+
 When a new public release is promoted, add it here only after the matching tag,
 release note, stable ref, update path, and focused release canary agree.
 
