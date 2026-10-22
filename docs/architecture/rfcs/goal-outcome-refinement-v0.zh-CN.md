@@ -1,8 +1,9 @@
 # RFC：持久化 Goal 成果细化（v0）
 
-- 状态：实现提案；安装／模型采用与比较收益尚未取得资格。
+- 状态：已接受；安装／模型采用与比较收益尚未取得资格。
+- 替代 / 关闭：无
 - 归属：Core Goal 验收与工作规划（S3/R4），调用方为 S1/S5。
-- 英文镜像：[English](goal-outcome-refinement-v0.md)。
+- 英文语义镜像：[English](goal-outcome-refinement-v0.md)。
 - 既有合同：[共享 Goal 对齐](shared-goal-alignment-and-governed-amendment-v0.zh-CN.md)。
 
 ## 问题与当前证据

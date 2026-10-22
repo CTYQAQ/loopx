@@ -1,8 +1,9 @@
 # RFC: Persistent Goal outcome refinement (v0)
 
-- Status: Implementation proposed; installed/model adoption and comparative benefit remain unqualified.
+- Status: Accepted; installed/model adoption and comparative benefit remain unqualified.
+- Supersedes / closes: none
 - Owner: Core Goal acceptance and work planning (S3/R4), with S1/S5 callers.
-- Language mirror: [中文](goal-outcome-refinement-v0.zh-CN.md).
+- Chinese semantic mirror: [中文](goal-outcome-refinement-v0.zh-CN.md).
 - Existing contract: [shared Goal alignment](shared-goal-alignment-and-governed-amendment-v0.md#37-current-work-and-goal-requirements).
 
 ## Problem and current evidence
