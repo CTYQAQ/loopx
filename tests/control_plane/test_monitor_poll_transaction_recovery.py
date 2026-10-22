@@ -1,4 +1,4 @@
-"""Original Monitor receipts recover without admitting fresh source writes."""
+"""Monitor recovery requires authority and preserves original receipt identity."""
 
 from __future__ import annotations
 
@@ -206,6 +206,13 @@ def test_original_receipt_replays_before_fresh_admission_without_effects(
     outbox.write_bytes(b'{"historical":"requires explicit reconciliation"}\n')
     outbox_before = outbox.read_bytes()
     state_before = state.read_bytes()
+    if provider == "unpromoted":
+        with pytest.raises(CanonicalAuthorityRequired):
+            _replay(registry, runtime)
+        assert state.read_bytes() == state_before
+        assert outbox.read_bytes() == outbox_before
+        assert not (runtime / "authority").exists()
+        return
     provider_before = read_canonical_todos_if_promoted(
         runtime_root=runtime,
         goal_id=GOAL,
@@ -224,8 +231,6 @@ def test_original_receipt_replays_before_fresh_admission_without_effects(
         runtime_root=runtime,
         goal_id=GOAL,
     ) == provider_before
-    if provider == "unpromoted":
-        assert not (runtime / "authority").exists()
 
 
 @pytest.mark.parametrize("promoted", [False, True])
@@ -245,16 +250,20 @@ def test_historical_receipt_rejects_changed_identity(tmp_path: Path, promoted, c
     provider_before = read_canonical_todos_if_promoted(
         runtime_root=runtime,
         goal_id=GOAL,
-    )
+    ) if promoted else None
 
-    with pytest.raises(ValueError, match="request mismatch"):
+    with pytest.raises(ValueError if promoted else CanonicalAuthorityRequired,
+                       match="request mismatch" if promoted else "Canonical authority"):
         _replay(registry, runtime, **change)
 
     assert state.read_bytes() == state_before
-    assert read_canonical_todos_if_promoted(
-        runtime_root=runtime,
-        goal_id=GOAL,
-    ) == provider_before
+    if promoted:
+        assert read_canonical_todos_if_promoted(
+            runtime_root=runtime,
+            goal_id=GOAL,
+        ) == provider_before
+    else:
+        assert not (runtime / "authority").exists()
 
 
 @pytest.mark.parametrize("promoted", [False, True])
@@ -272,7 +281,8 @@ def test_malformed_historical_receipt_is_not_treated_as_absent(
         _promote(runtime, state)
     state_before = state.read_bytes()
 
-    with pytest.raises(ValueError, match="receipt must be an object|duplicate|malformed"):
+    with pytest.raises(ValueError if promoted else CanonicalAuthorityRequired,
+                       match="receipt must be an object|duplicate|malformed" if promoted else "Canonical authority"):
         _replay(registry, runtime)
 
     assert state.read_bytes() == state_before
@@ -336,9 +346,17 @@ def _restore_1x_poll(tmp_path: Path):
     return registry, runtime, state, pending, history["poll"], marker
 
 
-def test_original_1x_cli_poll_settles_once_then_replays_without_new_business_work(tmp_path):
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_original_1x_cli_poll_requires_migration_then_settles_once(tmp_path, monkeypatch, provider):
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
     registry, runtime, state, pending, poll, _marker = _restore_1x_poll(tmp_path)
     display, reservation = state.read_bytes(), pending.read_bytes()
+    rc, unmigrated = _cli(registry, runtime, *poll)
+    assert rc != 0 and unmigrated["error_code"] == "canonical_authority_required", unmigrated
+    assert state.read_bytes() == display and pending.read_bytes() == reservation
+    assert _poll_events(runtime) == [] and not (runtime / "authority").exists()
+    _promote(runtime, state, provider)
+    provider_before = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL)
     changed = list(poll)
     changed[changed.index("--result-hash") + 1] = "changed-original-observation"
     rc, rejected = _cli(registry, runtime, *changed)
@@ -350,7 +368,7 @@ def test_original_1x_cli_poll_settles_once_then_replays_without_new_business_wor
     assert rc == 0 and recovered["appended"] is True, recovered
     # The index is the commit proof; current quota may retain a prepared WAL.
     assert state.read_bytes() == display
-    assert not (runtime / "authority").exists()
+    assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL) == provider_before
     events = _poll_events(runtime)
     assert len(events) == 1
     assert events[0]["todo_id"] == "todo_7f667db6fd16"
@@ -360,6 +378,7 @@ def test_original_1x_cli_poll_settles_once_then_replays_without_new_business_wor
     assert rc == 0 and replay["replayed"] is True, replay
     assert state.read_bytes() == display and pending.read_bytes() == committed
     assert _poll_events(runtime) == events
+    assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL) == provider_before
     assert not any(row.get("classification") == "quota_slot_spent" for row in read_run_index(runtime, GOAL))
 
 
