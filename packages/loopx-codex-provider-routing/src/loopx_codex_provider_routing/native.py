@@ -329,7 +329,7 @@ class NativeAccounts:
                 # Unrelated/remaining owners still require a safe-boundary wait.
                 # Other repeated failures stop automatic attempts until Refresh.
                 failures = state.get("failure_count", 0) + (code not in ("waiting_for_idle", "handoff_pending"))
-                if code in ("other_clients_busy", "client_quit_refused", "client_quit_timeout", "client_changed"):
+                if code in ("other_clients_busy", "client_quit_refused", "client_quit_timeout"):
                     failures = 3  # Do not repeatedly close/reopen a refused client.
                 state.update(action=code if code in ("waiting_for_idle", "selection_changed", "adapter_changed", "client_quit_refused", "client_quit_timeout", "client_changed", "handoff_pending") else "unavailable",
                              code=code, retry_at=self.clock() + (5 if code == "handoff_pending" else min(300, 60 * 2 ** min(failures, 3))), failure_count=failures)
