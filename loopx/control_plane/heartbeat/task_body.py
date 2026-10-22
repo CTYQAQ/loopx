@@ -530,10 +530,8 @@ def _render_goal_task_body(
 `{quota_guard_command}`
 Use the current `interaction_contract`, not remembered commands.
 {HOST_LOOP_QUOTA_DISPATCH_RULE}
-Use `cli_channel.settlement_plan.ordered_steps` when present; preserve identities/flags
-and supply truthful evidence/actual outcomes.
-Do not reconstruct refresh/spend commands. Ambiguous writes need readback/recovery,
-not blind repeats. Repair local entrypoint failures within authority; while the
+Preserve command flags and supply truthful evidence.
+Repair local entrypoint failures within authority; while the
 contract is unavailable or incomplete, no work/spend and no claim of completion.
 
 {SCOPE_BOUNDED_WORK_RULE}
