@@ -122,6 +122,14 @@ The request must carry the executor's matching `goal_ref` with a valid
 `goal_instance_id`; alias-only or mismatched requests fail before IO. Existing
 alias-only memory directories are not imported or deleted. Reconcile their
 pending effects separately; a new lifetime begins with empty memory.
+Before provider or MCP IO, the host holds the old alias cursor's lock alongside
+the new instance lock. A pending head, unfinished receipt or orphaned receipt
+in that old directory fails with `legacy_memory_requires_operator_reconciliation`;
+unreadable state also fails. Old records cannot identify a Goal lifetime, so
+changing the instance does not bypass this gate. Stop the old worker, reconcile
+its exact effects through the existing Turn recovery owner, then explicitly
+select a new `state_dir`. Do not delete the evidence. Completed old records stay
+untouched and are not imported; they do not block empty new-instance memory.
 Each new Turn
 opens a MemT session, imports the scope's last confirmed snapshot, runs the
 model/tool chain, exports a new snapshot, closes the session, then records the

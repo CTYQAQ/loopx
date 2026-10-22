@@ -65,6 +65,18 @@ def scope_path(config: Config, identity: dict) -> Path:
     return Path(config.state_dir) / scope
 
 
+def require_legacy_reconciled(directory: Path) -> None:
+    """Retain the alias format's unknown-effect stop without importing its memory."""
+    head_path = directory / "head.json"
+    head = read_state(head_path)
+    receipts = [path for path in directory.glob("*.json")
+                if re.fullmatch(r"[0-9a-f]{64}\.json", path.name)]
+    if head.get("pending_turn") or (not head and (head_path.exists() or receipts)):
+        raise AdapterError("legacy_memory_requires_operator_reconciliation")
+    if any(read_state(path).get("stage") != "completed" for path in receipts):
+        raise AdapterError("legacy_memory_requires_operator_reconciliation")
+
+
 def adopt_snapshot(head_path: Path, receipt: dict) -> None:
     persist(head_path, {"config": receipt["config"], "snapshot": receipt["snapshot"],
                         "tools": receipt["tools"], "pending_turn": None})
@@ -164,8 +176,14 @@ async def run(request: dict, config: Config) -> dict:
         raise AdapterError("memt_disabled")
     identity = work_identity(request)
     directory = scope_path(config, identity)
-    directory.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    directory.mkdir(exist_ok=True, mode=0o700)
-    lock_target = scope_path(config, identity) / "head.json"
-    with exclusive_file_lock(lock_target, policy=LockAcquisitionPolicy.SINGLE_FLIGHT):
-        return await execute(request, config, identity)
+    legacy = Path(config.state_dir) / digest([
+        str(Path(config.workspace).resolve()), identity["GOAL_ID"], identity["AGENT_ID"],
+    ])
+    legacy.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # The old host locks this same alias cursor. Hold it through IO so an old
+    # worker cannot create an uncertain effect after the upgrade's preflight.
+    with exclusive_file_lock(legacy / "head.json", policy=LockAcquisitionPolicy.SINGLE_FLIGHT):
+        require_legacy_reconciled(legacy)
+        directory.mkdir(exist_ok=True, mode=0o700)
+        with exclusive_file_lock(directory / "head.json", policy=LockAcquisitionPolicy.SINGLE_FLIGHT):
+            return await execute(request, config, identity)

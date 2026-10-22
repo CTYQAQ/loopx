@@ -105,7 +105,13 @@ loopx turn run-once --goal-id demo --agent-id analyst --todo-id todo_demo \
 记忆按解析后的工作区、精确 Goal 生命周期和 Agent 隔离。请求必须携带 executor
 给出的匹配 `goal_ref` 及合法 `goal_instance_id`；只有 alias 或实例不匹配时，在
 任何 IO 前失败。既有仅 alias 的记忆目录不会自动导入或删除；其中 pending 效果
-须单独核对，新实例从空记忆开始。新 Turn 创建 MemT 会话，导入最近
+须单独核对，新实例从空记忆开始。在任何 provider 或 MCP IO 前，宿主同时持有旧
+alias 游标锁和新实例锁。旧目录的 pending head、未完成或孤立回执会返回
+`legacy_memory_requires_operator_reconciliation`；无法读取的状态也拒绝继续。
+旧记录无法标明 Goal 生命周期，因此换实例不能绕过这道门。先停旧 worker，沿
+既有 Turn 恢复 owner 核对精确效果，再显式选择新 `state_dir`；不得删除原证据。
+旧的已完成记录保留原样、不导入，也不阻止新实例从空记忆开始。
+新 Turn 创建 MemT 会话，导入最近
 确认的快照，执行模型/工具链，导出新快照，关闭会话，再写回本地游标。
 服务重启后使用新的 epoch 和显式快照导入。服务端快照目录须持久保存；
 本地回执不包含记忆张量。适配器不记录对话原文、token 数组或模型推理；
