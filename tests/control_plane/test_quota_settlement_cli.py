@@ -1983,6 +1983,16 @@ def test_receipt_retry_keeps_open_vision_quiet_through_real_cli(
     project, runtime, registry, before, closed = _receipt_retry_with_vision_fixture(
         tmp_path, monkeypatch, provider, prior_work_turns=prior_work_turns,
     )
+    if prior_work_turns:
+        # The default cadence is six. Reach a real review threshold only after
+        # the blocked Turn was admitted, using the configuration owner rather
+        # than fabricated history or settlement receipts.
+        rc, configured = _run_cli(
+            registry, runtime, "configure-goal", "--goal-id", GOAL_ID,
+            "--execution-replan-after-turns", str(prior_work_turns), "--execute", cwd=project,
+        )
+        assert rc == 0, configured
+        assert configured["after"]["execution_profile"]["replan_after_effective_turns"] == prior_work_turns
     if human_item is not None:
         scope = "--bound-agent" if human_item == "user_action" else "--blocks-agent"
         rc, human = _run_cli(
