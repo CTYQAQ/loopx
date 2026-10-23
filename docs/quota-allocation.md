@@ -527,6 +527,15 @@ Turn without spending quota. The retry suppresses only the blocked Todo for
 the same Agent until due or superseded by newer work, so independent eligible
 Todos can still be selected. Historical blocked writebacks without a bounded
 retry retain their prior spend readback; no debit is retroactively erased.
+Receipt clocks can contain microseconds. Todo `resume_at` authoring and readback
+accept up to six fractional digits and compare the exact instant; existing
+second/millisecond normalization and receipt identities are unchanged. A valid
+historical receipt with a Python datetime spelling outside Todo authoring syntax
+retains its original selection fence, without fabricating an automatic clock
+proof or rewriting the receipt.
+回执时钟可能包含微秒。Todo `resume_at` 的写入与读取接受最多六位小数并精确比较，
+原有秒/毫秒的规范化和回执身份保持不变。合法历史回执若使用 Todo 写入语法之外的
+Python datetime 格式，仍保留原选择限制，不伪造自动时钟证明，也不改写历史回执。
 Automatic no-spend stall writeback uses the same receipt-owned retry projection
 as live selection, including its post-writeback readback. A future unchanged
 monitor therefore stays quiet during that wait without failing the heartbeat

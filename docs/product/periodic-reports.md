@@ -29,6 +29,25 @@ Its source-bound native host bridge supplies monitoring admission. A report
 Turn-start hook alone does not independently wake a sleeping actor, so calendar
 calculation does not enable a report.
 
+The existing calendar settings support an optional **First report date**, in
+the schedule's timezone. Before its first matching daily or weekly deadline,
+the calendar admits no report intent or generation work. The first report still
+covers the preceding full interval. Leaving the date empty retains the existing
+calendar behavior. This setting does not enable the steward's daily portfolio
+report integration by itself.
+
+The synthetic packaged settings journey below uses real preview/apply/readback
+over local HTTP. It preserves the date across frequency, time and timezone
+edits and reload. The narrow view is a 390×844 viewport emulation.
+
+| Before: recurrence only | After: optional first report date |
+| --- | --- |
+| ![Calendar before the first-date control](../assets/personal-workspace/report-calendar-start-date/before-desktop.png) | ![Calendar with a first report date](../assets/personal-workspace/report-calendar-start-date/after-desktop.png) |
+
+| Before, narrow viewport | After, narrow viewport |
+| --- | --- |
+| ![Recurrence controls in a narrow viewport](../assets/personal-workspace/report-calendar-start-date/before-narrow.png) | ![First report date in a narrow viewport](../assets/personal-workspace/report-calendar-start-date/after-narrow.png) |
+
 Chat `/goal` transport supervision and a LoopX-managed Turn are distinct. Merely
 relaxing `validate_goal_chat`, changing a Session field, adding a prompt, or
 starting a Codex native Goal does not establish the LoopX lifecycle below.
@@ -124,6 +143,11 @@ request. A failed or unknown accepted attempt is retained, never replayed.
 An in-memory wake hint expires within a minute and holds no scheduling
 authority; configuration invalidates it immediately. No extra scheduler,
 message consumer or binding-side scheduling toggle is created.
+
+An unreadable Session or queued Turn file affects only its own binding. Other
+stewards continue their due checks. The unreadable data and original monitor
+deadline remain intact; once the file is repaired, queued user work still takes
+priority over monitoring.
 
 The packaged browser journey below uses synthetic private connections over
 real HTTP, Core and native File storage. Desktop views are 1440×1000; narrow
