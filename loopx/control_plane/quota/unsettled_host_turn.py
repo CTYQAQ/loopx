@@ -366,6 +366,7 @@ def apply_receipt_bound_wait_recovery(
     monitor_phase: str | None = None,
     settlement_progress: dict[str, Any] | None = None,
     replay_phase: ReceiptBoundReplayPhase | None = None,
+    heartbeat_receipt: Mapping[str, Any] | None = None,
 ) -> bool:
     """Read full provider facts only when a replay lost its executable binding."""
     from ..todos.list_readback import list_goal_todos
@@ -389,11 +390,12 @@ def apply_receipt_bound_wait_recovery(
     items = compact_settlement_wait_todos(source_items, todo_id=todo_id)
     verdict = effect_runtime_result("quota.settlement.read", {
         "schema_version": "loopx_quota_receipt_bound_wait_request_v0",
-        "todos": items, "todo_id": todo_id, "agent_id": agent_id,
+        "todos": items, "todo_id": todo_id, "agent_id": agent_id, "goal_id": goal_id,
         "turn_instance_id": turn_instance_id, "observed_at": now_utc_iso(),
         "monitor_phase": monitor_phase,
         "settlement_progress": settlement_progress,
         "replay_phase": replay_phase.value if replay_phase else None,
+        "heartbeat_receipt": dict(heartbeat_receipt) if heartbeat_receipt is not None else None,
     }, large_local_snapshot=True)
     if verdict.get("status") == "none":
         return False
@@ -410,7 +412,7 @@ def apply_receipt_bound_wait_recovery(
         scheduler_execution_context=scheduler_execution_context)
     if verdict["recovery"].get("repair") == "durable_writeback":
         # Transport the typed recovery through the existing command owner. A
-        # completed Todo is not an executable selected_todo or a new grant.
+        # waiting or completed Todo is not executable work or a new grant.
         from ..work_items.action_selection_contract import render_cli_command_prefix
 
         assert settlement_progress is not None

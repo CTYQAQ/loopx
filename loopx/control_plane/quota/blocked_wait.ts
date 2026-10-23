@@ -1,6 +1,8 @@
-import type { JsonObject } from "../effect_program.ts";
+import {settlementIdentity, type JsonObject} from "../effect_program.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { jsonObject, requireJsonObject } from "../runtime_decode.ts";
+import {nativeChildReportAdmission} from "../capabilities/native_child_admission.ts";
+import {heartbeatReceiptBinding, heartbeatReceiptDetails, heartbeatReceiptFactFromEvent} from "./heartbeat_receipt_identity.ts";
 import {
   evaluateTodoResumeConditions,
   normalizeTodoResumeWhen,
@@ -208,6 +210,27 @@ export function prepareBlockedWait(value: unknown): JsonObject {
 
 export const RECEIPT_BOUND_WAIT_REQUEST_SCHEMA = "loopx_quota_receipt_bound_wait_request_v0";
 
+/** Reuse committed work admission; a bound repair/planning Turn has no business
+ * result merely because it has an identity and a missing writeback. */
+function admittedBusinessResult(request: JsonObject): boolean {
+  const receipt = jsonObject(request.heartbeat_receipt);
+  if (typeof request.goal_id !== "string" || !request.goal_id ||
+      !receipt || receipt.goal_id !== request.goal_id || receipt.agent_id !== request.agent_id ||
+      (receipt.todo_id != null && receipt.todo_id !== request.todo_id) ||
+      receipt.run_id !== request.turn_instance_id) return false;
+  const identity = settlementIdentity({goal_id: String(request.goal_id), agent_id: String(request.agent_id),
+    todo_id: String(request.todo_id), turn_instance_id: String(request.turn_instance_id)});
+  const binding = heartbeatReceiptBinding(identity.goal_id, identity.agent_id, heartbeatReceiptFactFromEvent(receipt));
+  if (binding?.binding_kind !== "todo" || binding.binding_id !== identity.todo_id ||
+      binding.settlement_effect_id !== identity.effect_id) return false;
+  const facts = heartbeatReceiptDetails(receipt);
+  // An original semantic replan still owes that decision, even when the host
+  // permits planning tools. Neither a timer nor this projection discharges it.
+  if (facts.semantic_replan_obligation_id != null && facts.semantic_replan_obligation_id !== "") return false;
+  return nativeChildReportAdmission(facts, receipt.status, identity.effect_id, "open", false)
+    .report_permission === "new_operation";
+}
+
 /** A pending dependency changes executable work, never the Turn's receipts.
  * settlement_progress is the existing settlement owner's exact-Turn readback,
  * transported by the live guard, not an author-declared progress observation.
@@ -227,14 +250,16 @@ export function projectReceiptBoundWait(value: unknown): JsonObject {
     return {status: "none"};
   }
   const progress = jsonObject(request.settlement_progress);
+  const writebackRequired = progress?.schema_version === "quota_settlement_progress_v0" &&
+      progress.next_step === "durable_writeback" &&
+      (progress.state === "writeback_required" || progress.state === "writeback_receipt_required");
   // Ordinary completion is a validation receipt, not Turn settlement. The
   // verified replay phase, rather than terminal Todo status alone, owns this
   // recovery even after the row leaves the active presentation lane.
   const completedSettlement = todo.status === "done" && todo.task_class === "advancement_task" &&
       request.replay_phase === "settlement_pending" &&
       progress?.schema_version === "quota_settlement_progress_v0";
-  if (completedSettlement && progress?.next_step === "durable_writeback" &&
-      (progress.state === "writeback_required" || progress.state === "writeback_receipt_required")) {
+  if (completedSettlement && writebackRequired) {
     const reason = "The original Todo's completion is verified, but its Turn still owes durable writeback and settlement. Record only the validated original result, then spend once for that same identity. Inspect existing effects before retrying; do not repeat completed work, invent a successor, or rebind this Turn.";
     return boundRecovery(request, "durable_writeback", reason);
   }
@@ -255,13 +280,33 @@ export function projectReceiptBoundWait(value: unknown): JsonObject {
     const reason = "The advancement Todo bound to this Turn is blocked. Inspect its existing effects and evidence, then close only this original attempt with a typed blocked writeback without spending. Keep the Todo blocked and its validator intact; no retry clock or execution is authorized. A fresh host Turn may select independent work.";
     return boundRecovery(request, "blocked_writeback", reason, wait);
   }
+  const condition = jsonObject(todo.resume_condition);
+  const kind = condition?.kind;
+  const resumeWhen = kind !== "monitor_changed" && kind !== "todo_done"
+    ? normalizeTodoResumeWhen({
+      schema_version: TODO_RESUME_NORMALIZE_REQUEST_SCHEMA_VERSION, resume_when: todo.resume_when,
+    })
+    : null;
+  const externalWait = !!resumeWhen && condition?.kind === resumeWhen.split(":", 1)[0] &&
+    condition.resume_when === resumeWhen;
+  // A later external wait removes executable work, not the original Turn's
+  // verified writeback duty. A due wait can become runnable before settlement;
+  // it still cannot discard the original identity or authorize new work.
+  if (["open", "deferred"].includes(String(todo.status)) &&
+      todo.task_class === "advancement_task" &&
+      writebackRequired && request.replay_phase === "open" &&
+      admittedBusinessResult(request) && externalWait) {
+    const reason = "The original admitted Turn still owes durable writeback. Its later external wait cannot discard that identity. Inspect existing effects and record only the validated original result, then settle once under the original identity. Keep the wait unchanged; do not repeat business work, select a successor, or invent a retry clock.";
+    return boundRecovery(request, "durable_writeback", reason);
+  }
   if (!["open", "deferred"].includes(String(todo.status)) ||
       todo.task_class !== "advancement_task" || todo.resume_ready !== false) return {status: "none"};
   // This projection repairs registered Todo dependencies. Other wait kinds
   // retain their existing route: in particular, a valid long timer must not
   // be rejected by the separate 1–30 minute blocked-retry writeback budget.
-  const kind = jsonObject(todo.resume_condition)?.kind;
-  if (kind !== "monitor_changed" && kind !== "todo_done") return {status: "none"};
+  if (kind !== "monitor_changed" && kind !== "todo_done") {
+    return {status: "none"};
+  }
   if (currentCompletionCondition(todo, todos)?.invalid_state === "dependency_cycle") {
     return boundRecovery(request, "dependency", CYCLE_REPAIR);
   }
@@ -292,7 +337,7 @@ function boundRecovery(
       delivery_allowed: false, notify: "DONT_NOTIFY",
       ...(repair === "quota_spend" ? {spend_allowed_now: true} : {}),
       spend_policy: repair === "durable_writeback"
-        ? "settle the original completed Todo after validated writeback; no independent work"
+        ? "settle the original admitted Turn after validated writeback; no independent work"
         : repair === "quota_spend"
         ? "settle the original verified writeback once; no independent work or new writeback"
         : "no spend for blocked closeout",
