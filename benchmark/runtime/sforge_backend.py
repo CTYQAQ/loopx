@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import inspect
 import json
 import tarfile
 from pathlib import Path, PurePosixPath
@@ -22,6 +23,7 @@ class RecordingDockerBackend(DockerBackend):
         self.blind_api_endpoint = blind_api_endpoint
         self.feedback = feedback
         self.checkpoint = checkpoint
+        self.registration_bound = False
         self.execution_command = None
         self.execution_start_marker = None
         self.execution_receipt = None
@@ -31,15 +33,30 @@ class RecordingDockerBackend(DockerBackend):
         if not oauth_proxy and not self.auth_ips:
             raise RuntimeError("Cannot resolve Codex OAuth endpoint")
 
+    def registration_options(self, run_agent):
+        # Older frozen providers expose registration through container env;
+        # newer providers keep that credential exclusively on the host.
+        if (self.feedback is not None or self.checkpoint is not None) and (
+                "host_registration_callback" in inspect.signature(run_agent).parameters):
+            return {"host_registration_callback": self.bind_registration}
+        return {}
+
+    def bind_registration(self, token):
+        if self.registration_bound or not isinstance(token, str) or not token:
+            raise ValueError("Observers require one native host registration")
+        environment = {"SFORGE_TOKEN": token}
+        for observer in (self.feedback, self.checkpoint):
+            if observer is not None:
+                observer.bind(environment)
+        self.registration_bound = True
+
     def create_container(self, image, name, **kwargs):
         hosts = dict(kwargs.get("extra_hosts") or {})
         if self.auth_ips:
             hosts["auth.openai.com"] = self.auth_ips[0]
         kwargs["extra_hosts"] = hosts
-        if self.feedback is not None:
-            self.feedback.bind(kwargs.get("environment"))
-        if self.checkpoint is not None:
-            self.checkpoint.bind(kwargs.get("environment"))
+        if not self.registration_bound and (self.feedback is not None or self.checkpoint is not None):
+            self.bind_registration((kwargs.get("environment") or {}).get("SFORGE_TOKEN"))
         kwargs["environment"] = self._agent_environment(kwargs.get("environment"))
         return super().create_container(image, name, **kwargs)
 
@@ -47,7 +64,7 @@ class RecordingDockerBackend(DockerBackend):
         if self.blind_api_endpoint is None or environment is None:
             return environment
         return {key: value for key, value in environment.items()
-                if key not in {"SFORGE_TOKEN", "SFORGE_JUDGE_URL"}}
+                if key not in {"SFORGE_TOKEN", "SFORGE_JUDGE_URL", "SFORGE_FEEDBACK_URL"}}
 
     def exec_run_with_timeout(self, handle, cmd, timeout=60, **kwargs):
         kwargs["environment"] = self._agent_environment(kwargs.get("environment"))

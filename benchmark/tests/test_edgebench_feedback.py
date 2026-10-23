@@ -359,13 +359,15 @@ def test_cli_native_context_default_and_explicit_controls_reach_registration(tmp
     constructed = {}
     def backend(**kwargs):
         constructed.update(kwargs)
-        return SimpleNamespace(image_exists=lambda image: True)
+        return SimpleNamespace(image_exists=lambda image: True,
+            registration_options=lambda runner: {"host_registration_callback": kwargs["feedback"].bind})
     monkeypatch.setattr(run, "RecordingDockerBackend", backend)
     def handoff(**kwargs):
         selected = mode or "native"
         assert kwargs["agent"].feedback == selected
         assert kwargs["max_submissions"] == (None if selected == "native" else 0)
         assert (constructed["feedback"] is not None) == (selected == "best-only")
+        assert ("host_registration_callback" in kwargs) == (selected == "best-only")
         assert constructed["blind_api_endpoint"] == (None if selected == "native" else ("192.0.2.1", 9090))
         prompt = kwargs["agent"].feedback_prompt
         assert prompt.endswith("---\n\nComplete the task\n")

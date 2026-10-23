@@ -174,7 +174,13 @@ def _activation_epoch(path: Path, binding: dict, remaining: float, recover: bool
 
 
 def _activation_result(result: dict, body: dict) -> None:
-    if (set(result) != {*body, "token"} or any(result.get(k) != v for k, v in body.items())
+    relay = result.get("feedback_relay_id")
+    expected = {*body, "token"}
+    if "feedback_relay_id" in result:
+        expected.add("feedback_relay_id")
+        if not isinstance(relay, str) or not relay:
+            raise ValueError("Native activation feedback relay is invalid")
+    if (set(result) != expected or any(result.get(k) != v for k, v in body.items())
             or not isinstance(result.get("token"), str) or not result["token"]):
         raise ValueError("Native activation result differs from the original request")
 
