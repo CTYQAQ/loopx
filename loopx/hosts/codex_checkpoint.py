@@ -492,12 +492,15 @@ def admit_native_checkpoint_session(env: dict[str, str], unit: Path, expected_sh
         # The original session binding is also the admission receipt. Only a
         # source-bound committed admission can recover a lost controller reply;
         # an unrelated binding or a partial native fork is never replaced.
+        # Session construction captures launch authority through the registry
+        # owner too. Construct before taking the non-reentrant binding fence;
+        # recheck current Goal and Agent authority inside it before readback.
+        wake = CodexAgentSession(env, context="resume", sandbox=sandbox, receipt={})
         with project_registry_transaction(registry, operation="checkpoint_session_binding", agent_id=lineage["agent_id"]):
             current = load_goal_from_registry(registry, lineage["goal_id"])
             require_registered_agent_id(registry_path=registry, goal_id=lineage["goal_id"], agent_id=lineage["agent_id"])
             if current != goal:
                 raise ValueError("destination Goal configuration changed during native checkpoint readback")
-            wake = CodexAgentSession(env, context="resume", sandbox=sandbox, receipt={})
             binding = select_codex_cli_session(wake.root, lineage=lineage, session_scope="agent",
                                               goal_admission=wake.admission)
             if not binding or binding.get("checkpoint_artifact_sha256") != expected_sha256:
@@ -522,6 +525,8 @@ def admit_native_checkpoint_session(env: dict[str, str], unit: Path, expected_sh
                 "session_binding_admitted": True, "session_profile_digest": wake.digest}
     result = fork_native_checkpoint(env, unit, expected_sha256, config_path,
                                     timeout=max(.1, deadline - time.monotonic()))
+    receipt: dict[str, Any] = {}
+    wake = CodexAgentSession(env, context="resume", sandbox=sandbox, receipt=receipt)
     # Hold the existing registry owner's fence through the session write. This
     # does not mint a lease, task or work admission from historical state.
     with project_registry_transaction(registry, operation="checkpoint_session_binding", agent_id=lineage["agent_id"]):
@@ -529,8 +534,6 @@ def admit_native_checkpoint_session(env: dict[str, str], unit: Path, expected_sh
         require_registered_agent_id(registry_path=registry, goal_id=lineage["goal_id"], agent_id=lineage["agent_id"])
         if current != goal:
             raise ValueError("destination Goal configuration changed during native checkpoint reconstruction")
-        receipt: dict[str, Any] = {}
-        wake = CodexAgentSession(env, context="resume", sandbox=sandbox, receipt=receipt)
         wake._bind_verified_fork(result["session_id"], source_profile, expected_sha256, str(unit))
     return {**result, "destination_goal_ref": wake.goal_ref, "destination_agent_id": lineage["agent_id"],
             "session_binding_admitted": True, "session_profile_digest": wake.digest}
