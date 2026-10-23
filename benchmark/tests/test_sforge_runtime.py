@@ -501,6 +501,7 @@ def test_blind_policy_removes_judge_route_and_credentials_native_is_unchanged(mo
     monkeypatch.setattr(DockerBackend, "create_network_isolation",
                         lambda self, handle, allowed_endpoints, logger: allowed_endpoints)
     env = {"SFORGE_TOKEN": "fixture", "SFORGE_JUDGE_URL": "http://judge:8080",
+           "SFORGE_FEEDBACK_URL": "http://judge:8080/api/v1/feedback/fixture",
            "HTTPS_PROXY": "http://api-proxy:9090", "SFORGE_PATCH_DIR": "/task"}
     assert backend._agent_environment(env) is env
     assert backend.create_network_isolation(None, [judge, api], None) == [judge, api]
@@ -742,7 +743,8 @@ def test_controller_handoff_cannot_be_partially_enabled(tmp_path, missing):
     assert error.value.code == 2 and not (tmp_path / "runs").exists()
 
 
-def test_checkpoint_supervisor_is_bound_to_container_and_only_solver_execution(tmp_path, monkeypatch):
+@pytest.mark.parametrize("host_callback", [False, True])
+def test_checkpoint_supervisor_is_bound_to_container_and_only_solver_execution(tmp_path, monkeypatch, host_callback):
     pytest.importorskip("sforge")
     pytest.importorskip("harbor")
     from types import SimpleNamespace
@@ -755,7 +757,21 @@ def test_checkpoint_supervisor_is_bound_to_container_and_only_solver_execution(t
                                     oauth_proxy=True, checkpoint=controller, client=SimpleNamespace())
     handle = SimpleNamespace(raw="exact-container")
     monkeypatch.setattr(DockerBackend, "create_container", lambda *a, **kw: handle)
-    backend.create_container("image", "name", environment={"SFORGE_TOKEN": "synthetic"})
+    def current_provider(*, host_registration_callback=None):
+        pass
+    def legacy_provider():
+        pass
+    provider = current_provider if host_callback else legacy_provider
+    options = backend.registration_options(provider)
+    env = {"SFORGE_FEEDBACK_URL": "http://judge/api/v1/feedback/synthetic-relay"}
+    if host_callback:
+        options["host_registration_callback"]("synthetic")
+    else:
+        assert options == {}
+        env["SFORGE_TOKEN"] = "synthetic"
+    original_env = dict(env)
+    backend.create_container("image", "name", environment=env)
+    assert env == original_env, "binding must not inject the host token into worker env"
     backend.execution_command = "solver"
     monkeypatch.setattr(DockerBackend, "exec_run_with_timeout", lambda *a, **kw:
         SimpleNamespace(exit_code=0, timed_out=False, elapsed_seconds=1))
@@ -763,6 +779,30 @@ def test_checkpoint_supervisor_is_bound_to_container_and_only_solver_execution(t
     assert calls == [("bind", "synthetic")]
     backend.exec_run_with_timeout(handle, ["/bin/bash", "-c", "solver"])
     assert calls == [("bind", "synthetic"), ("start", "exact-container"), ("close",)]
+    with pytest.raises(ValueError, match="one native host registration"):
+        backend.bind_registration("another-registration")
+
+
+def test_host_registration_is_opt_in_shared_and_requires_nonempty_token(tmp_path):
+    pytest.importorskip("sforge")
+    pytest.importorskip("harbor")
+    from types import SimpleNamespace
+    from benchmark.runtime.sforge_backend import RecordingDockerBackend
+    backend = RecordingDockerBackend(log_dir=tmp_path, logger=None, oauth_proxy=True,
+                                     client=SimpleNamespace())
+    def provider(*, host_registration_callback=None):
+        pass
+    assert backend.registration_options(provider) == {}, "ordinary official runs retain native behavior"
+    calls = []
+    backend.feedback = SimpleNamespace(bind=lambda env: calls.append(("feedback", env["SFORGE_TOKEN"])))
+    backend.checkpoint = SimpleNamespace(bind=lambda env: calls.append(("checkpoint", env["SFORGE_TOKEN"])))
+    callback = backend.registration_options(provider)["host_registration_callback"]
+    for invalid in (None, "", 1, {}):
+        with pytest.raises(ValueError):
+            callback(invalid)
+    assert calls == [] and not backend.registration_bound
+    callback("synthetic")
+    assert calls == [("feedback", "synthetic"), ("checkpoint", "synthetic")]
 
 
 @pytest.mark.parametrize("protect_fails", [False, True])

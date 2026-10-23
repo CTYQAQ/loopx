@@ -111,8 +111,20 @@ def submit(url, token, score):
         files={"archive": ("candidate.tar.gz", str(score).encode())}, timeout=5)
     if response.status_code == 200:
         identifier = response.json()["submission_id"]
-        wait(lambda: requests.get(url + "/api/v1/result/" + identifier, timeout=5).json()["status"] == "completed")
+        wait(lambda: requests.get(url + "/api/v1/result/" + identifier, params={"token": token}, timeout=5).json()["status"] == "completed")
     return response
+
+
+def test_activation_accepts_only_bound_native_fields_and_valid_optional_relay():
+    body = {"checkpoint_id": "fixture", "manifest_sha256": "a" * 64, "run_id": "branch"}
+    result = {**body, "token": "synthetic-host-token"}
+    transport._activation_result(result, body)
+    transport._activation_result({**result, "feedback_relay_id": "synthetic-relay"}, body)
+    for altered in ({**result, "run_id": "unrelated"}, {**result, "token": ""},
+                    {**result, "unexpected": True}, *(
+                        {**result, "feedback_relay_id": value} for value in (None, "", 1, {}))):
+        with pytest.raises(ValueError):
+            transport._activation_result(altered, body)
 
 
 def test_native_controller_transport_preserves_original_point_and_fresh_authority(controllers, tmp_path, capsys):
@@ -154,7 +166,7 @@ def test_native_controller_transport_preserves_original_point_and_fresh_authorit
     fresh = json.loads(private_result.read_text())["token"]
     assert fresh != token and fresh not in output
     assert private_result.stat().st_mode & 0o077 == 0 and len(grades) == 3
-    history = requests.get(second + "/api/v1/history", params={"token": fresh}, timeout=5).json()
+    history = requests.get(second + "/api/v1/history", params={"token": fresh, "admin_secret": destination.state.judge.admin_secret}, timeout=5).json()
     assert history["best_score"] == 7 and history["best_round"] == "agent-1" and history["agent_submissions"] == 2
     assert submit(second, fresh, 1).status_code == 429
     assert source.state.judge.get_run_history("source", "fixture")["best_score"] == 99
@@ -229,12 +241,12 @@ def test_host_phase_and_native_opportunities_continue_without_offline_refill(
         f"printf '8' > '{candidate}'; printf '%s' \"$remaining\""],
         env={"PATH": str(bin) + ":/usr/bin:/bin"}, capture_output=True, text=True, check=True)
     assert 7180 < int(result.stdout) <= 7200 and candidate.read_bytes() == b"8"
-    history = requests.get(second + "/api/v1/history", params={"token": fresh}, timeout=5).json()
+    history = requests.get(second + "/api/v1/history", params={"token": fresh, "admin_secret": destination.state.judge.admin_secret}, timeout=5).json()
     assert history["agent_submissions"] == 1 and history["best_score"] == 7
     assert submit(second, fresh, 8).status_code == 429
     time.sleep(body["point_metadata"]["native_reference"]["opportunity"]["remaining_cooldown_seconds"] + .05)
     assert submit(second, fresh, float(candidate.read_bytes())).status_code == 200
-    history = requests.get(second + "/api/v1/history", params={"token": fresh}, timeout=5).json()
+    history = requests.get(second + "/api/v1/history", params={"token": fresh, "admin_secret": destination.state.judge.admin_secret}, timeout=5).json()
     assert history["agent_submissions"] == 2 and history["best_round"] == "agent-2" and history["best_score"] == 8
     assert source_phase.read_bytes() == source_bytes
     assert (source.state.judge.tokens, source.state.judge.submissions, source.state.judge.run_history) == before
@@ -266,7 +278,7 @@ def test_explicit_phase_extension_is_first_activation_bound_without_native_refil
     assert started + retained + 64800 - 1 <= deadline <= time.time() + retained + 64800
     binding = json.loads(target.with_name(target.name + ".restore.json").read_text())
     assert binding["binding"]["phase_extension_seconds"] == 64800
-    history = requests.get(second + "/api/v1/history", params={"token": result["token"]}, timeout=5).json()
+    history = requests.get(second + "/api/v1/history", params={"token": result["token"], "admin_secret": destination.state.judge.admin_secret}, timeout=5).json()
     assert history["agent_submissions"] == 1 and history["best_score"] == 7
     assert submit(second, result["token"], 8).status_code == 429
     info = destination.state.judge.tokens[result["token"]]
@@ -622,7 +634,7 @@ def test_real_docker_controller_export_import_and_next_grade(tmp_path, monkeypat
         if response.status_code == 200:
             sid = response.json()["submission_id"]
             report = wait(lambda: (packet if (packet := requests.get(url + "/api/v1/result/" + sid,
-                timeout=10).json())["status"] in {"completed", "error"} else None))
+                params={"token": token}, timeout=10).json())["status"] in {"completed", "error"} else None))
             assert report["status"] == "completed" and report["report"]["score"] == score
         return response
     try:
@@ -733,7 +745,7 @@ def test_real_docker_controller_export_import_and_next_grade(tmp_path, monkeypat
                 finally:
                     guest.remove(force=True)
             assert grade(second, fresh, continued_score).json()["round_id"] == "agent-2"
-            history = requests.get(second + "/api/v1/history", params={"token": fresh}, timeout=5).json()
+            history = requests.get(second + "/api/v1/history", params={"token": fresh, "admin_secret": destination.state.judge.admin_secret}, timeout=5).json()
             assert history["best_score"] == 7 and history["best_round"] == "agent-1"
             assert grade(second, fresh, 99).status_code == 429 and len(grades) == 2
             assert (source.state.judge.tokens, source.state.judge.submissions, source.state.judge.run_history) == before
