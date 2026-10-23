@@ -7,6 +7,7 @@ import {turnScopedCliSettlementPlan} from "../../loopx/control_plane/quota/settl
 
 const input = {
   identity: {goal_id: "goal", agent_id: "agent", todo_id: "todo", turn_instance_id: "turn"},
+  delivery_batch_scale_choices: ["test_only", "single_surface", "multi_surface", "implementation"],
   command_templates: {
     todo_completion: "ordinary completion", durable_writeback: "writeback",
     quota_spend: "spend", terminal_closeout: "terminal completion",
@@ -80,6 +81,10 @@ test("autonomous replan never manufactures a Todo completion step", () => {
 });
 
 test("incomplete command facts or ambiguous identity fail closed", () => {
+  for (const choices of [undefined, [], [""], [1]]) {
+    assert.throws(() => turnScopedCliSettlementPlan({...input, delivery_batch_scale_choices: choices}),
+      /must be an array of strings|must be a non-empty string/);
+  }
   for (const key of ["todo_completion", "durable_writeback", "quota_spend", "terminal_closeout"]) {
     assert.throws(() => turnScopedCliSettlementPlan({...input,
       command_templates: {...input.command_templates, [key]: ""},
