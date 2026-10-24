@@ -4,6 +4,10 @@ from __future__ import annotations
 import copy
 import json
 import shlex
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +25,13 @@ from test_replan_progress_native_cli import (
 
 def json_bytes(value):
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def without_example(contract):
+    expected = copy.deepcopy(contract)
+    if "vision_authoring" in expected:
+        expected["vision_authoring"].pop("minimal_example")
+    return expected
 
 
 @pytest.mark.parametrize("stride", ["off", "evidence_conditioned_v1"])
@@ -50,16 +61,19 @@ def test_staged_packet_budget_and_lossless_authority(stride):
     assert review["coverage_count"] == context["coverage_count"]
     assert review["coverage_truncated"] == context["coverage_truncated"]
     assert [row["evidence_ref"] for row in review["evidence"]] == [row["evidence_ref"] for row in context["evidence"]]
-    assert writer["writeback_contract"] == source["replan_action_packet"]["writeback_contract"]
+    assert writer["writeback_contract"] == without_example(source["replan_action_packet"]["writeback_contract"])
     assert writer["allowed_terminal"] == source["replan_action_packet"]["allowed_terminal"]
     assert review["context_id"] == writer["context_id"] == context["context_id"]
     assert json_bytes(review) <= 16384
-    assert len(review["guidance"].encode()) <= 512
+    assert "guidance" not in review
     assert json_bytes(writer) <= 16384
     if stride != "off":
         control = writer["stride_control"]
         assert control["previous_decision_ref"] == source["replan_action_packet"]["stride_control"]["previous_decision_ref"]
         assert "decision_followthrough" not in control and "decision_value_review" not in control
+        assert "minimal_example" not in control
+        assert control["basis_options"] == ["supported_progress", "unexplained_gap", "uncertain_evidence", "useful_new_route", "decision_failure"]
+        assert {"basis", "action", "axes", "next_probe"} <= set(control["required_fields"])
     assert source == original
 
 
@@ -96,7 +110,10 @@ def test_real_guard_capture_read_and_writeback_without_another_guard(tmp_path, m
         initial = call_progress_cli(fixture, "quota", "should-run", "--codex-app",
             "--goal-id", GOAL, "--agent-id", AGENT, "--turn-instance-id", TURN)
         assert initial["decision"] == "autonomous_replan_required"
-        guard = call_progress_cli(fixture, "quota", "should-run", "--codex-app",
+        # Exercise the emitted command verbatim even with a hostile ambient
+        # PATH entry. The captured reader belongs to the originating checkout.
+        pinned_cli = str(Path(sys.executable).with_name("loopx"))
+        guard = call_progress_cli(fixture, "--cli-bin", pinned_cli, "quota", "should-run", "--codex-app",
             "--goal-id", GOAL, "--agent-id", AGENT, "--turn-instance-id", TURN,
             "--todo-id", TODO, "--decision-output-dir", str(capture),
             *(["--turn-envelope"] if envelope else []))
@@ -106,15 +123,23 @@ def test_real_guard_capture_read_and_writeback_without_another_guard(tmp_path, m
         original_files = {key: fixture[key].read_bytes() for key in ("registry", "state", "index")}
         # Executable commands come from the production packet. Deliberately use
         # an absent registry: the reader must never collect state or re-admit.
+        trap = tmp_path / "bin"
+        trap.mkdir()
+        (trap / "loopx").write_text("#!/bin/sh\nexit 73\n")
+        (trap / "loopx").chmod(0o700)
         reader_fixture = {**fixture, "registry": tmp_path / "missing-registry.json"}
         def read(stage, expected_code=0):
             args = shlex.split(packet[stage])
-            assert args[:3] == ["loopx", "--format", "json"]
-            return call_progress_cli(reader_fixture, *args[3:], expected_code=expected_code)
+            assert args[:3] == [pinned_cli, "--cli-bin", pinned_cli]
+            result = subprocess.run([args[0], "--registry", str(reader_fixture["registry"]), *args[1:]],
+                cwd=fixture["project"], env={**os.environ, "PATH": str(trap) + os.pathsep + os.environ["PATH"],
+                    "LOOPX_USAGE_PING": "0"}, capture_output=True, text=True, timeout=60)
+            assert result.returncode == expected_code, (result.stdout, result.stderr)
+            return json.loads(result.stdout)
         review, writer = read("review"), read("writeback")
         assert review["context_id"] == writer["context_id"]
         assert review["obligation_id"] == source["replan_action_packet"]["obligation_id"]
-        assert writer["writeback_contract"] == source["replan_action_packet"]["writeback_contract"]
+        assert writer["writeback_contract"] == without_example(source["replan_action_packet"]["writeback_contract"])
         assert (capture / "decision.json").read_bytes() == saved
         assert {key: fixture[key].read_bytes() for key in original_files} == original_files
         assert not reader_fixture["registry"].exists()

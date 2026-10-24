@@ -469,7 +469,10 @@ def _emit_quota_result(
         )
     bind_capture_selection_transport(payload, args)
     if capture_directory is not None and payload.get("replan_action_packet"):
-        payload = {**payload, "replan_read_path": str(capture_directory / "decision.json")}
+        from ..command_invocation import loopx_cli_argv
+
+        payload = {**payload, "replan_read_path": str(capture_directory / "decision.json"),
+            "replan_read_argv": loopx_cli_argv()}
     try:
         capture_decision(capture_directory, payload)
         if payload.get("ok") is True:

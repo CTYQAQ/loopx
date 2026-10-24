@@ -297,7 +297,13 @@ function replanReadCommands(payload: JsonObject): JsonObject | null {
   const packet = object(payload.replan_action_packet);
   if (typeof path !== "string" || !path.trim() || path.includes("\0") || payload.ok !== true ||
       !packet.obligation_id || packet.settlement_only === true) return null;
-  const command = `loopx --format json quota replan-view --decision-file ${shellQuote(path)}` +
+  // Retain the renderer's executable across reads. A different ambient LoopX
+  // may not understand this captured contract. Legacy captures keep their route.
+  const argv = payload.replan_read_argv ?? ["loopx"];
+  if (!Array.isArray(argv) || !argv.length || argv.some(arg => typeof arg !== "string" || !arg || /[\x00-\x1f]/.test(arg))) {
+    throw new EffectRuntimeRequestError("captured replan CLI route is malformed");
+  }
+  const command = `${argv.map(arg => shellQuote(arg as string)).join(" ")} --format json quota replan-view --decision-file ${shellQuote(path)}` +
     ` --source-hash ${canonicalHash(payload)}`;
   return {review: `${command} --replan-stage review`, writeback: `${command} --replan-stage writeback`,
     acceptance: `${command} --replan-stage acceptance`, explore: `${command} --replan-stage explore`};
@@ -318,6 +324,7 @@ function replanView(request: JsonObject): JsonObject {
     obligation_id: packet.obligation_id, context_id: context.context_id, source_hash: request.source_hash,
     stage: request.stage};
   const reads = replanReadCommands(payload);
+  const sourceRead = reads ? {source_read: `cat -- ${shellQuote(payload.replan_read_path as string)}`} : {};
   const outcomes = new Map<string, JsonObject>();
   function indexedGoal(value: unknown): JsonObject {
     const core = {...object(value)};
@@ -353,8 +360,14 @@ function replanView(request: JsonObject): JsonObject {
     // Preserve executable shape and all settlement rules; decision advice and
     // duplicate context are available in the unchanged full captured source.
     const stride = {...object(packet.stride_control)};
-    for (const key of ["decision_followthrough", "explore_basis", "decision_value_review"]) delete stride[key];
-    return {...common, writeback_contract: packet.writeback_contract,
+    for (const key of ["decision_followthrough", "explore_basis", "decision_value_review", "minimal_example"]) delete stride[key];
+    const contract = {...object(packet.writeback_contract)};
+    if (contract.vision_authoring) {
+      const authoring = {...object(contract.vision_authoring)};
+      delete authoring.minimal_example;
+      contract.vision_authoring = authoring;
+    }
+    return {...common, ...sourceRead, writeback_contract: contract,
       required_outcome: packet.required_outcome, allowed_terminal: packet.allowed_terminal,
       ...(packet.stride_control ? {stride_control: stride} : {}),
       writeback: actionProjection(payload).writeback,
@@ -400,9 +413,8 @@ function replanView(request: JsonObject): JsonObject {
     omitted_evidence: context.omitted_evidence ?? null,
     evidence_read_action_template: context.evidence_read_action_template ?? null,
     uncovered_frontier: context.uncovered_frontier,
-    guidance: "Compare the goal, prior decision and actual results; distinguish scoped dependencies from independent feasible work. " +
-      "Read applicable acceptance and evidence by their source references; choose useful work within existing authority and budget. " +
-      "Missing evidence stays unknown; no pivot is required.",
+    // Facts and their provenance are the review input. Do not preselect a
+    // diagnostic method, candidate route or judgment from observation counts.
     next: {writeback: replanReadCommands(payload)?.writeback ?? null},
   };
 }
@@ -413,7 +425,7 @@ function replanActionPacket(payload: JsonObject): JsonObject | null {
   const reads = replanReadCommands(payload);
   if (reads) return {...compactFields(source, ["schema_version", "decision", "obligation_id", "required_outcome", "allowed_terminal"]),
     review: reads.review, writeback: reads.writeback,
-    guidance: "Read review state, choose the next work, then read its writeback format. These reads reuse this decision; they grant no new authority."};
+    guidance: "Read review state and applicable acceptance/evidence before deciding; writeback supplies the format. Reads grant no new authority and require no acknowledgement."};
   const compact = compactFields(source, [
     "schema_version", "decision", "obligation_id", "uncovered_frontier",
     "required_outcome", "allowed_terminal", "bounded_frontier", "settlement_only", "successor_todo_id", "stride_control",

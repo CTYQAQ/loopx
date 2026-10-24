@@ -88,6 +88,16 @@ second supplies the existing authoring shape and settlement commands. No read
 runs another guard, writes a receipt or authorizes work. There is no additional
 read acknowledgement, mandatory model call or prescribed route change.
 
+Captured reads retain the caller's explicit `--cli-bin` route, including later
+acceptance and Explore reads; an ambient executable cannot silently replace it.
+The review stage provides structured facts without a prescribed diagnostic
+method. Writeback omits filled-in Vision/stride examples while retaining field
+limits, legal options, source bindings and settlement rules. Stride exposes its
+required field names and basis options independently of examples. The unchanged
+full capture remains available for optional examples and source inspection.
+This intentionally reduces advisory prompting; it does not remove acceptance,
+authority or stop obligations, nor demonstrate better autonomous decisions.
+
 Cumulative outcome requirements are indexed by exact content hash. Every
 objective, revision and requirement count remains visible; the acceptance read
 returns the complete original outcome. Identical IDs with different revisions
@@ -113,6 +123,12 @@ TurnEnvelope 先给出 `review` 状态读取，再给出 `writeback` 格式读�
 读取；不可用保持不可用。完整快照仍保存原指导、示例和证据。没有捕获或没有 CLI
 读取路径的原生 journal 保持原交付方式。通用执行回顾不再依赖 stride 开关；分类
 计数只表示观测，不等于工作成功或目标收益。
+
+捕获后的读取沿用调用方显式选择的 `--cli-bin`，后续验收和 Explore 读取也不会
+悄悄切换到环境中的其他版本。复盘视图提供结构化事实，不预设诊断方法；写回视图
+移除预填的 Vision／stride 答案示例，保留字段限制、合法选项、来源绑定和结算规则。
+stride 的必需字段与 basis 选项独立展示，完整快照仍可用于按需查看示例与源材料。
+这是有意减少建议性提示，不删除验收、权限或停止义务，也不证明自主决策质量提升。
 
 Regression budgets use compact UTF-8 JSON, separately from compute quota and
 provider tokens. The synthetic workload uses a real append index with 1,500
