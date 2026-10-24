@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -411,6 +412,9 @@ def _project_quota_cli_payload(
         if args.quota_command in {"status", "plan"}:
             return compact_quota_plan_cli_payload(payload, detail_sections=detail_sections)
         if args.quota_command == "should-run":
+            if captured_decision_path and "vision" not in detail_sections:
+                from ..control_plane.quota.turn_envelope import _turn_envelope_result
+                payload = _turn_envelope_result("replan_cli_view", payload=payload)
             return compact_quota_should_run_cli_payload(
                 payload,
                 include_todo_summary_detail="agent-todos" in detail_sections,
@@ -464,6 +468,8 @@ def _emit_quota_result(
             started_at=usage_quota_started,
         )
     bind_capture_selection_transport(payload, args)
+    if capture_directory is not None and payload.get("replan_action_packet"):
+        payload = {**payload, "replan_read_path": str(capture_directory / "decision.json")}
     try:
         capture_decision(capture_directory, payload)
         if payload.get("ok") is True:
@@ -504,6 +510,14 @@ def handle_quota_command(
     append_cli_rollout_event: RolloutEventAppender,
     capture_directory: Path | None = None,
 ) -> int:
+    if args.quota_command == "replan-view":
+        from .quota_capture import read_replan_view
+        try:
+            view = read_replan_view(args)
+        except (OSError, ValueError, EffectRuntimeRejected) as exc:
+            view = {"ok": False, "reason": str(exc)}
+        print_payload(view, args.format, lambda value: json.dumps(value, ensure_ascii=False, indent=2))
+        return 0 if view["ok"] else 1
     usage_quota_started = time.time_ns() // 1_000_000
     heartbeat_turn_id: str | None = None
     heartbeat_receipt_existing: dict[str, object] | None = None

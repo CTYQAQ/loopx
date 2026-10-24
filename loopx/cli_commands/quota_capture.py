@@ -123,3 +123,16 @@ def handoff_decision(directory: Path | None, socket_path: str | None) -> None:
             "Decision handoff failed after guard evaluation; inspect the original "
             f"Turn receipt and {path}. Do not blindly rerun the guard."
         ) from exc
+
+
+def read_replan_view(args: argparse.Namespace) -> dict:
+    """Read a captured observation only; no registry, provider, guard or receipts."""
+    from ..control_plane.quota.turn_envelope import _turn_envelope_result
+
+    if not args.decision_file or not args.source_hash:
+        raise ValueError("replan-view requires --decision-file and --source-hash")
+    path = Path(args.decision_file).expanduser()
+    with path.open(encoding="utf-8") as stream:
+        payload = json.load(stream)
+    return _turn_envelope_result("replan_view", payload=payload, source_hash=args.source_hash,
+                                 stage=args.replan_stage, outcome_ref=args.outcome_ref)
