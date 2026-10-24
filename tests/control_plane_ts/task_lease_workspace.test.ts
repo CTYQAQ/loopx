@@ -286,6 +286,22 @@ test("scope comparison folds case aliases without rewriting retained or request 
     right: ["src/_x"],
   }).overlap, true);
   assert.equal(evaluateTaskLeaseWriteScopesOverlap({
+    left: ["src/[A-b]x"],
+    right: ["src/cx"],
+  }).overlap, true);
+  assert.equal(evaluateTaskLeaseWriteScopesOverlap({
+    left: ["src/[!A-b]x"],
+    right: ["src/cx"],
+  }).overlap, false);
+  assert.equal(evaluateTaskLeaseWriteScopesOverlap({
+    left: ["src/Main/"],
+    right: ["src/main/file.ts"],
+  }).overlap, true);
+  assert.equal(evaluateTaskLeaseWriteScopesOverlap({
+    left: ["src/Main/[a-z]*.ts"],
+    right: ["src/main/[A-Z]*.ts"],
+  }).overlap, true);
+  assert.equal(evaluateTaskLeaseWriteScopesOverlap({
     left: ["src/Main.ts"],
     right: ["docs/main.ts"],
   }).overlap, false);

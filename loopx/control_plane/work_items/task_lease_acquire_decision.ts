@@ -151,19 +151,24 @@ function classMatch(
   let body = pattern.slice(start + 1, end);
   const negated = body.startsWith("!");
   if (negated) body = body.slice(1);
-  const foldedValue = foldCase ? value.toLowerCase() : value;
-  let matches = false;
-  for (let index = 0; index < body.length; index += 1) {
-    if (index + 2 < body.length && body[index + 1] === "-") {
-      if ((body[index] <= value && value <= body[index + 2]) ||
-          (foldCase && body[index].toLowerCase() <= foldedValue &&
-            foldedValue <= body[index + 2].toLowerCase())) matches = true;
-      index += 2;
-    } else if (body[index] === value ||
-        (foldCase && body[index].toLowerCase() === foldedValue)) {
-      matches = true;
+  const contains = (candidate: string) => {
+    for (let index = 0; index < body.length; index += 1) {
+      if (index + 2 < body.length && body[index + 1] === "-") {
+        if (body[index] <= candidate && candidate <= body[index + 2]) return true;
+        index += 2;
+      } else if (body[index] === candidate) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const candidates = new Set([value]);
+  if (foldCase) {
+    for (const candidate of [value.toLowerCase(), value.toUpperCase()]) {
+      if (candidate.length === 1) candidates.add(candidate);
     }
   }
+  const matches = [...candidates].some(contains);
   return { end, matches: negated ? !matches : matches };
 }
 
