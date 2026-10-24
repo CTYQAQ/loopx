@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import selectors
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,12 @@ class HostError(Exception):
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
+
+
+# LoopX chat surfaces keep a Codex app-server attached to the GPT home while
+# idle. They are product-owned clients of that home, so an unattended handoff
+# pauses them instead of treating them as an unrelated CLI hold.
+CHAT_AGENTS = ("com.loopx.personal-bots.chat",)
 
 
 # Address one inspected process, not an App bundle id shared by other routes.
@@ -215,6 +222,52 @@ class NativeHost:
         self.apps.open_app(self.home, "gpt", [])
         return self.status()
 
+    def _home_owners(self) -> list[int]:
+        result = subprocess.run(["/usr/sbin/lsof", "-Fp", "+d", str(self.spec["home"])],
+                                capture_output=True, text=True, timeout=10)
+        if result.returncode not in (0, 1):
+            raise HostError("ownership_unverified")
+        return [int(line[1:]) for line in result.stdout.splitlines()
+                if line.startswith("p") and line[1:].isdigit()]
+
+    def retire_app_helpers(self) -> None:
+        """Stop orphaned App-bundle helpers that still hold the GPT home."""
+        bundle = str(self.apps.app_bundle(self.spec, "gpt", self.home))
+        for pid in self._home_owners():
+            try:
+                command = subprocess.run(["/bin/ps", "-o", "command=", "-p", str(pid)],
+                                         capture_output=True, text=True, timeout=5)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if not command.stdout.strip().startswith(bundle + "/"):
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+
+    def pause_chat_agents(self) -> list[Path]:
+        """Unload known chat agents that keep this home attached while idle."""
+        stopped = []
+        for label in CHAT_AGENTS:
+            plist = self.home / "Library/LaunchAgents" / f"{label}.plist"
+            if not plist.is_file():
+                continue
+            target = f"gui/{os.getuid()}/{label}"
+            loaded = subprocess.run(["/bin/launchctl", "print", target],
+                                    capture_output=True, text=True, timeout=10)
+            if loaded.returncode != 0:
+                continue
+            subprocess.run(["/bin/launchctl", "bootout", target],
+                           capture_output=True, text=True, timeout=20)
+            stopped.append(plist)
+        return stopped
+
+    def resume_chat_agents(self, plists: list[Path]) -> None:
+        for plist in plists:
+            subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)],
+                           capture_output=True, text=True, timeout=20)
+
     def switch(self, slot: str, expected: str, *, reopen: bool, restart_clients: bool = False,
                force_quit_clients: bool = False, not_after: float | None = None) -> dict:
         if sys.platform != "darwin":
@@ -227,36 +280,47 @@ class NativeHost:
         # idle() is rechecked by the native owner under launch/account locks,
         # and immediately before its first mutation. This is the CAS fence,
         # including against manual selections outside LoopX.
+        paused: list[Path] = []
         try:
-            if restart_clients:
-                if not_after is not None and time.time() >= not_after:
-                    raise HostError("quota_stale")
-                self.close_client(expected, **({"force": True} if force_quit_clients else {}))
-                # Children may flush and exit just after their App root. An
-                # unrelated CLI/file owner remains a hold, never a kill target.
-                deadline = time.monotonic() + 10
-                while True:
+            try:
+                if restart_clients:
+                    if not_after is not None and time.time() >= not_after:
+                        raise HostError("quota_stale")
+                    self.close_client(expected, **({"force": True} if force_quit_clients else {}))
+                    # Orphaned App helpers and idle chat transports are
+                    # product-owned clients of this home. Retire or pause them;
+                    # an unrelated CLI/file owner remains a hold, never a kill
+                    # target.
+                    self.retire_app_helpers()
+                    paused = self.pause_chat_agents()
+                    deadline = time.monotonic() + 15
+                    while True:
+                        try:
+                            self.manager.idle()
+                            break
+                        except HostError as error:
+                            if error.code != "waiting_for_idle":
+                                raise
+                            if time.monotonic() >= deadline:
+                                raise HostError("other_clients_busy") from None
+                            self.retire_app_helpers()
+                            time.sleep(0.2)
+                result = self.manager.switch(slot)
+            except Exception as error:
+                # A refused/failed transaction must not unnecessarily leave a
+                # normally closed source App down. Native preflight blocks
+                # opening an incomplete credential journal; a later manual
+                # choice wins.
+                if restart_clients and before.get("client_running"):
                     try:
-                        self.manager.idle()
-                        break
-                    except HostError as error:
-                        if error.code != "waiting_for_idle":
-                            raise
-                        if time.monotonic() >= deadline:
-                            raise HostError("other_clients_busy") from None
-                        time.sleep(0.2)
-            result = self.manager.switch(slot)
-        except Exception as error:
-            # A refused/failed transaction must not unnecessarily leave a
-            # normally closed source App down. Native preflight blocks opening
-            # an incomplete credential journal; a later manual choice wins.
-            if restart_clients and before.get("client_running"):
-                try:
-                    if self.status().get("client_running") is False:
-                        self.reopen(expected)
-                except (HostError, OSError, ValueError, subprocess.SubprocessError):
-                    pass
-            raise
+                        if self.status().get("client_running") is False:
+                            self.reopen(expected)
+                    except (HostError, OSError, ValueError, subprocess.SubprocessError):
+                        pass
+                raise
+        finally:
+            # Restore product-owned transports even when the handoff fails.
+            self.resume_chat_agents(paused)
         value = self.status()
         if value["active_slot"] != slot or value["current_login_matches"] is not True:
             raise HostError("readback_failed")
