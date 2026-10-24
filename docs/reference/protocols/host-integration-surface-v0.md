@@ -381,6 +381,9 @@ replacement unknown until a subsequent observation recovers the new source.
 Windows `os.replace` uses a different operation that cannot overwrite an open
 destination even with delete sharing; the native rotation fixture uses
 [`ReplaceFile`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew).
+Visible conversation paging and content reads reuse the same read-only transport.
+An in-progress read retains its opened snapshot; the next page detects the new
+source identity and resets its cursor, while old content references are rejected.
 
 These are provider IO/cache changes under the existing host activity contract,
 not a new execution authority, scheduler, model call or configurable capability.

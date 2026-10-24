@@ -72,6 +72,55 @@ def replace_rollout(replacement, path):
         raise ctypes.WinError(ctypes.get_last_error())
 
 
+@pytest.mark.parametrize("reader", ["messages", "content"])
+def test_visible_history_read_does_not_block_native_rollout_rotation(
+    tmp_path, monkeypatch, reader
+):
+    from loopx.capabilities.native_chat import codex_history as history
+
+    path, replacement = tmp_path / "rollout.jsonl", tmp_path / "replacement.jsonl"
+
+    def message(text):
+        return encode({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "assistant", "channel": "final",
+                        "content": [{"type": "output_text", "text": text}]},
+        })
+
+    path.write_bytes(message("Original visible result"))
+    replacement.write_bytes(message("Replacement visible result"))
+    previous = history.read_messages(path)
+    row = previous["messages"][0]
+    content_args = dict(entry_id=int(row["id"]), offset=0,
+                        expected_source=previous["source_ref"],
+                        content_ref=row["content_ref"])
+    original_display = history._display_record
+    rotations = []
+
+    def display(raw):
+        # Both production readers still own their source handle here; the
+        # message reader also owns a real read-only mmap of the old snapshot.
+        replace_rollout(replacement, path)
+        rotations.append(True)
+        return original_display(raw)
+
+    with monkeypatch.context() as during_read:
+        during_read.setattr(history, "_display_record", display)
+        if reader == "messages":
+            snapshot = history.read_messages(path)["messages"][0]
+        else:
+            snapshot = history.read_content(path, **content_args)
+        assert snapshot["text"] == "Original visible result"
+    assert rotations == [True]
+    current = history.read_messages(
+        path, after=previous["after"], expected_source=previous["source_ref"]
+    )
+    assert current["reset"] is True
+    assert [row["text"] for row in current["messages"]] == ["Replacement visible result"]
+    with pytest.raises(ValueError, match="History source changed"):
+        history.read_content(path, **content_args)
+
+
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     root = tmp_path / "host"
