@@ -98,6 +98,22 @@ def test_authored_alias_declaration_can_be_claimed_without_revision(scope_goal):
     assert cli("todo", "list", "--todo-id", todo_id)["todo"]["required_write_scopes"] == ALIASES
 
 
+def test_case_aliases_remain_exclusive_write_scopes(scope_goal):
+    cli, current = scope_goal
+    acquire = ("task-lease", "acquire", "--todo-id", "todo_scope_a", "--owner", "agent-a",
+        "--idempotency-key", "case-a", "--expected-version", "0", "--write-scope", "src/Main.ts")
+    assert cli(*acquire)["acquired"]
+    assert cli(*acquire)["idempotent"]
+    changed = cli(*acquire[:-1], "src/main.ts", expected_exit=1)
+    assert changed["error_code"] == "coordination_operation_identity_mismatch"
+    before = current()
+    rejected = cli("task-lease", "acquire", "--todo-id", "todo_scope_b", "--owner", "agent-b",
+        "--idempotency-key", "case-b", "--expected-version", "0", "--write-scope", "src/main.ts",
+        expected_exit=1)
+    assert rejected["error_code"] == "write_scope_conflict"
+    assert current() == before
+
+
 @pytest.mark.parametrize("scope,target", [
     ("src/[]/./]x", "src/.x"),
     ("src/[]/./]x", "src/]x"),
