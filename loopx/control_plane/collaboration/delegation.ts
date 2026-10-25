@@ -1,7 +1,7 @@
 /** Explicit local execution bindings. Registration/messages alone grant no launch.
  * These are host observations; canonical task/Turn/acceptance remain authoritative. */
 import type {JsonObject} from "../effect_program.ts";
-import {requireInteger, requireJsonObject, requireStringArray} from "../runtime_decode.ts";
+import {jsonObject, requireInteger, requireJsonObject, requireStringArray} from "../runtime_decode.ts";
 import {EffectRuntimeRequestError} from "../effect_runtime_errors.ts";
 import {canonicalAuthoritySha256} from "../coordination/authority_store_codec.ts";
 import {acceptanceValidationEffects, goalAcceptanceTodoDigest, type AcceptanceCompletionRequirements} from "../goals/acceptance_contract.ts";
@@ -10,12 +10,51 @@ import {readTurnSelectionRejection, turnSelectionRejectionState} from "../turn_d
 import { BARE_SHA256_PATTERN, ENVELOPED_SHA256_PATTERN } from "../content_digest.ts";
 import {PROJECTION_ENVELOPE_SEAL_REQUEST, sealProjectionEnvelope} from "../projection_envelope.ts";
 import {normalizeCollaborationBrief, planCollaborationRequestPublication} from "./semantic_request.ts";
+import {findDelegationTurnJournal} from "../turn_driver/turn_journal_query.ts";
 
 function requireThat(ok: unknown, message: string): asserts ok {
   if (!ok) throw new EffectRuntimeRequestError(message);
 }
 function text(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 4096;
+}
+
+function revalidatedStatus(params: JsonObject, turnKey: unknown): JsonObject {
+  if (params.revalidated_result == null) return {};
+  const receipt = requireJsonObject(params.revalidated_result, "revalidated Turn receipt");
+  const lineage = jsonObject(receipt.lineage);
+  const intent = jsonObject(params.validation_failure);
+  return {revalidated_status: recoverRevalidatedDelegation({
+    from: params.status,
+    original_task_failure: intent?.stage === "task_postcondition"
+      && intent.turn_key === receipt.turn_key && receipt.turn_key === turnKey
+      && lineage?.goal_id === params.goal_id && lineage?.agent_id === params.agent_id
+      && lineage?.todo_id === params.todo_id,
+    committed_progress: receipt.result_kind === "validated_progress",
+    host_reinvoked: receipt.host_reinvoked,
+  }).status};
+}
+
+export async function delegationTurnRecovery(params: JsonObject): Promise<JsonObject> {
+  const evidence = await findDelegationTurnJournal(params);
+  const recovery = jsonObject(evidence.recovery);
+  const turnKey = evidence.turn_key;
+  return {
+    turn_key: turnKey,
+    task_failure: recovery?.task_failure ?? null,
+    committed_revalidation: jsonObject(params.validation_failure)?.turn_key === turnKey
+      && recovery?.status === "committed" && recovery?.result_kind === "validated_progress",
+    validated_settlement: recovery?.validated_settlement === true,
+    completed_phases: recovery?.completed_phases ?? null,
+    task_validation_ok: recovery?.task_validation_ok === true,
+    ...(recovery?.task_validation_ok === true ? {task_validation: {ok: true}} : {}),
+    ...(recovery?.host_result_turn_key === turnKey ? {host_result: {
+      turn_key: turnKey, result_kind: recovery?.host_result_kind,
+    }} : {}),
+    status: recovery?.status ?? null,
+    result_kind: recovery?.result_kind ?? null,
+    ...revalidatedStatus(params, turnKey),
+  };
 }
 
 /** The canonical acceptance reader resolves owner scope before this plan.

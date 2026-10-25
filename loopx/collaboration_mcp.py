@@ -37,10 +37,7 @@ from .control_plane.effect_runtime import (
 )
 from .control_plane.coordination.local_authority import local_authority_is_promoted
 from .control_plane.runtime.validation_command import noninteractive_validation
-from .control_plane.turn_driver.journal_store import (
-    load_turn_journal,
-    turn_journal_path,
-)
+from .control_plane.turn_driver.journal_store import turn_journal_path
 from .control_plane.turn_driver.host_binding import turn_host_arg_option
 from .control_plane.turn_driver.host_process_transport import (
     HOST_PROCESS_DRAINING, HOST_PROCESS_RECORD_ENV,
@@ -812,11 +809,13 @@ class Delegations:
             binding = self._bound(row, require_active=True)
             if row["status"] != "rejected":
                 raise ValueError("revalidation requires the original independent task failure")
-            failure = delegation_validation.task_failure(self, row, binding)
+            inspection = delegation_validation.turn_recovery(self, row, binding)
+            failure = inspection["task_failure"]
             if failure is None:
                 # A previous recheck may have committed before its response or
                 # projection write arrived. Reconcile that same execution first.
-                recovered = delegation_validation.recover_validated_settlement(self, path, row, binding)
+                recovered = delegation_validation.recover_validated_settlement(
+                    self, path, row, binding, inspection=inspection)
                 if not recovered:
                     raise ValueError("revalidation requires the original independent task failure")
             else:
@@ -900,9 +899,10 @@ class Delegations:
         if row.get("error"):
             result["error"] = row["error"]
         if row["status"] == "rejected":
-            if not active and stop is None and delegation_validation.committed_revalidation_key(self, row, binding) is not None:
+            inspection = delegation_validation.turn_recovery(self, row, binding)
+            if not active and stop is None and inspection["committed_revalidation"]:
                 result["recovery_required"] = True
-            failure = delegation_validation.task_failure(self, row, binding)
+            failure = inspection["task_failure"]
             if failure is not None:
                 result["task_failure"] = failure
         return result
@@ -1021,11 +1021,7 @@ class Delegations:
             return False, state
 
     def _turn_journal_status(self, row: dict, binding: dict) -> str | None:
-        turn_key = row.get("turn_key") or delegation_validation.matching_turn_key(self, row, binding)
-        if not turn_key:
-            return None
-        journal = load_turn_journal(turn_journal_path(self.root, goal_id=self.goal_id, turn_key=turn_key))
-        status = journal.get("status") if isinstance(journal, dict) else None
+        status = delegation_validation.turn_recovery(self, row, binding)["status"]
         return str(status) if status else None
 
     def _new_stop_record(self, row: dict, *, requested_by: str, worker: dict | None) -> dict:

@@ -6,6 +6,7 @@ import test, { type TestContext } from "node:test";
 
 import { EffectRuntimeConflictError, EffectRuntimeRequestError } from "../../loopx/control_plane/effect_runtime_errors.ts";
 import { commitTurnJournal } from "../../loopx/control_plane/turn_driver/turn_journal_effects.ts";
+import { delegationTurnRecovery } from "../../loopx/control_plane/collaboration/delegation.ts";
 import { findTurnJournalBySettlement, readTurnJournalCapabilities } from "../../loopx/control_plane/turn_driver/turn_journal_query.ts";
 
 const phases = ["host_execute", "typed_result", "validation", "durable_writeback", "quota_spend", "scheduler_apply", "scheduler_ack"];
@@ -75,6 +76,34 @@ test("real writer prefixes remain discoverable; only terminal history lends capa
     assert.deepEqual(await readFile(path), before);
     assert.deepEqual(await readdir(directory), files);
   }
+});
+
+test("delegation recovery gets the validated journal decision from one typed read", async t => {
+  const { root, path } = await fixture(t);
+  const value = journal();
+  Object.assign(value, {
+    status: "in_progress",
+    result_kind: "validated_progress",
+    completed_phases: ["host_execute", "typed_result", "validation"],
+    task_validation: {ok: true},
+    host_result: {turn_key: key, result_kind: "validated_progress"},
+  });
+  await writeFile(path, JSON.stringify(value));
+
+  assert.deepEqual(await delegationTurnRecovery({
+    runtime_root: root, ...selector, status: "rejected",
+  }), {
+    turn_key: key,
+    task_failure: null,
+    committed_revalidation: false,
+    validated_settlement: true,
+    completed_phases: ["host_execute", "typed_result", "validation"],
+    task_validation_ok: true,
+    task_validation: {ok: true},
+    host_result: {turn_key: key, result_kind: "validated_progress"},
+    status: "in_progress",
+    result_kind: "validated_progress",
+  });
 });
 
 test("capability evidence is bound to the current exact GoalRef", async t => {

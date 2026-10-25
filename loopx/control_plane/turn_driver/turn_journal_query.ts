@@ -22,10 +22,12 @@ import {
   interpretTurnJournal,
   parseTurnJournalGoalBinding,
 } from "./turn_journal.ts";
+import { taskValidationFailure } from "./task_validation_failure.ts";
 
 interface JournalEvidence {
   turn_key: string;
   observed_capabilities: string[] | null;
+  journal: JsonObject;
 }
 
 function decodeIdentity(value: unknown): BoundSettlementIdentity {
@@ -122,11 +124,13 @@ function evidenceForJournal(
   if (!inspection.journal_consistent) {
     journalConflict(`Turn journal history is inconsistent: ${inspection.violations.join(", ")}`);
   }
-  return {
+  const evidence: JournalEvidence = {
     turn_key: turnKey,
     observed_capabilities: inspection.replay_legal
       ? observedCapabilities(jsonObject(plan?.turn_envelope) ?? {}) : null,
+    journal: journal!,
   };
+  return evidence;
 }
 
 async function querySettlementJournal(
@@ -191,6 +195,48 @@ export async function findTurnJournalBySettlement(params: JsonObject): Promise<{
   }));
   const evidence = await querySettlementJournal(params.runtime_root, identity, null);
   return { turn_key: evidence?.turn_key ?? null };
+}
+
+/** One bounded read for delegation recovery; no second Python journal parse. */
+function delegationTaskFailure(journal: JsonObject): unknown {
+  return taskValidationFailure({
+    result_kind: journal.result_kind, status: journal.status,
+    receipt: journal.receipt, validation: journal.task_validation,
+    ...(Object.hasOwn(journal, "validation_stage") ? {validation_stage: journal.validation_stage} : {}),
+  }).failure;
+}
+
+function delegationRecoveryFacts(journal: JsonObject, turnKey: string): JsonObject {
+  const validation = jsonObject(journal.task_validation);
+  const hostResult = jsonObject(journal.host_result);
+  return {
+    status: journal.status ?? null,
+    result_kind: journal.result_kind ?? null,
+    task_failure: delegationTaskFailure(journal),
+    completed_phases: journal.completed_phases,
+    validated_settlement: journal.status === "in_progress"
+      && journal.result_kind === "validated_progress"
+      && JSON.stringify(journal.completed_phases) === JSON.stringify(["host_execute", "typed_result", "validation"])
+      && validation?.ok === true && hostResult?.turn_key === turnKey
+      && hostResult?.result_kind === "validated_progress",
+    task_validation_ok: validation?.ok === true,
+    host_result_turn_key: hostResult?.turn_key === turnKey ? turnKey : null,
+    host_result_kind: hostResult?.result_kind === "validated_progress" ? "validated_progress" : null,
+  };
+}
+
+export async function findDelegationTurnJournal(params: JsonObject): Promise<JsonObject> {
+  const identity = decodeIdentity(settlementIdentityPayload({
+    goal_id: requireNonEmptyString(params.goal_id, "goal_id"),
+    agent_id: requireNonEmptyString(params.agent_id, "agent_id"),
+    todo_id: requireNonEmptyString(params.todo_id, "todo_id"),
+    turn_instance_id: requireNonEmptyString(params.turn_instance_id, "turn_instance_id"),
+  }));
+  const evidence = await querySettlementJournal(params.runtime_root, identity, null);
+  return {
+    turn_key: evidence?.turn_key ?? null,
+    recovery: evidence ? delegationRecoveryFacts(evidence.journal, evidence.turn_key) : null,
+  };
 }
 
 export async function readTurnJournalCapabilities(params: JsonObject): Promise<{ observed_capabilities: string[] | null }> {
