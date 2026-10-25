@@ -134,7 +134,7 @@ def test_canonical_delivery_requires_completed_current_dependencies(team, monkey
     assert result_read["result"]["sha256"] == lead_completion["completion_result"]["sha256"]
     server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
     server.registry_path = root / "registry.json"
-    server.runtime_root_override = str(root / "runtime")
+    server.runtime_root_override = str(root / "separate-chat-store")
     server.completed_todo_pages = CompletedTodoPages()
     server.verbose = False
     worker = threading.Thread(target=server.serve_forever, daemon=True)

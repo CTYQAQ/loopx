@@ -24,7 +24,7 @@ from loopx.presentation.runtime_workspace import RuntimeWorkspaceServer
 
 
 @pytest.fixture
-def workspace(tmp_path, monkeypatch):
+def workspace(tmp_path, monkeypatch, request):
     runtime, sources = tmp_path / "runtime", tmp_path / "sources"
     sources.mkdir()
     evidence = b"Prior question\nOnly the diagnostic was measured; native utility remains untested.\n"
@@ -75,7 +75,9 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':10,'output_t
     registry.write_text(json.dumps({"common_runtime_root": str(runtime), "goals": [{"id": goal, "repo": str(tmp_path), "state_file": "active.md"} for goal in ("research-owner", "other-owner")]}))
     before = {path: path.read_bytes() for path in (state, registry, input_path, sources / "facts.txt")}
     server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
-    server.registry_path, server.runtime_root_override, server.verbose = registry, None, False
+    server.registry_path, server.runtime_root_override, server.verbose = (
+        registry, str(tmp_path / "private-chat") if getattr(request, "param", False) else None, False
+    )
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     base = f"http://127.0.0.1:{server.server_port}/api/chat/research-analysis"
@@ -97,6 +99,7 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':10,'output_t
         server.server_close()
 
 
+@pytest.mark.parametrize("workspace", [False, True], indirect=True)
 def test_shared_excerpts_reverify_through_http_without_dispatch(workspace, monkeypatch):
     w = workspace
     path = w["tmp_path"] / "input.json"
@@ -335,6 +338,7 @@ def test_registered_http_cancel_failure_retry_reuse_and_source_return(workspace)
     assert changed.value.code == 409
 
 
+@pytest.mark.parametrize("workspace", [False, True], indirect=True)
 def test_http_rejects_other_owner_paths_free_configuration_and_wrong_origin(workspace):
     w = workspace
     read, operation = w["request"], w["operation"]
@@ -354,6 +358,7 @@ def test_http_rejects_other_owner_paths_free_configuration_and_wrong_origin(work
     assert not w["count"].exists()
 
 
+@pytest.mark.parametrize("workspace", [False, True], indirect=True)
 def test_native_outcomes_and_bound_citations_read_over_http_without_analysis(workspace):
     w = workspace
     data = json.loads((w["tmp_path"] / "input.json").read_text())
