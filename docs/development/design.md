@@ -210,6 +210,13 @@ action consequences or relying on fixed alignment offsets.
 
 Reading a citation opens only the requested original, preserving the explicit
 open or closed state of the full analysis and returning to the exact citation.
+Read-only execution does not make a saved report or its sources unavailable.
+Keep valid reports readable; explain execution restrictions in the existing
+scope help and disable the affected actions. Source changes, unreadable originals
+and failed refreshes retain their own warning and recovery states.
+
+执行只读不等于汇报或来源不可读。正常显示已保存汇报，执行限制放在现有范围帮助中，
+禁用受限操作；来源变化、原文不可读及刷新失败保留各自的警告和恢复入口。
 
 When an explicit analysis supplies a whole-history translation, use it throughout
 the matching research snapshot, including routes, decisions and expanded history.

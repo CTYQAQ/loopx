@@ -175,6 +175,14 @@ export const researchHistoryScenario = {
       await nativePage.evaluate(() => {for (const e of document.querySelectorAll('*')) if (e.scrollTop) e.scrollTop = 0;});
       assert(await nativePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await nativePage.screenshot({path: resolve(outputDir, 'research-native-default-mobile.png'), animations: 'disabled'});
+      await nativePage.getByRole('button', {name: '分析详情', exact: true}).click();
+      const readOnlyAnalysis = nativePage.getByRole('region', {name: '轨迹深度分析', exact: true});
+      assert(await readOnlyAnalysis.getByRole('button', {name: '分析所选范围', exact: true}).isDisabled(), 'An available source does not grant analysis execution to its read-only reader');
+      assert.equal(await readOnlyAnalysis.locator('.analysis-actions > small').count(), 0, 'A read-only action does not advertise new model usage');
+      await readOnlyAnalysis.getByRole('button', {name: '分析范围', exact: true}).focus();
+      await readOnlyAnalysis.getByRole('tooltip').getByText(/不能启动、重试或取消分析/).waitFor();
+      await nativePage.keyboard.press('Escape');
+      await readOnlyAnalysis.press('Escape');
       const readback = await (await nativePage.request.get(`${nativeOwner.base}/fixture/readback`)).json();
       assert.equal(readback.source_unchanged, true);
       assert.equal(readback.mutation_attempts, 0);
@@ -237,6 +245,12 @@ export const researchHistoryScenario = {
       await synthesisPage.getByRole('button', {name: '深入解读', exact: true}).click();
       const analysis = synthesisPage.getByRole('region', {name: '轨迹深度分析', exact: true});
       await analysis.waitFor();
+      assert.equal(await analysis.locator('.analysis-warning').count(), 0, 'A readable saved report is not an unavailable analysis just because execution is read-only');
+      const readScope = analysis.getByRole('button', {name: '分析范围', exact: true});
+      await readScope.focus();
+      await analysis.getByRole('tooltip').getByText(/不能启动、重试或取消分析/).waitFor();
+      await synthesisPage.keyboard.press('Escape');
+      assert(await readScope.evaluate(e => e === document.activeElement), 'Read-only context help returns focus to the same reading scope');
       assert.equal(await synthesisPage.getByRole('region', {name: '研究汇报', exact: true}).count(), 1, 'One reading focus when expanded');
       assert.match(await analysis.innerText(), /竞争解释.*随机波动/s);
       const savedOverview = await analysis.locator('.research-synthesis-summary').innerText();
@@ -326,6 +340,10 @@ export const researchHistoryScenario = {
       await synthesisPage.setViewportSize({width: 390, height: 844});
       await synthesisPage.getByRole('button', {name: 'Read deeper', exact: true}).click();
       const english = synthesisPage.locator('.research-analysis');
+      assert.equal(await english.locator('.analysis-warning').count(), 0);
+      await english.getByRole('button', {name: 'Analysis scope', exact: true}).focus();
+      await english.getByRole('tooltip').getByText(/cannot start, retry or cancel analysis/).waitFor();
+      await synthesisPage.keyboard.press('Escape');
       const englishReview = english.locator('.analysis-method').first();
       const englishOrigin = english.locator('.research-report-finding .research-review-episodes').first();
       await englishOrigin.click();
@@ -355,6 +373,7 @@ export const researchHistoryScenario = {
     let analysisFixture = false, holdOldAnalysis = false, slowStarted, releaseOld, oldDelivered;
     let holdCitation = false, failedCitation = false, citationStarted, releaseCitation;
     let unavailableAnalysis = false, failedAnalysisPack = "a", episodeMetadataLimit = null, comparisonFixture = false;
+    let analysisSourceReason = null;
     let analysisWrites = 0, analysisReads = 0, localizedFixture = false, continuationFixture = false, equivalentContinuation = false;
     let versionComparison = "shared";
     let unavailableTask = false;
@@ -380,6 +399,7 @@ export const researchHistoryScenario = {
           const selected = ["b", "c", "d"].find(id => query.get("pack_id") === id.repeat(64)) ?? "a";
           if (holdOldAnalysis && selected === "a") {slowStarted(); await new Promise(resolve => {releaseOld = resolve;});}
           const readback = comparisonFixture ? comparisonReadback() : analysisReadback(selected);
+          if (analysisSourceReason) Object.assign(readback.pack, {availability: 'unavailable', reason_code: analysisSourceReason});
           if (continuationFixture) {
             const p = readback.pack, base = selected === 'b';
             p.pack_id = (base ? 'b' : 'a').repeat(64);
@@ -1082,6 +1102,15 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await history.getByRole("button", {name: "查看分析", exact: true}).click();
       const analysis = history.getByRole("region", {name: "轨迹深度分析", exact: true});
       await analysis.locator("header p").first().filter({hasText: /^Synthetic analysis A$/}).waitFor();
+      for (const [reason, message] of [['source_changed', /原始来源已变化/], ['source_unavailable', /原始来源暂不可读/]]) {
+        analysisSourceReason = reason;
+        await analysis.getByRole('button', {name: '刷新分析结果', exact: true}).click();
+        await analysis.locator('.analysis-warning').filter({hasText: message}).waitFor();
+        assert.equal(await analysis.locator('.analysis-episode > summary').count(), 2, 'A real source-validity warning retains the saved judgments');
+      }
+      analysisSourceReason = null;
+      await analysis.getByRole('button', {name: '刷新分析结果', exact: true}).click();
+      await analysis.locator('.analysis-warning').waitFor({state: 'hidden'});
       assert.match(await analysis.innerText(), /原目标收益|original-objective/);
       assert.equal(await analysis.locator('.analysis-episode > summary').count(), 2, 'The reader starts with one comparable row per episode');
       const firstEpisode = analysis.locator('.analysis-episode').first();

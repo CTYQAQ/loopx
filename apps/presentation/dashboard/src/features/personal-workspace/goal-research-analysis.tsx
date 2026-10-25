@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
-import {ArrowLeft, ArrowUpRight, ChevronDown, CircleHelp, LoaderCircle, RefreshCw, Sparkles, TriangleAlert, X} from "lucide-react";
+import {ArrowLeft, ArrowUpRight, ChevronDown, CircleHelp, Eye, LoaderCircle, RefreshCw, Sparkles, TriangleAlert, X} from "lucide-react";
 import type {AssessmentCitation, TrajectoryAssessment, TrajectoryEpisode, TrajectoryOutputLanguage, TrajectoryContinuation} from "../../../../../../loopx/control_plane/capabilities/trajectory_assessment_types.js";
 import {ResearchProgress, episodeQuestionGroups, metricCopy, verdictLabel, type ResearchProgressPack} from "./goal-research-progress";
 import {requestJson} from "../../data/chat";
@@ -209,7 +209,7 @@ export function ResearchAnalysisButton({analysis: a}: {analysis: Controller}) {
   // explanation is optional; cached results and unavailable states are reads.
   const readOnly = unavailable || a.readError || a.pack?.result || a.pending || a.recordedRunning;
   return <div className="research-analysis-entry"><div className="research-analysis-entry-actions"><button ref={a.trigger} type="button" disabled={a.loading && !a.pack} onClick={() => readOnly ? a.show() : void a.execute(a.pack?.job?.status === "failed" || a.pack?.job?.status === "cancelled")} aria-expanded={a.location.open}>
-    <Sparkles size={14} aria-hidden/>{a.pack?.result ? (a.zh ? "查看分析" : "View analysis") : analysisActionLabel(a.pack, a.zh)}
+    <Sparkles size={14} aria-hidden/>{a.pack?.result ? (a.zh ? "查看分析" : "View analysis") : a.readOnly ? (a.zh ? "分析详情" : "Analysis details") : analysisActionLabel(a.pack, a.zh)}
   </button><ContextHelp label={sourceUnavailable ? (a.zh ? "分析来源未就绪" : "Analysis source unavailable") : (a.zh ? "分析说明" : "About deep analysis")} icon={sourceUnavailable ? CircleHelp : undefined}>
     {sourceUnavailable ? <p>{reasonCopy(a.pack?.reason_code ?? a.snapshot?.catalog.reason_code, a.zh)}</p> : null}
     {a.pack ? <p>{a.zh ? "分析请求设置（固定）：" : "Fixed analysis request: "}{a.pack.config.model} / {a.pack.config.effort} / {a.pack.config.service_tier}</p> : null}
@@ -217,7 +217,7 @@ export function ResearchAnalysisButton({analysis: a}: {analysis: Controller}) {
       ? (a.zh ? "本次分析同时生成固定历史快照的中文展示译文；问题、决策、结论与历史正文按字段核对版本，缺失项保留原文。" : "This analysis also translates the frozen history snapshot: questions, decisions, findings and historical text are version-bound field by field; missing translations retain their originals.")
       : (a.zh ? "问题解读、理由与限制说明按界面语言生成；此轨迹包未包含整页历史译文。" : "Questions, reasons and limitations follow the interface language; this pack does not include whole-history translation.")}</p>
     <p>{a.zh ? "切换语言后单独缓存，需点击才生成。浏览、切换原文和展开内容不调用模型；译文未经独立校对，引用保留原文。" : "Each language is cached separately and generated only on request. Browsing, original-text switching and expansion never call a model. Translation is not independently checked; citations retain their originals."}</p>
-    <p>{a.pack?.result ? (a.zh ? "所选范围已有分析，查看不调用 Agent。" : "An analysis exists for the selected scope. Viewing never invokes an Agent.") : a.pack?.continuation?.can_reuse ? (a.zh ? "本次复用已有判读，不调用模型；原用量保留在上一版。" : "This action reuses existing judgments without a model call; original usage stays with the previous version.") : (a.zh ? "点击深度分析使用本机 Codex 账户，单独产生分析用量；普通浏览不调用 Agent。" : "Deep analysis uses the local Codex account with separate analysis usage; ordinary browsing never invokes an Agent.")}</p>
+    <p>{a.readOnly ? (a.zh ? "此来源只读；浏览已有分析不调用 Agent。" : "This source is read-only; viewing saved analyses never invokes an Agent.") : a.pack?.result ? (a.zh ? "所选范围已有分析，查看不调用 Agent。" : "An analysis exists for the selected scope. Viewing never invokes an Agent.") : a.pack?.continuation?.can_reuse ? (a.zh ? "本次复用已有判读，不调用模型；原用量保留在上一版。" : "This action reuses existing judgments without a model call; original usage stays with the previous version.") : (a.zh ? "点击深度分析使用本机 Codex 账户，单独产生分析用量；普通浏览不调用 Agent。" : "Deep analysis uses the local Codex account with separate analysis usage; ordinary browsing never invokes an Agent.")}</p>
     <p>{a.zh ? "只分析已授权的固定轨迹，不改变研究历史。范围、方法与来源版本可在结果中查看。" : "Analyzes an authorized fixed trajectory without changing research history. Scope, method and source revisions remain available with the result."}</p>
     {a.pack?.continuation ? <p>{a.zh ? "接续保留上一版。新增、更正或删除可能影响旧判断，本版重新评估全部片段；仅证据内容与配置等价时复用已有判读。浏览与来源更新不启动分析。" : "Continuation preserves the previous version. Additions, corrections and removals can affect earlier judgments, so all episodes are reassessed. Existing judgments are reused only for equivalent evidence and configuration. Browsing and source updates never start analysis."}</p> : null}
   </ContextHelp></div>{a.pack && !a.pack.result && !unavailable ? <small>{a.pack.continuation?.can_reuse ? (a.zh ? "无需新模型调用" : "No new model call") : <>{a.pack.config.model} · {a.zh ? "单独用量" : "Separate usage"}</>}</small> : null}</div>;
@@ -480,8 +480,10 @@ export function ResearchAnalysisPanel({analysis: a, onHistory}: {analysis: Contr
   const zh = a.zh, p = a.pack, result = p?.result;
   const resultJob = p?.result_job ?? p?.job;
   const failed = p?.job?.status === "failed" || p?.job?.status === "cancelled";
-  const sourceAvailable = p?.availability === "available" && !a.readOnly;
-  const available = sourceAvailable && !a.readError;
+  // Source validity and permission to execute are independent. A read-only
+  // reader can still present a current saved report and its original evidence.
+  const sourceAvailable = p?.availability === "available";
+  const available = sourceAvailable && !a.readOnly && !a.readError;
   const benefit = result?.metrics.find(m => m.metric === "benefit_test");
   const headline = !result ? null : benefit?.no ? (zh ? "仍有研究片段尚未检验原目标收益" : "Some episodes have not tested original-objective utility")
     : benefit?.unknown ? (zh ? "原目标收益的检验情况仍未知" : "Original-objective utility testing remains unknown")
@@ -493,7 +495,8 @@ export function ResearchAnalysisPanel({analysis: a, onHistory}: {analysis: Contr
     {a.snapshot?.catalog.unreadable_pack_ids?.length && !p?.continuation_unavailable ? <p className="analysis-warning">{zh ? "部分历史分析暂不可读" : "Some historical analyses cannot be read"} · {a.snapshot.catalog.unreadable_pack_ids.length}</p> : null}
     <AnalysisReadState analysis={a}/>
     {p ? <>
-      <div className="analysis-scope">{p.episode_count} {zh ? "个研究片段" : "research episodes"} · {p.selection.exhaustive ? (zh ? "固定范围" : "Fixed scope") : (zh ? "定向抽样" : "Purposive sample")}<ContextHelp label={zh ? "分析范围" : "Analysis scope"}>
+      <div className="analysis-scope">{p.episode_count} {zh ? "个研究片段" : "research episodes"} · {p.selection.exhaustive ? (zh ? "固定范围" : "Fixed scope") : (zh ? "定向抽样" : "Purposive sample")}<ContextHelp label={zh ? "分析范围" : "Analysis scope"} icon={a.readOnly ? Eye : undefined}>
+        {a.readOnly ? <p>{zh ? "可阅读已保存的分析与原文；此来源不能启动、重试或取消分析。" : "Saved analyses and originals remain readable. This source cannot start, retry or cancel analysis."}</p> : null}
         <p>{p.selection.exhaustive ? (zh ? "覆盖此固定分析范围；不等于覆盖全部研究。" : "Covers this fixed analysis scope, not necessarily the whole research history.") : (zh ? "定向抽样，仅分析选定研究片段；范围外或未捕获的工作未纳入，不代表全程。" : "Purposive sample of selected episodes; work outside this scope or not captured is excluded. It does not represent the whole run.")}</p>
         <p>{zh ? "正向诊断、证据采用与最终任务收益分别判断。没有综合分数，也不据此推断因果或整体研究质量。引用存在不代表模型解释已被独立核验。" : "Diagnostic value, evidence adoption and task utility are separate. There is no total score, causal claim or whole-run quality rating. Citations do not independently verify model interpretations."}</p>
         {result ? Object.values(metricCopy).map(label => <p key={label[1]}><strong>{label[zh ? 0 : 1]}</strong> · {label[zh ? 2 : 3]}</p>) : null}
@@ -504,15 +507,15 @@ export function ResearchAnalysisPanel({analysis: a, onHistory}: {analysis: Contr
       {p.result_attempt && p.result_attempt !== p.job?.attempt ? <ContextHelp label={zh ? "本次分析未完成" : "Current analysis incomplete"} icon={TriangleAlert}><p className="analysis-warning" role="status">{zh ? "当前重试尚未完成，显示上次已保存分析。" : "The current retry is incomplete; showing the previously saved analysis."}</p></ContextHelp> : null}
       {result?.display?.coverage.missing && !a.pending && !a.recordedRunning ? <div className="analysis-actions">
         <button type="button" disabled={!available} onClick={() => void a.execute(true)}>{zh ? "重新分析并补全译文" : "Reanalyze to complete translation"}</button>
-        <small>{zh ? "重新分析完整固定范围，产生新的分析用量；保留上一轮结果。" : "Reanalyzes the full fixed scope with new analysis usage; the previous result is preserved."}</small>
+        {!a.readOnly ? <small>{zh ? "重新分析完整固定范围，产生新的分析用量；保留上一轮结果。" : "Reanalyzes the full fixed scope with new analysis usage; the previous result is preserved."}</small> : null}
       </div> : null}
       {!result || a.pending || a.recordedRunning ? <div className="analysis-actions">
-        {a.pending || a.recordedRunning ? <><p role="status">{a.pending ? <LoaderCircle size={15} aria-hidden className="analysis-spin"/> : null}{a.pending ? (zh ? "正在处理分析请求…" : "Processing analysis request…") : (zh ? "上次记录仍待分析结果；当前执行状态尚未核验。" : "The last receipt awaits a result; current execution is unverified.")}</p><button type="button" onClick={() => void a.cancel()} disabled={a.cancelPending || p.job?.cancel_requested}>{p.job?.cancel_requested ? (zh ? "已请求取消" : "Cancellation requested") : a.cancelPending ? (zh ? "正在请求取消…" : "Requesting cancellation…") : (zh ? "取消分析" : "Cancel analysis")}</button></>
+        {a.pending || a.recordedRunning ? <><p role="status">{a.pending ? <LoaderCircle size={15} aria-hidden className="analysis-spin"/> : null}{a.pending ? (zh ? "正在处理分析请求…" : "Processing analysis request…") : (zh ? "上次记录仍待分析结果；当前执行状态尚未核验。" : "The last receipt awaits a result; current execution is unverified.")}</p><button type="button" onClick={() => void a.cancel()} disabled={a.readOnly || a.cancelPending || p.job?.cancel_requested}>{p.job?.cancel_requested ? (zh ? "已请求取消" : "Cancellation requested") : a.cancelPending ? (zh ? "正在请求取消…" : "Requesting cancellation…") : (zh ? "取消分析" : "Cancel analysis")}</button></>
           : result ? <button type="button" onClick={() => void a.read().catch(() => undefined)}><RefreshCw size={14} aria-hidden/>{zh ? "刷新结果" : "Refresh result"}</button>
             : <button className="analysis-primary" type="button" disabled={!available} onClick={() => void a.execute(failed)}><Sparkles size={15} aria-hidden/>{failed ? (zh ? "重试分析" : "Retry analysis") : p.continuation ? analysisActionLabel(p, zh) : (zh ? "分析所选范围" : "Analyze selected scope")}</button>}
-        {!result && !a.pending && !a.recordedRunning ? <small>{p.continuation?.can_reuse ? (zh ? "复用已有判读，无需新模型调用。" : "Reuses existing judgments without a new model call.") : zh ? "使用本机 Codex 账户，单独产生分析用量；浏览不调用 Agent。" : "Uses the local Codex account with separate analysis usage. Browsing never invokes an Agent."}</small> : null}
+        {!result && !a.readOnly && !a.pending && !a.recordedRunning ? <small>{p.continuation?.can_reuse ? (zh ? "复用已有判读，无需新模型调用。" : "Reuses existing judgments without a new model call.") : zh ? "使用本机 Codex 账户，单独产生分析用量；浏览不调用 Agent。" : "Uses the local Codex account with separate analysis usage. Browsing never invokes an Agent."}</small> : null}
       </div> : null}
-      {failed && !a.pending ? <p className="analysis-warning" role="status">{p.job?.status === "cancelled" ? (zh ? "分析已取消，研究历史保持可读。" : "Analysis cancelled. Research history remains readable.") : (zh ? "上次分析未完成；可重试，原失败记录会保留。" : "The last analysis did not complete. Retry preserves its failure record.")}</p> : null}
+      {failed && !a.pending ? <p className="analysis-warning" role="status">{p.job?.status === "cancelled" ? (zh ? "分析已取消，研究历史保持可读。" : "Analysis cancelled. Research history remains readable.") : !available ? (zh ? "上次分析未完成，失败记录保留。" : "The last analysis did not complete; its failure record is preserved.") : (zh ? "上次分析未完成；可重试，原失败记录会保留。" : "The last analysis did not complete. Retry preserves its failure record.")}</p> : null}
       {failed && !a.pending ? <p className="analysis-attempt-usage" aria-label={zh ? "本次分析用量" : "Current analysis usage"}>
         {zh ? "本次尝试" : "This attempt"} · {p.job?.analysis_wall_seconds == null ? (zh ? "耗时未知" : "Time unknown") : `${p.job.analysis_wall_seconds.toFixed(1)}s`} · {zh ? "输入" : "input"} {p.job?.usage?.input_tokens?.toLocaleString() ?? "—"} / {zh ? "输出" : "output"} {p.job?.usage?.output_tokens?.toLocaleString() ?? "—"} tokens
       </p> : null}
