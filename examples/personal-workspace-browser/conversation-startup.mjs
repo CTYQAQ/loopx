@@ -7,11 +7,17 @@ export const conversationStartupScenario = {
   async run({ browser, collectCoverage, url }) {
     const waiting = [];
     let fail = false;
+    let sourceAvailable = false;
+    let sessionCreates = 0;
     const context = await openWorkspacePage(browser, url, {
       collectCoverage, gotoWaitUntil: "domcontentloaded",
       beforeGoto: async (_api, page) => {
+        await page.route("**/api/chat/app-steward", route => sourceAvailable
+          ? route.fallback()
+          : route.fulfill({status: 503, json: {ok: false, error: "Source unavailable"}}));
         await page.route("**/api/chat/sessions", async route => {
           if (route.request().method() !== "POST") return route.fallback();
+          sessionCreates += 1;
           if (!fail) await new Promise(resolve => waiting.push(resolve));
           if (fail) return route.fulfill({ status: 503, json: { ok: false, error_code: "host_gate", error: "Executor connection timed out." } });
           return route.fallback();
@@ -20,6 +26,13 @@ export const conversationStartupScenario = {
     });
     const { page, api } = context;
     try {
+      await page.getByRole("alert").filter({hasText: "原管家会话暂不可用"}).waitFor();
+      assert.equal(await page.getByLabel("向 LoopX 发送消息").isDisabled(), true);
+      assert.equal(await page.getByRole("button", {name: "发送", exact: true}).isDisabled(), true);
+      assert.equal(sessionCreates, 0, "failed source discovery cannot create an ordinary manager session");
+      assert.equal(api.turnRequests.length, 0, "failed source discovery cannot dispatch work");
+      sourceAvailable = true;
+      await page.getByRole("button", {name: "重试读取", exact: true}).click();
       const send = async text => {
         await page.getByLabel("向 LoopX 发送消息").fill(text);
         await page.getByRole("button", { name: "发送", exact: true }).click();

@@ -988,6 +988,12 @@ export async function installApi(page, { fixturePort = port, goalSubagentConfigu
   await page.route("**/api/chat/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/chat/app-steward" && request.method() === "GET") {
+      // An ordinary manager is available only after discovery explicitly finds
+      // no selected original conversation; a missing/failed read is not empty.
+      await route.fulfill({json: {ok: true, binding_id: null, session_id: null}});
+      return;
+    }
     if (url.pathname === "/api/chat/sidebar-goal-order") {
       const body = request.method() === "POST" ? request.postDataJSON() : null;
       const source = body?.source ?? url.searchParams.get("source");
