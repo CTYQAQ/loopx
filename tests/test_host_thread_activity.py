@@ -521,19 +521,37 @@ def test_aliased_homes_preserve_one_installed_heartbeat_cadence(
     lane = HostDeliveryScope(
         goal_id="bound", agent_id="a", host_surface="codex-app", thread_id="t-open"
     )
+    reads: list[Path] = []
+    read_text = Path.read_text
+
+    def record_read(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path.name == "automation.toml":
+            reads.append(path)
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", record_read)
 
     assert codex_delivery_expectations([lane]) == {
         lane: HostDeliveryExpectation(
             expected_interval_minutes=5, source="codex_app_automation_rrule"
         )
     }
-    assert codex_homes() == [first, other.root]
+    assert reads == [first / "automations" / "one" / "automation.toml"]
+    logical_homes = [home.root, alias, other.root] if selection == "sibling" else [alias, home.root, other.root]
+    assert codex_homes() == logical_homes
+    # Explicit reader inputs receive the same physical-store protection.
+    assert codex_delivery_expectations([lane], homes=logical_homes)[lane].expected_interval_minutes == 5
     # Two distinct automations remain ambiguous even when their home has aliases.
     _install_automation(
         home, automation_id="two", goal_id="bound", agent_id="a",
         rrule="FREQ=MINUTELY;INTERVAL=9",
     )
     assert codex_delivery_expectations([lane]) == {}
+    _install_automation(
+        home, automation_id="two", goal_id="bound", agent_id="a",
+        rrule="FREQ=MINUTELY;INTERVAL=9", status="PAUSED",
+    )
+    assert codex_delivery_expectations([lane])[lane].expected_interval_minutes == 5
 
 
 def test_delivery_expectations_resolve_only_installed_active_app_automations(

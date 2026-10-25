@@ -64,7 +64,7 @@ def codex_homes(env: Mapping[str, str] | None = None, user_home: Path | None = N
     ``LOOPX_CODEX_HOMES`` (``os.pathsep``-separated) is used verbatim when set.
     Otherwise ``CODEX_HOME``, ``~/.codex`` and sibling ``~/.codex-*`` homes are
     searched, because Codex App installs can each keep their own home.
-    Aliases of one directory retain only their first selected path.
+    Preserve distinct path names: callers also use them as profile aliases.
     """
 
     env = os.environ if env is None else env
@@ -77,10 +77,8 @@ def codex_homes(env: Mapping[str, str] | None = None, user_home: Path | None = N
         candidates.append(user_home / ".codex")
         candidates.extend(sorted(user_home.glob(".codex-*")))
     homes: list[Path] = []
-    identities: set[Path] = set()
     for candidate in candidates:
-        if candidate.is_dir() and (identity := candidate.resolve()) not in identities:
-            identities.add(identity)
+        if candidate.is_dir() and candidate not in homes:
             homes.append(candidate)
     return homes
 
@@ -328,7 +326,14 @@ def _installed_automation_intervals(
 
     intervals: dict[tuple[str, str, str], int] = {}
     ambiguous: set[tuple[str, str, str]] = set()
+    identities: set[Path] = set()
     for home in codex_homes() if homes is None else homes:
+        # Discovery retains logical profile names; read each physical store only
+        # once here so an alias cannot masquerade as a second installed heartbeat.
+        identity = home.resolve()
+        if identity in identities:
+            continue
+        identities.add(identity)
         for path in sorted((home / "automations").glob("*/automation.toml")):
             try:
                 item = tomllib.loads(path.read_text(encoding="utf-8"))
