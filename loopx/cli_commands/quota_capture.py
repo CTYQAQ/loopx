@@ -104,11 +104,41 @@ def read_context_capture(args: argparse.Namespace) -> dict[str, Any]:
             "recovery": "Restore the original digest-bound capture; no guard, admission or spend was performed."}
 
 
+def native_context_capture_view(projected: dict[str, Any], directory: Path, *,
+                                context_directory: str | None = None) -> dict[str, Any]:
+    """One paged presentation for ordinary and already-captured native calls.
+
+    The guard/projector already ran. Only serialize its wire and prefetch the
+    existing digest-checked reader; never collect or admit another decision.
+    """
+    from ..control_plane.turn_driver.decision_capture import write_decision_capture
+
+    wire = directory / "delivery.json"
+    write_decision_capture(wire, projected)
+    reference = {"path": str(wire), "sha256": hashlib.sha256(wire.read_bytes()).hexdigest()}
+    mode, target = "full", None
+    if projected.get("schema_version") == "context_delivery_v1":
+        mode, target = projected["mode"], projected["target"]
+        if mode == "full":
+            reference = {key: projected["recovery"][key] for key in ("path", "sha256")}
+    reference["command"] = context_capture_read_command(Path(reference["path"]), reference["sha256"], page_bytes=3072)
+    result = {"mode": mode, **reference, **({"target": target} if target else {})}
+    page = read_context_capture(argparse.Namespace(capture_file=reference["path"],
+        capture_sha256=reference["sha256"], offset=0, page_bytes=3072))
+    if page["ok"]:
+        result.update(page)
+        from ..control_plane.turn_driver.codex_context import register_native_context_view
+
+        register_native_context_view(context_directory,
+            {**result, "ancestry": projected.get("ancestry", 0)})
+    return result
+
+
 def project_saved_context_capture(args: argparse.Namespace) -> dict[str, Any]:
     """Present an immutable already-decided quota capture, without authority IO.
 
-    Publication is delayed until this native tool runs, so the same actual-input
-    observer can qualify a resumed baseline. Optional codec failure returns the
+    Publication is delayed until this native tool runs, so the lifecycle owner
+    can select its current continuity basis. Optional codec failure returns the
     original full read reference. An unsafe recovery selector fails explicitly
     with that same reference, never a replacement guard.
     Invalid run-mode opt-ins fail before that optional transport path.
@@ -137,9 +167,9 @@ def project_saved_context_capture(args: argparse.Namespace) -> dict[str, Any]:
     mode = "full"
     target = None
     native_prepared = False
+    native_view = None
     try:
         from ..control_plane.turn_driver.codex_context import codex_context_directory, project_codex_context
-        from ..control_plane.turn_driver.decision_capture import write_decision_capture
 
         if not activation["enabled"]:
             raise ValueError("context delivery is off")
@@ -160,20 +190,12 @@ def project_saved_context_capture(args: argparse.Namespace) -> dict[str, Any]:
         cache = Path(tempfile.mkdtemp(prefix="context-", dir=root))
         projected = project_codex_context(payload, directory=directory, capture_directory=cache,
             goal_id=args.goal_id, agent_id=args.agent_id, surface="quota_packet",
-            capture_id=hashlib.sha256(raw).hexdigest())
+            capture_id=hashlib.sha256(raw).hexdigest(),
+            continuity_generation=getattr(args, "_context_delivery_generation", None))
         native_prepared = True
-        wire = cache / "delivery.json"
-        write_decision_capture(wire, projected)
-        digest = hashlib.sha256(wire.read_bytes()).hexdigest()
-        reference = {"path": str(wire), "sha256": digest, "command": context_capture_read_command(wire, digest)}
-        if projected.get("schema_version") == "context_delivery_v1":
-            mode = projected["mode"]
-            target = projected["target"]
-            if mode == "full":
-                # The native observer verifies paged complete context bytes.
-                # Deliver that exact full body plus its target in this small
-                # descriptor, rather than paging another wrapper around it.
-                reference = {key: projected["recovery"][key] for key in ("path", "sha256", "command")}
+        native_view = native_context_capture_view(projected, cache, context_directory=directory)
+        reference = {key: native_view[key] for key in ("path", "sha256", "command")}
+        mode, target = native_view["mode"], native_view.get("target")
     except (QuotaDecisionTransportError, OSError, ValueError, TypeError, RecursionError) as exc:
         if isinstance(exc, QuotaDecisionTransportError) or (activation["enabled"] and not native_prepared):
             if not isinstance(exc, QuotaDecisionTransportError):
@@ -196,19 +218,9 @@ def project_saved_context_capture(args: argparse.Namespace) -> dict[str, Any]:
         **({"context_delivery": activation} if activation["enabled"] else {}),
         "instruction": "Presentation of the original decision only; authority and freshness are unchanged. "
             + CONTEXT_CAPTURE_READ_GUIDANCE}
-    if activation["enabled"] and native_prepared:
-        # Reuse the public page protocol and its physical-file/digest/UTF-8
-        # checks. Older callers can still restart with command; current callers
-        # consume this page and avoid a descriptor-only model round trip.
-        # Reserve room for the descriptor in the same tool response; subsequent
-        # reads retain the ordinary page size and exact UTF-8 cursor.
-        page = read_context_capture(argparse.Namespace(capture_file=reference["path"],
-            capture_sha256=reference["sha256"], offset=0, page_bytes=3072))
-        if page["ok"]:
-            if not page["eof"]:
-                page["next_command"] = context_capture_read_command(Path(reference["path"]),
-                    reference["sha256"], offset=page["next_offset"])
-            result.update(page)
+    if native_view is not None:
+        result.update(native_view)
+        if "content" in native_view:
             result["instruction"] = ("This result includes page zero. Consume its content, then follow "
                 "next_command through eof. command restarts at zero if the inline page is incomplete "
                 "or unsupported. " + result["instruction"])
@@ -426,8 +438,8 @@ def handle_native_context_command(args: argparse.Namespace, *, print_payload: Ca
                        "Omit per-command activation and location flags to retain that inheritance. " if machine_runtime else
                        "Pass --context-delivery on with the same declared host mode, context location and a decision-output-root to heartbeat-prompt/should-run. ")
                     +
-                    "For delta, the native process must already have CODEX_ROLLOUT_TRACE_ROOT pointing to private diagnostics; "
-                    "unavailable diagnostics preserve full delivery. Set --context-delivery off and remove context options to restore ordinary output. "
+                    "Normal completed full reads establish an explicit continuity assumption; no input diagnostics or provider change is required. "
+                    "Known invalidation or incomplete reads keep full recovery. Set --context-delivery off and remove context options to restore ordinary output. "
                     "This command installs nothing and grants no execution authority."}
         except (OSError, ValueError, TypeError) as exc:
             payload = {"ok": False, "reason": str(exc)}
@@ -436,7 +448,9 @@ def handle_native_context_command(args: argparse.Namespace, *, print_payload: Ca
     if args.quota_command == "context-hook":
         import sys
         from ..control_plane.effect_runtime import MAX_REQUEST_BYTES
-        from ..control_plane.turn_driver.codex_context import codex_context_directory, codex_context_hook
+        from ..control_plane.turn_driver.codex_context import (
+            CONTEXT_LIFECYCLE_HOOKS, codex_context_directory, codex_context_hook,
+        )
 
         # Native transport only: no registry discovery, guard or quota effects.
         try:
@@ -446,7 +460,7 @@ def handle_native_context_command(args: argparse.Namespace, *, print_payload: Ca
             raw = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
             event = json.loads(raw) if len(raw) <= MAX_REQUEST_BYTES else None
             if (isinstance(event, dict) and isinstance(event.get("session_id"), str) and event["session_id"]
-                    and event.get("hook_event_name") in ("SessionStart", "PreCompact", "PreToolUse")):
+                    and event.get("hook_event_name") in CONTEXT_LIFECYCLE_HOOKS):
                 directory = codex_context_directory(directory=args.codex_context_dir,
                     root=getattr(args, "codex_context_root", None), session=event.get("session_id"), create=True)
                 payload = codex_context_hook(directory, event)

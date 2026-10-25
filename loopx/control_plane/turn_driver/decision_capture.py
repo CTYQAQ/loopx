@@ -103,10 +103,13 @@ def validate_handoff_socket(value: str) -> Path:
 CONTEXT_CAPTURE_READ_GUIDANCE = (
     "Follow next_command through eof and combine content in byte-offset order. "
     "In code-mode, forward successful exec stdout directly with text(result.output); "
-    "retain errors. Small batches can save model round trips; start with at most two default pages "
+    "retain errors. The reader verifies the original capture SHA-256; keep its returned digest and byte cursors. "
+    "Do not hash or retype the packet. Native input observation independently verifies complete model-visible "
+    "bytes before delta reuse; neither a retyped hash nor a disk hash proves that input. "
+    "Small batches can save model round trips; start with at most two default pages "
     "and inspect every output. A host may truncate inside valid JSON or omit a whole output. "
-    "Check each model-visible content's UTF-8 byte length against next_offset (total_bytes at eof), "
-    "complete coverage and the original SHA-256. If incomplete, reread the affected range "
+    "Consume all model-visible content in UTF-8 byte-offset order with complete coverage through total_bytes. "
+    "If a range or output is missing, truncated or uncertain, reread the affected range "
     "of this same capture with fewer pages or a smaller --page-bytes; do not trust a preview or EOF alone. "
     "Do not rerun admission or ask the owner. File existence and page EOF are not retention proof."
 )
@@ -142,8 +145,8 @@ def project_captured_context(
     """Adapt an admitted capture to the shared TS presentation owner.
 
     The caller-owned rendezvous may supply a continuity observation. It must
-    still recheck the candidate at final model-input assembly and ACK only intact
-    delivery. Unsupported ordinary CLI clients never supply this request. Every
+    either confirm intact final input or explicitly select native lifecycle
+    assumptions. Unsupported ordinary CLI clients never supply this request. Every
     opt-in attempt saves the complete projected JSON for same-capture recovery;
     neither malformed requests nor optimization failures rerun the guard.
     A native caller may pass its already-published recovery reference, never a
@@ -161,6 +164,7 @@ def project_captured_context(
         if not isinstance(scope, dict) or scope.get("goal_id") != goal_id or scope.get("agent_id") != agent_id:
             return payload
         retained = request.get("retained")
+        continuity = request.get("continuity")
         if "native_input" in request:
             from .codex_input_trace import codex_context_in_active_input
 
@@ -174,9 +178,10 @@ def project_captured_context(
                     or not codex_context_in_active_input(observation, baseline=baseline,
                         session_id=native_session)):
                 retained = None
+                continuity = None
         delivery = prepare_context_delivery(payload, scope=scope,
             capture_id=capture_id, surface=surface,
-            baseline=request.get("baseline"), retained=retained)
+            baseline=request.get("baseline"), retained=retained, continuity=continuity)
         delivery["recovery"] = recovery
         return delivery
     except (OSError, ValueError, TypeError, EffectRuntimeRemoteError, EffectRuntimeStartupError):
