@@ -45,6 +45,90 @@ fail before execution. Set it back to `false` for the next run to roll back;
 do not change a running trial's treatment. Captures contain private Goal context.
 Transport tests do not establish lower token cost or better model decisions.
 
+For an explicitly selected native context-delivery treatment, add
+`context_delivery: "on"` to the same heartbeat agent `kwargs` (default `"off"`).
+Only the existing Codex heartbeat worker accepts `"on"`; booleans, other modes and
+scenario names are rejected. This is an experimental transport setting, separate
+from `turn_envelope`.
+The existing EdgeBench/SForge entry exposes the same selection through
+`--context-delivery on` on a heartbeat worker (`off` is the default).
+The worker preserves its existing `generic_cli` scheduler profile. Its execution
+owner requires `mode=heartbeat` and explicitly propagates `LOOPX_EXECUTION_MODE=heartbeat`
+and `LOOPX_CONTEXT_DELIVERY=on` into the native tool environment. Generic CLI
+without these worker declarations stays full. These are caller declarations,
+not host authentication or a new admission grant.
+It works with ordinary quota or the explicit TurnEnvelope view. The existing
+worker stages two product lifecycle hooks in the trial's private Codex home and
+queries native `hooks/list` without invoking a model. Only those exact native
+hashes receive per-process trust; workspace/plugin hooks are not trusted and no
+bypass flag or operator settings are used. Private native trace-v1 diagnostics
+are enabled only in this opted-in trial. Install and wake receipts record the
+selection; `context_transport.available` records setup, **not** warm eligibility
+or delivery/benefit. Unsupported native setup continues ordinary full output.
+
+The product heartbeat renderer carries `--codex-context-dir` and the original
+capture root into guard/reentry commands. The product observer proves intact
+baseline content in the current model input before warm reuse; uncertainty
+selects full. Startup/fork/compaction reset the epoch. Same-session resume clears
+the active call and keeps only an unconfirmed candidate; reuse requires the new
+call's complete actual input, never a saved session or file. Each worker wake
+uses a separate private trace directory, avoiding repeated scans of old wakes.
+The small recovery hook reads the original full capture after compaction, with
+no replacement admission or debit. Native worker and app-server code-mode tests
+cover resumed warm reuse for both packet views. The opted-in worker also carries
+a compact native developer instruction that survives compaction independently
+of hook output. If context was lost while continuing a captured decision,
+`quota context-read --codex-context-dir DIR --goal-id GOAL --agent-id AGENT`
+checks the current native session/workspace and selects the original capture.
+Follow its digest-pinned next commands; this read never reruns admission or
+spends quota. Missing/foreign references refuse lookup. Native tests omit or
+kill all subsequent hooks and still recover every byte through this route.
+Installed App adoption remains separate; deterministic transport tests are not autonomous
+solver outcomes. Include this persistent instruction in subsequent cost comparisons;
+earlier input replays did not include it. Count complete input, recovery reads, native discovery and trace
+IO in treatment cost, not just the delta bytes.
+
+Codex App setup uses the same product configuration renderer as the worker:
+`loopx --format json quota context-config --context-delivery on --codex-app --codex-context-root DIR --goal-id GOAL --agent-id AGENT`.
+It returns native hooks and persistent recovery instructions, without installing
+files or changing trust. A shared root isolates journals by native session;
+the trial-local single-session `--codex-context-dir` remains supported.
+See [heartbeat setup](../../docs/heartbeat-automation-prompt.md#opt-in-native-context-delivery)
+for activation, diagnostics, readback and rollback. Generated setup and a native
+app-server test do not by themselves prove installed desktop adoption.
+
+A simultaneous `fresh_replan` checkpoint listener retains ownership of the same
+original capture. It validates and holds the original full decision before any
+context projection, then releases its exact digest. Only afterward may the
+native observer project full/delta for an uninterrupted tool. A refused/lost
+release remains the original typed transport failure, without publishing an
+optimized result or rerunning the guard. An interrupted guard continues with
+the original full packet; no delta is required for checkpoint recovery. Native
+cursor verification also binds the context-directory/root option. The existing
+Darwin native-checkpoint refusal remains in force.
+
+The host-side checkpoint preflight still captures the complete original decision.
+With context delivery enabled, its prompt now supplies `quota context-project`
+with that original path/hash, Goal/Agent/Turn and private cache location. The
+native tool presents the saved decision using the same current-input observer;
+no guard, checkpoint, admission or debit is repeated. Cold delivery supplies the
+full body and its target; qualified warm delivery supplies the exact delta.
+The small response points to bounded reads and an original full-read fallback.
+Uncertain retention keeps full input. If enabled native preparation cannot
+establish safe recovery, the command returns a typed transport failure with the
+original full-read reference and receipt; use that explicit reference without
+rerunning admission. An optional cache write after recovery is established can
+still fall back to the same full input. A bad source hash/scope is refused before
+publication. This does not renew decision
+freshness or establish autonomous solver benefit. Default-off preloading is
+unchanged. Include the projection command, descriptor, recovery and page reads
+in subsequent total-cost comparisons.
+Across distinct worker wakes, settle the prior Turn before selecting new work;
+reading an old prompt from resumed history cannot supply the next wake's guard.
+Do not modify an active/frozen trial. Set `context_delivery: "off"` for a new trial
+to roll back; default runs install no hooks, trust or trace settings. No scorer,
+budget, task semantics or launch authority changes with this option.
+
 Checkpoint capture is independent of this display experiment. A `fresh_replan`
 declaration may establish a private capture/handoff socket while
 `turn_envelope` remains false: the worker keeps the ordinary dispatcher and quota

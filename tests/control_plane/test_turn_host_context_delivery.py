@@ -136,6 +136,8 @@ def test_bound_replan_reaches_actual_host_with_original_evidence(tmp_path, monke
         "--todo-id", SELECTED_REPLAN_TODO_ID, "--turn-instance-id", turn,
         "--codex-app", "--turn-envelope", "--decision-output-dir", str(capture), cwd=project)
     assert code == 0, envelope
+    assert envelope["action"]["delivery_allowed"] is False
+    assert envelope["action"]["must_attempt"] is True
     plan = build_loopx_turn_plan(envelope, host="dsh", execution_mode="isolated-headless",
                                  turn_instance_id=turn)
     assert plan["route"]["kind"] == "replan_required"

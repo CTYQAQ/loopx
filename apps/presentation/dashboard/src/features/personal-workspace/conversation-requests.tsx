@@ -51,6 +51,8 @@ export function ConversationRequests({sessionId, ownerFallback, refreshKey}: {se
   const {locale} = useWorkspaceI18n();
   const zh = locale === "zh-CN";
   const [open, setOpen] = useState(false);
+  const [searchDraft, setSearchDraft] = useState("");
+  const [search, setSearch] = useState("");
   const [history, setHistory] = useState(false);
   const [pages, setPages] = useState<ConversationRequestInventory[]>([]);
   const [busy, setBusy] = useState(false);
@@ -62,7 +64,7 @@ export function ConversationRequests({sessionId, ownerFallback, refreshKey}: {se
   const trigger = useRef<HTMLButtonElement>(null);
   const requestAbort = useRef<AbortController | null>(null);
   useEffect(() => {
-    setOpen(false); setHistory(false); setPages([]); setError(false);
+    setOpen(false); setHistory(false); setPages([]); setError(false); setSearch(""); setSearchDraft("");
   }, [sessionId]);
   useEffect(() => {
     if (open) dialog.current?.showModal(); else dialog.current?.close();
@@ -70,7 +72,7 @@ export function ConversationRequests({sessionId, ownerFallback, refreshKey}: {se
   useEffect(() => {
     void load();
     return () => {generation.current++; requestAbort.current?.abort();};
-  }, [sessionId, ownerFallback, history, refreshKey, revision]);
+  }, [sessionId, ownerFallback, history, search, refreshKey, revision]);
   async function load(offset = 0) {
     const current = ++generation.current;
     requestAbort.current?.abort();
@@ -86,7 +88,7 @@ export function ConversationRequests({sessionId, ownerFallback, refreshKey}: {se
       }
       if (current !== generation.current) return;
       if (!source) {setNoSession(true); return;}
-      const value = await fetchConversationRequests(source, history, offset, abort.signal);
+      const value = await fetchConversationRequests(source, history, offset, abort.signal, search);
       if (current !== generation.current) return;
       // Returns and revised briefs can reorder a live list between pages.
       // Restart the read rather than silently skipping work at an old offset.
@@ -103,7 +105,13 @@ export function ConversationRequests({sessionId, ownerFallback, refreshKey}: {se
   const recipients = [...new Set(rows.map(row => `${row.goal_id}\n${row.agent_id}`))];
   const count = error || !page ? "—" : unknown ? (page.pending_count ? `${page.pending_count}+` : "—") : page.pending_count;
   const title = zh ? "委派" : "Delegations";
-  const close = () => {setOpen(false); trigger.current?.focus();};
+  const applySearch = (value: string) => {
+    // Fence immediately, including the interval before the effect starts.
+    generation.current++; requestAbort.current?.abort();
+    setPages([]); setError(false); setBusy(true); setSearch(value.trim());
+    setRevision(value => value + 1);
+  };
+  const close = () => {generation.current++; requestAbort.current?.abort(); setBusy(false); setOpen(false); trigger.current?.focus();};
   return <div className="conversation-requests-entry">
     <button ref={trigger} type="button" onClick={() => {setHistory(false); setOpen(true); setRevision(value => value + 1);}}
       aria-haspopup="dialog" aria-label={zh ? `委派，${count} 条待跟进` : `Delegations, ${count} awaiting follow-up`}>
@@ -120,12 +128,24 @@ export function ConversationRequests({sessionId, ownerFallback, refreshKey}: {se
         <button type="button" aria-pressed={history} onClick={() => setHistory(true)}>{zh ? "全部记录" : "All records"}</button>
         <button type="button" disabled={busy} onClick={() => setRevision(value => value + 1)} aria-label={zh ? "刷新委派" : "Refresh delegations"}><RefreshCw size={16}/></button>
       </nav>
+      <form className="conversation-requests-search" role="search" onSubmit={event => {event.preventDefault(); applySearch(searchDraft);}}>
+        <input type="search" value={searchDraft} maxLength={200}
+          aria-label={zh ? "搜索委派" : "Search delegations"}
+          placeholder={zh ? "请求内容、Goal 或 Agent" : "Request text, Goal or Agent"}
+          onChange={event => setSearchDraft(event.target.value)}/>
+        <button type="submit" disabled={busy}>{zh ? "搜索" : "Search"}</button>
+        {search || searchDraft ? <button type="button" onClick={() => {setSearchDraft(""); applySearch("");}}>{zh ? "清空" : "Clear"}</button> : null}
+      </form>
       <div className="conversation-requests-body" aria-busy={busy}>
         {error ? <p role="alert">{zh ? "委派记录暂时无法核验。" : "Delegation records cannot be verified."} <button type="button" onClick={() => setRevision(value => value + 1)}>{zh ? "重试" : "Retry"}</button></p> : null}
         {unknown ? <p role="status">{zh ? "部分记录未能读取，数量与列表尚不完整。" : "Some records could not be read. Counts and list are incomplete."}</p> : null}
         {busy && !rows.length ? <p role="status">{zh ? "正在读取委派…" : "Loading delegations…"}</p> : null}
         {!busy && noSession ? <p>{zh ? "尚无可读取的管家会话。" : "No readable steward conversation yet."}</p> : null}
-        {!busy && !noSession && !error && page && !unknown && !rows.length ? <p>{zh ? "当前没有待跟进的委派。" : "No delegations awaiting follow-up."}</p> : null}
+        {!busy && !noSession && !error && page && !unknown && !rows.length ? <p>{search
+          ? (zh ? "未找到匹配的委派。" : "No matching delegations.")
+          : history ? (zh ? "暂无委派记录。" : "No delegation records.")
+            : (zh ? "当前没有待跟进的委派。" : "No delegations awaiting follow-up.")}</p> : null}
+        {!busy && !error && page && search && rows.length ? <p role="status">{zh ? `匹配 ${page.matched} 条${unknown ? "（部分记录）" : ""}` : `${page.matched} matches${unknown ? " (partial records)" : ""}`}</p> : null}
         {recipients.map(recipient => {const [goal, agent] = recipient.split("\n"); return <section key={recipient} className="conversation-requests-group">
           <h3>{agent}<span>{goal}</span></h3>
           {rows.filter(row => row.goal_id === goal && row.agent_id === agent).map(row => <details key={row.request_id} className="conversation-request-row">

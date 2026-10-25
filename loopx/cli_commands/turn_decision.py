@@ -31,15 +31,18 @@ from ..capabilities.periodic_report.pending_intent import (
     periodic_report_pending_intent_interaction_hook,
 )
 from ..control_plane.quota.live_decision import build_live_quota_should_run_decision
+from ..control_plane.quota.effective_action import EffectiveAction
 from ..control_plane.quota.turn_envelope import build_turn_envelope
 from ..control_plane.quota.settlement import SettlementIdentity, build_turn_scoped_cli_settlement_plan
 from ..control_plane.quota.heartbeat_receipt import (
     find_heartbeat_receipt,
     heartbeat_receipt_settlement_replan_obligation_id,
+    heartbeat_receipt_settlement_todo_id,
 )
 from ..control_plane.goals.first_party_host_admission import FirstPartyHostRuntimeRejected
 from ..control_plane.turn_driver.driver import build_loopx_turn_plan, selected_turn_todo
 from ..control_plane.scheduler.execution_context import (
+    SchedulerExecutionContextResolution,
     scheduler_execution_context_for_turn,
 )
 from ..status import AUTONOMOUS_REPLAN_PERIODIC_LOOKBACK, collect_status
@@ -56,6 +59,7 @@ def _attach_original_replan_settlement(
     decision: dict[str, Any], *, registry_path: Path, runtime_root: Path,
     goal_id: str, agent_id: str,
     turn_instance_id: str | None, goal_ref: Mapping[str, object] | None,
+    receipt_bound_todo_id: str | None = None,
 ) -> dict[str, Any]:
     """Give an outer executor the existing quota-owned scoped plan.
 
@@ -64,8 +68,20 @@ def _attach_original_replan_settlement(
     to the same shared settlement owner, not to a made-up Todo or Host session.
     """
     obligation = replan_obligation_id_from_packet(decision.get("replan_action_packet"))
-    if (not turn_instance_id or not obligation or decision.get("selected_todo")
-            or decision.get("should_run") is not True):
+    if not turn_instance_id or not obligation or decision.get("should_run") is not True:
+        return decision
+    agent = (decision.get("interaction_contract") or {}).get("agent_channel") or {}
+    selected = decision.get("selected_todo")
+    original_task = (isinstance(selected, Mapping) and receipt_bound_todo_id is not None
+                     and selected.get("todo_id") == receipt_bound_todo_id)
+    if (agent.get("must_attempt") is True and agent.get("delivery_allowed") is False
+            and decision.get("effective_action") == EffectiveAction.AUTONOMOUS_REPLAN_REQUIRED.value
+            and not original_task):
+        # A fallback business Todo is context, not the selected owner of a
+        # required semantic replan. An original receipt-bound Task already
+        # owns its replan, so only an unbound fallback yields to the obligation.
+        decision.pop("selected_todo", None)
+    if decision.get("selected_todo"):
         return decision
     cli = (decision.get("interaction_contract") or {}).get("cli_channel")
     if not isinstance(cli, dict) or cli.get("settlement_plan"):
@@ -116,8 +132,8 @@ def _build_turn_decision(
     *,
     registry_path: Path,
     runtime_root: Path,
-    status_payload: Mapping[str, Any],
-    scheduler_execution_context: Mapping[str, Any],
+    status_payload: dict[str, Any],
+    scheduler_execution_context: Mapping[str, Any] | SchedulerExecutionContextResolution,
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]],
     turn_start_hook_dispatch: Mapping[str, Any] | None = None,
     goal_ref: Mapping[str, object] | None = None,
@@ -145,6 +161,7 @@ def _build_turn_decision(
         agent_id=args.agent_id, turn_instance_id=turn_instance_id, goal_ref=goal_ref)
         if turn_instance_id else None)
     bound_replan = heartbeat_receipt_settlement_replan_obligation_id(receipt) if receipt else None
+    bound_todo = heartbeat_receipt_settlement_todo_id(receipt) if receipt else None
 
     def build_turn_decision(
         *, requested_action_todo_id: str | None = None
@@ -185,6 +202,7 @@ def _build_turn_decision(
             decision, registry_path=registry_path, runtime_root=runtime_root,
             goal_id=args.goal_id, agent_id=args.agent_id,
             turn_instance_id=turn_instance_id, goal_ref=goal_ref,
+            receipt_bound_todo_id=bound_todo,
         )
 
     return build_turn_decision
@@ -225,7 +243,7 @@ class FreshTurnDecisionOwner:
     """
 
     status_payload: Mapping[str, Any]
-    scheduler_execution_context: Mapping[str, Any]
+    scheduler_execution_context: Mapping[str, Any] | SchedulerExecutionContextResolution
     operator_inbox_urgency_projector: Callable[..., dict[str, Any]]
     build_turn_decision: Callable[..., dict[str, Any]]
     requested_todo_id: str | None = None
@@ -334,7 +352,8 @@ def current_turn_host_launch_decision(
     )
     _attach_original_replan_settlement(current, registry_path=registry_path,
         runtime_root=runtime_root, goal_id=identity.goal_id, agent_id=identity.agent_id,
-        turn_instance_id=identity.turn_instance_id, goal_ref=goal_ref)
+        turn_instance_id=identity.turn_instance_id, goal_ref=goal_ref,
+        receipt_bound_todo_id=identity.todo_id or None)
     launch = {"current": current, "planned_effective_action": planned_effective_action}
     # The shared typed launch owner retains refusal precedence (including
     # Stop/witness failures) and compares the original effective action.

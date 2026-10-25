@@ -1,3 +1,4 @@
+import {ContextHelp} from "./context-help";
 import type {PrivateConversation} from "../../data/chat";
 import {useEffect, useState} from "react";
 import {StewardReport} from "./steward-report";
@@ -22,7 +23,7 @@ export function StewardManagedMode({state, zh, busy, available, onPrepare, onMon
           ? (zh ? "授权 Goal 状态监控已启用。" : "Authorized Goal monitoring is enabled.")
           : state.monitor ? (zh ? "状态监控已暂停。" : "Goal monitoring is paused.")
           : (zh ? "管家身份已准备，状态监控尚未启用。" : "The steward identity is prepared; monitoring is not enabled.")}</p>
-        <p>{zh ? "状态检查复用原生监控，不调用模型。" : "State checks use the native monitor without model calls."}</p>
+        <ContextHelp label={zh ? "状态检查范围" : "Status inspection scope"}><p>{zh ? "状态检查复用原生监控，不调用模型。" : "State checks use the native monitor without model calls."}</p></ContextHelp>
         {state.goal_active === false ? <p role="status">{zh ? "管家的工作 Goal 已停止；恢复原 Goal 后才能继续监控。" : "The steward Goal is stopped. Resume that original Goal before monitoring."}</p> : null}
         {state.monitor ? <p>{state.scheduling_enabled ? (zh ? "下次检查：" : "Next check: ") : (zh ? "保留的到期时间：" : "Retained deadline: ")}{state.monitor.next_due_at ? new Date(state.monitor.next_due_at).toLocaleString(zh ? "zh-CN" : "en-US") : (zh ? "未排期" : "Unscheduled")}
           <br/>{zh ? "上次检查：" : "Last check: "}{state.monitor.last_checked_at ? new Date(state.monitor.last_checked_at).toLocaleString() : (zh ? "尚未完成首次检查" : "No completed check yet")}</p> : null}

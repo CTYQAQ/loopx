@@ -1,7 +1,112 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {planStewardReport} from "../../loopx/control_plane/collaboration/steward_reports.ts";
-import {admitStewardManagedTurn, bindStewardManagedActor} from "../../loopx/control_plane/collaboration/steward_managed_mode.ts";
+import {admitManagedSessionIdentity, admitManagedSessionTurn, admitStewardManagedTurn, bindStewardManagedActor, observeManagedWork} from "../../loopx/control_plane/collaboration/steward_managed_mode.ts";
+import {resolveConversationScope} from "../../loopx/control_plane/collaboration/conversation_scope.ts";
+
+test("a managed work identity is registration-bound and never chosen from the executor or legacy history", () => {
+  const goal = {goal_id: "project", goal_instance_id: "original", registered_agents: ["writer", "reviewer"], workspace_path: "/workspace"};
+  const input = {goal, goal_active: true, workspace_path: "/workspace", managed_agent_id: "writer"};
+  const identity = admitManagedSessionIdentity(input);
+  assert.deepEqual(identity, {managed_agent_id: "writer", channel_id: "agent.writer", goal_instance_id: "original"});
+  assert.notDeepEqual(admitManagedSessionIdentity({...input, managed_agent_id: "reviewer"}), identity);
+  for (const changed of [{managed_agent_id: "codex"}, {managed_agent_id: ["writer"]}, {goal_active: false},
+    {workspace_path: "/other"}, {goal: {...goal, goal_instance_id: {unverified: true}}}]) {
+    assert.throws(() => admitManagedSessionIdentity({...input, ...changed}));
+  }
+  const session = {...identity, goal_id: goal.goal_id, session_id: "a".repeat(32), session_mode: "managed_runtime",
+    agent_id: "codex", executor_endpoint_id: "codex", adapter_kind: "codex_app_server", managed_workspace_path: "/workspace"};
+  assert.equal(resolveConversationScope(session).kind, "owner_goal");
+  assert.equal(resolveConversationScope({...session, channel_id: "goal.project"}).kind, "unavailable");
+  assert.equal(resolveConversationScope({...session, origin: "lark"}).kind, "unavailable");
+  const request = {operation: "native_turn", host: "codex-app-server", work_kind: "native_turn",
+    turn_instance_id: "one-operation", todo_id: null, validation_command: null,
+    actor: {schema_version: "loopx_managed_session_actor_v0", goal_id: goal.goal_id, goal_instance_id: "original",
+      agent_id: "writer", session_id: session.session_id, workspace_path: "/workspace"}};
+  const params = {goal, goal_active: true, session, request, queued_turn_count: 0};
+  assert.deepEqual(admitManagedSessionTurn(params).actor, request.actor);
+  for (const changed of [{managed_agent_id: "reviewer"}, {managed_agent_id: undefined, channel_id: "goal.project"},
+    {goal_instance_id: "replaced"}, {managed_workspace_path: "/other"}, {executor_endpoint_id: "other"}]) {
+    assert.throws(() => admitManagedSessionTurn({...params, session: {...session, ...changed}}));
+  }
+  const watch = {todo_id: "todo_watch", target_key: `managed-session-watch.${session.session_id}`,
+    task_class: "continuous_monitor", action_kind: "local_runtime_observe", claimed_by: "writer",
+    watch_only: true, status: "open", next_due_at: "2030-01-01T00:00:00Z"};
+  const watched = {...params, request: {...request, work_kind: "monitor", todo_id: watch.todo_id,
+    monitor_deadline: watch.next_due_at, monitor_lease_version: 0}, monitor_todo: watch};
+  assert.equal(admitManagedSessionTurn(watched).observation_only, true);
+  for (const changed of [{target_key: "steward-portfolio-watch"}, {claimed_by: "reviewer"},
+    {target_key: "managed-session-watch.other-session"}, {watch_only: false}, {status: "blocked"},
+    {action_kind: "business_work"}, {next_due_at: "2030-01-02T00:00:00Z"}]) {
+    assert.throws(() => admitManagedSessionTurn({...watched, monitor_todo: {...watch, ...changed}}));
+  }
+  assert.throws(() => admitManagedSessionTurn({...params, request: {...request, monitor_deadline: watch.next_due_at}}));
+});
+
+test("local native work observation excludes watch bookkeeping and retains real work changes", () => {
+  const goal = {goal_id: "project", goal_instance_id: "original"};
+  const task = {todo_id: "todo_work", task_class: "advancement_task", status: "open", title: "Useful work"};
+  const watch = {todo_id: "todo_watch", task_class: "continuous_monitor", next_due_at: "2030-01-01"};
+  const source = {goal, actor: {goal_id: goal.goal_id, goal_instance_id: goal.goal_instance_id}, todos: [task, watch]};
+  const first = observeManagedWork(source);
+  const unchanged = observeManagedWork({...source, previous_hash: first.result_hash,
+    todos: [{...watch, next_due_at: "2031-01-01", result_hash: "changed", material_change_generation: 99}, task]});
+  assert.equal(unchanged.result_hash, first.result_hash);
+  assert.equal(unchanged.material_change, false);
+  assert.equal(first.observed_task_count, 1);
+  assert.equal(observeManagedWork({...source, previous_hash: first.result_hash, todos: [{...task, status: "done"}]}).material_change, true);
+  assert.throws(() => observeManagedWork({...source, goal: {...goal, goal_instance_id: "replacement"}}));
+  assert.throws(() => observeManagedWork({...source, todos: undefined}));
+});
+
+test("a local calendar report retains its exact original Session, subscription, window and native Task", () => {
+  const goal = {goal_id: "project", goal_instance_id: "original", registered_agents: ["writer", "peer"], workspace_path: "/workspace"};
+  const session = {goal_id: goal.goal_id, goal_instance_id: goal.goal_instance_id, session_id: "a".repeat(32),
+    channel_id: "agent.writer", session_mode: "managed_runtime", managed_agent_id: "writer", agent_id: "codex",
+    executor_endpoint_id: "codex", adapter_kind: "codex_app_server", managed_workspace_path: goal.workspace_path};
+  const actor = {schema_version: "loopx_managed_session_actor_v0", goal_id: goal.goal_id, goal_instance_id: goal.goal_instance_id,
+    session_id: session.session_id, agent_id: "writer", workspace_path: goal.workspace_path};
+  const request = {operation: "native_turn", host: "codex-app-server", work_kind: "report", actor,
+    turn_instance_id: "managed-session.report.original", todo_id: "todo_report", validation_command: null,
+    report_window_id: "original-window", report_subscription_revision: "original-subscription"};
+  const subscription = {enabled: true, profile_preset: "weekly-progress", route_ref: `managed-session:${session.session_id}`,
+    effective_revision: request.report_subscription_revision};
+  const window = {goal_id: goal.goal_id, agent_id: "writer", window_id: request.report_window_id,
+    subscription_revision: request.report_subscription_revision};
+  const todo = {todo_id: request.todo_id, target_key: window.window_id, action_kind: "generate_periodic_report", claimed_by: "writer", status: "open"};
+  const input = {session, goal, request, goal_active: true, queued_turn_count: 0,
+    report_window: window, report_subscription: subscription, report_todo: todo};
+  assert.equal(admitManagedSessionTurn(input).observation_only, false);
+  for (const changed of [
+    {...input, goal_active: false}, {...input, queued_turn_count: 1},
+    {...input, session: {...session, managed_agent_id: "peer"}},
+    {...input, session: {...session, session_mode: "attached_host"}},
+    {...input, session: {...session, goal_instance_id: "replacement"}},
+    {...input, report_window: {...window, goal_id: "another"}},
+    {...input, report_window: {...window, agent_id: "peer"}},
+    {...input, report_window: {...window, window_id: "next-window"}},
+    {...input, report_subscription: {...subscription, enabled: false}},
+    {...input, report_subscription: {...subscription, effective_revision: "changed"}},
+    {...input, report_subscription: {...subscription, profile_preset: "portfolio-progress"}},
+    {...input, report_subscription: {...subscription, route_ref: "managed-session:" + "b".repeat(32)}},
+    {...input, report_todo: {...todo, target_key: "another-window"}},
+    {...input, report_todo: {...todo, claimed_by: "peer"}},
+    {...input, report_todo: {...todo, status: "done"}},
+    {...input, request: {...request, validation_command: ["a-caller-command"]}},
+    {...input, request: {...request, profile: "another-runtime"}},
+    {...input, request: {...request, work_kind: "native_turn"}},
+  ]) assert.throws(() => admitManagedSessionTurn(changed));
+  const inspection = {schema_version: "loopx_turn_journal_inspection_v1", ok: true,
+    goal_matches: true, owner_matches: true, turn_key_matches: true, journal_consistent: true,
+    journal_status: "failed", completed_phases: ["host_execute", "typed_result"],
+    recovery_decision: {action: "continue", resume_from: "validation", reinvoke_host: false}};
+  assert.equal(admitManagedSessionTurn({...input, report_settlement_recovery: inspection}).observation_only, false);
+  for (const changed of [{owner_matches: false}, {journal_consistent: false}, {completed_phases: ["host_execute"]},
+    {recovery_decision: {...inspection.recovery_decision, reinvoke_host: true}},
+    {recovery_decision: {...inspection.recovery_decision, resume_from: "host_execute"}}]) {
+    assert.throws(() => admitManagedSessionTurn({...input, report_settlement_recovery: {...inspection, ...changed}}));
+  }
+});
 
 function original() {
   const binding = {binding_id: "b".repeat(24), transport_ref: "private-steward", provider_ref: "c".repeat(24),
@@ -182,4 +287,90 @@ test("a retained pre-publication launch refusal can resume only its original nat
     {...input, goal_active: false},
     {...input, queued_turn_count: 1},
   ]) assert.throws(() => admitStewardManagedTurn(invalid));
+});
+
+test("only a proven original pre-execution replan refusal admits one correlated report continuation", () => {
+  const p = original();
+  const request = {operation: "native_turn", host: "codex-app-server", actor: p.actor,
+    turn_instance_id: "report.cadence_original", todo_id: "todo_report", validation_command: ["python", "validate.py"],
+    work_kind: "report", report_window_id: "cadence_original", report_subscription_revision: "sha256:original"};
+  const refusal = {schema_version: "loopx_turn_selection_rejection_v0", source: "quota.should-run",
+    requested_todo_id: request.todo_id, state: "deferred", reason_code: "autonomous_replan",
+    recovery_action: "reenter_guard_without_selection", delivery_preemptions: ["autonomous_replan", "delivery_not_allowed"],
+    status_health_ok: true, contract_error_count: 0};
+  const effects = {host_invoked: false, state_written: false, quota_spent: false, scheduler_acknowledged: false};
+  const result = {schema_version: "loopx_turn_execution_v0", mode: "run_once", ok: false,
+    error_code: "turn_todo_selection_deferred", effects_scope: "current_invocation", effects, selection_rejection: refusal};
+  const source = {session_id: p.session.session_id, status: "completed", origin: "native_loopx", loopx_execution: true,
+    delta_count: 0, upstream_turn_id: null, loopx_request: request, response: {native_loopx: result}};
+  const proof = {original: source, generation_present: false};
+  const input = {...p, request, report_selection_recovery: proof,
+    report_window: {window_id: request.report_window_id, subscription_revision: request.report_subscription_revision,
+      goal_id: p.actor.goal_id, agent_id: p.actor.agent_id},
+    report_subscription: {enabled: true, profile_preset: "portfolio-progress",
+      route_ref: `steward-private:${p.binding.binding_id}:${p.source}`, effective_revision: request.report_subscription_revision},
+    report_todo: {todo_id: request.todo_id, target_key: request.report_window_id,
+      claimed_by: "steward", action_kind: "generate_periodic_report", status: "open"}};
+  assert.equal(admitStewardManagedTurn(input).observation_only, false);
+  for (const original of [
+    {...source, status: "failed"}, {...source, delta_count: 1}, {...source, upstream_turn_id: "actual-model"},
+    {...source, session_id: "other"}, {...source, loopx_request: {...request, todo_id: "todo_other"}},
+    ...["host_invoked", "state_written", "quota_spent", "scheduler_acknowledged"].flatMap(key => [true, null].map(value =>
+      ({...source, response: {native_loopx: {...result, effects: {...effects, [key]: value}}}}))),
+    ...[{state: "unavailable"}, {reason_code: "control_repair"}, {status_health_ok: false}, {contract_error_count: 1},
+      {recovery_action: "inspect_original"}, {requested_todo_id: "todo_other"}].map(changed =>
+      ({...source, response: {native_loopx: {...result, selection_rejection: {...refusal, ...changed}}}})),
+    {...source, response: {native_loopx: {...result, resume_turn_key: "sha256:" + "a".repeat(64)}}},
+  ]) assert.throws(() => admitStewardManagedTurn({...input, report_selection_recovery: {...proof, original}}));
+  for (const changed of [
+    {report_selection_recovery: {...proof, generation_present: true}},
+    {report_subscription: {...input.report_subscription, enabled: false}}, {queued_turn_count: 1}, {goal_active: false},
+    {request: {...request, work_kind: "native_turn"}},
+  ]) assert.throws(() => admitStewardManagedTurn({...input, ...changed}));
+
+  const turn_key = "sha256:" + "c".repeat(64);
+  const journal = {schema_version: "loopx_turn_journal_v0", goal_id: p.actor.goal_id,
+    turn_key, status: "stopped", host: {kind: "codex-app-server", executable: "built-in"},
+    host_attempt_count: 1, result_kind: "wait", completed_phases: ["host_execute", "typed_result", "validation"],
+    host_result: {schema_version: "loopx_turn_result_v0", turn_key, result_kind: "wait", classification: "report_replan_not_admitted"},
+    plan: {route: {kind: "ready_for_host", effective_action: "normal_run"},
+      turn_envelope: {goal_id: p.actor.goal_id, agent_id: p.actor.agent_id, effective_action: "normal_run",
+        replan_action_packet: null, action: {must_attempt: true, delivery_allowed: true, selected_todo: {todo_id: request.todo_id}}},
+      transaction: {settlement_plan: {identity: {goal_id: p.actor.goal_id, agent_id: p.actor.agent_id,
+        todo_id: request.todo_id, turn_instance_id: request.turn_instance_id + ".replan"}}}}};
+  const inspection = {schema_version: "loopx_turn_journal_inspection_v1", ok: true,
+    goal_matches: true, owner_matches: true, turn_key_matches: true, journal_consistent: true, journal_status: "stopped",
+    recorded_effects: {host_invoked: true, state_written: false, quota_spent: false, scheduler_acknowledged: false},
+    recovery_decision: {action: "return_existing", reinvoke_host: false}};
+  const probe = {turn: {...source, turn_id: "c".repeat(32)}, journal, inspection};
+  const resumed = {...input, report_selection_recovery: {...proof, probe}};
+  assert.equal(admitStewardManagedTurn(resumed).observation_only, false);
+  // An unselected guard's advisory is not executed or inherited. The original
+  // report still has to pass a fresh native exact-Todo admission afterwards.
+  const other = structuredClone(journal);
+  other.plan.turn_envelope.action.selected_todo.todo_id = "todo_advisory";
+  other.plan.transaction.settlement_plan.identity.todo_id = "todo_advisory";
+  assert.equal(admitStewardManagedTurn({...input,
+    report_selection_recovery: {...proof, probe: {...probe, journal: other}}}).observation_only, false);
+  for (const changed of [
+    {...probe, turn: {...probe.turn, turn_id: ""}}, {...probe, journal: {...journal, turn_key: "unknown"}},
+    {...probe, turn: {...probe.turn, delta_count: 1}}, {...probe, turn: {...probe.turn, upstream_turn_id: "model"}},
+    {...probe, turn: {...probe.turn, status: "running"}}, {...probe, turn: {...probe.turn, session_id: "another"}},
+    {...probe, turn: {...probe.turn, response: {native_loopx: {...result, effects: {...effects, state_written: true}}}}},
+    {...probe, journal: {...journal, host_attempt_count: 2}}, {...probe, journal: {...journal, status: "failed"}},
+    {...probe, journal: {...journal, host: {...journal.host, executable: "external"}}},
+    {...probe, journal: {...journal, host_result: {...journal.host_result, classification: "model_wait"}}},
+    {...probe, journal: {...journal, completed_phases: [...journal.completed_phases, "durable_writeback"]}},
+    {...probe, journal: {...journal, plan: {...journal.plan, turn_envelope: {...journal.plan.turn_envelope,
+      replan_action_packet: {schema_version: "autonomous_replan_obligation_v0"}}}}},
+    {...probe, journal: {...journal, plan: {...journal.plan, turn_envelope: {...journal.plan.turn_envelope,
+      action: {...journal.plan.turn_envelope.action, selected_todo: {todo_id: "todo_other"}}}}}},
+    {...probe, journal: {...journal, plan: {...journal.plan, transaction: {settlement_plan: {identity: {
+      ...journal.plan.transaction.settlement_plan.identity, turn_instance_id: "other.replan"}}}}}},
+    ...["goal_matches", "owner_matches", "turn_key_matches", "journal_consistent"].map(key =>
+      ({...probe, inspection: {...inspection, [key]: false}})),
+    ...["state_written", "quota_spent", "scheduler_acknowledged"].flatMap(key => [true, null].map(value =>
+      ({...probe, inspection: {...inspection, recorded_effects: {...inspection.recorded_effects, [key]: value}}}))),
+    {...probe, inspection: {...inspection, recovery_decision: {...inspection.recovery_decision, reinvoke_host: true}}},
+  ]) assert.throws(() => admitStewardManagedTurn({...input, report_selection_recovery: {...proof, probe: changed}}));
 });

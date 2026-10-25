@@ -58,6 +58,7 @@ async function runConversation(browser, uncertain) {
       // Unrelated Goal/status APIs use the public synthetic workspace. The
       // original-conversation route always reaches the real production owner.
       await page.route('**/api/chat/codex-attached**', route => route.continue());
+      await page.route('**/api/chat/sessions?*managed_agent_id=*', route => route.continue());
     }});
     const {page} = context;
     await page.locator('.personal-goal-link').filter({hasText:'Product Release'}).click();
@@ -68,7 +69,8 @@ async function runConversation(browser, uncertain) {
       const other = page.getByRole('button',{name:'与 other-worker 对话',exact:true});
       await other.click();
       const unavailable = page.getByRole('region',{name:'Agent 工作会话',exact:true});
-      await unavailable.getByText('此 Agent 尚无已绑定的会话来源。',{exact:true}).waitFor();
+      await unavailable.getByRole('button',{name:'尚无工作会话',exact:true}).click();
+      await unavailable.getByText('此 Agent 尚无已绑定的工作会话。原 Goal 对话记录仍独立保留。',{exact:true}).waitFor();
       assert.equal(await unavailable.getByText('Original result',{exact:true}).count(),0);
       assert.equal(await unavailable.getByRole('textbox').count(),0);
       await page.goBack();
@@ -177,12 +179,14 @@ async function runConversation(browser, uncertain) {
       assert.equal(await owner.getByRole('textbox',{name:'回复 worker',exact:true}).inputValue(),'保留在 worker 的草稿');
       await owner.getByRole('textbox',{name:'回复 worker',exact:true}).fill('');
       await owner.getByRole('combobox',{name:'查看 Agent'}).selectOption('remote-worker');
+      await owner.getByRole('button',{name:'会话来源未接入',exact:true}).click();
       await owner.getByText('来源：cursor。此宿主的工作记录与回复尚未接入。',{exact:true}).waitFor();
       assert.equal(await owner.getByRole('textbox').count(),0);
       await page.screenshot({path:resolve(outputDir,'attached-agent-unsupported.png'),animations:'disabled'});
       await page.goBack();
       await owner.getByText('Original result',{exact:true}).waitFor();
       await page.goForward();
+      await owner.getByRole('button',{name:'会话来源未接入',exact:true}).click();
       await owner.getByText('来源：cursor。此宿主的工作记录与回复尚未接入。',{exact:true}).waitFor();
       await owner.getByRole('button',{name:'返回概览',exact:true}).click();
       await entry.waitFor();
@@ -203,7 +207,94 @@ async function runConversation(browser, uncertain) {
     const inputCount = async () => (await (await page.request.get(new URL('/fixture/inputs',url).href)).json()).count;
     const composer = panel.getByRole('textbox', {name:'回复 worker',exact:true});
     const send = panel.getByRole('button', {name:'发送到原会话',exact:true});
+    // The original-host composer follows the same keyboard contract as Chat.
+    // Composition confirmation must never become a native input operation.
+    await composer.fill('输入法保留的草稿');
+    await composer.dispatchEvent('compositionstart');
+    await composer.dispatchEvent('keydown',{key:'Enter',keyCode:13,isComposing:false});
+    await composer.dispatchEvent('compositionend');
+    for (const key of [{key:'Enter',keyCode:13,isComposing:true}, {key:'Enter',keyCode:229,isComposing:false}, {key:'Enter',repeat:true}]) {
+      await composer.dispatchEvent('keydown',key);
+    }
+    assert.equal(await inputCount(),0,'IME confirmation and held Enter never reach the native owner');
+    assert.equal(await composer.inputValue(),'输入法保留的草稿');
+    await composer.press('Shift+Enter');
+    assert.equal(await composer.inputValue(),'输入法保留的草稿\n');
+    assert.equal(await inputCount(),0,'Shift+Enter adds a line without submitting');
+    await composer.fill('');
     if (!uncertain) {
+      // One Agent may own several independent host conversations. Selection,
+      // drafts, delayed reads and refresh must keep their exact original scope.
+      await page.screenshot({path:resolve(outputDir,'agent-sessions-before-desktop.png'),animations:'disabled'});
+      await page.setViewportSize({width:390,height:844});
+      await page.screenshot({path:resolve(outputDir,'attached-composer-default-narrow.png'),animations:'disabled'});
+      await page.setViewportSize({width:1440,height:900});
+      await page.request.post(new URL('/fixture/second-conversation',url).href);
+      // A fresh directory has no exact route selection. An existing exact URL
+      // otherwise correctly keeps its original Session when another is added.
+      const directoryUrl = new URL(page.url()); directoryUrl.searchParams.delete('workSession');
+      await page.goto(directoryUrl.href);
+      const sessions = panel.getByRole('combobox',{name:'工作会话',exact:true});
+      await sessions.waitFor();
+      assert.equal(await sessions.inputValue(),'','Multiple Sessions require an exact choice');
+      assert.equal(await composer.count(),0,'No first-row fallback opens the wrong history');
+      const choices = await sessions.locator('option').evaluateAll(options => options.map(option => option.value).filter(Boolean));
+      assert.equal(choices.length,2);
+      await sessions.selectOption(choices[0]);
+      await panel.getByText('Original result',{exact:true}).waitFor();
+      await composer.fill('第一条会话草稿');
+      await sessions.selectOption(choices[1]);
+      await panel.getByText('Result: Separate investigation',{exact:true}).waitFor();
+      assert.equal(await panel.getByText('Original result',{exact:true}).count(),0);
+      assert.equal(await composer.inputValue(),'');
+      await composer.fill('第二条会话草稿');
+      await page.reload();
+      await panel.getByText('Result: Separate investigation',{exact:true}).waitFor();
+      assert.equal(await sessions.inputValue(),choices[1]);
+      assert.equal(await composer.inputValue(),'第二条会话草稿');
+      await page.screenshot({path:resolve(outputDir,'agent-sessions-after-desktop.png'),animations:'disabled'});
+      await page.setViewportSize({width:390,height:844});
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1),false);
+      await page.screenshot({path:resolve(outputDir,'agent-sessions-after-narrow.png'),animations:'disabled'});
+      await page.setViewportSize({width:1440,height:900});
+      let releaseRead, startedRead;
+      const heldRead = new Promise(resolve => {releaseRead = resolve;});
+      const readStarted = new Promise(resolve => {startedRead = resolve;});
+      let held = false;
+      const delayedSession = async route => {
+        if (held || new URL(route.request().url()).searchParams.get('binding_ref') !== choices[0]) return route.continue();
+        held = true;
+        const response = await route.fetch(); startedRead(); await heldRead; await route.fulfill({response});
+      };
+      await page.route('**/api/chat/codex-attached?*',delayedSession);
+      await sessions.selectOption(choices[0]);
+      await readStarted;
+      await sessions.selectOption(choices[1]);
+      await panel.getByText('Result: Separate investigation',{exact:true}).waitFor();
+      releaseRead();
+      await page.unroute('**/api/chat/codex-attached?*',delayedSession);
+      assert.equal(await panel.getByText('Original result',{exact:true}).count(),0);
+      assert.equal(await composer.inputValue(),'第二条会话草稿');
+      const missingSelection = async route => {
+        if (new URL(route.request().url()).searchParams.has('agent_id')) return route.continue();
+        const response = await route.fetch(), value = await response.json();
+        await route.fulfill({response,json:{...value,agents:value.agents.filter(row => row.binding_ref !== choices[1])}});
+      };
+      await page.route('**/api/chat/codex-attached?*',missingSelection);
+      await page.reload();
+      await sessions.waitFor();
+      assert.equal(await sessions.inputValue(),'');
+      assert.match(await sessions.locator('option:checked').innerText(),/原会话绑定已变更/);
+      assert.equal(await composer.count(),0,'A stale saved choice never falls back to the sole other Session');
+      await page.unroute('**/api/chat/codex-attached?*',missingSelection);
+      await page.reload();
+      await panel.getByText('Result: Separate investigation',{exact:true}).waitFor();
+      assert.equal(await composer.inputValue(),'第二条会话草稿');
+      await sessions.selectOption(choices[0]);
+      await panel.getByText('Original result',{exact:true}).waitFor();
+      assert.equal(await composer.inputValue(),'第一条会话草稿');
+      await composer.fill('');
+      assert.equal(await inputCount(),0,'Reading and switching never start or replay host work');
       const live = panel.getByLabel('原宿主实时记录',{exact:true});
       await page.request.post(new URL('/fixture/live-start',url).href);
       await live.getByText('原宿主实时草稿',{exact:true}).waitFor();
@@ -227,6 +318,7 @@ async function runConversation(browser, uncertain) {
       assert.equal(await activeMarks.count(),2,'Returning to the tail restores the current observation');
       assert.equal(await inputCount(),0,'Observation never submits native input');
       await panel.getByRole('combobox',{name:'查看 Agent'}).selectOption('remote-worker');
+      await panel.getByRole('button',{name:'会话来源未接入',exact:true}).click();
       await panel.getByText('来源：cursor。此宿主的工作记录与回复尚未接入。',{exact:true}).waitFor();
       assert.equal(await live.count(),0,'Changing the Agent removes the old live records');
       await page.waitForFunction(async () => (await (await fetch('/fixture/following')).json()).events.at(-1) === false);
@@ -269,7 +361,7 @@ async function runConversation(browser, uncertain) {
       await page.route('**/api/chat/codex-attached',unrelatedRejection);
       await composer.fill('核对一次投递，不要自动重发。');
       const submitted = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/chat/codex-attached');
-      await send.click();
+      await composer.press('Meta+Enter');
       await submitted;
       await page.unroute('**/api/chat/codex-attached',unrelatedRejection);
       await panel.getByText('投递尚未确认，请先在原 App 核对，不会自动重发。',{exact:false}).waitFor();
@@ -324,11 +416,46 @@ async function runConversation(browser, uncertain) {
     await page.request.post(new URL('/fixture/append',url).href);
     await panel.getByText('原 Agent 的新结果：已保留原会话。',{exact:true}).waitFor();
     await panel.getByLabel('回复 worker',{exact:true}).fill('请沿用当前原会话补充验证。');
-    await panel.getByRole('button',{name:'发送到原会话',exact:true}).click();
+    // Two keydowns in one browser task must share one in-flight submission.
+    await composer.evaluate(node => {
+      for (const metaKey of [false,true]) node.dispatchEvent(new KeyboardEvent('keydown',{
+        key:'Enter',code:'Enter',bubbles:true,cancelable:true,metaKey,
+      }));
+    });
     await panel.getByText('已由原 App 接纳；等待 Agent 结果。',{exact:false}).waitFor();
     await panel.locator('.attached-conversation-messages').getByText('请沿用当前原会话补充验证。',{exact:true}).waitFor();
     assert.equal(await composer.count(),1, 'A confirmed reply must leave the next composer available');
     assert.equal(await composer.inputValue(),'');
+    assert.equal(await inputCount(),1,'Enter submits exactly once through the real original-host owner');
+    const keyboardHelp = panel.getByRole('button',{name:'回复快捷键',exact:true});
+    await keyboardHelp.focus();
+    await page.getByRole('tooltip').filter({hasText:'Shift+Enter'}).waitFor();
+    assert.equal(await inputCount(),1,'Reading keyboard help has no native effect');
+    await page.screenshot({path:resolve(outputDir,'attached-composer-help-desktop.png'),animations:'disabled'});
+    await page.keyboard.press('Escape');
+    assert.ok(await keyboardHelp.evaluate(node => node === document.activeElement));
+    const sourceHelp = panel.getByRole('button',{name:'原会话来源与更新',exact:true});
+    await sourceHelp.hover();
+    const sourcePopover = page.getByRole('tooltip').filter({hasText:'实时内容来自原宿主'});
+    await sourcePopover.hover();
+    assert.equal(await sourcePopover.isVisible(),true,'Pointer can enter source help without losing it');
+    await page.keyboard.press('Escape');
+    // A recovery-storage failure must stop the keyboard operation before POST.
+    await composer.fill('恢复记录失败时保留这份草稿');
+    await page.evaluate(() => {
+      window.__attachedOriginalSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(key,value) {
+        if (this === sessionStorage && key.startsWith('loopx-attached-input:') && !key.endsWith(':draft')) throw new DOMException('Synthetic recovery storage failure','QuotaExceededError');
+        return window.__attachedOriginalSetItem.call(this,key,value);
+      };
+    });
+    await composer.press('Enter');
+    await panel.getByRole('alert').filter({hasText:'无法保存回复回执，未发送。'}).waitFor();
+    assert.equal(await inputCount(),1,'Recovery storage refusal creates no native input');
+    assert.equal(await composer.inputValue(),'恢复记录失败时保留这份草稿');
+    await page.evaluate(() => {Storage.prototype.setItem = window.__attachedOriginalSetItem; delete window.__attachedOriginalSetItem;});
+    await panel.getByRole('alert').waitFor({state:'hidden'});
+    await composer.fill('');
     assert.equal(await panel.getByRole('button',{name:'已核对，写下一条',exact:true}).count(),0);
     await page.reload();
     await panel.getByText('已由原 App 接纳；等待 Agent 结果。',{exact:false}).waitFor();
@@ -341,6 +468,13 @@ async function runConversation(browser, uncertain) {
     assert.ok(await panel.boundingBox());
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true);
     await page.screenshot({path:resolve(outputDir,'attached-codex-conversation-phone.png'),animations:'disabled'});
+    await keyboardHelp.click();
+    const keyboardPopover = page.getByRole('tooltip').filter({hasText:'Shift+Enter'});
+    await keyboardPopover.waitFor();
+    const helpBounds = await keyboardPopover.boundingBox();
+    assert.ok(helpBounds.x >= 0 && helpBounds.x + helpBounds.width <= 390);
+    await page.screenshot({path:resolve(outputDir,'attached-composer-help-narrow.png'),animations:'disabled'});
+    await page.keyboard.press('Escape');
     // The host may become busy between the idle snapshot and the explicit send.
     const busyRace = async route => {
       await page.request.post(new URL('/fixture/busy',url).href);
@@ -366,6 +500,12 @@ async function runConversation(browser, uncertain) {
     assert.equal(await composer.inputValue(),'继续检查这份结果。', 'Rejected input remains a draft across reload');
     assert.equal(await inputCount(),1, 'Reload must not retry the rejected input');
     assert.equal(await send.isDisabled(),true, 'Keeping the composer must not bypass host activity');
+    await composer.press('Meta+Enter');
+    await panel.getByText('此连接不支持调整本轮；草稿已保留。',{exact:true}).waitFor();
+    await composer.press('Enter');
+    await panel.getByText('原会话当前不能接收回复；草稿已保留。',{exact:true}).waitFor();
+    assert.equal(await composer.inputValue(),'继续检查这份结果。');
+    assert.equal(await inputCount(),1,'Busy keyboard actions cannot bypass original-host admission');
     await page.request.post(new URL('/fixture/append',url).href);
     await panel.getByText('原会话可回复',{exact:true}).waitFor();
     await send.focus();
@@ -491,7 +631,8 @@ async function runConversation(browser, uncertain) {
     await page.reload();
     await windowRead;
     await panel.getByRole('combobox',{name:'查看 Agent'}).selectOption('other-worker');
-    await panel.getByText('此 Agent 尚无已绑定的会话来源。',{exact:true}).waitFor();
+    await panel.getByRole('button',{name:'尚无工作会话',exact:true}).click();
+    await panel.getByText('此 Agent 尚无已绑定的工作会话。原 Goal 对话记录仍独立保留。',{exact:true}).waitFor();
     const lateWindow = page.waitForResponse(response => new URL(response.url()).searchParams.get('agent_id') === 'worker');
     releaseWindow(); await lateWindow;
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -560,6 +701,20 @@ async function runConversation(browser, uncertain) {
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true);
     await page.screenshot({path:resolve(outputDir,'attached-codex-dialogue-primary-phone.png'),animations:'disabled'});
+    await page.setViewportSize({width:1512,height:982});
+    await page.screenshot({path:resolve(outputDir,'attached-composer-long-mixed-desktop.png'),animations:'disabled'});
+    const inputsBeforeLanguage = await inputCount();
+    await page.evaluate(() => localStorage.setItem('loopx-pw-locale','en'));
+    await page.reload();
+    const englishHelp = page.getByRole('button',{name:'Reply keyboard shortcuts',exact:true});
+    await englishHelp.focus();
+    await page.getByRole('tooltip').filter({hasText:'Command+Enter also sends while idle'}).waitFor();
+    await page.setViewportSize({width:390,height:844});
+    await page.screenshot({path:resolve(outputDir,'attached-composer-help-english-narrow.png'),animations:'disabled'});
+    assert.equal(await inputCount(),inputsBeforeLanguage,'Changing language and reading help cannot submit native input');
+    await page.evaluate(() => localStorage.setItem('loopx-pw-locale','zh-CN'));
+    await page.reload();
+    await panel.getByRole('textbox',{name:'回复 worker',exact:true}).waitFor();
     await page.setViewportSize({width:1512,height:982});
     await page.request.post(new URL('/fixture/rebind',url).href);
     await panel.getByRole('alert').waitFor();

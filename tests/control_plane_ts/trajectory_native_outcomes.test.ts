@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {prepareTrajectoryAssessment, type TrajectoryInput} from "../../loopx/control_plane/capabilities/trajectory_assessment.ts";
+import {createHash} from "node:crypto";
+import {prepareTrajectoryAssessment, qualifyTrajectoryAssessment, type TrajectoryInput} from "../../loopx/control_plane/capabilities/trajectory_assessment.ts";
+import {compareTrajectoryAssessments} from "../../loopx/control_plane/capabilities/trajectory_assessment_continuation.ts";
 
 const input: TrajectoryInput = {schema_version:"trajectory_assessment_input_v1",
   scope:{goal_id:"g",case_id:"c",run_id:"r",revision:"rev",window:"complete"}, objective:"Minimize native error",
@@ -15,6 +17,73 @@ function capture() {return {schema_version:"trajectory_native_outcomes_v1",scope
     submitted_at:`2026-01-01T00:0${i}:00Z`,observed_at:`2026-01-01T00:0${i===1?5:3}:00Z`,valid:true,value,
     citation:{source_id:"s",first_line:i+1,last_line:i+1}}))};}
 function project(value: unknown) {return prepareTrajectoryAssessment({input,config,native_outcomes:value}).native_outcomes!;}
+
+function contextInput() {
+  const raw = {...capture(), retained_result_id: null};
+  const text = JSON.stringify(raw);
+  return {...structuredClone(input), native_outcomes_source_id: "capture", sources: [...input.sources,
+    {id: "capture", artifact: "capture.json", artifact_sha256: createHash("sha256").update(text).digest("hex"), first_line: 1, text}]};
+}
+
+test("explicit native context supplies measured direction and unknown retention to the observer", () => {
+  const bound = contextInput(), prepared = prepareTrajectoryAssessment({input: bound, config});
+  assert.equal(prepared.input.native_outcomes_source_id, "capture");
+  const context = JSON.parse(prepared.prompt.split("\n\nNative outcome context:\n")[1]!);
+  assert.equal(context.metric.higher_is_better, false);
+  assert.equal(context.best_valid.value, 1);
+  assert.equal(context.final_valid.value, 1);
+  assert.equal(context.retained, null, "Best/final must not invent retained selection");
+  assert.equal(context.sample_count, 3);
+  assert.equal(prepared.prompt.includes(bound.sources.at(-1)!.text), false, "Do not duplicate a context-only capture in the model evidence");
+  assert.notEqual(prepared.analysis_key, prepareTrajectoryAssessment({input: {...bound, native_outcomes_source_id: undefined}, config}).analysis_key);
+});
+
+test("native context requires a complete registered capture with the same scope", () => {
+  for (const mutate of [
+    (x: ReturnType<typeof contextInput>) => {x.native_outcomes_source_id = "missing";},
+    (x: ReturnType<typeof contextInput>) => {x.sources.at(-1)!.first_line = 2;},
+    (x: ReturnType<typeof contextInput>) => {x.sources.at(-1)!.text = "not JSON";},
+    (x: ReturnType<typeof contextInput>) => {const raw = JSON.parse(x.sources.at(-1)!.text); raw.scope.run_id = "foreign"; x.sources.at(-1)!.text = JSON.stringify(raw);},
+  ]) {
+    const x = contextInput(); mutate(x);
+    assert.throws(() => prepareTrajectoryAssessment({input: x, config}));
+  }
+  assert.throws(() => prepareTrajectoryAssessment({input: contextInput(), config, native_outcomes: capture()}),
+    /differs from the bound analysis context/, "Display retention must not disagree with analysis context");
+});
+
+test("rebinding native context cannot reuse judgments even when the source collection is unchanged", () => {
+  const bound = contextInput();
+  const other = JSON.stringify({...capture(), retained_result_id: "result-1"});
+  bound.sources.push({id: "other", artifact: "other.json", artifact_sha256: createHash("sha256").update(other).digest("hex"), first_line: 1, text: other});
+  const previous = {...prepareTrajectoryAssessment({input: bound, config}), output: {
+    assessments: [{episode_id: "e", metric: "benefit_test", verdict: "unknown", reason: "Synthetic judgment", citations: []}],
+    limitations: ["Not a model-quality test"],
+  }};
+  assert.equal(compareTrajectoryAssessments({input: bound, config, previous}).can_reuse, true);
+  const current = {...bound, native_outcomes_source_id: "other"};
+  const comparison = compareTrajectoryAssessments({input: current, config, previous});
+  assert.equal(comparison.can_reuse, false);
+  assert.deepEqual(comparison.reassessed_episode_ids, ["e"]);
+  assert.deepEqual(comparison.sources, {added: [], revised: [], removed: []});
+  assert.notEqual(prepareTrajectoryAssessment({input: current, config}).analysis_key, previous.analysis_key);
+});
+
+test("native context does not widen metric or synthesis citation scope", () => {
+  const bound = contextInput(), configWithSynthesis = {...config, research_synthesis: true};
+  const prepared = prepareTrajectoryAssessment({input: bound, config: configWithSynthesis});
+  const citation = {source_id: "s", first_line: 1, last_line: 1};
+  const output = {assessments: [{episode_id: "e", metric: "benefit_test", verdict: "yes", reason: "Synthetic test", citations: [citation]}],
+    limitations: ["Not a model-quality test"], synthesis: {summary: {text: "A sampled result", episode_ids: ["e"], citations: [citation]}, findings: [], next_experiments: []}};
+  assert.ok(qualifyTrajectoryAssessment({...prepared, output}));
+  for (const mutate of [
+    (x: typeof output) => {x.assessments[0]!.citations[0]!.source_id = "capture";},
+    (x: typeof output) => {x.synthesis.summary.citations[0]!.source_id = "capture";},
+  ]) {
+    const invalid = structuredClone(output); mutate(invalid);
+    assert.throws(() => qualifyTrajectoryAssessment({...prepared, output: invalid}), /outside episode evidence/);
+  }
+});
 
 test("native facts preserve first quality, actual retention and submission order independently of delayed feedback",()=>{
   const native=project(capture());

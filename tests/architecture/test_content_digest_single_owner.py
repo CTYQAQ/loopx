@@ -177,6 +177,7 @@ CONSUMER_MODULES = (
     "loopx.capabilities.periodic_report.machine_defaults",
     "loopx.capabilities.progress_review.receipt",
     "loopx.chat_action_normalization",
+    "loopx.cli_commands.quota_capture",
     "loopx.configuration_transaction",
     "loopx.control_plane.agents.execution_facts",
     "loopx.control_plane.collaboration.conversation_inventory",
@@ -1373,18 +1374,20 @@ def test_periodic_report_generation_receipt_checks_both_digest_fields() -> None:
         bindings._generation_receipt(receipt(ENVELOPED, HEX64))
 
 
-def test_schema_string_site_is_the_same_question_as_the_owner_bare_shape() -> None:
-    statements = _module_of("loopx.capabilities.manager_context.inspection")[
-        "statements"
-    ]
-    assert statements, "the recorded schema site no longer states the shape"
-    for statement in statements:
-        assert statement["shape"] == "bare"
-        declared = re.compile(statement["value"])
-        for value in PARITY_PROBES:
-            assert bool(declared.fullmatch(value)) is bool(
-                BARE_SHA256_PATTERN.fullmatch(value)
-            ), value
+@pytest.mark.parametrize(
+    ("field", "owner"),
+    [
+        ("request_id", BARE_SHA256_PATTERN),
+        ("expected_source_revision", ENVELOPED_SHA256_PATTERN),
+        ("delivery_ref", ENVELOPED_SHA256_PATTERN),
+    ],
+)
+def test_manager_schema_digest_fields_keep_their_declared_envelopes(field, owner) -> None:
+    from loopx.capabilities.manager_context.inspection import READ_TOOL
+
+    declared = re.compile(READ_TOOL["inputSchema"]["properties"][field]["pattern"])
+    for value in PARITY_PROBES:
+        assert bool(declared.fullmatch(value)) is bool(owner.fullmatch(value)), value
 
 
 # --- per-surface wiring: every case enters through that surface's own reader -------------

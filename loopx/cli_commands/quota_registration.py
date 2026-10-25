@@ -27,6 +27,10 @@ def register_quota_command(
             "status",
             "plan",
             "should-run",
+            "context-read",
+            "context-project",
+            "context-hook",
+            "context-config",
             "monitor-poll",
             "scheduler-ack",
             "scheduler-ack-current",
@@ -35,7 +39,7 @@ def register_quota_command(
             "void-slot",
         ],
         default="status",
-        help="Use status for all groups, plan for next-turn groups, should-run for one goal, monitor-poll for no-spend quiet poll evidence, scheduler-ack for successful Codex App RRULE state, scheduler-fail-current to suppress a repeated failed host update pair, spend-slot for accounting, or void-slot for a non-destructive accounting correction.",
+        help="Use status for all groups, plan for next-turn groups, should-run for one goal, context-read for bounded original-capture recovery without a guard, context-project to present an existing digest-bound quota capture with native full/delta and a full-read fallback, context-hook for opt-in native Codex lifecycle IO, context-config for native hook/recovery configuration without installation or trust changes, monitor-poll for no-spend quiet poll evidence, scheduler-ack for successful Codex App RRULE state, scheduler-fail-current to suppress a repeated failed host update pair, spend-slot for accounting, or void-slot for a non-destructive accounting correction.",
     )
     quota_parser.add_argument(
         "--goal-id",
@@ -196,6 +200,28 @@ def register_quota_command(
               "Requires a capture destination and a same-user Unix socket in a private directory. "
               "Waits at most 120s for a digest-bound release; failure retains the original receipt."),
     )
+    quota_parser.add_argument("--capture-file", help="For context-read/context-project: original captured JSON file; no guard is evaluated.")
+    from ..control_plane.turn_driver.codex_context import CONTEXT_DELIVERY_SETTINGS
+
+    quota_parser.add_argument("--context-delivery", choices=CONTEXT_DELIVERY_SETTINGS, default="off",
+        help="Experimental native packet reuse; off by default. On uses existing host declarations: "
+             "Codex App heartbeat/resume/recovery (--codex-app), or the Codex benchmark heartbeat worker "
+             "(generic_cli plus its explicit heartbeat worker settings). On rejects missing, contradictory or unsupported modes. "
+             "A directory alone never enables it; declarations are not retention proof.")
+    context_location = quota_parser.add_mutually_exclusive_group()
+    context_location.add_argument("--codex-context-dir",
+        help="Opt-in private native Codex lifecycle directory. For context-hook, consume one native hook event on stdin. "
+             "For should-run, requires JSON and a decision capture destination; unknown retention stays full. "
+             "For context-read without a file/hash, select the current native session/workspace capture for --goal-id/--agent-id; "
+             "start at offset zero, then follow digest-pinned next_command. Does not install hooks, enable tracing, or change native trust.")
+    context_location.add_argument("--codex-context-root",
+        help="Existing private native context root, with independent journals per native session. "
+             "Use for shared Codex App hook configuration; cannot combine with --codex-context-dir. "
+             "context-config renders native configuration for the exact Goal/Agent; no files, trust, guard or spend are changed.")
+    quota_parser.add_argument("--capture-sha256", help="For context-read/context-project: exact SHA-256 supplied with the capture reference.")
+    quota_parser.add_argument("--offset", type=int, default=0, help="For context-read: byte offset returned by the previous page.")
+    quota_parser.add_argument("--page-bytes", type=int, default=4096,
+        help="For context-read: maximum UTF-8 content bytes per page, 256–8192 (default: 4096).")
     quota_parser.add_argument(
         "--turn-instance-id",
         help=(

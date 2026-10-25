@@ -66,9 +66,12 @@ def _goal_command(args, *, registry: Path, legacy: bool) -> list[str]:
         ("runtime_profile", "--runtime-profile"), ("visible_goal_host", "--visible-goal-host"),
         ("host_surface", "--host-surface"), ("scheduler_owner", "--scheduler-owner"),
         ("execution_mode", "--execution-mode"),
+        ("decision_output_root", "--decision-output-root"),
+        ("codex_context_root", "--codex-context-root"),
+        ("context_delivery", "--context-delivery"),
     ):
         value = getattr(args, field, None)
-        if value is not None:
+        if value is not None and not (field == "context_delivery" and value == "off"):
             if field == "active_state":
                 value = str(Path(value).expanduser().resolve())
             command += [flag, value]
@@ -78,6 +81,8 @@ def _goal_command(args, *, registry: Path, legacy: bool) -> list[str]:
             command += [flag, value]
     if args.cli_bin != "loopx":
         command += ["--cli-bin", args.cli_bin]
+    if getattr(args, "turn_envelope", False):
+        command.append("--turn-envelope")
     if legacy:
         if args.codex_app:
             command.append("--codex-app")
@@ -112,17 +117,19 @@ def host_bootstrap_binding(prompt: str) -> dict | None:
             return None
         values = dict(cli_bin=command[0], turn_instance_id=None, codex_app=False,
                       trae_app=False,
-                      full=False, compact=False, brief=False, thin=False,
+                      full=False, compact=False, brief=False, thin=False, turn_envelope=False,
                       visible_goal_host=None, available_capabilities=[], agent_scopes=[],
                       runtime_root=None)
         singles = {"--" + name.replace("_", "-"): name for name in (
             "registry", "runtime_root", "goal_id", "agent_id", "active_state",
             "material_rule", "permission_rule", "runtime_profile", "visible_goal_host",
-            "host_surface", "scheduler_owner", "execution_mode", "cli_bin")}
+            "host_surface", "scheduler_owner", "execution_mode", "cli_bin",
+            "decision_output_root", "codex_context_root", "context_delivery")}
         repeated = {"--agent-scope": "agent_scopes", "--available-capability": "available_capabilities"}
         booleans = {
             "--codex-app": "codex_app",
             "--trae_app": "trae_app",
+            "--turn-envelope": "turn_envelope",
             **{"--" + name.replace("_", "-"): name for name in ("full", "compact", "brief", "thin")},
         }
         index = 3

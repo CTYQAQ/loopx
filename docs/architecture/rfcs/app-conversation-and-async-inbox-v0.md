@@ -154,6 +154,46 @@ Packaged browser evidence qualifies the local UI path separately. Live Lark
 return delivery, installed service adoption, split-root composition and
 Goal-less project peer handoff remain open; this checkpoint does not close them.
 
+The existing Lark reply workers now also project committed App-origin user and
+answer messages from that exact owner-private Session. Each provider outbox
+retains the canonical message identity, frozen text and delivery attempt. The
+original Lark input supplies address provenance only: projection never readmits
+it or starts model work. Before every write and receipt recovery, Core rechecks
+the Session, current binding and audience, and the provider verifies the original
+source. Posts identify the App speaker, stay in canonical append order within
+that outbox and retain complete long text through the existing rich-post parts.
+Distinct canonical messages and parts get distinct provider idempotency keys,
+including when their text is identical; callers without that identity retain
+their existing receipt digest. Known attempts are read back before continuation;
+a started write without a provider locator stays unconfirmed after restart.
+Revocation or changed identity prevents further delivery. Disable the existing
+connection to revoke it; rollback must preserve its private delivery journals.
+
+Use **Continue original conversation** above to reach this path. Ordinary App
+steward history is still a separate entry; it is not silently merged or retargeted.
+This checkpoint covers text projection, not reply/thread relation mirroring,
+attachment transfer, retroactive insertion into Lark chronology or all-channel
+broadcast. An App attachment produces an explicit unsynchronized notice and a
+partial outbox, never a full-delivery claim. Synthetic real-HTTP/Core journeys
+cover repeated inputs, long text, restart, missing/unknown receipts, revocation
+and provider replacement. Installed provider readback remains a separate gate.
+
+The implementation decision follows primary-source comparisons, not a claim
+that shared context already guarantees two-way delivery:
+
+- [OpenClaw history delta](https://github.com/openclaw/openclaw/blob/b3ba4d622638ac23f64c0cec415bf5bfe81f5cf5/src/gateway/server-methods/chat-history-delta.ts)
+  resets incomplete/scoped projections; its
+  [send retry owner](https://github.com/openclaw/openclaw/blob/b3ba4d622638ac23f64c0cec415bf5bfe81f5cf5/src/gateway/server-methods/chat-send-retry.ts)
+  reconciles already-started execution. These inform recovery, not a Lark bridge.
+- [nanobot unified session keys](https://github.com/HKUDS/nanobot/blob/9e9e22d3319678178dba05a76f0ea61064b78ee8/nanobot/session/keys.py)
+  and [last-destination routing](https://github.com/HKUDS/nanobot/blob/9e9e22d3319678178dba05a76f0ea61064b78ee8/nanobot/agent/loop.py)
+  share context; a last destination does not replicate a transcript to every surface.
+- [mautrix message mappings](https://github.com/mautrix/go/blob/a4237e5b9f8f0e9b35c81d5310615eb70c202cea/bridgev2/database/message.go)
+  and [portal echo handling](https://github.com/mautrix/go/blob/a4237e5b9f8f0e9b35c81d5310615eb70c202cea/bridgev2/portal.go)
+  motivate stable transaction/part identities and echo suppression. A Matrix
+  homeserver/bridge would add separate infrastructure and identity ownership.
+  LoopX borrows the design, not MPL-2.0 code; the other two snapshots are MIT.
+
 Synthetic product previews: [desktop](../../assets/personal-workspace/private-project-conversations.png),
 [narrow](../../assets/personal-workspace/private-project-conversations-narrow.png),
 [revoked workspace](../../assets/personal-workspace/private-project-workspace-revoked.png).

@@ -380,19 +380,51 @@ def _pending_replan_attempt(state: dict[str, Any], payload: dict[str, Any], args
     return any(_same_replan_scope(attempt, scope) for attempt in unresolved)
 
 
-def _read_resolved_replan_attempts(state: dict[str, Any], payload: dict[str, Any], args: argparse.Namespace) -> bool:
+def _host_retry_replan(state: dict[str, Any], payload: dict[str, Any],
+                       args: argparse.Namespace, prior: dict[str, Any]) -> dict[str, Any] | None:
+    """Reuse a dispatch-bound replan only after the Host retry gate admits it.
+
+    A native session alone cannot associate a transport failure with an older
+    semantic attempt. Legacy/unbound or ambiguous attempts retain their hold.
+    This does not acknowledge the obligation or settle its original effects.
+    """
+    obligation = prior.get("replan_obligation_id")
+    current = _replan_attempt(payload, args)
+    if not obligation or current is None or current["obligation_id"] != obligation:
+        return None
+    pending = [attempt for attempt in state.get("replan_attempts", [])
+               if attempt["status"] in {"started", "unknown"}
+               and _same_replan_scope(attempt, current)]
+    if (len(pending) != 1 or pending[0]["status"] != "unknown"
+            or pending[0]["obligation_id"] != obligation
+            or _attempt_scope(pending[0]) != _attempt_scope(current)):
+        return None
+    return pending[0]
+
+
+def _read_resolved_replan_attempts(
+    state: dict[str, Any], payload: dict[str, Any], args: argparse.Namespace,
+    prior: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Only the original settlement owner can resolve a known lost response.
 
     An opaque unbound shell command has no such proof. Leave it visibly unknown
     instead of inferring a Turn from the latest row or dispatching a new command.
+    Return only attempts verified by this read, not historical local markers.
     """
-    unresolved = [attempt for attempt in state.get("replan_attempts", [])
-                  if attempt["status"] in {"started", "unknown"} and attempt.get("settlement_identity")]
-    if not unresolved:
-        return False
+    retry_obligation = (prior or {}).get("replan_obligation_id")
+    # Recheck a saved recovery marker after restart: local transport state is
+    # not a substitute for the original canonical settlement proof.
+    candidates = [attempt for attempt in state.get("replan_attempts", [])
+                  if attempt.get("settlement_identity") and (
+                      attempt["status"] in {"started", "unknown"}
+                      or (retry_obligation == attempt["obligation_id"]
+                          and attempt.get("recovery") == "original_settlement_verified"))]
+    if not candidates:
+        return []
     scope = _admission_scope(payload, args)
-    changed = False
-    for attempt in unresolved:
+    resolved: list[dict[str, Any]] = []
+    for attempt in candidates:
         if not _same_replan_scope(attempt, scope):
             continue
         original = _attempt_settlement_identity(attempt)
@@ -408,8 +440,8 @@ def _read_resolved_replan_attempts(state: dict[str, Any], payload: dict[str, Any
                 and readback.replay_phase == "settled" and readback.settlement.failure is None
                 and readback.settlement.value is not None):
             attempt.update(status="returned", recovery="original_settlement_verified")
-            changed = True
-    return changed
+            resolved.append(attempt)
+    return resolved
 
 
 def _observe_worker_replan(
@@ -832,9 +864,20 @@ def _run_worker_locked(
                             sleep(min(delay, 60.0))
                             retry_after_error = True
                             break
-                    if _read_resolved_replan_attempts(state, payload, args):
+                    resolved_replans = _read_resolved_replan_attempts(state, payload, args, prior)
+                    if resolved_replans:
                         _save_state(state_path, state)
-                    if _pending_replan_attempt(state, payload, args):
+                    retry_replan = _host_retry_replan(state, payload, args, prior) if host_guard and prior else None
+                    if prior.get("replan_obligation_id") and retry_replan is None:
+                        scope_now = _admission_scope(payload, args)
+                        bound = [attempt for attempt in state.get("replan_attempts", [])
+                                 if attempt["obligation_id"] == prior["replan_obligation_id"]
+                                 and _attempt_scope(attempt) == scope_now]
+                        if len(bound) != 1 or not any(attempt is bound[0] for attempt in resolved_replans):
+                            _log("status=host_failure_hold reason=original_replan_not_retryable "
+                                 "next=original_host_recovery goal_complete=false new_wake=false")
+                            return 2
+                    if _pending_replan_attempt(state, payload, args) and retry_replan is None:
                         replan_scope = _admission_scope(payload, args)
                         original = next(previous for previous in state["replan_attempts"]
                                         if previous["status"] in {"started", "unknown"}
@@ -843,13 +886,13 @@ def _run_worker_locked(
                         _log("status=replan_outcome_unknown next=use_original_host_recovery "
                              "goal_complete=false new_wake=false")
                         return 2
-                    attempt = _replan_attempt(payload, args)
+                    attempt = retry_replan if retry_replan is not None else _replan_attempt(payload, args)
                     if attempt is not None:
                         attempts = state.setdefault("replan_attempts", [])
                         original = next((previous for previous in attempts
                                          if _same_replan_scope(previous, attempt)
                                          and previous["obligation_id"] == attempt["obligation_id"]), None)
-                        if original is not None:
+                        if original is not None and original is not retry_replan:
                             _observe_worker_replan(payload, args, original, "replan_paused")
                             _log("status=replan_paused reason=unresolved_original_obligation "
                                  f"obligation={attempt['obligation_id']} "
@@ -857,8 +900,9 @@ def _run_worker_locked(
                                  "goal_complete=false new_wake=false")
                             return 0
                         attempt["status"] = "started"
-                        attempt.update(_worker_goal_observation_digests(args))
-                        attempts.append(attempt)
+                        if retry_replan is None:
+                            attempt.update(_worker_goal_observation_digests(args))
+                            attempts.append(attempt)
                         _save_state(state_path, {**state, "reset_token": decision.reset_token,
                                                 "unchanged_count": unchanged_count})
                     _observe_worker_replan(payload, args, None, None)
@@ -868,7 +912,9 @@ def _run_worker_locked(
                         _save_host_pending(state_path, True)
                         state["host_attempt"] = {"scope": scope, "status": "started",
                             "attempt": prior.get("attempt", 0) + 1,
-                            "session_id": prior.get("session_id")}
+                            "session_id": prior.get("session_id"),
+                            **({"replan_obligation_id": attempt["obligation_id"]}
+                               if attempt is not None else {})}
                         save({})
                         environment = {**os.environ, "LOOPX_HOST_RETRY_SESSION_ID": prior.get("session_id") or ""}
                     wake_result = _run_wake(

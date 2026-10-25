@@ -24,7 +24,7 @@ from loopx.chat_server import (
 from loopx.chat_store import ChatSessionStore
 from loopx.control_plane.effect_runtime import restart_effect_runtime
 from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
-from loopx.capabilities.benchmark_toolkit.trajectory_assessment_store import register_pack, inspect_pack, execute_pack
+from loopx.capabilities.benchmark_toolkit.trajectory_assessment_store import DEFAULT_CONFIG, register_pack, inspect_pack, execute_pack
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests" / "control_plane"))
 from canonical_authority_fixture import initialize_canonical_authority
@@ -79,6 +79,8 @@ def main():
         original[registry] = registry.read_bytes()
         # Optional synthetic analysis uses the real pack verifier, process/job
         # owner and HTTP reader. It never enables model dispatch from the page.
+        fixture_config = {**DEFAULT_CONFIG, "research_synthesis": False}
+        fixture_config.pop("research_synthesis_revision", None)
         for capture in captures:
             for index, analysis in enumerate(capture.get("analyses", [])):
                 source_root = root / f"analysis-{capture['goal_id']}-{index}"
@@ -90,7 +92,9 @@ def main():
                 input_path = source_root / "input.json"
                 input_path.write_text(json.dumps(analysis["input"], ensure_ascii=False))
                 scope = dict(runtime_root=runtime, owner_goal_id=capture["goal_id"])
-                registered = register_pack(**scope, input_path=input_path, source_root=source_root, title=analysis["title"])
+                registered = register_pack(**scope, input_path=input_path, source_root=source_root, title=analysis["title"],
+                                           config=analysis.get("config", fixture_config),
+                                           native_outcomes_json=analysis.get("native_outcomes_json"))
                 for language, output in analysis["outputs"].items():
                     provider = root / f"analysis-provider-{index}-{language}"
                     provider.write_text(f"#!{sys.executable}\nimport sys\nfrom pathlib import Path\n"

@@ -43,6 +43,8 @@ def workspace(tmp_path, monkeypatch):
     mode, count = tmp_path / "mode", tmp_path / "process-count"
     mode.write_text("wait")
     output = {"assessments": [dict(episode_id="episode", metric="benefit_test", verdict="no", reason="Diagnostic measurements do not establish a native utility test.", citations=[dict(source_id="facts", first_line=2, last_line=2)])], "limitations": ["Synthetic process output, not a calibrated model assessment."]}
+    output["synthesis"] = {"summary": {"text": "A diagnostic improvement leaves native utility unresolved.", "episode_ids": ["episode"],
+                                      "citations": [dict(source_id="facts", first_line=2, last_line=2)]}, "findings": [], "next_experiments": []}
     binary = tmp_path / "bin"
     binary.mkdir()
     provider = binary / "codex"
@@ -93,6 +95,38 @@ print(json.dumps({{'type':'turn.completed','usage':{{'input_tokens':10,'output_t
         server.shutdown()
         worker.join(timeout=5)
         server.server_close()
+
+
+def test_shared_excerpts_reverify_through_http_without_dispatch(workspace, monkeypatch):
+    w = workspace
+    path = w["tmp_path"] / "input.json"
+    data = json.loads(path.read_text())
+    data["sources"].append({**data["sources"][0], "id": "prior", "first_line": 1, "text": "Prior question"})
+    data["episodes"][0]["source_ids"].append("prior")
+    path.write_text(json.dumps(data))
+    registered = register_pack(runtime_root=w["tmp_path"] / "runtime", owner_goal_id="research-owner",
+        input_path=path, source_root=w["sources"], title="Two excerpts of one artifact")
+    original = type(path).read_bytes
+    reads = []
+
+    def observed(source):
+        if source == w["sources"] / "facts.txt":
+            reads.append(source)
+        return original(source)
+
+    monkeypatch.setattr(type(path), "read_bytes", observed)
+    view = w["request"](pack_id=registered["pack_id"])
+    assert view["pack"]["availability"] == "available"
+    # Two catalog entries plus the selected pack; each verification reads once.
+    assert len(reads) == 3 and not w["count"].exists()
+    source = w["sources"] / "facts.txt"
+    stat = source.stat()
+    source.write_bytes(original(source).replace(b"Prior", b"Other"))
+    os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    reads.clear()
+    changed = w["request"](pack_id=registered["pack_id"])
+    assert changed["pack"]["reason_code"] == "source_changed"
+    assert len(reads) == 3 and not w["count"].exists()
 
 
 def test_display_context_uses_registered_sources_and_the_existing_http_reader(workspace):
@@ -344,6 +378,64 @@ def test_native_outcomes_and_bound_citations_read_over_http_without_analysis(wor
         w["request"](goal="other-owner", pack_id=registered["pack_id"])
 
 
+def test_explicit_native_context_reaches_process_and_changed_source_blocks_reuse(workspace):
+    w, read = workspace, workspace["request"]
+    path = w["tmp_path"] / "input.json"
+    data = json.loads(path.read_text())
+    native = {"schema_version": "trajectory_native_outcomes_v1", "scope": data["scope"],
+        "start": "2026-01-01T00:00:00Z", "end": "2026-01-01T00:04:00Z", "complete": True,
+        "metric": {"name": "error", "unit": "points", "higher_is_better": False},
+        "retained_result_id": None,
+        "comparison": {"baseline_result_id": "result-1", "retention_citation": None},
+        "samples": [{"submission_index": i, "result_id": f"result-{i}", "candidate_ref": f"candidate-{i}",
+            "valid": True, "value": value, "submitted_at": f"2026-01-01T00:0{i}:00Z",
+            "observed_at": f"2026-01-01T00:0{i}:30Z",
+            "citation": {"source_id": "facts", "first_line": 2, "last_line": 2}}
+            for i, value in enumerate((10, 9), 1)]}
+    capture = json.dumps(native)
+    native_path = w["sources"] / "native.json"
+    native_path.write_text(capture)
+    scope = dict(runtime_root=w["tmp_path"] / "runtime", owner_goal_id="research-owner",
+        input_path=path, source_root=w["sources"], native_outcomes_json="native.json")
+    # Display-only registration keeps the existing analysis identity.
+    legacy = register_pack(**scope, title="Display-only native outcomes")
+    assert legacy["analysis_key"] == w["operation"]["analysis_key"]
+    data["sources"].append(dict(id="capture", artifact="native.json",
+        artifact_sha256=hashlib.sha256(capture.encode()).hexdigest(), first_line=1, text=capture))
+    data["native_outcomes_source_id"] = "capture"
+    path.write_text(json.dumps(data))
+    registered = register_pack(**scope, title="Explicit native context", base_pack_id=legacy["pack_id"])
+    assert registered["analysis_key"] != legacy["analysis_key"]
+    before = read(pack_id=registered["pack_id"])["pack"]
+    assert before["native_outcomes"]["projection"]["retained"] is None
+    assert before["job"] is None and not w["count"].exists()
+    provider = w["tmp_path"] / "bin" / "codex"
+    prompt_path = w["tmp_path"] / "received-prompt.txt"
+    provider.write_text(provider.read_text().replace("prompt=sys.stdin.read()",
+        f"prompt=sys.stdin.read()\nPath({str(prompt_path)!r}).write_text(prompt)"))
+    operation = {**w["operation"], "pack_id": registered["pack_id"], "analysis_key": registered["analysis_key"]}
+    w["mode"].write_text("ok")
+    assert read(body=operation)["job"]["status"] == "succeeded"
+    context = json.loads(prompt_path.read_text().split("\n\nNative outcome context:\n")[1])
+    assert context["metric"]["higher_is_better"] is False
+    assert context["best_valid"]["value"] == context["final_valid"]["value"] == 9
+    assert context["retained"] is None
+    assert context["retained_improvement"]["value"] is None
+    assert context["retained_improvement"]["final_candidate_delta"] == 1
+    assert capture not in prompt_path.read_text()
+    assert read(body=operation)["job"]["reused"]
+    read(pack_id=registered["pack_id"], output_language="en")
+    assert w["count"].read_text().splitlines() == ["started"]
+    native_path.write_text(capture + "\n")
+    historical = read(pack_id=registered["pack_id"])["pack"]
+    assert historical["result"] is not None
+    assert historical["native_outcomes"]["applicability"] == "historical"
+    with pytest.raises(HTTPError) as changed:
+        read(body=operation)
+    assert changed.value.code == 409
+    assert w["count"].read_text().splitlines() == ["started"]
+
+
 @contextmanager
 def source_analysis_workspace(w, name, *, enabled=True):
     """Synthetic source transport; actual local store, HTTP and provider process."""
@@ -523,3 +615,32 @@ def test_source_analysis_default_off_and_non_analysis_writes_stay_disabled(works
             with pytest.raises(HTTPError):
                 s["request"](body=body)
         assert not w["count"].exists()
+
+
+def test_synthesis_only_citation_uses_existing_reader_and_does_not_execute(workspace):
+    w, read = workspace, workspace["request"]
+    # The exact two-line synthesis citation is distinct from the metric's
+    # single-line citation. Arbitrary ranges remain unauthorized.
+    path = w["tmp_path"] / "input.json"
+    data = json.loads(path.read_text())
+    data["sources"][0].update(first_line=1, text=(w["sources"] / "facts.txt").read_text().rstrip("\n"))
+    path.write_text(json.dumps(data))
+    registered = register_pack(runtime_root=w["tmp_path"] / "runtime", owner_goal_id="research-owner", input_path=path,
+                               source_root=w["sources"], title="Synthetic grounded synthesis")
+    provider = w["tmp_path"] / "bin" / "codex"
+    script = provider.read_text().replace("Path(sys.argv[sys.argv.index('-o')+1]).write_text", "output['synthesis']['summary']['citations'][0]['first_line']=1\nPath(sys.argv[sys.argv.index('-o')+1]).write_text")
+    provider.write_text(script)
+    before = read(pack_id=registered["pack_id"])["pack"]
+    assert before["job"] is None and not w["count"].exists()
+    operation = {**w["operation"], "pack_id":registered["pack_id"], "analysis_key":before["analysis_key"]}
+    w["mode"].write_text("ok")
+    assert read(body=operation)["job"]["status"] == "succeeded"
+    result = read(pack_id=registered["pack_id"])["pack"]["result"]
+    citation = result["synthesis"]["summary"]["citations"][0]
+    assert citation == dict(source_id="facts", first_line=1, last_line=2)
+    query = {key:value for key,value in operation.items() if key != "goal_id"}
+    assert read(suffix="/citation", **query, **citation)["text"] == data["sources"][0]["text"]
+    with pytest.raises(HTTPError):
+        read(suffix="/citation", **query, **{**citation,"last_line":3})
+    assert w["count"].read_text().splitlines() == ["started"]
+    assert json.loads(path.read_text()) == data

@@ -1,3 +1,4 @@
+import {CircleHelp} from "lucide-react";
 import {useLayoutEffect, useRef, useState, type CSSProperties} from "react";
 import type {ExploreTimeline, TimelineFinding, TimelineNode, TimelinePhase} from "../../../../../../loopx/control_plane/presentation/explore_timeline.js";
 import {exploreTimelinePhaseAt, groupExploreTimelinePoints, selectExploreTimelineDecisions} from "../../../../../../loopx/control_plane/presentation/explore_timeline.js";
@@ -53,7 +54,7 @@ export function GoalResearchTimeline({timeline, zh, selectedIds, selectedDay, da
     noTime: "No usable record time; the history cannot be placed on a time axis. All records remain readable below.",
   };
   const {start, end} = timeline;
-  if (start === null || end === null) return <p className="research-history-note">{copy.noTime}</p>;
+  if (start === null || end === null) return <ContextHelp label={zh ? "记录时间未知" : "Record time unknown"} icon={CircleHelp}><p className="research-history-note">{copy.noTime}</p></ContextHelp>;
   const span = Math.max(1, end - start);
   const pct = (at: number) => `${((at - start) / span) * 100}%`;
   const inPhase = (at: number | null) => phase === null || exploreTimelinePhaseAt(timeline.phases, at) === phase;
@@ -186,12 +187,12 @@ export function GoalResearchTimeline({timeline, zh, selectedIds, selectedDay, da
         </div></div>
       </> : null}
     </div>
-    {unknownTime ? <div className="research-history-note"><p>{zh ? "缺少记录时间的问题未放上时间轴" : "Questions without a record time are not placed on the axis"} · {unknownTime}</p>
+    {unknownTime ? <div className="research-history-note"><ContextHelp label={zh ? "记录时间缺失" : "Missing record time"} icon={CircleHelp}><p>{zh ? "缺少记录时间的问题未放上时间轴" : "Questions without a record time are not placed on the axis"} · {unknownTime}</p></ContextHelp>
       {[...timeline.nodes.values()].filter(item => item.first === null).map(item => <button key={item.node.id} type="button" className="research-link" onClick={() => onSelect(item.node.id)}>{item.node.latest.title}</button>)}
     </div> : null}
     <section className="research-trail" aria-label={copy.trail}>
       <h3>{copy.trail}</h3>
-      {!timeline.decisions.length ? <p className="research-history-note">{timeline.structuredCount ? copy.none : copy.unstructured}</p>
+      {!timeline.decisions.length ? <ContextHelp label={zh ? "暂无结构化决策记录" : "No structured decision records"} icon={CircleHelp}><p className="research-history-note">{timeline.structuredCount ? copy.none : copy.unstructured}</p></ContextHelp>
         : <TrailList items={trail} copy={copy} label={label} timeLabel={timeLabel} selectedIds={selectedIds} onSelect={onSelect}/>}
     </section>
   </div>;

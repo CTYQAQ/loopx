@@ -159,7 +159,8 @@ def register_heartbeat_control_commands(
 
     heartbeat_prompt_parser.add_argument(
         "--decision-output-root",
-        help="Save full local decisions without changing the display; requires thin mode and an explicit host-owned Turn ID.",
+        help="Save full local decisions without changing the display; requires thin mode and an explicit host-owned Turn ID, "
+             "or codex-context-root with the normal per-wake LOOPX_TURN binding.",
     )
 
     heartbeat_prompt_parser.add_argument(
@@ -171,6 +172,24 @@ def register_heartbeat_control_commands(
     heartbeat_prompt_parser.add_argument(
         "--decision-handoff-socket",
         help="Retain the explicit private Host handoff on generated guards; requires --decision-output-root.",
+    )
+
+    from ..control_plane.turn_driver.codex_context import CONTEXT_DELIVERY_SETTINGS
+
+    heartbeat_prompt_parser.add_argument("--context-delivery", choices=CONTEXT_DELIVERY_SETTINGS, default="off",
+        help="Experimental native packet reuse; off by default. On uses existing host declarations: "
+             "Codex App heartbeat/resume/recovery (--codex-app), or the Codex benchmark heartbeat worker "
+             "(generic_cli plus its explicit heartbeat worker settings). On rejects missing, contradictory or unsupported modes. "
+             "A directory alone never enables it; declarations are not retention proof.")
+    context_location = heartbeat_prompt_parser.add_mutually_exclusive_group()
+    context_location.add_argument(
+        "--codex-context-dir",
+        help="Carry the opt-in native context directory into guards; requires --decision-output-root. Does not install hooks or enable tracing.",
+    )
+    context_location.add_argument(
+        "--codex-context-root",
+        help="Carry a shared private native context root into guards, isolated per native session; "
+             "requires --decision-output-root. Use quota context-config to render native setup.",
     )
 
     heartbeat_prequota_parser = subparsers.add_parser(

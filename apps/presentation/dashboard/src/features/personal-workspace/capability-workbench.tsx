@@ -1,3 +1,4 @@
+import {ContextHelp} from "./context-help";
 import { AlertTriangle, ShieldCheck, SlidersHorizontal } from "lucide-react";
 
 import type { CapabilityConfigurationCatalog } from "../../data/chat";
@@ -45,8 +46,7 @@ export function CapabilityEditorStatus({ available, description, t }: Readonly<{
 }>) {
   if (available) return null;
   return <section className="personal-capability-editor-status is-read-only">
-    <AlertTriangle aria-hidden size={18} />
-    <div><strong>{t("capabilities.readOnly")}</strong><p>{description}</p></div>
+    <div><strong>{t("capabilities.readOnly")}</strong><ContextHelp icon={AlertTriangle} label={t("capabilities.readOnly")}><p>{description}</p></ContextHelp></div>
   </section>;
 }
 

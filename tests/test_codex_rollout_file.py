@@ -48,3 +48,56 @@ def test_exception_closes_reader_without_deleting_source(tmp_path):
             raise ArithmeticError("synthetic consumer failure")
     assert reader.closed
     assert path.read_bytes() == b"retained"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows handle ownership")
+@pytest.mark.parametrize("failure_at", ["descriptor", "stream"])
+def test_native_handle_is_released_when_reader_construction_fails(tmp_path, monkeypatch, failure_at):
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    information = kernel32.GetHandleInformation
+    information.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    information.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    path = tmp_path / "rollout.jsonl"
+    path.write_bytes(b"retained")
+    handles, descriptors = [], []
+    original = msvcrt.open_osfhandle
+    failure = OSError("synthetic reader construction failure")
+
+    def adopt(handle, flags):
+        handles.append(handle)
+        assert information(handle, ctypes.byref(wintypes.DWORD()))
+        if failure_at == "descriptor":
+            raise failure
+        descriptor = original(handle, flags)
+        descriptors.append(descriptor)
+        return descriptor
+
+    def stream_failure(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(msvcrt, "open_osfhandle", adopt)
+    if failure_at == "stream":
+        monkeypatch.setattr(os, "fdopen", stream_failure)
+    try:
+        with pytest.raises(OSError) as caught:
+            open_rollout(path)
+        assert caught.value is failure
+        assert len(handles) == 1
+        assert not information(handles[0], ctypes.byref(wintypes.DWORD()))
+        assert ctypes.get_last_error() == 6  # ERROR_INVALID_HANDLE
+        assert path.read_bytes() == b"retained"
+    finally:
+        # A failing regression must not itself leak the real native resource.
+        for handle in handles:
+            if information(handle, ctypes.byref(wintypes.DWORD())):
+                if descriptors:
+                    os.close(descriptors[0])
+                else:
+                    close_handle(handle)

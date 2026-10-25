@@ -368,6 +368,43 @@ test('later evidence can overturn an earlier judgment; full new denominators are
   assert.throws(() => compareTrajectoryAssessments({...current, output: output(), previous: {...original, output: output()}}), /missing eligible/);
 });
 
+test('comparison denominator distinguishes unchanged judgments, disjoint units and unavailable results', () => {
+  const current = prepared(), previous = {...prepared(), output: output()};
+  const unchanged = compareTrajectoryAssessments({...current, previous, output: output()});
+  assert.equal(unchanged.compared_pair_count, 3);
+  assert.deepEqual(unchanged.verdict_changes, []);
+  for (const args of [
+    {...current, previous},
+    {...current, previous: prepared(), output: output()},
+    {...current, previous: prepared()},
+  ]) assert.equal(compareTrajectoryAssessments(args).compared_pair_count, null, 'Missing qualified output is unknown, not zero comparisons');
+
+  const next = input(), renamed = output();
+  next.scope.revision = 'different-research-units';
+  for (const episode of next.episodes) episode.id = `new-${episode.id}`;
+  for (const assessment of renamed.assessments) assessment.episode_id = `new-${assessment.episode_id}`;
+  const disjoint = compareTrajectoryAssessments({input: next, config, previous, output: renamed});
+  assert.equal(disjoint.compared_pair_count, 0);
+  assert.equal(disjoint.new_pair_count, 3);
+  assert.equal(disjoint.removed_pair_count, 3);
+  assert.deepEqual(disjoint.verdict_changes, [], 'No shared rows is not evidence of unchanged conclusions');
+});
+
+test('comparison denominator counts shared episode and metric pairs, not total new judgments', () => {
+  const next = input(), revised = output();
+  next.episodes[0]!.eligible_metrics = ['information_gain'];
+  next.episodes.push({id: 'e3', question: 'Does the new intervention help?', source_ids: ['s'], eligible_metrics: ['information_gain']});
+  next.selection.population_episodes = 3;
+  revised.assessments.splice(1, 1);
+  revised.assessments[0]!.verdict = 'no';
+  revised.assessments.push({episode_id: 'e3', metric: 'information_gain', verdict: 'yes', reason: 'New evidence', citations: [{source_id: 's', first_line: 10, last_line: 10}]});
+  const delta = compareTrajectoryAssessments({input: next, config, previous: {...prepared(), output: output()}, output: revised});
+  assert.equal(delta.compared_pair_count, 2);
+  assert.equal(delta.new_pair_count, 1);
+  assert.equal(delta.removed_pair_count, 1);
+  assert.deepEqual(delta.verdict_changes, [{episode_id: 'e1', metric: 'information_gain', before: 'yes', after: 'no'}]);
+});
+
 test('corrections, removals, scope and model changes require full reassessment and identity cannot cross runs', () => {
   const previous = {...prepared(), output: output()};
   for (const edit of [(x: TrajectoryInput) => {x.sources[0]!.text = 'corrected negative evidence';},
@@ -494,4 +531,81 @@ test('artifact digests retain bare lowercase syntax, original bytes and error se
     const x=input() as unknown as {sources: Record<string,unknown>[]}; x.sources[0]!.artifact_sha256=digest;
     assert.throws(()=>prepareTrajectoryAssessment({input:x,config}), error => error instanceof Error && error.message === message);
   }
+});
+
+for (const revision of [undefined, 2]) test(`research synthesis revision ${revision ?? 1} preserves episode citation boundaries`, () => {
+  const x = input();
+  x.sources.push({id: 'other', artifact: 'other.txt', artifact_sha256: 'b'.repeat(64), first_line: 4, text: 'A competing explanation remains open'});
+  x.episodes[1]!.source_ids = ['other'];
+  const p = prepareTrajectoryAssessment({input: x, config: {...config, research_synthesis: true, output_language: 'zh',
+    ...(revision === 2 ? {research_synthesis_revision: revision} : {})}});
+  const citation = {source_id: 's', first_line: 10, last_line: 10};
+  const synthesis = {
+    summary: {text: 'Negative evidence narrowed the question; the mechanism remains unresolved.', episode_ids: ['e1'], citations: [citation]},
+    findings: [{title: 'The negative result is informative', observation: 'A did not improve the measurement.',
+      interpretation: 'The route may not address the bottleneck.', alternative_explanations: ['Noise may hide a smaller gain.'],
+      episode_ids: ['e1', 'e2'], citations: [citation, {source_id: 'other', first_line: 4, last_line: 4}]}],
+    next_experiments: [{question: 'Does A change the bottleneck under matched conditions?', why_priority: 'It separates the remaining explanations.',
+      intervention: 'Change only A.', controls: 'Same checkpoint, inputs, random sequence and total budget.',
+      prediction: 'A repeatable gain with the bottleneck change supports the interpretation.',
+      disconfirming_result: 'No bottleneck change despite matched repeated gains refutes it.', episode_ids: ['e1'], citations: [citation]}],
+  };
+  const raw = {...output(), episode_questions: x.episodes.map(e => ({episode_id: e.id, question: e.question})), synthesis};
+  const result = qualifyTrajectoryAssessment({...p, output: raw});
+  assert.deepEqual(result.synthesis, synthesis);
+  assert.equal(result.calibration, 'uncalibrated_model');
+  assert.notEqual(p.analysis_key, prepareTrajectoryAssessment({input: x, config: {...config, output_language: 'zh'}}).analysis_key);
+  const previous = {...prepared(), output: output()};
+  assert.equal(compareTrajectoryAssessments({...p, previous}).can_reuse, false);
+  for (const mutate of [
+    (s: typeof synthesis) => {s.summary.citations = [];},
+    (s: typeof synthesis) => {s.summary.episode_ids = ['missing'];},
+    (s: typeof synthesis) => {s.summary.episode_ids = ['e1', 'e1'];},
+    (s: typeof synthesis) => {s.summary.citations[0]!.first_line = 9;},
+    (s: typeof synthesis) => {s.findings[0]!.episode_ids = ['e1'];},
+    (s: typeof synthesis) => {s.next_experiments[0]!.disconfirming_result = '';},
+    (s: typeof synthesis) => {s.findings.push(...s.findings, ...s.findings, ...s.findings);},
+  ]) {
+    const invalid = structuredClone(raw); mutate(invalid.synthesis);
+    assert.throws(() => qualifyTrajectoryAssessment({...p, output: invalid}));
+  }
+  const invalidMetric = structuredClone(raw);
+  invalidMetric.assessments[0]!.citations = [{source_id: 'other', first_line: 4, last_line: 4}];
+  assert.throws(() => qualifyTrajectoryAssessment({...p, output: invalidMetric}), /outside episode evidence/);
+  assert.throws(() => qualifyTrajectoryAssessment({...p, output: {...raw, synthesis: undefined}}), /synthesis/);
+});
+
+test('synthesis off preserves legacy prompt, schema, key and qualified output', () => {
+  const original = prepared(), off = prepareTrajectoryAssessment({input: input(), config: {...config, research_synthesis: false}});
+  assert.deepEqual(off, original);
+  assert.deepEqual(qualifyTrajectoryAssessment({...off, output: output()}), qualifyTrajectoryAssessment({...original, output: output()}));
+  assert.equal(qualifyTrajectoryAssessment({...original, output: output()}).synthesis, undefined);
+  assert.throws(() => prepareTrajectoryAssessment({input: input(), config: {...config, research_synthesis: 'yes'}}), /must be boolean/);
+});
+
+test('synthesis revision separates new guidance while frozen and disabled requests keep their identities', () => {
+  const legacy = prepareTrajectoryAssessment({input: input(), config: {...config, research_synthesis: true}});
+  // Frozen public fixture identities from before the revision: upgrading the
+  // producer must not strand saved jobs, including language-specific requests.
+  assert.equal(prepared().analysis_key, 'bafc1cd4c93f25a274a6f6789eda79f3a1f9e197ff21a651bfd7f677f36cb607');
+  assert.equal(legacy.analysis_key, '96c07478771c8bdb4db5e79999a31a25f8acc86cbc182bc8cb09ad52ac8a7a91');
+  const next = prepareTrajectoryAssessment({input: input(), config: {...legacy.config, research_synthesis_revision: 2}});
+  assert.equal(next.method_version, 'research-episodes-synthesis-v2');
+  assert.notEqual(next.analysis_key, legacy.analysis_key);
+  assert.deepEqual(next.input, legacy.input);
+  assert.deepEqual(next.output_schema, legacy.output_schema, 'No new result fields or scientific qualification gate');
+  assert.equal(next.prompt.split('\n\nEvidence pack:\n')[1], legacy.prompt.split('\n\nEvidence pack:\n')[1]);
+  const raw = {...output(), synthesis: {summary: {text: 'The mechanism is unresolved.', episode_ids: ['e1'],
+    citations: [{source_id: 's', first_line: 10, last_line: 10}]}, findings: [], next_experiments: []}};
+  assert.deepEqual(qualifyTrajectoryAssessment({...next, output: raw}).metrics,
+    qualifyTrajectoryAssessment({...legacy, output: raw}).metrics);
+  assert.equal(compareTrajectoryAssessments({...next, previous: {...legacy, output: raw}}).can_reuse, false,
+    'A guidance revision needs an explicit new analysis; do not relabel a saved judgment');
+  assert.deepEqual(prepareTrajectoryAssessment({input: input(), config: legacy.config}), legacy);
+  for (const revision of [null, true, '2', 0, 1, 3]) {
+    assert.throws(() => prepareTrajectoryAssessment({input: input(), config: {...config,
+      research_synthesis: true, research_synthesis_revision: revision}}), /supported revision/);
+  }
+  assert.throws(() => prepareTrajectoryAssessment({input: input(), config: {...config,
+    research_synthesis: false, research_synthesis_revision: 2}}), /enabled synthesis/);
 });

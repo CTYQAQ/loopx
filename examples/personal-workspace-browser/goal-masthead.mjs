@@ -60,6 +60,16 @@ async function openGoal(page, name) {
   await page.getByTestId("goal-vitals").waitFor({ state: "visible", timeout: 15_000 });
 }
 
+async function readVitalHelp(page, cell) {
+  await cell.locator('..').locator('.context-help-trigger').focus();
+  const bubble = page.locator('.context-help-popover:popover-open');
+  await bubble.waitFor();
+  const text = await bubble.innerText();
+  await page.keyboard.press('Escape');
+  await bubble.waitFor({state:'hidden'});
+  return text;
+}
+
 async function vital(page, label) {
   const cell = page.getByTestId("goal-vitals").locator(".goal-vital").filter({ has: page.locator(".goal-vital-label", { hasText: label }) });
   return { cell, value: (await cell.locator(".goal-vital-value").innerText()).trim(), sub: (await cell.locator(".goal-vital-sub").allInnerTexts()).join(" ").trim() };
@@ -194,9 +204,11 @@ export const goalMastheadScenario = {
       await openGoal(quiet.page, title);
       const agentTime = await vital(quiet.page, "Agent 用时");
       const cost = await vital(quiet.page, "成本");
-      assert.deepEqual([agentTime.value, cost.value, cost.sub], ["—", "—", "未采集"], "Absent usage is unknown, never $0.00");
+      assert.deepEqual([agentTime.value, cost.value, cost.sub], ["—", "—", ""], "Absent usage is unknown, never $0.00");
       const last = await vital(quiet.page, "最近活动");
-      assert.deepEqual([last.value, last.sub], ["—", "暂无观测到的活动"], "A claim or Todo write is not activity");
+      assert.deepEqual([last.value, last.sub], ["—", ""], "A claim or Todo write is not activity");
+      assert.match(await readVitalHelp(quiet.page, cost.cell), /未采集/);
+      assert.match(await readVitalHelp(quiet.page, last.cell), /暂无观测到的活动/);
       assert.notEqual((await vital(quiet.page, "状态")).value, "执行中");
       await quiet.page.screenshot({ path: resolve(outputDir, "goal-masthead-unmeasured.png"), animations: "disabled" });
       await quiet.page.evaluate(() => localStorage.setItem("loopx-pw-locale", "en"));
@@ -265,7 +277,8 @@ export const goalMastheadScenario = {
             throw new Error(`${locale} ${mode}: expected ${expected}; observed ${await work.cell.innerText()}`, {cause: error});
           });
           if (mode === "unknown") {
-            await work.cell.getByText(locale === "en" ? "Total unknown" : "总数未知", {exact: true}).waitFor({state: "visible"});
+            const scope = await readVitalHelp(ui.page, work.cell);
+            assert.match(scope, locale === "en" ? /Total unknown/ : /总数未知/);
             assert.equal(await work.cell.locator(".goal-work-ribbon").count(), 0, "Unknown totals cannot imply a completion proportion");
             await ui.page.screenshot({ path: resolve(outputDir, `goal-work-unknown-${locale}.png`), animations: "disabled" });
           }
@@ -307,9 +320,10 @@ export const goalMastheadScenario = {
         const expected = mode === "complete" ? "21" : mode === "mixed-complete" ? "1" : mode === "optional" ? "0" : "—";
         assert.equal(needs.value, expected, "Only complete classified rows qualify a blocking total; open User Todo totals do not classify hidden rows");
         const partial = !["complete", "mixed-complete", "optional"].includes(mode);
-        if (partial) assert.match(needs.sub, locale === "en" ? /oldest unknown/ : /最早时间未知/);
+        const coverageHelp = partial ? await readVitalHelp(ui.page, needs.cell) : "";
+        if (partial) assert.match(coverageHelp, locale === "en" ? /oldest unknown/ : /最早时间未知/);
         const listed = ["complete", "mixed-complete", "optional"].includes(mode) ? 21 : mode === "empty" ? 0 : 3;
-        if (partial) assert.match(needs.sub, new RegExp(`${listed} ${locale === "en" ? "listed" : "项"}`));
+        if (partial) assert.match(coverageHelp, new RegExp(`${listed} ${locale === "en" ? "listed" : "项"}`));
         if (mode === "optional") assert.match(needs.sub, locale === "en" ? /21 optional/ : /21 项可选/);
         if (mode === "unknown") assert.doesNotMatch(needs.sub, /Nothing waiting|暂无等待/);
         await ui.page.getByRole("navigation", { name: /^(Goal 视图|Goal view)$/ }).getByRole("button", { name: /^(概览|Overview)$/ }).click();
@@ -318,7 +332,7 @@ export const goalMastheadScenario = {
           assert.equal(await rail.count(), 0, "No unlisted row is invented as a decision card; the vital retains unknown and its partial qualifier");
         } else {
           assert.equal(await rail.locator(".goal-overview-count").textContent(), expected, "Rail and strip share the same qualified count or unknown");
-          if (partial) assert.match(await rail.textContent(), locale === "en" ? /oldest unknown/ : /最早时间未知/);
+          if (partial) assert.doesNotMatch(await rail.innerText(), locale === "en" ? /oldest unknown/ : /最早时间未知/, "The same coverage explanation is not repeated under the decision list");
           await rail.locator(".goal-overview-more").waitFor({ state: "visible" });
         }
         await ui.page.screenshot({ path: resolve(outputDir, `goal-attention-${mode}-${locale}.png`), animations: "disabled" });

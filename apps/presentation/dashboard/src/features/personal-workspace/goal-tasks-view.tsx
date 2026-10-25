@@ -1,8 +1,9 @@
+import {Bot, Check, ChevronDown, CircleHelp, ExternalLink, ListPlus, LoaderCircle, MessageSquareText, MoreHorizontal} from "lucide-react";
+import {ContextHelp} from "./context-help";
 import type {GoalWorkspaceDigest} from "../../../../../../loopx/control_plane/presentation/goal_workspace_digest.js";
 import {useGoalWorkspaceDigest} from "./goal-masthead";
 import {goalWorkClassLabel} from "./goal-workspace-work";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bot, Check, ChevronDown, ExternalLink, ListPlus, LoaderCircle, MessageSquareText, MoreHorizontal } from "lucide-react";
 
 import type {
   WorkspaceDrawerSelection,
@@ -253,7 +254,7 @@ export function GoalTasksView({
             </button>
           );
         })}
-        {!attentionItems.length ? <p className="personal-task-empty">{t("tasks.emptyConfirm")}</p> : null}
+        {!attentionItems.length ? <ContextHelp label={locale === "zh-CN" ? "暂无待确认任务" : "No tasks awaiting confirmation"} icon={CircleHelp}><p className="personal-task-empty">{t("tasks.emptyConfirm")}</p></ContextHelp> : null}
       </TaskLane>
       <TaskLane listView={listView} count={openAgentTodos.length} label={t("tasks.pendingAndRunning")} tone="progress">
         {openAgentTodos.map((todo) => {
@@ -291,7 +292,7 @@ export function GoalTasksView({
             </div>
           );
         })}
-        {!openAgentTodos.length ? <p className="personal-task-empty">{t("tasks.emptyRunning")}</p> : null}
+        {!openAgentTodos.length ? <ContextHelp label={locale === "zh-CN" ? "暂无运行记录" : "No run records"} icon={CircleHelp}><p className="personal-task-empty">{t("tasks.emptyRunning")}</p></ContextHelp> : null}
       </TaskLane>
       <TaskLane listView={listView} count={scheduleItems.length} label={t("tasks.scheduled")} tone="schedule">
         {scheduleItems.map((item) => (
@@ -299,14 +300,14 @@ export function GoalTasksView({
             <span>◷</span><strong>{item.schedule.label}</strong><small>{item.schedule.status === "paused" ? t("schedule.paused") : t("schedule.active")}</small>
           </button>
         ))}
-        {!scheduleItems.length ? <p className="personal-task-empty">{t("tasks.emptySchedules")}</p> : null}
+        {!scheduleItems.length ? <ContextHelp label={locale === "zh-CN" ? "暂无定时任务" : "No schedules"} icon={CircleHelp}><p className="personal-task-empty">{t("tasks.emptySchedules")}</p></ContextHelp> : null}
       </TaskLane>
       <CompletedTaskLane searchable key={`${goal.goalId}:${selectedLaneId}`} goal={goal} agentId={selectedLaneId} seed={doneAgentTodos} refreshRevision={historyRefreshRevision} enabled={historyEnabled && historyActive} listView={listView} onSelect={onSelect} selectedTodoId={selectedTodoId} />
       </div>
       {isEmpty ? (
-        <p className="personal-task-empty">
+        <ContextHelp label={locale === "zh-CN" ? "当前任务范围" : "Current task scope"} icon={CircleHelp}><p className="personal-task-empty">
           {t("tasks.emptyGoal")}
-        </p>
+        </p></ContextHelp>
       ) : null}
     </section>
   );

@@ -648,13 +648,20 @@ def test_disable_waits_for_owned_transaction_then_persists_off(native, tmp_path)
     assert provider.tick()["action"] == "disabled" and len(transport.calls) == before
 
 
-def client_host(native, monkeypatch):
+def client_host(native, monkeypatch, tmp_path):
     from loopx_codex_provider_routing import native_host as module
 
     monkeypatch.setattr(module.sys, "platform", "darwin")
     adapter = module.NativeHost.__new__(module.NativeHost)
     state = {"pid": 11, "active": "a", "revision": "initial", "quit": [], "switch": 0, "open": 0}
-    adapter.home, adapter.spec = Path("/synthetic"), {}
+    adapter.home, adapter.spec = tmp_path, {"home": tmp_path}
+    executable = Path("/synthetic/GPT.app/Contents/MacOS/GPT")
+    identity = (1, str(executable), 1000, 1)
+    # This fixture owns one synthetic App launch, with no helpers or installed
+    # Chat agents. The package client smoke covers discovery and service effects.
+    monkeypatch.setattr(module, "process_identity", lambda pid: identity if pid == 11 else None)
+    adapter.inspect_client_helpers = lambda: ((state["pid"], module.process_identity(state["pid"])), {})
+    adapter._home_owners = lambda: []
     adapter.revision = lambda: state["revision"]
     adapter.status = lambda: {"active_slot": state["active"], "selection_revision": state["revision"],
                               "current_login_matches": True, "recovery_required": False,
@@ -680,9 +687,11 @@ def client_host(native, monkeypatch):
         assert command[-2:] == ["11", "/synthetic/GPT.app/Contents/MacOS/GPT"]
         state["pid"] = None
 
-    adapter.manager = SimpleNamespace(switch=switch, idle=idle)
-    adapter.apps = SimpleNamespace(executable=lambda _: Path("/synthetic/GPT.app/Contents/MacOS/GPT"),
-                                   app_bundle=lambda *_: None, running=lambda *_: state["pid"], open_app=reopen)
+    adapter.manager = SimpleNamespace(root=tmp_path / "native-accounts", switch=switch, idle=idle)
+    adapter.accounts = SimpleNamespace(private_dir=lambda path: path.mkdir(mode=0o700, exist_ok=True))
+    adapter.apps = SimpleNamespace(executable=lambda _: executable,
+                                   app_bundle=lambda *_: executable.parents[2],
+                                   running=lambda *_: state["pid"], open_app=reopen)
     monkeypatch.setattr(module.subprocess, "run", quit)
     return adapter, state, module
 
@@ -690,8 +699,8 @@ def client_host(native, monkeypatch):
 @pytest.mark.parametrize("fault,phase", [(None, "quit"), ("unreadable-launch", "probe"),
                                         *[(fault, phase) for fault in ("selection", "new-process", "stale-quota")
                                           for phase in ("probe", "quit")]])
-def test_force_quit_requires_the_same_observed_launch_and_selection(native, monkeypatch, fault, phase):
-    adapter, state, module = client_host(native, monkeypatch)
+def test_force_quit_requires_the_same_observed_launch_and_selection(native, monkeypatch, tmp_path, fault, phase):
+    adapter, state, module = client_host(native, monkeypatch, tmp_path)
     adapter.not_after = None
     forced = []
 
@@ -729,8 +738,8 @@ def test_force_quit_requires_the_same_observed_launch_and_selection(native, monk
                                     '{"launch_time":"1000"}', '{"launch_time":0}',
                                     '{"launch_time":-1}', '{"launch_time":NaN}',
                                     '{"launch_time":Infinity}', '{"launch_time":-Infinity}'])
-def test_incomplete_or_invalid_probe_cannot_authorize_any_quit(native, monkeypatch, receipt):
-    adapter, state, module = client_host(native, monkeypatch)
+def test_incomplete_or_invalid_probe_cannot_authorize_any_quit(native, monkeypatch, tmp_path, receipt):
+    adapter, state, module = client_host(native, monkeypatch, tmp_path)
     calls = []
 
     def probe(command, **parameters):
@@ -747,8 +756,8 @@ def test_incomplete_or_invalid_probe_cannot_authorize_any_quit(native, monkeypat
 
 @pytest.mark.parametrize("launch_time", [None, 1000.0])
 @pytest.mark.parametrize("outcome", ["graceful", "refused", "timeout"])
-def test_force_permission_only_escalates_a_failed_normal_quit(native, monkeypatch, launch_time, outcome):
-    adapter, state, module = client_host(native, monkeypatch)
+def test_force_permission_only_escalates_a_failed_normal_quit(native, monkeypatch, tmp_path, launch_time, outcome):
+    adapter, state, module = client_host(native, monkeypatch, tmp_path)
     adapter.not_after = None
     calls = []
 
@@ -785,22 +794,22 @@ def test_force_permission_is_independent_and_survives_reconfiguration(native, tm
         provider.configure(expected_revision=3, enabled=False, slots=["a", "b"], force_quit_clients="yes")
 
 
-def test_normal_quit_precedes_native_idle_transaction_and_same_route_reopen(native, monkeypatch):
-    adapter, state, _ = client_host(native, monkeypatch)
+def test_normal_quit_precedes_native_idle_transaction_and_same_route_reopen(native, monkeypatch, tmp_path):
+    adapter, state, _ = client_host(native, monkeypatch, tmp_path)
     result = adapter.switch("b", "initial", reopen=True, restart_clients=True)
     assert state["quit"] and state["switch"] == 1 and state["open"] == 1
     assert result["active_slot"] == "b" and result["client_running"] is True
 
 
-def test_wait_only_mode_does_not_quit_a_client(native, monkeypatch):
-    adapter, state, _ = client_host(native, monkeypatch)
+def test_wait_only_mode_does_not_quit_a_client(native, monkeypatch, tmp_path):
+    adapter, state, _ = client_host(native, monkeypatch, tmp_path)
     with pytest.raises(Exception, match="waiting_for_idle"):
         adapter.switch("b", "initial", reopen=True)
     assert not state["quit"] and state["active"] == "a"
 
 
-def test_quit_refusal_and_timeout_do_not_mutate_credentials(native, monkeypatch):
-    adapter, state, module = client_host(native, monkeypatch)
+def test_quit_refusal_and_timeout_do_not_mutate_credentials(native, monkeypatch, tmp_path):
+    adapter, state, module = client_host(native, monkeypatch, tmp_path)
 
     def refuse(*_, **__):
         raise module.subprocess.CalledProcessError(1, "synthetic")
@@ -815,8 +824,8 @@ def test_quit_refusal_and_timeout_do_not_mutate_credentials(native, monkeypatch)
     assert state["active"] == "a"
 
 
-def test_manual_selection_and_new_client_prevent_closing_the_wrong_process(native, monkeypatch):
-    adapter, state, _ = client_host(native, monkeypatch)
+def test_manual_selection_and_new_client_prevent_closing_the_wrong_process(native, monkeypatch, tmp_path):
+    adapter, state, _ = client_host(native, monkeypatch, tmp_path)
     with pytest.raises(Exception, match="selection_changed"):
         adapter.switch("b", "stale", reopen=True, restart_clients=True)
     assert not state["quit"]
@@ -827,16 +836,16 @@ def test_manual_selection_and_new_client_prevent_closing_the_wrong_process(nativ
     assert not state["quit"] and state["switch"] == 0 and state["open"] == 0
 
 
-def test_native_switch_failure_reopens_source_without_replaying_account_selection(native, monkeypatch):
-    adapter, state, module = client_host(native, monkeypatch)
+def test_native_switch_failure_reopens_source_without_replaying_account_selection(native, monkeypatch, tmp_path):
+    adapter, state, module = client_host(native, monkeypatch, tmp_path)
     adapter.manager.switch = lambda _: (_ for _ in ()).throw(module.HostError("readback_failed"))
     with pytest.raises(Exception, match="readback_failed"):
         adapter.switch("b", "initial", reopen=True, restart_clients=True)
     assert state["active"] == "a" and state["open"] == 1
 
 
-def test_manual_selection_during_quit_wins_before_any_credential_write(native, monkeypatch):
-    adapter, state, module = client_host(native, monkeypatch)
+def test_manual_selection_during_quit_wins_before_any_credential_write(native, monkeypatch, tmp_path):
+    adapter, state, module = client_host(native, monkeypatch, tmp_path)
     quit = module.subprocess.run
 
     def manual_choice(*args, **kwargs):
@@ -849,8 +858,8 @@ def test_manual_selection_during_quit_wins_before_any_credential_write(native, m
     assert state["active"] == "c" and state["switch"] == 0 and state["open"] == 0
 
 
-def test_expired_automatic_evidence_does_not_even_quit_the_client(native, monkeypatch):
-    adapter, state, _ = client_host(native, monkeypatch)
+def test_expired_automatic_evidence_does_not_even_quit_the_client(native, monkeypatch, tmp_path):
+    adapter, state, _ = client_host(native, monkeypatch, tmp_path)
     with pytest.raises(Exception, match="quota_stale"):
         adapter.switch("b", "initial", reopen=True, restart_clients=True, not_after=time.time() - 1)
     assert not state["quit"] and not state["switch"]

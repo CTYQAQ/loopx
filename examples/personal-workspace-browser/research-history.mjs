@@ -126,6 +126,204 @@ export async function startHistoryOwner(fixture) {
 export const researchHistoryScenario = {
   id: "research-history",
   async run({browser, collectCoverage, url}) {
+    // The ordinary journey uses the real source verifier and HTTP owner, with
+    // no intercepted analysis response and no analysis process or Goal writes.
+    const nativeOwner = await startHistoryOwner(resolve(repoRoot, "apps/presentation/dashboard/src/data/fixtures/research-native-readback.json"));
+    const nativePage = await browser.newPage({viewport: {width: 1280, height: 900}});
+    try {
+      await nativePage.addInitScript(() => localStorage.setItem('loopx-pw-locale', 'zh-CN'));
+      const query = new URLSearchParams({goalId: 'synthetic-research-readback', view: 'research', statusUrl: '/status.json?goal_id=synthetic-research-readback'});
+      await nativePage.goto(`${nativeOwner.base}/chat/?${query}`, {waitUntil: 'domcontentloaded'});
+      const native = nativePage.getByRole('region', {name: '原生测量', exact: true});
+      await native.waitFor();
+      assert.match(await native.innerText(), /2 \/ 3.*项有效结果/s);
+      assert.equal(await native.locator('[data-native-point="best_valid"] strong').textContent(), '3');
+      assert.equal(await native.locator('[data-native-point="initial"] strong').textContent(), '7');
+      assert.match(await native.locator('[data-native-point="retained"]').innerText(), /未知/);
+      assert(await native.locator('[data-native-point="best_valid"] strong').evaluate(e => parseFloat(getComputedStyle(e).fontSize) >= 32));
+      assert(await native.locator('[data-native-point="initial"] strong').evaluate(e => parseFloat(getComputedStyle(e).fontSize) >= 16));
+      assert.match(await native.locator('.research-native-scope').innerText(), /UTC/);
+      assert.doesNotMatch(await native.locator('.research-native-scope').innerText(), /T00:00:00Z/);
+      assert.equal(await native.locator('.research-native-basis').evaluate(e => e.open), false);
+      assert.equal(await nativePage.locator('.research-progress-basis').evaluate(e => e.open), false);
+      assert.equal(await nativePage.getByRole('button',{name:'所选范围尚未分析',exact:true}).isVisible(), true, 'Measured progress remains readable before model analysis; the unknown analysis is contextual help');
+      assert.equal(await nativePage.locator('.research-progress > header .context-help-trigger').count(), 1, 'Result state and interpretation share one heading help entry');
+      await nativePage.screenshot({path: resolve(outputDir, 'research-native-default-desktop.png'), animations: 'disabled'});
+      await native.getByRole('button', {name: /首次提交.*查看原始证据/}).click();
+      const original = nativePage.getByRole('region', {name: '引用原文', exact: true});
+      await original.waitFor();
+      await original.getByText(/Synthetic baseline: candidate-one measured error 7 points/).waitFor();
+      assert.match(await original.innerText(), /Synthetic baseline: candidate-one measured error 7 points/);
+      await original.press('Escape');
+      assert.equal(await nativePage.locator('.research-analysis').count(), 0, 'Reading a native citation does not open or run model analysis');
+      await nativePage.setViewportSize({width: 390, height: 844});
+      await native.getByRole('heading', {name: '原生测量', exact: true}).click();
+      await nativePage.evaluate(() => {for (const e of document.querySelectorAll('*')) if (e.scrollTop) e.scrollTop = 0;});
+      assert(await nativePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      await nativePage.screenshot({path: resolve(outputDir, 'research-native-default-mobile.png'), animations: 'disabled'});
+      const readback = await (await nativePage.request.get(`${nativeOwner.base}/fixture/readback`)).json();
+      assert.equal(readback.source_unchanged, true);
+      assert.equal(readback.mutation_attempts, 0);
+    } finally {
+      await nativePage.close();
+      await nativeOwner.close();
+    }
+    // Saved synthesis crosses the actual qualification/process/HTTP boundary.
+    // Its fixture is synthetic: these checks qualify reading and provenance,
+    // not the scientific usefulness of a real model's interpretation.
+    const synthesisOwner = await startHistoryOwner(resolve(repoRoot, "apps/presentation/dashboard/src/data/fixtures/research-synthesis-readback.json"));
+    const synthesisPage = await browser.newPage({viewport: {width: 1280, height: 900}});
+    try {
+      await synthesisPage.addInitScript(() => {if (!localStorage.getItem('loopx-pw-locale')) localStorage.setItem('loopx-pw-locale', 'zh-CN');});
+      const query = new URLSearchParams({goalId: 'synthetic-research-readback', view: 'research', statusUrl: '/status.json?goal_id=synthetic-research-readback'});
+      await synthesisPage.goto(`${synthesisOwner.base}/chat/?${query}`, {waitUntil: 'domcontentloaded'});
+      const synthesis = synthesisPage.getByRole('region', {name: '研究汇报', exact: true});
+      await synthesis.waitFor();
+      assert.match(await synthesis.innerText(), /积极信号.*最终保留.*仍未知/s);
+      assert.equal(await synthesis.locator('.research-synthesis-finding').count(), 2);
+      assert(await synthesis.locator('.research-synthesis-summary').evaluate(e => parseFloat(getComputedStyle(e).fontSize) >= 16), 'Main research account must be readable body text');
+      assert.equal(await synthesis.locator('details[open]').count(), 0, 'Ordinary reading starts with observations; reasoning is optional detail');
+      assert.equal(await synthesisPage.locator('.research-effect-metrics:visible').count(), 0, 'Metric counts do not replace the research account');
+      await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-ordinary-desktop.png'), animations: 'disabled'});
+      assert(await synthesisPage.evaluate(() => {
+        const results = document.querySelector('.research-progress');
+        const report = document.querySelector('.research-synthesis');
+        const history = document.querySelector('.research-history-heading');
+        return Boolean(results && report && history
+          && (results.compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING)
+          && (report.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING));
+      }), 'The complete overview reads results, report, then research history');
+      const reading = synthesisPage.getByRole('navigation', {name: '研究阅读', exact: true});
+      await reading.getByRole('button', {name: '汇报', exact: true}).click();
+      assert(await synthesisPage.evaluate(() => document.activeElement?.contains(document.querySelector('.research-synthesis'))));
+      await reading.getByRole('button', {name: '指标', exact: true}).click();
+      assert(await synthesisPage.evaluate(() => document.activeElement?.contains(document.querySelector('.research-progress'))));
+      await synthesis.locator('.research-synthesis-finding > summary').first().click();
+      await synthesis.getByRole('button', {name: /^证据 1: facts/}).first().click();
+      const source = synthesisPage.getByRole('region', {name: '引用原文', exact: true});
+      await source.waitFor();
+      await source.getByText(/Synthetic baseline: candidate-one/).waitFor();
+      assert.match(await source.innerText(), /Synthetic baseline.*Synthetic later result/s);
+      await source.press('Escape');
+      assert.equal(await synthesisPage.getByRole('region', {name: '轨迹深度分析', exact: true}).count(), 0);
+      await synthesisPage.setViewportSize({width: 390, height: 844});
+      await synthesis.locator('.research-synthesis-finding > summary').first().click();
+      await synthesisPage.evaluate(() => {for (const e of document.querySelectorAll('*')) if (e.scrollTop) e.scrollTop = 0;});
+      assert(await synthesisPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-ordinary-mobile.png'), animations: 'disabled'});
+      await reading.getByRole('button', {name: '汇报', exact: true}).click();
+      await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-report-mobile.png'), animations: 'disabled'});
+      await synthesisPage.getByRole('button', {name: '深入解读', exact: true}).click();
+      const analysis = synthesisPage.getByRole('region', {name: '轨迹深度分析', exact: true});
+      await analysis.waitFor();
+      assert.equal(await synthesisPage.getByRole('region', {name: '研究汇报', exact: true}).count(), 1, 'One reading focus when expanded');
+      assert.match(await analysis.innerText(), /竞争解释.*随机波动/s);
+      const savedOverview = await analysis.locator('.research-synthesis-summary').innerText();
+      assert(await analysis.locator('.research-report-tabs').evaluate(tabs => {
+        const overview = tabs.parentElement.querySelector('.research-synthesis-summary');
+        return Boolean(overview && (tabs.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING));
+      }), 'Choose findings or experiments before reading a potentially long overview');
+      await analysis.getByRole('tab', {name: /结论与解释/}).focus();
+      await synthesisPage.keyboard.press('ArrowRight');
+      assert.equal(await analysis.getByRole('tab', {name: /下一步实验/}).getAttribute('aria-selected'), 'true');
+      assert.equal(await analysis.locator('.research-synthesis-summary').count(), 0, 'Experiment reading starts with the experiment instead of repeating the report overview');
+      assert.match(await analysis.innerText(), /固定条件.*随机序列.*推翻解释的结果/s);
+      assert.equal(await analysis.locator('.analysis-method').first().evaluate(e => e.open), false, 'Episode judgments remain available as secondary verification');
+      await synthesisPage.mouse.move(1, 1);
+      if (await synthesisPage.locator('.context-help-popover:popover-open').count()) await synthesisPage.keyboard.press('Escape');
+      await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-deep-mobile.png'), animations: 'disabled'});
+      await synthesisPage.setViewportSize({width: 1280, height: 900});
+      await analysis.getByRole('tab', {name: /结论与解释/}).click();
+      assert.equal(await analysis.locator('.research-synthesis-summary').innerText(), savedOverview, 'Returning to findings restores the complete saved overview');
+      await analysis.evaluate(e => e.scrollIntoView({block: 'start'}));
+      await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-deep-desktop.png'), animations: 'disabled'});
+      // The report already declares its episode lineage. Follow those exact
+      // identities, not the whole Goal's history or a title/time heuristic.
+      const review = analysis.locator('.analysis-method').first();
+      const related = analysis.locator('.research-report-finding .research-review-episodes').first();
+      await related.click();
+      assert.deepEqual(await review.locator('[data-analysis-episode]').evaluateAll(rows => rows.map(row => row.dataset.analysisEpisode)), ['search-episode', 'control-episode']);
+      assert.equal(await review.locator('.analysis-episode[open]').getAttribute('data-analysis-episode'), 'search-episode');
+      await synthesisPage.waitForFunction(() => document.activeElement?.closest('[data-analysis-episode]')?.dataset.analysisEpisode === 'search-episode');
+      assert.match(await review.innerText(), /证据不足/);
+      await synthesisPage.screenshot({path: resolve(outputDir, 'research-related-episodes-desktop.png'), animations: 'disabled'});
+      await review.locator('.analysis-episode[open] .analysis-citations button').first().click();
+      await source.getByText(/Synthetic baseline: candidate-one/).waitFor();
+      await source.press('Escape');
+      await synthesisPage.waitForFunction(() => document.activeElement?.closest('[data-analysis-episode]')?.dataset.analysisEpisode === 'search-episode');
+      await review.getByRole('button', {name: '返回汇报', exact: true}).click();
+      assert.equal(await review.evaluate(e => e.open), false);
+      assert(await related.evaluate(e => e === document.activeElement));
+
+      const retention = analysis.locator('.research-report-finding .research-review-episodes').nth(1);
+      await retention.click();
+      assert.deepEqual(await review.locator('[data-analysis-episode]').evaluateAll(rows => rows.map(row => row.dataset.analysisEpisode)), ['retention-episode']);
+      assert.match(await review.locator('.analysis-episode[open]').innerText(), /证据不足/);
+      await review.getByRole('button', {name: '显示全部片段', exact: true}).click();
+      assert.deepEqual(await review.locator('[data-analysis-episode]').evaluateAll(rows => rows.map(row => row.dataset.analysisEpisode)), ['search-episode', 'control-episode', 'retention-episode']);
+      assert.equal(await review.getByRole('status', {name: '全部片段', exact: true}).innerText(), '3 / 3', 'The reading scope describes the episodes actually shown');
+      const subset = review.getByRole('button', {name: '只看相关片段', exact: true});
+      assert(await subset.evaluate(e => e === document.activeElement), 'Changing scope retains the same control focus');
+      await subset.click();
+      assert.deepEqual(await review.locator('[data-analysis-episode]').evaluateAll(rows => rows.map(row => row.dataset.analysisEpisode)), ['retention-episode']);
+      assert.equal(await review.getByRole('status', {name: '相关片段', exact: true}).innerText(), '1 / 3');
+      await review.getByRole('button', {name: '返回汇报', exact: true}).click();
+      assert(await retention.evaluate(e => e === document.activeElement));
+
+      await related.click();
+      const nextExperiments = analysis.getByRole('tab', {name: /下一步实验/});
+      await nextExperiments.click();
+      await review.getByRole('button', {name: '返回汇报', exact: true}).click();
+      assert(await nextExperiments.evaluate(e => e === document.activeElement), 'A removed report trigger returns to the current report tab');
+      const experiment = analysis.locator('.research-report-experiment .research-review-episodes').first();
+      await synthesisPage.setViewportSize({width: 390, height: 844});
+      await experiment.click();
+      assert.deepEqual(await review.locator('[data-analysis-episode]').evaluateAll(rows => rows.map(row => row.dataset.analysisEpisode)), ['control-episode']);
+      assert(await synthesisPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      assert(await review.locator('.analysis-episode[open] > summary').evaluate(row => row.getBoundingClientRect().top < innerHeight - 80), 'The chosen episode is visible after a narrow-screen jump');
+      assert(await review.locator('.analysis-episode[open] > summary').evaluate(row => {
+        const name = row.querySelector('.analysis-episode-name').getBoundingClientRect();
+        const verdict = row.querySelector('.analysis-episode-verdict').getBoundingClientRect();
+        return verdict.top >= name.bottom;
+      }), 'Narrow episode verdicts reflow below the full selected question');
+      await synthesisPage.screenshot({path: resolve(outputDir, 'research-related-episodes-mobile.png'), animations: 'disabled'});
+      await review.getByRole('button', {name: '返回汇报', exact: true}).click();
+      assert(await experiment.evaluate(e => e === document.activeElement));
+      assert.equal(await analysis.getByRole('tab', {name: /下一步实验/}).getAttribute('aria-selected'), 'true');
+      await synthesisPage.setViewportSize({width: 1280, height: 900});
+      const packBeforeHistory = new URL(synthesisPage.url()).searchParams.get('research_pack');
+      await analysis.getByRole('button', {name: 'Goal 研究历程', exact: true}).click();
+      assert.equal(await analysis.count(), 0);
+      assert.equal(new URL(synthesisPage.url()).searchParams.get('research_pack'), packBeforeHistory);
+      await synthesisPage.waitForFunction(() => document.activeElement?.classList.contains('research-history-heading'));
+      await reading.getByRole('button', {name: '汇报', exact: true}).click();
+      await synthesisPage.getByRole('button', {name: '深入解读', exact: true}).click();
+      await analysis.getByRole('button', {name: '关闭分析', exact: true}).click();
+      await synthesisPage.waitForFunction(() => document.activeElement?.textContent?.includes('深入解读'));
+      await synthesisPage.evaluate(() => localStorage.setItem('loopx-pw-locale', 'en'));
+      await synthesisPage.reload({waitUntil: 'domcontentloaded'});
+      await synthesisPage.setViewportSize({width: 390, height: 844});
+      await synthesisPage.getByRole('button', {name: 'Read deeper', exact: true}).click();
+      const english = synthesisPage.locator('.research-analysis');
+      const englishReview = english.locator('.analysis-method').first();
+      const englishOrigin = english.locator('.research-report-finding .research-review-episodes').first();
+      await englishOrigin.click();
+      assert.equal(await englishReview.getByRole('status', {name: 'Related episodes', exact: true}).innerText(), '2 / 3');
+      await englishReview.getByRole('button', {name: 'Show all episodes', exact: true}).click();
+      assert.equal(await englishReview.getByRole('status', {name: 'All episodes', exact: true}).innerText(), '3 / 3');
+      await englishReview.getByRole('button', {name: 'Related episodes only', exact: true}).click();
+      assert.deepEqual(await englishReview.locator('[data-analysis-episode]').evaluateAll(rows => rows.map(row => row.dataset.analysisEpisode)), ['search-episode', 'control-episode']);
+      assert.match(await englishReview.locator('[data-analysis-episode="control-episode"] > summary').innerText(), /Unknown 1/);
+      await synthesisPage.screenshot({path: resolve(outputDir, 'research-related-episodes-mobile-en.png'), animations: 'disabled'});
+      await englishReview.getByRole('button', {name: 'Back to report', exact: true}).click();
+      assert(await englishOrigin.evaluate(e => e === document.activeElement));
+      const readback = await (await synthesisPage.request.get(`${synthesisOwner.base}/fixture/readback`)).json();
+      assert.equal(readback.source_unchanged, true);
+      assert.equal(readback.mutation_attempts, 0, 'Reading either layer and citations starts no model or state write');
+    } finally {
+      await synthesisPage.close();
+      await synthesisOwner.close();
+    }
     const capture = JSON.parse(await readFile(resolve(repoRoot, "apps/presentation/dashboard/src/data/fixtures/edgebench-research-history.json")));
     let owner = await startHistoryOwner();
     let collisionOwner, emptyOwner, temporary;
@@ -135,14 +333,16 @@ export const researchHistoryScenario = {
     let unavailable = false;
     let analysisFixture = false, holdOldAnalysis = false, slowStarted, releaseOld, oldDelivered;
     let holdCitation = false, failedCitation = false, citationStarted, releaseCitation;
-    let unavailableAnalysis = false, episodeMetadataLimit = null, comparisonFixture = false;
-    let analysisWrites = 0, localizedFixture = false, continuationFixture = false, equivalentContinuation = false;
+    let unavailableAnalysis = false, failedAnalysisPack = "a", episodeMetadataLimit = null, comparisonFixture = false;
+    let analysisWrites = 0, analysisReads = 0, localizedFixture = false, continuationFixture = false, equivalentContinuation = false;
+    let versionComparison = "shared";
     let unavailableTask = false;
     const taskReads = [];
     try {
       context = await openWorkspacePage(browser, url, {collectCoverage, beforeGoto: async (_, page) => {
         await page.route("**/api/chat/research-analysis**", async route => {
           if (route.request().method() !== "GET") {analysisWrites++; return route.fulfill({status: 403, json: {error: "Read-only presentation fixture"}});}
+          analysisReads++;
           if (!analysisFixture) return route.fulfill({json: {ok: true, catalog: {availability: "unavailable", reason_code: "no_available_pack", default_pack_id: null, packs: []}, pack: null}});
           const query = new URL(route.request().url()).searchParams;
           const language = query.get('output_language');
@@ -172,8 +372,11 @@ export const researchHistoryScenario = {
               sources: {added: ['follow-up'], revised: [], removed: []}, episodes: {added: [], revised: ['variant-alpha'], removed: []},
               can_reuse: false, configuration_changed: false, objective_changed: false, base_available: true, base_episode_count: 4,
               reassessed_episode_ids: p.episodes.map(e => e.id), new_pair_count: 0, removed_pair_count: 0,
+              compared_pair_count: versionComparison === "disjoint" ? 0 : p.result.assessments.length,
               verdict_changes: [{episode_id: 'variant-alpha', metric: 'benefit_test', before: 'yes', after: 'unknown'}],
             };
+            if (!base && ["disjoint", "unchanged"].includes(versionComparison)) p.continuation.verdict_changes = [];
+            if (!base && versionComparison === "legacy") delete p.continuation.compared_pair_count;
           }
           for (const pack of [...readback.catalog.packs, readback.pack]) pack.config = {...pack.config, output_language: language};
           if (readback.pack.result) {
@@ -197,7 +400,7 @@ export const researchHistoryScenario = {
               sources: {added: [], revised: [], removed: []}, episodes: {added: [], revised: [], removed: []}, reassessed_episode_ids: [], verdict_changes: []});
             readback.pack.result = null; readback.pack.job = null;
           }
-          await route.fulfill(unavailableAnalysis && selected === "a"
+          await route.fulfill(unavailableAnalysis && selected === failedAnalysisPack
             ? {status: 503, json: {error: "Synthetic analysis read unavailable"}}
             : {json: readback});
           if (holdOldAnalysis && selected === "a") oldDelivered();
@@ -241,6 +444,43 @@ export const researchHistoryScenario = {
       await history.getByRole("status").filter({hasText: "76 / 76"}).waitFor();
       assert.equal(pages.length, 2, "The complete Portfolio checkpoint requires every bounded HTTP page");
       assert.deepEqual(pages.flatMap(value => value.items).map(row => row.event_id), capture.events.map(row => row.event_id));
+      assert.equal(await history.locator('.analysis-read-empty').count(), 0,
+        'No analysis source must not add another explanation card above the recorded history');
+      const sourceHelp = history.getByRole('button', {name: '分析来源未就绪', exact: true});
+      await sourceHelp.waitFor();
+      assert.equal(await history.getByRole('button', {name: '分析说明', exact: true}).count(), 0,
+        'Source state and optional analysis guidance share one contextual entry');
+      assert.doesNotMatch(await history.innerText(), /尚无可分析的授权轨迹包/);
+      await sourceHelp.hover();
+      const sourceExplanation = page.locator('.context-help-popover:popover-open');
+      await sourceExplanation.hover();
+      assert.match(await sourceExplanation.innerText(), /尚无可分析的授权轨迹包/);
+      await page.keyboard.press('Escape');
+      await sourceHelp.focus();
+      await sourceExplanation.waitFor({state: 'visible'});
+      await page.keyboard.press('Escape');
+      assert(await sourceHelp.evaluate(e => e === document.activeElement));
+      const readsBeforeRefresh = analysisReads;
+      const analysisRefreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/chat/research-analysis');
+      await history.getByRole('button', {name: '刷新记录', exact: true}).click();
+      await analysisRefreshed;
+      await sourceHelp.waitFor();
+      assert(analysisReads > readsBeforeRefresh, 'The shared research refresh still reads the analysis owner');
+      await page.setViewportSize({width: 390, height: 844});
+      await sourceHelp.click();
+      await sourceExplanation.waitFor({state: 'visible'});
+      const sourceBounds = await sourceExplanation.boundingBox();
+      assert(sourceBounds.x >= 0 && sourceBounds.x + sourceBounds.width <= 390);
+      await history.getByRole('heading', {name: '研究历程', exact: true}).click();
+      await sourceExplanation.waitFor({state: 'hidden'});
+      await history.getByRole('button', {name: '深度分析', exact: true}).click();
+      const unavailablePanel = history.getByRole('region', {name: '轨迹深度分析', exact: true});
+      await unavailablePanel.getByRole('status').filter({hasText: '分析来源未就绪'}).waitFor();
+      assert.equal(await unavailablePanel.locator('header p').count(), 0, 'An empty reader does not repeat analysis instructions');
+      await unavailablePanel.press('Escape');
+      assert(await history.getByRole('button', {name: '深度分析', exact: true}).evaluate(e => e === document.activeElement));
+      assert.equal(analysisWrites, 0, 'Unavailable analysis, help and recovery are reads');
+      await page.setViewportSize({width: 1280, height: 900});
       await history.locator(".research-phases").waitFor();
       const early = history.locator(".research-phase").first();
       await early.click();
@@ -294,8 +534,16 @@ export const researchHistoryScenario = {
       await history.getByRole('button',{name:'刷新记录',exact:true}).click();
       await history.getByRole('alert').waitFor();
       assert.match(await history.textContent(),/76 \/ 76/,'A failed refresh retains the complete real capture');
+      const readError = history.locator('.research-history-read-error');
+      assert.match(await readError.innerText(), /刷新失败，当前记录已保留/);
+      assert.equal(await readError.getByRole('tooltip').isVisible(), false, 'Technical failure detail stays secondary');
+      assert.doesNotMatch(await readError.innerText(), /可继续阅读|技术详情默认收起/);
+      await readError.getByRole('button', {name: '研究记录读取详情', exact: true}).focus();
+      assert.match(await readError.getByRole('tooltip').innerText(), /Isolated history transport unavailable/);
+      await page.keyboard.press('Escape');
+      await readError.screenshot({path:resolve(outputDir,'research-history-refresh-error.png'),animations:'disabled'});
       unavailable=false;
-      await history.getByRole('button',{name:'刷新记录',exact:true}).click();
+      await readError.getByRole('button',{name:'重试',exact:true}).click();
       await history.getByRole('alert').waitFor({state:'hidden'});
       await page.setViewportSize({width:390,height:844});
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
@@ -517,7 +765,7 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
         assert(await detail.getByText('0.2 / 30', {exact:true}).isVisible());
         await page.screenshot({path:resolve(outputDir, `research-execution-${viewport.width}.png`), animations:'disabled'});
         assert.deepEqual(selectedNodes(),['hit-6']);
-        await detail.getByRole('heading',{name:'Synthetic hit target 6',exact:true}).waitFor();
+        await detail.getByText('Synthetic hit target 6',{exact:true}).waitFor();
         await detail.press('Escape');
         assert.deepEqual(selectedNodes(),ids,'Escape returns to the original group');
         assert(await detail.locator('[data-research-node="hit-6"] button').evaluate(e=>e===document.activeElement));
@@ -584,6 +832,10 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await effects.waitFor();
       assert.equal(await effects.locator('.research-effect-metric').count(), 6, 'All six analyzer metrics are primary without opening analysis or cost details');
       assert.equal(await progress.locator('.research-progress-basis').evaluate(e => e.open), false, 'Sources and cost share one secondary disclosure by default');
+      const primaryNative = progress.getByRole('region', {name: '原生测量', exact: true});
+      assert.equal(await primaryNative.isVisible(), true, 'Ordinary reading exposes measured results without opening provenance or requesting a model');
+      assert.equal(await primaryNative.evaluate(native => Boolean(native.compareDocumentPosition(document.querySelector('.research-effect-metrics')) & Node.DOCUMENT_POSITION_FOLLOWING)), true,
+        'Measured task outcomes precede the separate model judgments');
       // Optional methodology must be reachable without crowding the results,
       // changing counts or invoking analysis. Exercise the same disclosure with
       // pointer, keyboard and touch-sized layout, including Escape in a panel.
@@ -607,7 +859,7 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await help.waitFor({state: 'visible'});
       const helpBounds = await help.boundingBox();
       assert(helpBounds.x >= 0 && helpBounds.x + helpBounds.width <= 390);
-      await progress.getByRole('heading', {name: '研究效果判读', exact: true}).click();
+      await progress.getByRole('heading', {name: '研究结果', exact: true}).click();
       await help.waitFor({state: 'hidden'});
       assert.match(await effects.locator('[data-metric="evidence_adoption"]').innerText(), /1 \/ 2.*未知 1/s);
       assert.doesNotMatch(await effects.locator('[data-metric="evidence_adoption"]').innerText(), /不适用/,
@@ -776,8 +1028,11 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await improvement.locator('summary').click();
       await basis.locator(':scope > summary').click();
       const nativeResults = progress.getByRole('region', {name: '原生测量', exact: true});
-      assert.match(await nativeResults.innerText(), /首次提交.*7.*提交 1/s, 'Detailed native measurements use the existing source disclosure');
-      assert.match(await nativeResults.innerText(), /原生保留结果.*3.*提交 3/s);
+      assert.equal(await nativeResults.locator('[data-native-point="initial"] strong').textContent(), '7', 'Native measurements retain their source-bound endpoints');
+      assert.equal(await nativeResults.locator('[data-native-point="retained"] strong').textContent(), '3');
+      await nativeResults.locator('.research-native-basis > summary').click();
+      assert.match(await nativeResults.locator('.research-native-basis').innerText(), /candidate-first.*提交 1/s, 'Exact submission identity is available on demand');
+      await nativeResults.locator('.research-native-basis > summary').click();
       assert.match(await nativeResults.innerText(), /越低越好/);
       await nativeResults.getByRole('button', {name: /首次提交.*查看原始证据/}).scrollIntoViewIfNeeded();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Native details remain readable on a narrow screen');
@@ -806,7 +1061,7 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       assert.equal(await analysis.locator('.analysis-episode > summary').count(), 2, 'The reader starts with one comparable row per episode');
       const firstEpisode = analysis.locator('.analysis-episode').first();
       assert.equal(await analysis.locator('.analysis-episode[open]').count(), 0);
-      assert.match(await firstEpisode.locator(':scope > summary').innerText(), /Does a useful diagnosis prove original-objective utility\?.*收益检验.*尚未检验收益.*证据采用.*有依据/s);
+      assert.match(await firstEpisode.locator(':scope > summary').getAttribute('aria-label'), /Does a useful diagnosis prove original-objective utility\?.*收益检验.*尚未检验收益.*证据采用.*有依据/s);
       assert.equal(await analysis.locator('.analysis-citations button:visible').count(), 0);
       await firstEpisode.locator(':scope > summary').focus();
       await firstEpisode.locator(':scope > summary').press('Enter');
@@ -866,9 +1121,15 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       assert.match(await progress.innerText(), /历史捕获|historical/i);
       assert.equal(await improvement.locator('[data-retained-improvement]').textContent(), '0', 'A rejected candidate does not create realized gain');
       await basis.locator(':scope > summary').click();
-      assert.match(await nativeResults.innerText(), /历史原生测量.*当前结果未核验/s, 'Stale measurements never appear current');
-      assert.match(await nativeResults.locator('[data-native-point="retained"]').innerText(), /3.*提交 3/s);
-      assert.match(await nativeResults.locator('[data-native-point="final_valid"]').innerText(), /5.*提交 4/s, 'The last submission is not silently presented as retained or best');
+      assert.match(await nativeResults.innerText(), /历史原生测量/, 'Stale measurements retain their historical identity');
+      const currentSource = nativeResults.getByRole('button',{name:'当前来源未核验',exact:true});
+      assert.equal(await nativeResults.locator(':scope > .research-progress-title .context-help-trigger').count(), 1, 'Historical measurement state and its basis share the owning heading');
+      assert.equal(await nativeResults.locator(':scope > .context-help').count(), 0, 'A historical warning is not an orphan glyph between the heading and data');
+      await currentSource.focus();
+      await page.getByRole('tooltip').getByText(/当前结果未核验/).waitFor();
+      await page.keyboard.press('Escape');
+      assert.equal(await nativeResults.locator('[data-native-point="retained"] strong').textContent(), '3');
+      assert.equal(await nativeResults.locator('[data-native-point="final_valid"] strong').textContent(), '5', 'The last submission is not silently presented as retained or best');
       await page.reload({waitUntil: "networkidle"});
       await analysis.locator("header p").first().filter({hasText: /^Synthetic analysis B$/}).waitFor();
       await page.setViewportSize({width: 390, height: 844});
@@ -904,11 +1165,12 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await analysis.locator("header p").first().filter({hasText: /^Synthetic analysis B$/}).waitFor();
       await analysis.press("Escape");
       await analysis.waitFor({state: "hidden"});
+      await page.waitForFunction(() => document.activeElement?.textContent?.trim() === "查看分析");
       assert.equal(await history.getByRole("button", {name: "查看分析", exact: true}).evaluate(button => button === document.activeElement), true);
       await progress.getByRole("combobox").focus();
       await progress.getByRole("combobox").selectOption("c".repeat(64));
       await progress.locator(`.research-progress-scope[data-pack-id="${"c".repeat(64)}"]`).waitFor();
-      assert.match(await progress.locator('.research-progress-basis > summary').innerText(), /完整成本未知/);
+      assert.equal(await progress.locator('.research-progress-basis > summary').getByRole('button',{name:/完整成本未知/}).isVisible(),true,'The cost boundary remains discoverable with the details closed');
       await progress.locator('.research-progress-basis > summary').click();
       assert.match(await progress.innerText(), /尚无用量捕获|No usage capture/);
       await progress.getByRole('button', {name: '用量范围与成本', exact: true}).focus();
@@ -924,24 +1186,40 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       assert.doesNotMatch(await progress.innerText(), /0%/);
       assert.equal(await nativeResults.count(), 0, 'A missing native capture cannot borrow the previous scope');
       assert.equal(await improvement.count(), 0, 'An absent comparison preserves the prior process-only surface');
-      assert.match(await progress.innerText(), /原生测量.*未采集/);
+      assert.equal(await progress.getByRole('button',{name:/原生测量未采集.*完整成本未知/}).isVisible(),true);
       await history.getByRole("button", {name: "查看分析", exact: true}).click();
       await analysis.locator("header p").first().filter({hasText: /^Synthetic analysis C$/}).waitFor();
-      await analysis.press('Escape');
+      await analysis.getByRole('button', {name: '关闭分析', exact: true}).click();
+      await analysis.waitFor({state: 'hidden'});
       await progress.getByRole('combobox').selectOption('d'.repeat(64));
       await progress.locator(`.research-progress-scope[data-pack-id="${"d".repeat(64)}"]`).waitFor();
       await progress.locator('.research-progress-basis > summary').click();
       assert.match(await progress.innerText(), /末轮未完成|final Turn incomplete/);
       assert.match(await progress.innerText(), /400.*8.*tokens/s, "Persisted unfinished usage is visible without declaring total cost");
       await progress.locator('.research-progress-basis > summary').click();
-      assert.match(await progress.innerText(), /所选范围尚未分析/);
+      assert.equal(await progress.getByRole('button',{name:'所选范围尚未分析',exact:true}).isVisible(),true);
+      assert.equal(await nativeResults.isVisible(), true, 'An unanalysed pack still exposes its recorded outcomes with cost details closed');
       assert.equal(await progress.locator('.research-effect-metrics').count(), 0, 'An unanalysed cost pack never borrows another pack’s judgments');
       assert.equal(await analysis.count(), 0, 'Choosing an unanalysed source never requests analysis');
       assert.equal(await improvement.locator('[data-retained-improvement]').textContent(), '—', 'Missing comparison evidence is unknown, never zero');
+      failedAnalysisPack = "d"; unavailableAnalysis = true;
+      await tabs.getByRole('button', {name: '概览', exact: true}).click();
+      await tabs.getByRole('button', {name: '研究', exact: true}).click();
+      await history.locator('.analysis-read-error').waitFor();
+      assert.equal(await nativeResults.locator('[data-native-point="retained"] strong').textContent(), '3', 'A failed same-scope refresh keeps recorded native facts');
+      await history.getByRole('button', {name: '深度分析', exact: true}).click();
+      await analysis.waitFor();
+      assert(await analysis.getByRole('button', {name: '分析所选范围', exact: true}).isDisabled(), 'A stale unanalysed pack cannot start a model while its refresh is unavailable');
+      assert.equal(analysisWrites, 0, 'The entry opens recovery instead of executing from a stale snapshot');
+      unavailableAnalysis = false; failedAnalysisPack = "a";
+      await analysis.getByRole('button', {name: '重试读取', exact: true}).click();
+      await analysis.getByRole('alert').waitFor({state: 'hidden'});
+      assert(await analysis.getByRole('button', {name: '分析所选范围', exact: true}).isEnabled(), 'A successful owner read restores the existing explicit analysis action');
+      await analysis.press('Escape');
       await basis.locator(':scope > summary').click();
-      assert.match(await nativeResults.innerText(), /原生保留结果.*3.*提交 3/s, 'Native facts do not require an analyzer result');
-      assert.match(await nativeResults.innerText(), /部分窗口，起点未知/);
-      assert.match(await nativeResults.locator('[data-native-point="initial"]').innerText(), /— 未知/);
+      assert.equal(await nativeResults.locator('[data-native-point="retained"] strong').textContent(), '3', 'Native facts do not require an analyzer result');
+      assert.match(await nativeResults.innerText(), /部分窗口 · 起点未知/);
+      assert.match(await nativeResults.locator('[data-native-point="initial"]').innerText(), /未知/);
       const nativeCitation = nativeResults.getByRole('button', {name: /原生保留结果.*查看原始证据/});
       await nativeCitation.focus(); await nativeCitation.press('Enter');
       await citedOriginal.waitFor();
@@ -969,6 +1247,11 @@ print(json.dumps([
       const previousOwner = owner; owner = emptyOwner; await previousOwner.close();
       await page.reload({waitUntil: "networkidle"});
       await history.getByRole("status").filter({hasText: "0 / 0"}).waitFor();
+      const emptyHistory = history.locator('.research-history-empty');
+      await emptyHistory.screenshot({path: resolve(outputDir, 'research-history-empty.png'), animations: 'disabled'});
+      await emptyHistory.getByRole('button', {name: '查看研究模式', exact: true}).click();
+      assert(await page.locator("[data-testid='goal-research-mode']").evaluate(element => element.contains(document.activeElement)),
+        'The empty-state action focuses the existing research-mode control');
       await progress.locator(`.research-progress-scope[data-pack-id="${"d".repeat(64)}"]`).waitFor();
 
       comparisonFixture = true;
@@ -1030,8 +1313,10 @@ print(json.dumps([
       await page.screenshot({path: resolve(outputDir, 'research-assessment-comparison-mobile.png'), animations: 'disabled'});
       await rows.last().locator(':scope > summary').click();
       await rows.last().getByText(/Synthetic evidence connects/).waitFor();
-      assert(await rows.last().locator('.research-assessment-name').evaluate(element => element.clientHeight >= element.scrollHeight),
-        'Expanding the row restores the complete question without a second copy');
+      assert(await rows.last().locator('.research-assessment-name').evaluate(element => {
+        const style = getComputedStyle(element);
+        return style.display === 'block' && style.webkitLineClamp === 'none' && style.overflow === 'visible';
+      }), 'Expanding the row restores the complete question without a second copy');
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await page.screenshot({path: resolve(outputDir, 'research-assessment-expanded-mobile.png'), animations: 'disabled'});
       await metricDetail.getByRole('button', {name: '收起指标详情', exact: true}).click();
@@ -1061,10 +1346,10 @@ print(json.dumps([
       const episodeCitation = episodeRows.first().getByRole('button', {name: /source.*行 1–2/}).first();
       await episodeCitation.click(); await citedOriginal.waitFor(); await citedOriginal.press('Escape');
       assert.equal(await episodeCitation.evaluate(element => element === document.activeElement), true);
-      const otherJudgments = episodeRows.first().locator('.analysis-judgments details');
-      assert.equal(await otherJudgments.count(), 4);
-      await otherJudgments.first().locator('summary').click();
-      await otherJudgments.first().getByText('来源只记录了实验结果，缺少干预与目标瓶颈的联系。', {exact: true}).waitFor();
+      assert.equal(await episodeRows.first().locator('[data-analysis-judgment]').count(), 6, 'Every metric and its verdict remain available');
+      await episodeRows.first().getByText('来源只记录了实验结果，缺少干预与目标瓶颈的联系。', {exact: true}).waitFor();
+      assert.equal(await episodeRows.first().getByText('来源只记录了实验结果，缺少干预与目标瓶颈的联系。', {exact: true}).count(), 1,
+        'Identical rationales with identical evidence are read once across all six judgments');
       const originalQuestion = chineseAnalysis.locator('.analysis-episode').first().getByText('原始研究问题', {exact: true});
       await originalQuestion.click();
       assert.match(await chineseAnalysis.locator('.analysis-episode').first().innerText(), /variant-alpha 的实验是否检验原始目标/);
@@ -1084,10 +1369,12 @@ print(json.dumps([
       await page.evaluate(key => localStorage.setItem(key, 'en'), 'loopx-pw-locale');
       await page.reload({waitUntil: 'networkidle'});
       const englishAnalysis = page.getByRole('region', {name: 'Trajectory analysis', exact: true});
-      await englishAnalysis.locator('.analysis-episode-name').first().filter({hasText: 'Did variant-alpha test the original objective?'}).waitFor();
+      await englishAnalysis.locator('.analysis-episode-name').first().filter({hasText: 'variant-alpha'}).waitFor();
       assert.equal(await englishAnalysis.locator('.analysis-episode[open]').count(), 0, 'Language changes reset optional episode details');
       await englishAnalysis.locator('.analysis-episode > summary').first().click();
-      assert.equal(await englishAnalysis.locator('.analysis-episode-name').first().innerText(), 'Did variant-alpha test the original objective?');
+      assert.match(await englishAnalysis.locator('.analysis-episode > summary').first().getAttribute('aria-label'), /Did variant-alpha test the original objective\?/);
+      await englishAnalysis.locator('.analysis-episode').first().getByText('Full question', {exact: true}).click();
+      await englishAnalysis.locator('.analysis-episode').first().getByText('Did variant-alpha test the original objective?', {exact: true}).waitFor();
       assert.doesNotMatch(await englishAnalysis.innerText(), /来源只记录了实验结果/);
       await page.evaluate(key => localStorage.setItem(key, 'zh-CN'), 'loopx-pw-locale');
       await page.reload({waitUntil: 'networkidle'});
@@ -1095,13 +1382,16 @@ print(json.dumps([
       assert.equal(await chineseAnalysis.locator('.analysis-episode[open]').count(), 0);
       continuationFixture = true;
       await page.reload({waitUntil: 'networkidle'});
-      // The inline version summary is a semantic section, not another page.
+      // Version bookkeeping is optional detail; the saved analysis leads.
       const version = chineseAnalysis.locator('.analysis-continuation');
-      await version.getByText('接续上一版', {exact: true}).waitFor();
-      await version.getByText(/已复核全部 4 片段/).waitFor();
+      await version.getByText('版本与变化', {exact: true}).waitFor();
       assert.equal(await version.locator('details').getAttribute('open'), null);
-      await version.locator('summary').click();
-      assert.match(await version.innerText(), /original-capture → later-evidence/);
+      assert.doesNotMatch(await version.innerText(), /新增来源|已复核全部|original-capture/);
+      await version.locator('summary').focus();
+      await page.keyboard.press('Enter');
+      await version.getByText(/已复核全部 4 片段/).waitFor();
+      await version.getByText(/共同判断 \d+ 项 · 变化 1 项/).waitFor();
+      assert.match(await version.innerText(), /original-capture.*later-evidence/s);
       assert.match(await version.innerText(), /variant-alpha.*已做收益检验.*证据不足/);
       await version.locator('summary').click();
       await page.setViewportSize({width: 1440, height: 1000});
@@ -1112,9 +1402,18 @@ print(json.dumps([
       await chineseAnalysis.getByText('Synthetic original analysis', {exact: true}).waitFor();
       assert.equal(await chineseAnalysis.locator('.analysis-continuation').count(), 0);
       await page.goBack({waitUntil: 'networkidle'});
-      await version.getByText('接续上一版', {exact: true}).waitFor();
+      await version.getByText('版本与变化', {exact: true}).waitFor();
       await page.reload({waitUntil: 'networkidle'});
-      await version.getByText('接续上一版', {exact: true}).waitFor();
+      await version.getByText('版本与变化', {exact: true}).waitFor();
+      for (const [mode, label] of [["unchanged", /共同判断 \d+ 项 · 变化 0 项/], ["disjoint", "无共同判断项"], ["legacy", "共同判断项数量未知。"]]) {
+        versionComparison = mode;
+        await page.reload({waitUntil: 'networkidle'});
+        await version.getByText('版本与变化', {exact: true}).click();
+        await version.getByText(label, {exact: true}).waitFor();
+        if (mode !== "unchanged") assert.doesNotMatch(await version.innerText(), /共同判断 \d+ 项 · 变化 0 项|0 项判断变化/);
+      }
+      versionComparison = "shared";
+      await page.reload({waitUntil: 'networkidle'});
       await page.setViewportSize({width: 390, height: 844});
       await chineseAnalysis.evaluate(element => element.scrollIntoView({block: 'start'}));
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
@@ -1122,6 +1421,11 @@ print(json.dumps([
       await page.evaluate(key => localStorage.setItem(key, 'en'), 'loopx-pw-locale');
       await page.reload({waitUntil: 'networkidle'});
       await page.getByRole('button', {name: 'Previous version', exact: true}).waitFor();
+      versionComparison = "disjoint";
+      await page.reload({waitUntil: 'networkidle'});
+      await page.getByText('Version and changes', {exact: true}).click();
+      await page.getByText('No shared judgments', {exact: true}).waitFor();
+      versionComparison = "shared";
       equivalentContinuation = true;
       await page.reload({waitUntil: 'networkidle'});
       await page.getByRole('button', {name: 'Reuse analysis', exact: true}).first().waitFor();

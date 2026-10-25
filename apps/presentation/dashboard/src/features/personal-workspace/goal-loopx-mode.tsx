@@ -1,3 +1,4 @@
+import {ContextHelp} from "./context-help";
 import {useEffect, useRef, useState} from "react";
 import {Pause, Play, Settings2, Users, X} from "lucide-react";
 import {fetchLoopXMode, updateLoopXMode, type LoopXModeSnapshot, type LoopXModeSettings} from "../../data/chat";
@@ -103,7 +104,7 @@ export function GoalLoopXMode({sessionId, onPrepare, onExecute, onChange}: {
     <dialog className="goal-loopx-dialog" ref={dialog} aria-labelledby="goal-loopx-dialog-title" onClose={() => setPanel(null)} onClick={event => {if (event.target === event.currentTarget) setPanel(null);}}>
       {panel ? <div className="goal-loopx-dialog-content">
         <header><h2 id="goal-loopx-dialog-title">{panel === "team" ? (zh ? "团队执行情况" : "Team execution") : (zh ? "Agent Loop 运行设置" : "Agent Loop settings")}</h2><button type="button" autoFocus aria-label={zh ? "关闭" : "Close"} onClick={() => setPanel(null)}><X size={18}/></button></header>
-        {panel === "settings" ? <p>{zh ? "对话执行器、当前模型和推理强度见页面上方。这里管理持续推进 Goal 的协调身份、额度和成员绑定；保存设置不会自动开启 Agent Loop。" : "The conversation executor, current model and reasoning effort appear above. These settings manage the Goal coordinator, allowance and member bindings; saving does not start the Agent Loop."}</p> : null}
+        {panel === "settings" ? <ContextHelp label={zh ? "持续推进设置" : "Continuation settings"}><p>{zh ? "对话执行器、当前模型和推理强度见页面上方。这里管理持续推进 Goal 的协调身份、额度和成员绑定；保存设置不会自动开启 Agent Loop。" : "The conversation executor, current model and reasoning effort appear above. These settings manage the Goal coordinator, allowance and member bindings; saving does not start the Agent Loop."}</p></ContextHelp> : null}
         {error || readError ? <p className="personal-composer-error" role="alert">{error || readError}</p> : null}
         {panel === "team" && sessionId && !readError ? <GoalTeamWork key={`${sessionId}:${snapshot?.settings.agent_id}:${snapshot?.settings.execution_config}`} sessionId={sessionId} members={snapshot?.members ?? []} zh={zh} canMessage={active && !snapshot?.paused && !readError} ingress={snapshot?.ingress ?? []}/> : null}
         {panel === "team" ? <div className="goal-team-control">
@@ -114,7 +115,7 @@ export function GoalLoopXMode({sessionId, onPrepare, onExecute, onChange}: {
     {editing ? <div className="goal-loopx-mode-settings"><label>{zh ? "已注册的协调身份" : "Registered coordinator"}<select value={settings.agent_id} onChange={event => setSettings({...settings, agent_id: event.target.value})}><option value="">{zh ? "选择已授权身份" : "Select authorized identity"}</option>{snapshot?.registered_agents.map(id => <option key={id} value={id}>{id}</option>)}</select></label>
       <label>{zh ? "协调员总 token 额度" : "Coordinator total token allowance"}<input type="number" min={1} max={2147483647} value={settings.token_budget || ""} onChange={event => setSettings({...settings, token_budget: Number(event.target.value)})}/></label>
       <label>{zh ? "成员执行绑定文件（Goal 配置）" : "Member execution bindings (Goal configuration)"}<input readOnly value={snapshot?.settings.execution_config ?? (zh ? "未配置" : "Not configured")}/></label>
-      <p>{zh ? "绑定文件由 Goal 子代理设置统一管理；额度包含协调员历史用量，成员授权不会因开启模式而扩大。" : "Manage the binding file in Goal sub-agent settings. The allowance includes coordinator history; enabling this mode does not expand member grants."}</p>
+      <ContextHelp label={zh ? "协调身份与额度" : "Coordinator and allowance"}><p>{zh ? "绑定文件由 Goal 子代理设置统一管理；额度包含协调员历史用量，成员授权不会因开启模式而扩大。" : "Manage the binding file in Goal sub-agent settings. The allowance includes coordinator history; enabling this mode does not expand member grants."}</p></ContextHelp>
       <button type="button" disabled={busy || !settings.agent_id || settings.token_budget < 1 || !snapshot?.settings.execution_config} onClick={() => void mutate("configure")}>{zh ? "保存设置" : "Save settings"}</button></div> : null}
     {panel === "settings" && snapshot?.enabled && snapshot.native.tokensUsed !== undefined ? <p className="goal-loopx-mode-usage">{zh ? "协调员累计用量" : "Coordinator usage"} {snapshot.native.tokensUsed.toLocaleString()} / {snapshot.native.tokenBudget?.toLocaleString() ?? "—"} tokens</p> : null}
         {panel === "settings" ? <>

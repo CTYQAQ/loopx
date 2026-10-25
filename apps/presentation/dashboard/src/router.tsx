@@ -47,6 +47,7 @@ const searchSchema = z.object({
   settings_tab: z.unknown().optional(),
   // Stable Goal/Agent working conversation; empty string opens the directory.
   workAgent: z.string().regex(/^[A-Za-z0-9._:-]{0,200}$/).optional().catch(undefined),
+  workSession: z.unknown().transform(value => typeof value === "string" ? value : JSON.stringify(value)).optional(),
   todo: z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/).optional().catch(undefined),
   // Scopes the steward conversation to a host-granted workspace; selecting a Goal clears it.
   workspace: z.string().regex(/^[A-Za-z0-9]{1,80}$/).optional().catch(undefined),

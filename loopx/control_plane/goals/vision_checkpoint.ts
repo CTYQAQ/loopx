@@ -75,7 +75,7 @@ export const VISION_MATERIAL_CLOSEOUT_HINT =
   "Checkpoint satisfied alone does not qualify the outcome.";
 
 /** Authoring hints share the validator's limits; they grant no transition authority. */
-export function visionAuthoringContract(): JsonObject {
+export function visionAuthoringContract(autonomousReplan = false): JsonObject {
   return {
     schema_version: GOAL_VISION_REPLAN_SCHEMA_VERSION,
     fields: {
@@ -92,7 +92,7 @@ export function visionAuthoringContract(): JsonObject {
       schema_version: GOAL_VISION_REPLAN_SCHEMA_VERSION, state: "vision_patch_proposed",
       vision_patch: {acceptance_summary: "Verified result; scoped work remains."},
       path_delta: {
-        outcome: "continue", prior_assumption: "Viable route.",
+        outcome: autonomousReplan ? "replan" : "continue", prior_assumption: "Viable route.",
         observed_reality: "Evidence supports the route.", retained: ["Route"],
         evidence_refs: ["evidence:verified-result"],
       },
@@ -101,6 +101,12 @@ export function visionAuthoringContract(): JsonObject {
       "For todo_delta, use retain:todo_<id> for existing work; supported verbs are activate, create, reopen, resume and retain. " +
       "Replace todo_<id> with a verified Todo ID after normal authoring/readback. Entries record plans, not Todo mutations, claims or execution authority. " +
       "For ordinary CLI writeback, pass the packet with --agent-vision-json <file>. " +
+      (autonomousReplan
+        ? "JSON replaces the complete packet; the sparse minimal_example is not an update to an existing Vision. " +
+          "Start from the current Agent's complete packet and full vision_patch, then replace only deliberately reviewed fields and the fresh path_delta. " +
+          "Preserve every other field and the current state; path_delta.retained text does not merge omitted fields. " +
+          "Reuse the known current packet, or read it from canonical status/history if unavailable; never reconstruct missing intent from summaries. "
+        : "") +
       "checkpoint-context is only for recovery after the original committed Turn writeback; " +
       "follow its returned same-Turn recovery action, not a fresh-turn preflight.",
     total_text_limit: GOAL_VISION_TOTAL_LIMIT,
@@ -115,7 +121,11 @@ export function visionAuthoringContract(): JsonObject {
         ([field, [maxItems, maxChars]]) => [field, {item_type: "string", max_items: maxItems, max_item_chars: maxChars}],
       )),
     },
-    rule: "Material closeout: acceptance_summary + evidence-linked path_delta. Changed mainline: outcome=replan. vision_closed closes a stage, not Goal; no_followup: no scoped work.",
+    rule: "Material closeout: acceptance_summary + evidence-linked path_delta. " +
+      (autonomousReplan
+        ? `Autonomous review: changing ${GOAL_VISION_DURABLE_FIELDS.join(", ")} requires outcome=replan, even when the Goal objective stays unchanged. Retaining these fields permits continue/no_change. `
+        : "Changed mainline: outcome=replan. ") +
+      "vision_closed closes a stage, not Goal; no_followup: no scoped work.",
   };
 }
 // Bounded typed fallback declarations survive prepare unchanged so the

@@ -7,11 +7,7 @@ import sys
 import pytest
 
 from canonical_authority_fixture import (
-    initialize_canonical_authority,
     isolate_sqlite_runtime,
-)
-from loopx.control_plane.coordination.runtime_shadow import (
-    build_todo_runtime_shadow_projection,
 )
 from test_quota_settlement_cli import (
     AGENT_ID,
@@ -21,6 +17,7 @@ from test_quota_settlement_cli import (
     _classification_count,
     _configure_selected_todo_replan_fixture,
     _initialize_git_checkout,
+    _initialize_fixture_authority,
     _run_cli,
     _write_fixture,
 )
@@ -39,11 +36,7 @@ def _fixture(tmp_path, monkeypatch, provider):
     _configure_selected_todo_replan_fixture(project, registry)
     _initialize_git_checkout(project)
     state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
-    rc, listed = _run_cli(registry, runtime, "todo", "list", "--goal-id", GOAL_ID)
-    assert rc == 0, listed
-    initialize_canonical_authority(runtime, GOAL_ID, build_todo_runtime_shadow_projection(
-        goal_id=GOAL_ID, handoff_mode="soft_claim", todos=listed["todos"],
-    ), state_path=state, provider=provider)
+    _initialize_fixture_authority(project, runtime, provider=provider)
     rc, updated = _run_cli(registry, runtime, "todo", "update", "--goal-id", GOAL_ID,
         "--todo-id", SELECTED_REPLAN_TODO_ID, "--agent-id", AGENT_ID,
         "--note", "Retain the original review context.",

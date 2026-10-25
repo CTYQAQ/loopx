@@ -1,3 +1,4 @@
+import {ContextHelp} from "./context-help";
 import { goalCreateContent, goalCreateRequest } from "./goal-create-request";
 import { useEffect, useId, useRef, useState } from "react";
 import { useWorkspaceI18n } from "./i18n";
@@ -129,9 +130,9 @@ export function WorkspaceActionForm({ draft, workspaceGoals = [], workspaceProje
                 {workspaceGoals.map((goal) => <option key={goal.goalId} value={goal.goalId}>{goal.title} · {goal.repository?.label ?? goal.goalId}</option>)}
               </optgroup> : null}
             </select></label>
-            <p>{zh
+            <ContextHelp label={zh ? "工作区目录范围" : "Workspace directory scope"}><p>{zh
               ? <>检查配置时会显示具体目录。要添加其他目录，请用 <code>loopx dashboard --scan-path &lt;目录&gt;</code> 重新启动 Dashboard（每个项目一个）。选择目录不会增加执行权限。</>
-              : <>The review names the directory before anything is created. To add another directory, restart the Dashboard with <code>loopx dashboard --scan-path &lt;directory&gt;</code>, once per project. Choosing a directory does not expand execution permissions.</>}</p>
+              : <>The review names the directory before anything is created. To add another directory, restart the Dashboard with <code>loopx dashboard --scan-path &lt;directory&gt;</code>, once per project. Choosing a directory does not expand execution permissions.</>}</p></ContextHelp>
             <label>{zh ? "执行权限" : "Execution permission"}<select aria-label={zh ? "执行权限" : "Execution permission"} value={permission} onChange={(event) => setPermission(event.target.value)}><option value="read_only">{zh ? "只读" : "Read only"}</option><option value="workspace_write_on_confirmation">{zh ? "确认后允许修改工作区" : "Allow workspace changes after confirmation"}</option></select></label>
           </> : null}
         </>}

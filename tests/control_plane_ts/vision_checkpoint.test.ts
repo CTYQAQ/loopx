@@ -45,6 +45,59 @@ function prepareRequest(overrides: Record<string, unknown> = {}) {
   };
 }
 
+test("authoring examples distinguish ordinary continuation from autonomous durable changes", () => {
+  const existing = {vision_patch: {acceptance_summary: "Original evidence pending."}};
+  for (const autonomous of [false, true]) {
+    const packet = visionAuthoringContract(autonomous).minimal_example as Record<string, unknown>;
+    const result = buildVisionCheckpoint(prepareRequest({
+      agent_vision_packet: packet, existing_agent_vision: existing,
+      require_path_delta_for_durable_change: autonomous,
+    })).agent_vision as Record<string, unknown>;
+    assert.equal((result.path_delta as Record<string, unknown>).outcome, autonomous ? "replan" : "continue");
+    assert.deepEqual(result.vision_patch, packet.vision_patch);
+  }
+  const ordinary = visionAuthoringContract().minimal_example;
+  assert.throws(() => buildVisionCheckpoint(prepareRequest({
+    agent_vision_packet: ordinary, existing_agent_vision: existing,
+    require_path_delta_for_durable_change: true,
+  })), /changes durable fields acceptance_summary/);
+});
+
+test("autonomous JSON authoring retains the complete current packet before changing evidence", () => {
+  const contract = visionAuthoringContract(true);
+  assert.match(String(contract.authoring_hint), /JSON replaces the complete packet/);
+  assert.match(String(contract.authoring_hint), /current Agent's complete packet and full vision_patch/);
+  assert.match(String(contract.authoring_hint), /path_delta.retained text does not merge omitted fields/);
+  assert.doesNotMatch(String(visionAuthoringContract().authoring_hint), /JSON replaces/);
+  const existing = {
+    state: "active", todo_delta: ["retain:todo_current001"],
+    vision_patch: {
+      vision_summary: "Verify the whole delivery.", role_scope: "Own only the current role.",
+      advancement_policy: "repeat_until_closed", acceptance_summary: "Original evidence pending.",
+      dreaming_policy: "Propose bounded alternatives.",
+    },
+  };
+  const example = contract.minimal_example as Record<string, unknown>;
+  // The documented procedure copies known intent and overlays deliberate edits;
+  // replacement semantics and the existing durable-change validator stay intact.
+  const packet = {...existing,
+    vision_patch: {...existing.vision_patch, ...(example.vision_patch as Record<string, unknown>)},
+    path_delta: example.path_delta};
+  const result = buildVisionCheckpoint(prepareRequest({agent_vision_packet: packet,
+    existing_agent_vision: existing, require_path_delta_for_durable_change: true,
+  })).agent_vision as Record<string, unknown>;
+  assert.deepEqual(result.vision_patch, {...existing.vision_patch,
+    acceptance_summary: "Verified result; scoped work remains."});
+  assert.equal(result.state, existing.state);
+  assert.deepEqual(result.todo_delta, existing.todo_delta);
+  // Sparse JSON remains a replacement: fixing guidance must not silently change
+  // callers that intentionally replace a packet or weaken the validator.
+  const sparse = buildVisionCheckpoint(prepareRequest({agent_vision_packet: example,
+    existing_agent_vision: existing, require_path_delta_for_durable_change: true,
+  })).agent_vision as Record<string, unknown>;
+  assert.deepEqual(sparse.vision_patch, example.vision_patch);
+});
+
 test("prepare owns packet normalization, budgets, and path delta", () => {
   const result = buildVisionCheckpoint(prepareRequest({
     agent_vision_packet: {

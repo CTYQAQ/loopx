@@ -6,13 +6,13 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import shutil
-import shlex
 import sys
 import tempfile
 from typing import Any, Iterator, Mapping
 
 from . import __version__
 from .file_lock import exclusive_file_lock
+from .python_install_owner import interpreter_invocation
 from .skill_install_readback import (
     ARK_MANAGED_AGENT_REQUIRED_SKILL_IDS,
     PACKAGED_HOST_SKILL_IDS,
@@ -391,7 +391,7 @@ def workflow_skill_install(
                     "would_create", "updated", "upgraded_legacy_managed",
                 }
             ),
-            "install_command": shlex.join(install_command),
+            "install_command": interpreter_invocation(install_command[0], install_command[1:]),
         }
 
     if entry_preview["status"] not in MANAGED_ENTRY_PREVIEW_STATUSES:
@@ -464,9 +464,9 @@ def workflow_skill_install(
         "after": after,
         "skill_reconciliation": reconciliation,
         "ego_browser": ego,
-        "rollback_command": shlex.join(
+        "rollback_command": interpreter_invocation(
+            "loopx",
             [
-                "loopx",
                 "workflow-skills",
                 "--uninstall",
                 "--skills-dir",

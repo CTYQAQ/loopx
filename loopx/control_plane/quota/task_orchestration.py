@@ -34,6 +34,23 @@ def task_orchestration_contract_is_actionable(
     return str(contract.get("execution_state") or "ready") == "ready"
 
 
+def apply_task_route_hint_override(
+    hint: dict[str, Any] | None,
+    override: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Apply the route patch returned by the TypeScript decision owner."""
+    if hint is None or override is None:
+        return hint
+    projected_hint = {
+        key: value for key, value in hint.items()
+        if not (override.get("omit_current_agent_next_action") is True
+                and key == "current_agent_next_action")
+    }
+    projected_hint.update({key: value for key, value in override.items()
+                           if key != "omit_current_agent_next_action"})
+    return projected_hint
+
+
 def task_orchestration_requires_material_change_stop(
     contract: dict[str, Any] | None,
     *,
@@ -143,34 +160,6 @@ def apply_task_orchestration_contract(
     if not task_orchestration_contract_is_actionable(contract):
         return contract, fallback_work_lane_contract
     return contract, _task_orchestration_work_lane_contract(contract)
-
-
-def task_goal_route_hint(
-    goal_route_hint: dict[str, Any] | None,
-    contract: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if not contract or not isinstance(goal_route_hint, dict):
-        return goal_route_hint
-    if not task_orchestration_contract_is_actionable(contract):
-        return goal_route_hint
-    lanes = contract.get("eligible_child_lanes")
-    if not isinstance(lanes, list):
-        lanes = contract.get("eligible_peer_lanes")
-    return {
-        **{
-            key: value
-            for key, value in goal_route_hint.items()
-            if key != "current_agent_next_action"
-        },
-        "kind": "task_orchestration",
-        "route_decision": "coordinate_task_bundle",
-        "reason": (
-            "task-scoped coordinator may spawn admitted child lanes"
-            if contract.get("mode") == "adaptive"
-            else "task-scoped coordinator must activate/resume eligible peer lanes"
-        ),
-        "peer_lane_count": len(lanes) if isinstance(lanes, list) else 0,
-    }
 
 
 def attach_task_orchestration_payload(

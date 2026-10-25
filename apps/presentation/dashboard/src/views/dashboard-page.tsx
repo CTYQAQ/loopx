@@ -1,3 +1,4 @@
+import {useManagedConversation} from "../data/use-managed-conversation";
 import { normalizeGoalDraft, type GoalDraft } from "../../../../../loopx/control_plane/collaboration/goal_draft.js";
 import { withTurnActivity, type TurnStep } from "../data/turn-steps";
 import { conversationReturnSessions, conversationPendingReturnSessions, reconcileConversationHistory, reconcileConversationReturns } from "../data/conversation-returns";
@@ -1231,6 +1232,8 @@ function PersonalGoalHome({
   selectedView,
   selectedTodoId,
   selectedWorkAgentId,
+  selectedWorkSessionId,
+  onSelectWorkSession,
   onSelectWorkAgent,
   onSelectTodo,
   onSelectView,
@@ -1260,6 +1263,8 @@ function PersonalGoalHome({
   selectedView?: WorkspaceGoalTab;
   selectedTodoId?: string | null;
   selectedWorkAgentId?: string | null;
+  selectedWorkSessionId?: string;
+  onSelectWorkSession: (sessionId: string, replace?: boolean) => void;
   onSelectWorkAgent: (agentId: string | null) => void;
   onSelectTodo: (todoId: string | null) => void;
   onSelectView: (view: WorkspaceGoalTab) => void;
@@ -1382,7 +1387,11 @@ function PersonalGoalHome({
   const originalConversation = rootGoalId && boundConversation
     ? { session: undefined, source: undefined, error: "Original conversation is outside this Goal navigation scope.", retry: originalReadback.retry }
     : originalReadback;
-  const conversationContext: ConversationContext = boundConversation
+  const managedTarget = selectedWorkAgentId != null && selectedWorkSessionId?.startsWith("managed:") && selectedGoal
+    ? {goalId: selectedGoal.goalId, agentId: selectedWorkAgentId, sessionId: selectedWorkSessionId.slice(8)} : null;
+  const managedConversation = useManagedConversation(managedTarget, !readOnly);
+  const fixedSession = Boolean(boundConversation || managedTarget);
+  const conversationContext: ConversationContext = managedTarget ? {kind: "managed", ...managedTarget} : boundConversation
     ? { kind: "bound", ...boundConversation } : selectedWorkspaceRef
     ? { kind: "project", projectRef: selectedWorkspaceRef }
     : selectedGoal ? { kind: "goal", goalId: selectedGoal.goalId } : { kind: "manager" };
@@ -1462,8 +1471,10 @@ function PersonalGoalHome({
   // Runtime readback drives the label; only an owner pick drives a new binding.
   const requestedAgentModels = useRef<Record<string, string>>({});
   const requestedAgentEfforts = useRef<Record<string, string>>({});
-  const selectedAgentId = boundConversation ? originalConversation.session?.agent_id ?? "original-conversation" : selectedAgents[contextId] ?? agentDefaultForContext(contextId);
-  const selectedAgent: PersonalAgentOption = boundConversation
+  const selectedAgentId = managedTarget ? managedConversation.session?.agent_id ?? "original-managed-session" : boundConversation ? originalConversation.session?.agent_id ?? "original-conversation" : selectedAgents[contextId] ?? agentDefaultForContext(contextId);
+  const selectedAgent: PersonalAgentOption = managedTarget
+    ? {...(discoveredAgents.find(agent => agent.agentId === selectedAgentId) ?? {agentId: selectedAgentId, label: selectedAgentId, capability: "", statusLabel: t("agent.statusNeedsSetup")}), available: Boolean(managedConversation.session) && discoveredAgents.some(agent => agent.agentId === selectedAgentId && agent.available)}
+    : boundConversation
     ? discoveredAgents.find(agent => agent.agentId === selectedAgentId) ?? {
       agentId: selectedAgentId, available: false, label: selectedAgentId === "original-conversation"
         ? (locale === "zh-CN" ? "原会话" : "Original conversation") : selectedAgentId,
@@ -1508,7 +1519,8 @@ function PersonalGoalHome({
     channelId: conversationChannelId(conversationContext),
     goalId: selectedGoal?.goalId,
     bound: boundConversation ?? undefined,
-    enabled: !readOnly && (boundConversation ? Boolean(originalConversation.session) : selectedAgent.available),
+    managed: managedTarget ?? undefined,
+    enabled: !readOnly && (selectedWorkAgentId == null || managedTarget !== null) && (managedTarget ? Boolean(managedConversation.session) : boundConversation ? Boolean(originalConversation.session) : selectedAgent.available),
   });
 
   // Who is speaking in the transcript. The manager channel answers as the LoopX
@@ -1516,8 +1528,10 @@ function PersonalGoalHome({
   // to the machine-capability chip, so a person reading an answer is never told
   // the CLI brand of whatever host happened to run it. Goal channels still name
   // the Goal's own Agent.
-  const answerIdentityLabel = (targetContextId: string, goalFallback: string) =>
-    targetContextId === "manager" ? t("header.manager") : goalFallback;
+  const answerIdentityLabel = (targetContextId: string, goalFallback: string) => {
+    const target = conversationContextOfKey(targetContextId);
+    return target.kind === "managed" ? target.agentId : target.kind === "manager" ? t("header.manager") : goalFallback;
+  };
 
   useEffect(() => {
     const resolved = resolveLocalStatusUrl(
@@ -1563,7 +1577,7 @@ function PersonalGoalHome({
   // navigation. A single index read detects changes; snapshots refresh only
   // their original context and never take ownership of the current stream.
   const conversationReturnSessionKey = JSON.stringify(Object.fromEntries(
-    [...new Set([...Object.keys(runtimeBindings), ...Object.keys(messagesByContext)])].filter(id => conversationContextOfKey(id).kind !== "bound").sort().map<[string, string[]]>((id) => [
+    [...new Set([...Object.keys(runtimeBindings), ...Object.keys(messagesByContext)])].filter(id => !["bound", "managed"].includes(conversationContextOfKey(id).kind)).sort().map<[string, string[]]>((id) => [
       id, conversationReturnSessions(runtimeBindings[id]?.sessionId, messagesByContext[id] ?? []),
     ]).filter(([, ids]) => ids.length > 0),
   ));
@@ -1781,7 +1795,7 @@ function PersonalGoalHome({
         const activeSnapshot = history.snapshots.find(
           (snapshot) => snapshot.session.session_id === created.session_id,
         );
-        const activeTurnId = (targetContext.kind === "bound" ? created.session.active_turn_id : activeSnapshot?.session.active_turn_id) ?? "";
+        const activeTurnId = ((targetContext.kind === "bound" || targetContext.kind === "managed") ? created.session.active_turn_id : activeSnapshot?.session.active_turn_id) ?? "";
         recordRuntimeBinding(targetContextId, {
           agentId: created.agent_id || selectedAgent.agentId,
           resumable: true,
@@ -2252,7 +2266,7 @@ function PersonalGoalHome({
     const targetGoal = targetContext.kind === "goal"
       ? model.goals.find((goal) => goal.goalId === targetContext.goalId) ?? null
       : null;
-    const selectedRoute = route?.agentId
+    const selectedRoute = targetContext.kind === "managed" || targetContext.kind === "bound" ? selectedAgent : route?.agentId
       ? selectChatAgent(agentOptions, route.agentId, defaultAgentId)
       : selectedAgent;
     if (!selectedRoute.available) throw new Error(t("agent.workspaceUnavailable"));
@@ -2701,7 +2715,7 @@ function PersonalGoalHome({
   }
 
   function chooseAgent(agentId: string) {
-    if (boundConversation) return;
+    if (fixedSession) return;
     if (!agentOptions.some((agent) => agent.agentId === agentId && agent.available)) {
       return;
     }
@@ -2714,7 +2728,7 @@ function PersonalGoalHome({
   }
 
   function chooseAgentModel(agentId: string, modelId: string) {
-    if (boundConversation) return;
+    if (fixedSession) return;
     const selectionKey = agentModelSelectionKey(contextId, agentId);
     if (selectedAgentModels[selectionKey] === modelId) return;
     requestedAgentModels.current[selectionKey] = modelId;
@@ -2728,7 +2742,7 @@ function PersonalGoalHome({
   }
 
   function chooseAgentReasoningEffort(agentId: string, effort: string) {
-    if (boundConversation) return;
+    if (fixedSession) return;
     const key = agentModelSelectionKey(contextId, agentId);
     if (selectedAgentEfforts[key] === effort) return;
     if (effort) requestedAgentEfforts.current[key] = effort;
@@ -2922,8 +2936,8 @@ function PersonalGoalHome({
       <PersonalWorkspacePage
         typedActionsRevision={typedActionsRevision}
         workspaceConversations={{ ...workspaceProjects, selectedRef: selectedWorkspaceRef, onSelect: onSelectWorkspace,
-          onOpenOriginal: onOpenOriginalConversation, bound: boundConversation ? { target: boundConversation, ...originalConversation } : undefined }}
-        agents={(boundConversation ? [selectedAgent] : agentOptions).map((agent) => ({
+          onOpenOriginal: onOpenOriginalConversation, managed: managedTarget ? {target: managedTarget, ...managedConversation} : undefined, bound: boundConversation ? { target: boundConversation, ...originalConversation } : undefined }}
+        agents={(fixedSession ? [selectedAgent] : agentOptions).map((agent) => ({
           adapterKind: agent.adapterKind,
           agentId: agent.agentId,
           available: agent.available,
@@ -3165,6 +3179,7 @@ function PersonalGoalHome({
           onSelectGoal: (goalId, view) => onSelectGoal(goalId ?? "", view),
           onSelectView,
           onSelectWorkAgent,
+          onSelectWorkSession,
           onSelectTodo,
           onSendMessage: async (message, agentId, targetContextId, attachments) => sendManagerQuestion(message, { agentId, contextId: targetContextId, attachments }),
           onQueueConversationTurn: (targetContextId, sessionId, message, ingressId, attachments) => new Promise<void>((resolve, reject) => {
@@ -3179,6 +3194,7 @@ function PersonalGoalHome({
         selectedView={selectedView}
         selectedTodoId={selectedTodoId}
         selectedWorkAgentId={selectedWorkAgentId}
+        selectedWorkSessionId={selectedWorkSessionId}
         managerChannelBinding={managerChannelBinding}
         managerRuntime={managerRuntime}
         conversationSessionId={runtimeBindings[contextId]?.sessionId}
@@ -3710,7 +3726,7 @@ export function DashboardPage() {
         workspace: undefined,
         conversationBinding: undefined,
         conversationSession: undefined,
-        workAgent: undefined,
+        workAgent: undefined, workSession: undefined,
         todo: undefined,
         view: view === "chat" ? "conversation" : view,
       }),
@@ -3718,7 +3734,7 @@ export function DashboardPage() {
   }
 
   function selectWorkspace(projectRef: string | null) {
-    void navigate({ search: (current) => ({ ...current, goalId: "", todo: undefined, workAgent: undefined, workspace: projectRef ?? undefined,
+    void navigate({ search: (current) => ({ ...current, goalId: "", todo: undefined, workAgent: undefined, workSession: undefined, workspace: projectRef ?? undefined,
       conversationBinding: undefined, conversationSession: undefined, view: "conversation" }) });
   }
 
@@ -3740,18 +3756,24 @@ export function DashboardPage() {
       boundConversation={search.conversationBinding !== undefined || search.conversationSession !== undefined
         ? { bindingId: search.conversationBinding ?? "", sessionId: search.conversationSession ?? "" } : null}
       onOpenOriginalConversation={target => void navigate({search: current => ({...current, goalId: "", workspace: undefined,
-        workAgent: undefined, todo: undefined, conversationBinding: target.bindingId, conversationSession: target.sessionId, view: "conversation"})})}
+        workAgent: undefined, workSession: undefined, todo: undefined, conversationBinding: target.bindingId, conversationSession: target.sessionId, view: "conversation"})})}
       rootGoalId={search.rootGoalId}
       onChangeGoalRoot={rootGoalId => void navigate({search: current => ({...current,
-        rootGoalId: rootGoalId ?? undefined, goalId: rootGoalId ?? ("goalId" in current ? current.goalId : ""), workspace: undefined})})}
+        workAgent: undefined, workSession: undefined, rootGoalId: rootGoalId ?? undefined, goalId: rootGoalId ?? ("goalId" in current ? current.goalId : ""), workspace: undefined})})}
       goalArchiveLoadState={goalArchiveLoadState}
       sourceError={loadError}
       selectedTodoId={search.todo ?? null}
+      selectedWorkSessionId={search.workSession}
+      onSelectWorkSession={(sessionId, replace = false) => {
+        const goalId = search.goalId, agentId = search.workAgent, statusUrl = search.statusUrl;
+        void navigate({replace, search: current => "goalId" in current && current.goalId === goalId && current.workAgent === agentId && current.statusUrl === statusUrl
+          ? {...current, workSession: sessionId} : current});
+      }}
       selectedWorkAgentId={search.workAgent ?? null}
       onSelectWorkAgent={(agentId) => {
         const goalId = search.goalId, statusUrl = search.statusUrl;
         void navigate({search: current => "goalId" in current && current.goalId === goalId && current.statusUrl === statusUrl
-          ? {...current, todo: undefined, workAgent: agentId ?? undefined, view: agentId === null ? "overview" : "conversation"} : current});
+          ? {...current, todo: undefined, workAgent: agentId ?? undefined, workSession: undefined, view: agentId === null ? "overview" : "conversation"} : current});
       }}
       onSelectTodo={(todoId) => {
         const goalId = search.goalId, statusUrl = search.statusUrl;
@@ -3760,7 +3782,7 @@ export function DashboardPage() {
       }}
       selectedView={search.view === "conversation" ? "chat" : search.goalId ? search.view ?? "overview" : "overview"}
       onSelectView={(view) => {
-        void navigate({ search: current => ({ ...current, workAgent: undefined, view: view === "chat" ? "conversation" : view }) });
+        void navigate({ search: current => ({ ...current, workAgent: undefined, workSession: undefined, view: view === "chat" ? "conversation" : view }) });
       }}
       onGoalActivationStateChange={(goalId, activationState) => {
         statusRequestFenceRef.current.projectionRevision += 1;

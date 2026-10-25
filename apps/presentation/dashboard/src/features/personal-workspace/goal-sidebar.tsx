@@ -201,15 +201,19 @@ export function GoalSidebar({
       </nav>
 
       <div className="personal-sidebar-footer">
-        {onOpenCommands ? <button className="personal-sidebar-utility" onClick={onOpenCommands} type="button" aria-keyshortcuts="Control+k Meta+k"><Search size={16} /><span>{t("palette.title")}</span></button> : null}
         <DesktopUpdate />
-        {onOpenSettings ? (
-          <button aria-label={t("settings.open")} className="personal-sidebar-utility" onClick={onOpenSettings} type="button">
-            <span className="personal-sidebar-utility-icon"><Settings2 size={17} /></span>
-            <span className="personal-sidebar-utility-copy"><strong>{t("settings.open")}</strong></span>
-            <ChevronRight aria-hidden="true" size={15} />
-          </button>
-        ) : null}
+        <div className="personal-sidebar-actions">
+          {onOpenSettings ? (
+            <button aria-label={t("settings.open")} className="personal-sidebar-utility" onClick={onOpenSettings} type="button">
+              <Settings2 aria-hidden="true" size={17} /><span>{t("settings.open")}</span>
+            </button>
+          ) : null}
+          {onOpenCommands ? <div className="personal-sidebar-search">
+            <button onClick={onOpenCommands} type="button" aria-label={t("palette.title")}
+              aria-describedby="workspace-navigation-hint" aria-keyshortcuts="Control+k Meta+k"><Search aria-hidden="true" size={18} /></button>
+            <span id="workspace-navigation-hint" role="tooltip">{t("palette.title")}</span>
+          </div> : null}
+        </div>
       </div>
     </div>
   );

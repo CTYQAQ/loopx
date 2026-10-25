@@ -78,6 +78,25 @@ def _observe(home: CodexHome, *thread_ids: str) -> dict[str, HostThreadActivity]
     return observe_codex_threads(thread_ids, homes=[home.root])
 
 
+@pytest.mark.parametrize("configuration", ["explicit", "CODEX_HOME", "LOOPX_CODEX_HOMES"])
+def test_relative_codex_home_recovers_activity_without_writing_the_store(
+    tmp_path, monkeypatch, configuration,
+):
+    selected = CodexHome(tmp_path / "project # 中文" / ".codex")
+    rollout = selected.thread("relative-thread", [_event(T2, "task_complete")])
+    before = {path: path.read_bytes() for path in (selected.db, rollout)}
+    monkeypatch.chdir(tmp_path)
+    relative = selected.root.relative_to(tmp_path)
+    homes = [relative] if configuration == "explicit" else codex_homes(
+        env={configuration: str(relative)}, user_home=tmp_path / "synthetic-user",
+    )
+    assert homes[0] == relative
+    result = observe_codex_threads(["relative-thread"], homes=homes)["relative-thread"]
+    assert result.state is HostThreadState.IDLE
+    assert result.last_turn_ended_at == T2
+    assert all(path.read_bytes() == content for path, content in before.items())
+
+
 def test_current_execution_reads_the_bound_home_only_and_recovers_without_preferences(home, tmp_path):
     other = CodexHome(tmp_path / ".codex-other")
     meta = {"timestamp": T0, "type": "session_meta", "payload": {"id": "t", "model_provider": "openai"}}

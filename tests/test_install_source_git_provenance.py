@@ -30,7 +30,7 @@ def git(root: Path, *args: str) -> str:
 @pytest.fixture
 def repository(tmp_path, monkeypatch):
     # Git hooks/CI may otherwise lend these disposable fixtures another identity.
-    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("LOOPX_RESOLVED_SOURCE_GIT_COMMIT", raising=False)
     root = tmp_path / "仓库"
@@ -147,6 +147,47 @@ def test_missing_source_is_unavailable(tmp_path):
     assert doctor["git_commit"] is None
     assert manifest["git_commit"] is None
     assert skills["source"]["revision_kind"] == "skills_digest"
+
+
+@pytest.mark.parametrize("detached", [False, True])
+def test_failed_git_status_preserves_identity_without_claiming_clean(
+    repository, tmp_path, detached,
+):
+    expected_ref = "source"
+    if detached:
+        git(repository, "tag", "v1.0.0")
+        git(repository, "checkout", "--detach")
+        expected_ref = "v1.0.0"
+    expected_commit = git(repository, "rev-parse", "HEAD")
+    # Only corrupt this disposable repository; HEAD/ref remain independently readable.
+    (repository / ".git" / "index").write_bytes(b"invalid index\n")
+    status = subprocess.run(
+        ["git", "-C", str(repository), "status", "--porcelain"],
+        capture_output=True, encoding="utf-8",
+    )
+    assert status.returncode != 0
+    assert git(repository, "rev-parse", "HEAD") == expected_commit
+
+    doctor, manifest, skills = source_observations(repository, tmp_path)
+    for observation in (doctor, manifest):
+        assert observation["git_commit"] == expected_commit
+        assert observation["git_ref"] == expected_ref
+        assert observation["git_dirty"] is None
+    assert skills["source"]["revision"] == expected_commit
+    assert skills["source"]["revision_kind"] == "git_commit"
+    assert skills["source"]["git_dirty"] is None
+
+
+def test_unborn_repository_reports_status_without_a_commit(tmp_path, monkeypatch):
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(key, raising=False)
+    git(tmp_path, "init", "--initial-branch=source")
+    metadata = git_metadata_for_root(tmp_path)
+    assert metadata["git_commit"] is None
+    assert metadata["git_ref"] == "source"
+    assert metadata["git_dirty"] is False
+    (tmp_path / "untracked.txt").write_text("new\n", encoding="utf-8")
+    assert git_metadata_for_root(tmp_path)["git_dirty"] is True
 
 
 @pytest.mark.parametrize("marker", ["broken", "borrowed"])

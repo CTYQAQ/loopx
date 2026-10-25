@@ -279,6 +279,35 @@ def _legacy_model_at_booking(
     return model
 
 
+def _usage_index_records(index_path: Path) -> Iterator[tuple[int, dict[str, Any]]]:
+    try:
+        stream = index_path.open(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise CodexSessionUsageError(
+            f"cannot read run index for the usage basis: {exc}"
+        ) from exc
+    try:
+        with stream:
+            for line_number, line in enumerate(stream, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise CodexSessionUsageError(
+                        f"run index row {line_number} is corrupt: {index_path}"
+                    ) from exc
+                if isinstance(row, dict):
+                    yield line_number, row
+    except OSError as exc:
+        raise CodexSessionUsageError(
+            f"cannot read run index for the usage basis: {exc}"
+        ) from exc
+
+
 def session_usage_baseline(
     index_path: Path, session_id: str
 ) -> dict[str, Any] | None:
@@ -292,38 +321,20 @@ def session_usage_baseline(
     Corrupt index rows fail closed: skipping a booked row would shrink the
     basis and double-book real spend. Callers must hold the usage booking lock
     while reading the basis and appending the row it funds.
+    Buffer one record at a time; retain only the selected session's aggregate
+    metadata and row identities needed for duplicate suppression.
     """
     sid = str(session_id or "").strip()
     if not sid:
         raise CodexSessionUsageError("usage observation has no session id")
     prefix = f"{CODEX_USAGE_PROVIDER}:{sid}:"
-    try:
-        raw = index_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise CodexSessionUsageError(
-            f"cannot read run index for the usage basis: {exc}"
-        ) from exc
-
     int_totals: dict[str, int | None] = {field: None for field in _BASELINE_INT_FIELDS}
     cost_total: float | None = None
     last_usage: Mapping[str, Any] | None = None
     snapshot_first_booked_at: Any = None
     binding_recorded = False
     seen_rows: set[tuple[str, str, str]] = set()
-    for line_number, line in enumerate(raw.split("\n"), start=1):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise CodexSessionUsageError(
-                f"run index row {line_number} is corrupt: {index_path}"
-            ) from exc
-        if not isinstance(row, dict):
-            continue
+    for line_number, row in _usage_index_records(index_path):
         raw_usage = row.get("usage")
         if not isinstance(raw_usage, dict):
             continue

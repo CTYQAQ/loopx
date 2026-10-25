@@ -45,6 +45,42 @@ resolution, guards, formatting and typed owners. This adds no domain rule, bridg
 operation or data cache. Incremental qualification accounts for pending quota
 request-scope adoption separately rather than counting its gain again.
 
+### Agent collaboration CLI caller adoption
+
+`agent-context`, `agent-directory` and `agent-capabilities` now use the existing
+selected parser and shared dispatcher. Full-parser compatibility callers use
+the same dispatcher; their old handler branches are removed. Each command keeps
+its original registration, handler, registry/runtime resolution, native-controller
+guard and output. The dispatcher reuses the existing executable-revision request
+scope; source and capability observations remain live. No new module, bridge,
+semantic owner or state cache is introduced. This is bounded caller adoption;
+it does not qualify peer execution, model outcomes or the complete native CLI.
+
+### Lifecycle CLI caller adoption
+
+`refresh-state`, `checkpoint-context`, `read-only-map`, `reward` and
+`operator-gate` reuse the selected parser and shared dispatcher. Both CLI
+entrypoints use the existing lifecycle registration, handlers and writeback-hook
+composition; the old full-CLI dispatch branch is removed. The command set lives
+with routing and remains available through its lifecycle-module import. Existing
+help, diagnostics, registry/runtime selection and native-controller guards stay
+on their established paths. This adds no domain rule, bridge operation or state
+cache. Complete command cost and real write/recovery behavior qualify separately
+from import timing; installed and live-provider behavior need their own evidence.
+
+### Handoff CLI caller adoption
+
+`handoff` and `handoff-mode` use the existing selected parser and shared
+dispatcher. The full compatibility CLI reaches the same unchanged handlers;
+its separate continuation and mode dispatch blocks are retired. Each command
+joins the existing executable-revision request scope, while registry, provider,
+workspace and authority observations remain live. Existing help, diagnostics,
+formats, native-controller guards and operation replay identities remain with
+their current owners. This adds no module, semantic owner, bridge operation or
+data cache. It is bounded Stage 3 caller adoption; complete CLI cost and real
+handoff/policy recovery qualify separately from the full native CLI and host
+or provider promotion.
+
 ### Product conversations and asynchronous inbox
 
 **Chat HTTP POST scope.** `ChatRequestHandler.do_POST` now joins the existing
@@ -1605,7 +1641,7 @@ codec retire when CLI/Host callers use the typed kernel directly. The target is
 TypeScript ownership throughout, with no Python rule fallback.
 The adapter transports bounded facts and diagnostic strings, then applies the
 typed quota patch without round-tripping source numbers or metadata. Receipt-bound
-overlays, later route/action builders and effect authority retain their owners.
+overlays, remaining route/action builders and effect authority retain their owners.
 The existing effective-action vocabulary and generated TS binding are reused;
 its canonical Python enum remains until a separate contract-owner cutover.
 The TypeScript producer witness executes the real typed classifier against shared guard fixtures and rejects a
@@ -1613,6 +1649,15 @@ changed rule or an enum-only substitute. This delivers the implementation and
 semantic parity for one base-admission consumer. Full-CLI performance acceptance
 is held for owner review after a p95 regression; whole-Goal migration and
 provider/default qualification remain open.
+
+The task-scoped `goal_route_hint` override now comes back in that same
+`quota.run_decision` response. Python projects the lane count from the existing
+task-orchestration source fact. TypeScript owns the ready-state check, route
+decision and coordination wording. Python's duplicate `task_goal_route_hint` decision is
+deleted, leaving only the bounded merge into the assembled hint. This adds no
+request, provider read or authority. Other Goal-route and primary-action
+builders remain separate migration work; this does not complete the quota read
+transaction or claim a performance gain.
 
 **Long-history transport boundary.** Replan history still has one TS decision
 owner. Small requests retain the inline codec; larger complete fact snapshots

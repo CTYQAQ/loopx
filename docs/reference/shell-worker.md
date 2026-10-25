@@ -56,9 +56,22 @@ model invocation. A retry reads that original binding even when normal wakes
 use fresh context. A confirmed successful response ends the failure streak;
 an exhausted policy remains held. Provider hold/backoff is checked before
 recording a new semantic replan attempt; a rejected dispatch cannot consume one.
-An unresolved semantic replan still requires its original settlement recovery,
-even when the provider would otherwise permit a transport retry. Host state is
-local transport evidence, not Goal/Todo/quota authority or proof of completion.
+For a replan, dispatch also binds the Host attempt to its original obligation.
+A permitted transport retry may continue that one unknown semantic attempt only
+while current admission retains the exact Goal/agent scope and obligation. It
+reuses the recorded attempt and session, preserves its evidence, and does not
+acknowledge or settle the obligation. Changed admission, multiple unresolved
+attempts, interrupted dispatch, or legacy state without this association still
+requires original recovery. After transport success, an unchanged unresolved
+obligation remains paused; it cannot authorize another semantic attempt. Host
+state is local transport evidence, not Goal/Todo/quota authority or completion.
+If the original canonical settlement is instead verified complete, the worker
+may continue newly admitted work under the same bounded Host retry policy.
+It requires one exact dispatch-bound original attempt and rechecks its original
+settlement identity, including after a saved recovery marker survives restart.
+A changed admission or local marker alone cannot supply that proof. Missing,
+conflicting or unreadable proof retains the hold; session, backoff, retry limits
+and Core Stop still apply. Recovery never repeats the original refresh or spend.
 
 Inspect the existing state file, the original wake's `receipt.json`, and the
 content-free `host_failure_hold` / `host_failure_backoff` liveness output. Use

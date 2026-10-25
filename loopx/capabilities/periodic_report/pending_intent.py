@@ -18,6 +18,7 @@ from ...control_plane.capability_hooks import (
 from ...control_plane.effect_runtime import effect_runtime_result
 from ...control_plane.digest_envelope import sha256_envelope
 from ...history import load_registry
+from .field_shapes import REPORT_IDENTITY_PATTERN
 from .todo_source import read_report_todo_source
 from ...registry import (
     atomic_write_json,
@@ -56,7 +57,6 @@ EDITORIAL_RESPONSE_SCHEMA = "periodic_report_editorial_response_v0"
 HOOK_ID = "periodic_report.pending_intent"
 CAPABILITY_ID = "periodic-report"
 _DISPATCH_RE = re.compile(r"^pwh_[0-9a-f]{64}\.json$")
-_IDENTITY_RE = re.compile(r"^[a-z][a-z0-9_.:-]{2,127}$")
 _CHINESE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _ANALYSIS_SECTION_CONTRACT = (
     ("overview", "全景判断"),
@@ -333,7 +333,7 @@ def pending_periodic_report_intents(
 ) -> list[dict[str, Any]]:
     """Read only exact, eligible, unconsumed intents for one Goal/Agent."""
 
-    if not _IDENTITY_RE.fullmatch(goal_id) or not _IDENTITY_RE.fullmatch(agent_id):
+    if not REPORT_IDENTITY_PATTERN.fullmatch(goal_id) or not REPORT_IDENTITY_PATTERN.fullmatch(agent_id):
         return []
     pending: list[dict[str, Any]] = []
     for intent in periodic_report_request_intents(
@@ -441,7 +441,8 @@ def periodic_report_pending_intent_interaction_hook(
             if normalized_agent_id and subscription is not None
             else []
         )
-        if not intents or subscription.get("profile_preset") == "portfolio-progress":
+        from .goal_configuration import managed_session_report_destination
+        if not intents or subscription.get("profile_preset") == "portfolio-progress" or managed_session_report_destination(subscription) is not None:
             # This explicit source profile is consumed by the original Chat
             # host's admitted native report Todo. Projecting the Goal Channel
             # CLI action as well would preempt that controlled model Turn and
@@ -1085,7 +1086,8 @@ def _consume_pending_periodic_report_intent(
             "status": "subscription_disabled",
             "external_writes_performed": False,
         }
-    if subscription.get("profile_preset") == "portfolio-progress":
+    from .goal_configuration import managed_session_report_destination
+    if subscription.get("profile_preset") == "portfolio-progress" or managed_session_report_destination(subscription) is not None:
         # A CLI caller cannot manufacture the original conversation's reader
         # or private destination. Its host supplies those under the live grant.
         return {"ok": True, "schema_version": CONSUMPTION_RECEIPT_SCHEMA,

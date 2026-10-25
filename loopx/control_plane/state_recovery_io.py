@@ -128,10 +128,33 @@ def _sha(handle: BinaryIO) -> tuple[str, int]:
     return digest.hexdigest(), count
 
 
+class _ArchiveInput(io.RawIOBase):
+    """Witness the compressed bytes actually consumed by the parser."""
+
+    def __init__(self, handle: BinaryIO):
+        super().__init__()
+        self.handle = handle
+        self.digest = hashlib.sha256()
+        self.total = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        data = self.handle.read(min(len(buffer), MAX_ARCHIVE_BYTES - self.total + 1))
+        self.total += len(data)
+        _require(self.total <= MAX_ARCHIVE_BYTES, "recovery_capacity_exceeded")
+        self.digest.update(data)
+        buffer[:len(data)] = data
+        return len(data)
+
+
 class _BoundedGzip(io.RawIOBase):
     def __init__(self, handle: BinaryIO, archive_size: int):
         super().__init__()
-        self.source = gzip.GzipFile(fileobj=handle, mode="rb")
+        self.archive = _ArchiveInput(handle)
+        self.compressed = io.BufferedReader(self.archive, buffer_size=_CHUNK)
+        self.source = gzip.GzipFile(fileobj=self.compressed, mode="rb")
         self.limit = min(MAX_EXPANDED_BYTES, archive_size * MAX_EXPANSION_RATIO)
         self.total = 0
 
@@ -141,6 +164,13 @@ class _BoundedGzip(io.RawIOBase):
         self.total += len(data)
         _require(self.total <= self.limit, "recovery_capacity_exceeded")
         return data
+
+    def close(self) -> None:
+        try:
+            self.source.close()
+        finally:
+            self.compressed.close()
+            super().close()
 
 
 class _RecoveryTarInfo(tarfile.TarInfo):
@@ -350,7 +380,7 @@ def _scan(handle: BinaryIO, archive_size: int, output: Path | None = None) -> di
             ValueError, OverflowError, KeyError, RecursionError) as exc:
         raise StateRecoveryError("archive_unreadable") from exc
     finally:
-        stream.source.close()
+        stream.close()
     _require(embedded is not None, "embedded_manifest_missing")
     _check_links(links)
     # Links are materialized last and no member may live beneath a link.
@@ -361,7 +391,8 @@ def _scan(handle: BinaryIO, archive_size: int, output: Path | None = None) -> di
         for name, target in links:
             _directories(output, PurePosixPath(name).parts[:-1])
             os.symlink(target, output / name)
-    return {"embedded_manifest": embedded, "files": files, "logical_bytes": logical,
+    return {"archive_sha256": stream.archive.digest.hexdigest(), "archive_size_bytes": stream.archive.total,
+            "embedded_manifest": embedded, "files": files, "logical_bytes": logical,
             "sqlite_members": sqlite_members, "standalone_sqlite_members": standalone,
             "entry_count": len(names)}
 
@@ -383,6 +414,8 @@ def verify_state_backup(
         _runtime("state.recovery.archive.verify", {"external_manifest": external,
             "archive_sha256": archive_sha, "archive_size_bytes": archive_size})
         observation = _scan(archive_handle, archive_size)
+        _require(observation["archive_sha256"] == archive_sha
+                 and observation["archive_size_bytes"] == archive_size, "recovery_input_changed")
         verified = _runtime("state.recovery.manifest.verify", {
             "external_manifest": external, "embedded_manifest": observation["embedded_manifest"],
             "archive_sha256": archive_sha, "archive_size_bytes": archive_size,

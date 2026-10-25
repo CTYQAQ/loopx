@@ -109,6 +109,36 @@ Web 来源，通过已有 Core 队列及新鲜来源准入。连接列表独立�
 真实 Lark 结果回传、安装态服务采用、分离运行根组合及无 Goal 项目的 peer 交办
 仍未关闭，不由此检查点代替。
 
+现有 Lark 回复 worker 现在也投递该本人私聊确切 Session 中已提交的 App 用户消息和
+回答。每份 provider outbox 保留 canonical 消息身份、冻结正文和发送尝试。原 Lark
+输入只提供地址来源证据；投影不会重新受理它或启动模型工作。每次发送和恢复回执前，
+Core 重查 Session、当前绑定与受众，provider 核验原来源。消息标明 App 发言者，在
+该 outbox 内按 canonical 追加顺序发送，长正文沿用既有富文本分段，保留完整内容。
+即使正文相同，不同 canonical 消息及分段也使用不同 provider 幂等键；未提供该身份
+的既有调用者保持原回执 digest。恢复先读回已知发送，再继续未发送部分；已经开始但
+没有 provider locator 的写入，重启后仍保留未确认。撤权或身份变化阻止后续投递。
+关闭既有连接即可撤销授权；回滚须保留私有投递 journal。
+
+通过上述 **继续原会话** 使用该路径。普通 App 管家历史仍是独立入口，不会被静默
+合并或重定向。本检查点覆盖文本投影，不覆盖回复/话题关系镜像、附件传输、向 Lark
+历史回插旧时间或全渠道广播。App 附件会产生明确的未同步提示，并保留 partial
+outbox，不声明完整送达。真实 HTTP/Core 配合合成 provider 的旅程覆盖重复输入、
+长正文、重启、回执缺失/未知、撤权及 App 身份替换；安装态 provider 读回另行验收。
+
+实现判断来自一手源码比较，不把共享上下文视为双向送达已经成立：
+
+- [OpenClaw 历史增量](https://github.com/openclaw/openclaw/blob/b3ba4d622638ac23f64c0cec415bf5bfe81f5cf5/src/gateway/server-methods/chat-history-delta.ts)
+  对不完整/受限投影要求重置；其
+  [发送重试 owner](https://github.com/openclaw/openclaw/blob/b3ba4d622638ac23f64c0cec415bf5bfe81f5cf5/src/gateway/server-methods/chat-send-retry.ts)
+  对已经开始的执行先对账。这些机制用于恢复设计，不代表已有 Lark 桥。
+- [nanobot 统一会话键](https://github.com/HKUDS/nanobot/blob/9e9e22d3319678178dba05a76f0ea61064b78ee8/nanobot/session/keys.py)
+  和[最后目的地路由](https://github.com/HKUDS/nanobot/blob/9e9e22d3319678178dba05a76f0ea61064b78ee8/nanobot/agent/loop.py)
+  可以共享上下文，但最后目的地不等于向每个界面复制完整记录。
+- [mautrix 消息映射](https://github.com/mautrix/go/blob/a4237e5b9f8f0e9b35c81d5310615eb70c202cea/bridgev2/database/message.go)
+  及 [portal 回声处理](https://github.com/mautrix/go/blob/a4237e5b9f8f0e9b35c81d5310615eb70c202cea/bridgev2/portal.go)
+  支持稳定事务/分段身份和回声抑制的设计判断。采用 Matrix homeserver/桥还会增加
+  独立基础设施与身份 owner；LoopX 借鉴设计，不复制 MPL-2.0 代码，另两个快照为 MIT。
+
 ![合成私聊工作区设置](../../assets/personal-workspace/private-project-conversations.png)
 ![窄屏私聊设置](../../assets/personal-workspace/private-project-conversations-narrow.png)
 ![工作区撤权读回](../../assets/personal-workspace/private-project-workspace-revoked.png)

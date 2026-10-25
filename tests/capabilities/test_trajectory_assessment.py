@@ -80,6 +80,9 @@ def provider(
             )
         ],
         "limitations": ["Synthetic provider; no model qualification"],
+        "synthesis": {"summary": {"text": "The measurement is unavailable; utility remains unknown.",
+                                   "episode_ids": ["episode"], "citations": [dict(source_id="source", first_line=1, last_line=1)]},
+                      "findings": [], "next_experiments": []},
     }
     if invalid:
         output["assessments"] = []
@@ -162,7 +165,10 @@ def test_failed_model_output_needs_explicit_retry_and_preserves_failure(
     with pytest.raises(Exception, match="missing eligible"):
         execute(prepared, tmp_path / "jobs", codex=provider(tmp_path, invalid=True))
     directory = tmp_path / "jobs" / prepared["analysis_key"]
-    assert read_job(directory)["status"] == "failed"
+    failure = read_job(directory)
+    assert failure["status"] == "failed"
+    assert failure["usage"] == {"input_tokens": 12, "output_tokens": 3}
+    assert failure["analysis_wall_seconds"] is not None
     assert not (directory / "assessment.json").exists()
     assert execute(prepared, tmp_path / "jobs", codex="must-not-run")["ok"] is False
     success = execute(prepared, tmp_path / "jobs", retry=True, codex=provider(tmp_path))
@@ -173,6 +179,7 @@ def test_failed_model_output_needs_explicit_retry_and_preserves_failure(
         )["status"]
         == "failed"
     )
+    assert read_job(directory / "attempt-1")["usage"] == failure["usage"]
 
 
 def test_invalid_utf8_output_fails_strictly_and_retry_preserves_bytes(

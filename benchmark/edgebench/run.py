@@ -24,7 +24,7 @@ if __name__ == "__main__":
     bootstrap()  # Select SForge before any provider or adapter imports.
 
 from sforge.harness.benchmark import load_benchmark
-from sforge.harness.config import SForgeConfig
+from sforge.harness.config import load_config
 from sforge.harness.constants import get_admin_secret
 from sforge.harness.run_agent import run_agent
 from sforge.harness.task_spec import make_task_spec
@@ -126,6 +126,8 @@ def main(argv=None):
                         help="New-run default: native public feedback; blind/best-only are explicit controls")
     parser.add_argument("--turn-envelope", action="store_true",
                         help="Opt-in short heartbeat context with same-invocation full captures")
+    parser.add_argument("--context-delivery", choices=("off", "on"), default="off",
+                        help="Experimental native Codex benchmark heartbeat reuse only; off by default")
     parser.add_argument("--native-goal-continue", action="store_true",
                         help="Opt-in: when a native Goal declares completion with budget left, start "
                              "continuation Goals until the budget edge (native-goal worker only)")
@@ -159,6 +161,8 @@ def main(argv=None):
     retention.add_argument("--no-checkpoint-retention", action="store_true",
                            help="Keep every captured point; disable default checkpoint rotation")
     parser.add_argument("--restore-config", type=Path)
+    parser.add_argument("--restore-model-config", type=Path,
+                        help="Explicit destination config for changing only model/effort in a new checkpoint receiver; --restore-config retains the sealed source config")
     parser.add_argument("--restore-goal")
     parser.add_argument("--restore-agent")
     parser.add_argument("--restore-source-todo")
@@ -190,6 +194,8 @@ def main(argv=None):
         parser.error("--task-entry loopx-planned requires a heartbeat worker")
     if args.turn_envelope and args.worker not in {"heartbeat-resume", "heartbeat-explore"}:
         parser.error("--turn-envelope requires a heartbeat worker")
+    if args.context_delivery != "off" and not args.worker.startswith("heartbeat-"):
+        parser.error("--context-delivery requires a heartbeat worker")
     if args.native_goal_continue and args.worker != "native-goal":
         parser.error("--native-goal-continue requires --worker native-goal")
     if (args.replan_after_turns is not None or args.replan_after_todos is not None
@@ -228,6 +234,8 @@ def main(argv=None):
         parser.error("Research component restoration requires an explicit warm checkpoint continuation")
     if args.restore_fresh_replan and not args.restore_checkpoint:
         parser.error("Fresh context requires an explicit warm checkpoint continuation")
+    if args.restore_model_config is not None and not args.restore_checkpoint:
+        parser.error("Model transition requires an explicit warm checkpoint continuation")
     if args.restore_checkpoint and (not handoff or args.eval_interval != 0 or args.replan_after_todos is not None):
         parser.error("Warm continuation requires full native checkpoint capture, no periodic evaluation and effective-Turn cadence")
     # One directory is one attempt: never reuse native registration or overwrite
@@ -280,7 +288,10 @@ def main(argv=None):
             # task remains the separately owned Goal objective.
             feedback_prompt = workspace_instructions + f"---\n\n{task.work.agent_query}\n"
         task_objective = task.work.agent_query
-    config = SForgeConfig(
+    config = replace(
+        load_config(),
+        # This runner owns the OpenAI route selection.  Explicitly clearing the
+        # route must also clear any ambient SFORGE_AGENT_API_* fallback.
         agent_api_base_url=api_base_url, agent_api_key=api_key,
         agent_model=args.model, agent_effort=args.effort,
         agent_timeout=args.timeout, log_dir=args.log_dir, tasks_dir=args.tasks_dir,
@@ -307,8 +318,16 @@ def main(argv=None):
         candidate = WarmStart(args.restore_checkpoint, args.restore_sha256, args.restore_config,
             args.restore_goal, args.restore_agent, args.restore_source_todo,
             int(time.time()) + args.timeout, args.replan_after_turns or 6,
-            tuple(args.restore_research_component), args.restore_fresh_replan)
+            tuple(args.restore_research_component), args.restore_fresh_replan,
+            destination_config=args.restore_model_config)
         metadata = candidate.verify(task.cwd)
+        if args.restore_model_config is not None:
+            from loopx.hosts.codex_checkpoint import checkpoint_destination_config
+            _, transition = checkpoint_destination_config(args.restore_config,
+                metadata["native_session"]["config_sha256"], args.restore_model_config)
+            if (transition["destination_model"] != args.model or
+                    transition["destination_effort"] != args.effort):
+                raise ValueError("Checkpoint destination model must match the explicit runner model/effort")
         snapshot = metadata["worker_file_snapshot"]
         capsule = args.restore_checkpoint / "components" / snapshot["native_capsule_component_id"]
         clock = attempt / "restored-phase-deadline"
@@ -320,6 +339,7 @@ def main(argv=None):
                          task_objective=task_objective,
                          task_entry=args.task_entry,
                          turn_envelope=args.turn_envelope,
+                         context_delivery=args.context_delivery,
                          native_goal_continue=args.native_goal_continue,
                          replan_after_turns=args.replan_after_turns,
                          replan_after_todos=args.replan_after_todos,
@@ -383,6 +403,7 @@ def main(argv=None):
         "loopx_commit": pins[0], "runner_commit": pins[1],
         "sforge_source": active_source_receipt(),
         **turn_envelope_receipt(explicit=args.turn_envelope),
+        **({"context_delivery": "on"} if args.context_delivery != "off" else {}),
         **({"native_goal_continue": True} if args.native_goal_continue else {}),
         "task_sha256": hashlib.sha256(task_file.read_bytes()).hexdigest(),
         "feedback": args.feedback, "internet": task.internet,

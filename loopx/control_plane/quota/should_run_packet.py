@@ -73,8 +73,8 @@ from ..quota.stall_repair import (
 )
 from ..quota.task_orchestration import (
     PEER_COORDINATION_BLOCKED_ACTION,
+    apply_task_route_hint_override,
     attach_task_orchestration_payload,
-    task_goal_route_hint,
     task_orchestration_contract_is_actionable,
     task_orchestration_requires_material_change_stop,
 )
@@ -1278,9 +1278,9 @@ def _resolve_quota_should_run_route(
         latest_run_recommended_action=latest_run_recommended_action_text,
         selected_recommended_action=selected_recommended_action,
     )
-    goal_route_hint = task_goal_route_hint(
+    goal_route_hint = apply_task_route_hint_override(
         goal_route_hint,
-        prepared.task_orchestration_contract,
+        run_decision.goal_route_hint_override,
     )
     payload_work_lane_contract = _payload_work_lane_contract(
         prepared.work_lane_contract,

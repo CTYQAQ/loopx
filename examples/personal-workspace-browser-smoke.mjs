@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {managedAgentSessionsScenario} from "./personal-workspace-browser/managed-agent-sessions.mjs";
 import {reportDownloadScenario} from "./personal-workspace-browser/report-download.mjs";
 import { selectScenarioShard } from "./personal-workspace-browser/shard.mjs";
 import {completedHistoryIsolationScenario} from "./personal-workspace-browser/completed-history-isolation.mjs";
@@ -76,6 +77,7 @@ import { researchRecordSearchScenario } from "./personal-workspace-browser/resea
 import { researchRouteReadingScenario } from "./personal-workspace-browser/research-route-reading.mjs";
 import { researchDisplayLanguageScenario } from "./personal-workspace-browser/research-display-language.mjs";
 import { researchMeasurementsScenario } from "./personal-workspace-browser/research-measurements.mjs";
+import { researchNativeReadingScenario } from "./personal-workspace-browser/research-native-reading.mjs";
 import { loopxModeScenario } from "./personal-workspace-browser/loopx-mode.mjs";
 import { progressiveLoadingScenario } from "./personal-workspace-browser/progressive-loading.mjs";
 import { stewardJourneyScenario } from "./personal-workspace-browser/steward-journey.mjs";
@@ -129,6 +131,7 @@ scenarioCatalog.push(attentionUserActionScenario);
 scenarioCatalog.push(researchResultsScenario);
 scenarioCatalog.push(researchHistoryScenario);
 scenarioCatalog.push(researchMeasurementsScenario);
+scenarioCatalog.push(researchNativeReadingScenario);
 scenarioCatalog.push(researchFindingReaderScenario);
 scenarioCatalog.push(researchRecordSearchScenario);
 scenarioCatalog.push(researchRouteReadingScenario);
@@ -152,6 +155,7 @@ scenarioCatalog.push(attentionNotificationsLiveScenario);
 scenarioCatalog.push(firstGoalHomeLiveScenario);
 scenarioCatalog.push(goalSuggestionsScenario);
 scenarioCatalog.push(goalSuggestionsLiveScenario);
+scenarioCatalog.push(managedAgentSessionsScenario);
 const requestedScenario = process.env.LOOPX_PERSONAL_WORKSPACE_SCENARIO;
 scenarioCatalog.push(completedHistoryIsolationScenario);
 scenarioCatalog.push(agentModelSelectionScenario);

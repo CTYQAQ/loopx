@@ -560,6 +560,7 @@ export async function inspectGoalAcceptance(
   goalRef?: WireExactGoalRef,
   includeWorkDetails = true,
   agentId?: string,
+  registeredAgents?: unknown,
 ): Promise<JsonObject> {
   const head = await store.loadAuthority();
   if (head.status !== "loaded") return source(store, {...head});
@@ -577,8 +578,9 @@ export async function inspectGoalAcceptance(
   const state = authority.kind === "legacy" ? authority.state
     : authority.owner_matches && authority.lifecycle.state === "active" ? authority.state : null;
   const tasks = [...todos.entries()].filter(([key]) => todoId === undefined || key === todoId).map(([key, todo]) => ({
-    todo_id: key, todo_semantic_digest: goalAcceptanceTodoDigest(todo),
-    ...(state ? acceptanceTask(key, todo, state) : {state: "unbound", criterion_ids: [], applicable: false}),
+    todo_semantic_digest: goalAcceptanceTodoDigest(todo),
+    ...(state ? acceptanceTask(key, todo, state)
+      : {todo_id: key, state: "unbound", criterion_ids: [], applicable: false}),
   }));
   return source(store, {status: "loaded", provider_revision: head.provider_revision,
     revision: state?.revision ?? null, contract_digest: state?.digest ?? null,
@@ -587,7 +589,7 @@ export async function inspectGoalAcceptance(
       completion_requirements: acceptanceCompletionRequirements(head.head, goalId, todoId)}),
     ...(agentId === undefined || currentGoalObjective(head.head) === null ? {} : {objective_work_digest: goalObjectiveWorkDigest(head.head, agentId),
       goal_objective_guard: goalObjectiveWorkGuard(head.head, agentId)}),
-    goal_acceptance_contract: projectGoalAcceptance(head.head, goalId)});
+    goal_acceptance_contract: projectGoalAcceptance(head.head, goalId, registeredAgents)});
 }
 
 async function local(value: unknown, kind: "inspect" | "configure" | "verify" | "lifecycle" | "refine" | "objective"): Promise<JsonObject> {
@@ -606,7 +608,8 @@ async function local(value: unknown, kind: "inspect" | "configure" | "verify" | 
           request.todo_id == null ? undefined : requireAuthorityStoreId(request.todo_id, "todo_id"),
           request.goal_ref === undefined ? undefined : parseWireExactGoalRef(request.goal_ref, "acceptance request goal_ref"),
           request.include_work_details !== false,
-          request.agent_id === undefined ? undefined : requireAuthorityStoreId(request.agent_id, "agent_id"));
+          request.agent_id === undefined ? undefined : requireAuthorityStoreId(request.agent_id, "agent_id"),
+          request.registered_agents);
       }
       if (kind === "configure") return configureGoalAcceptance(store, request);
       if (kind === "refine") return refineGoalAcceptanceOutcome(store, request);

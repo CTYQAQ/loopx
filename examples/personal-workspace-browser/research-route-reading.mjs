@@ -28,6 +28,11 @@ for route in range(3):
         events.append(build_explore_finding_event(goal_id=goal,node_id=node,finding_id=f'finding-{node}',title='固定合成记录',
             summary='完整观测：局部质量下降，延迟改善；完整成本和独立验证仍未知。',status='refuted' if route==2 else 'tentative',
             recorded_at=f'2026-01-0{route+1}T{1 if endpoint=="start" else 13:02}:00:00Z'))
+        if route==0 and endpoint=='end':
+            for index,status in enumerate(('confirmed','refuted')):
+                events.append(build_explore_finding_event(goal_id=goal,node_id=node,finding_id=f'finding-{node}-{index}',
+                    title='相同输入下的候选取舍与后续验证',summary='本地比较保留正结果和回退；独立收益及完整成本仍未知。',
+                    status=status,recorded_at=f'2026-01-01T13:00:0{index+1}Z'))
 Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'合成研究 · 路线阅读','events':events},ensure_ascii=False))
 `, path], {cwd: repoRoot});
 }
@@ -109,8 +114,23 @@ export const researchRouteReadingScenario = {
           const fullTitle = capture.events.find(event => event.result_id === `route-0-${endpoint ? "end" : "start"}` && event.event_kind === "node").title;
           await page.keyboard.press("Enter");
           await reader.waitFor();
-          assert.equal(await reader.locator("h3").first().innerText(), fullTitle, "One activation reveals the complete original title");
-          assert(await reader.locator("h3").evaluate(element => element.scrollHeight <= element.clientHeight + 1), "Selected text is not clipped");
+          const question = reader.getByText(fullTitle, {exact: true});
+          assert.equal(await question.innerText(), fullTitle, "One route activation reveals the complete original question");
+          assert(await question.evaluate(element => element.scrollHeight <= element.clientHeight + 1 && element.scrollWidth <= element.clientWidth + 1), "Requested question text is not clipped");
+          if (endpoint) {
+            await reader.locator("select").selectOption("finding-route-0-end");
+            const body = reader.getByText("完整观测：局部质量下降，延迟改善；完整成本和独立验证仍未知。", {exact: true}).first();
+            const box = await body.boundingBox();
+            const reading = await history.evaluate(element => {const bounds = element.closest(".personal-channel-scroll")?.getBoundingClientRect(); return {top: Math.max(0, bounds?.top ?? 0), bottom: Math.min(innerHeight, bounds?.bottom ?? innerHeight)};});
+            const lineHeight = await body.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
+            assert(box.y >= reading.top - 1 && box.y + Math.min(box.height, lineHeight * 2) <= reading.bottom + 1, "The selected finding begins with readable content inside the reading viewport");
+            assert(await body.evaluate(element => parseFloat(getComputedStyle(element).fontSize) >= 16), "Density retains readable finding text");
+            assert.match(await reader.locator(".research-finding-exceptions").innerText(), /1/);
+            const context = reader.getByText(fullTitle, {exact: true});
+            await context.click();
+            assert(await context.evaluate(element => element.scrollHeight <= element.clientHeight + 1 && element.scrollWidth <= element.clientWidth + 1), "Full parent context remains one optional activation away");
+            await context.click();
+          }
           if (endpoint && language === "zh-CN" && width !== 768) await page.screenshot({path: resolve(outputDir, `research-route-reading-detail-${width}.png`), animations: "disabled"});
           await page.keyboard.press("Escape");
           assert.equal(await reader.count(), 0);
@@ -142,7 +162,7 @@ export const researchRouteReadingScenario = {
       await reader.getByRole("button", {name: "Whole graph", exact: true}).click();
       await page.goBack();
       await reader.waitFor();
-      assert.match(await reader.locator("h3").first().innerText(), /末端研究/);
+      assert.match(await reader.locator(".research-reader-question").innerText(), /末端研究/);
       assert.equal(analysisWrites, 0, "Reading, language changes and every action state never dispatch a model");
       const readback = await (await page.request.get(`${owner.base}/fixture/readback`)).json();
       assert(readback.source_unchanged && readback.mutation_attempts === 0, "No source or execution state changes");

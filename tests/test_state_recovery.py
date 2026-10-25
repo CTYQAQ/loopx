@@ -645,6 +645,74 @@ def test_digest_refusal_precedes_tar_decoding_and_writes_nothing(tmp_path):
     assert not list(tmp_path.glob(".loopx-recovery-*"))
 
 
+@pytest.mark.parametrize("execute", [False, True])
+def test_archive_bytes_changed_between_reads_are_rejected_even_after_restore(tmp_path, monkeypatch, execute):
+    archive, manifest = _backup(tmp_path)
+    original_bytes = archive.read_bytes()
+    changed = bytearray(original_bytes)
+    changed[4] ^= 1  # gzip mtime changes identity without changing tar members.
+    changed_bytes = bytes(changed)
+    archive_inode = archive.stat().st_ino
+    original_fdopen = os.fdopen
+
+    class ChangingArchive(io.BufferedReader):
+        passes = 0
+        eof = False
+
+        def note_eof(self):
+            if not self.eof:
+                self.passes += 1
+                self.eof = True
+
+        def read(self, size=-1):
+            value = super().read(size)
+            if not value:
+                self.note_eof()
+            return value
+
+        def readinto(self, buffer):
+            count = super().readinto(buffer)
+            if not count:
+                self.note_eof()
+            return count
+
+        def seek(self, offset, whence=0):
+            if offset == 0 and whence == 0:
+                if self.passes == 1:
+                    archive.write_bytes(changed_bytes)
+                elif self.passes >= 3:
+                    archive.write_bytes(original_bytes)
+                # Force real file reads rather than replaying a buffered prefix.
+                super().seek(0, os.SEEK_END)
+                self.eof = False
+            return super().seek(offset, whence)
+
+    def input_file(fd, *args, **kwargs):
+        handle = original_fdopen(fd, *args, **kwargs)
+        return ChangingArchive(handle.detach()) if os.fstat(fd).st_ino == archive_inode else handle
+
+    monkeypatch.setattr(os, "fdopen", input_file)
+    destination = tmp_path / "unpublished"
+    with pytest.raises(StateRecoveryError, match="recovery_input_changed"):
+        verify_state_backup(archive=archive, manifest=manifest, destination=destination, execute=execute)
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".loopx-recovery-*"))
+
+
+def test_archive_stream_enforces_the_compressed_byte_budget(monkeypatch):
+    from loopx.control_plane import state_recovery_io as recovery
+
+    data = io.BytesIO()
+    with tarfile.open(fileobj=data, mode="w:gz") as archive:
+        member = tarfile.TarInfo("manifest.json")
+        member.size = 2
+        archive.addfile(member, io.BytesIO(b"{}"))
+    compressed = data.getvalue()
+    monkeypatch.setattr(recovery, "MAX_ARCHIVE_BYTES", len(compressed) - 1)
+    with pytest.raises(StateRecoveryError, match="recovery_capacity_exceeded"):
+        recovery._scan(io.BytesIO(compressed), len(compressed))
+
+
 def test_external_manifest_cannot_relabel_the_embedded_capture(tmp_path):
     archive, manifest = _backup(tmp_path)
     data = json.loads(manifest.read_text())

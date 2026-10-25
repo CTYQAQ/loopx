@@ -1,7 +1,8 @@
+import {AlertTriangle, Check, CircleHelp, Code2, RefreshCw, RotateCcw, ShieldCheck, Trash2} from "lucide-react";
+import {ContextHelp} from "./context-help";
 import { PerformanceDiagnosisPanel } from "./performance-diagnosis-panel";
 import { UsageStatisticsSettings } from "./usage-statistics-settings";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, Code2, RefreshCw, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 
 import {
   applyMachineConfiguration,
@@ -349,7 +350,7 @@ export function MachineConfigurationSettings({ section, onChanged }: {
     </section></>;
   }
   if (!selected) {
-    return <>{diagnosis}<p className="personal-capability-empty">{t("machine.capabilityEmpty")}</p></>;
+    return <>{diagnosis}<ContextHelp label={locale === "zh-CN" ? "暂无本机能力" : "No device capabilities"} icon={CircleHelp}><p className="personal-capability-empty">{t("machine.capabilityEmpty")}</p></ContextHelp></>;
   }
 
   return (
@@ -386,9 +387,9 @@ export function MachineConfigurationSettings({ section, onChanged }: {
           {selected.capability_id === "goal_storage" ? (
             <section className="personal-capability-behavior-note">
               <ShieldCheck aria-hidden size={18} />
-              <div><strong>{locale === "zh-CN" ? "仅影响此后创建的 Goal" : "Future Goals only"}</strong><p>{locale === "zh-CN"
+              <div><strong>{locale === "zh-CN" ? "仅影响此后创建的 Goal" : "Future Goals only"}</strong><ContextHelp label={locale === "zh-CN" ? "创建策略与迁移" : "Creation policy and migration"}><p>{locale === "zh-CN"
                 ? "2.0 新建 Goal 必须启用 canonical 创建，并采用所选执行策略。旧的关闭设置不会自动改变；启用后再重试创建。已有 Goal 需备份、停止写入并导入；这里不迁移已有数据，也不授予工具权限。"
-                : "2.0 requires canonical creation with the selected execution policy. An older disabled setting is not changed automatically; enable it before retrying creation. Back up, stop writers and import existing Goals separately. This setting neither migrates existing data nor grants tool permissions."}</p></div>
+                : "2.0 requires canonical creation with the selected execution policy. An older disabled setting is not changed automatically; enable it before retrying creation. Back up, stop writers and import existing Goals separately. This setting neither migrates existing data nor grants tool permissions."}</p></ContextHelp></div>
             </section>
           ) : null}
 
@@ -422,18 +423,18 @@ export function MachineConfigurationSettings({ section, onChanged }: {
           {selected.capability_id === "steward_executor" ? (
             <section className="personal-capability-behavior-note">
               <ShieldCheck aria-hidden size={18} />
-              <div><strong>{locale === "zh-CN" ? "管家模型与思考深度" : "Steward model and reasoning"}</strong><p>{locale === "zh-CN"
+              <div><strong>{locale === "zh-CN" ? "管家模型与思考深度" : "Steward model and reasoning"}</strong><ContextHelp label={locale === "zh-CN" ? "管家默认值的生效范围" : "Steward default scope"}><p>{locale === "zh-CN"
                 ? "这里设置本机管家新会话的默认模型和思考深度。已有会话可能继续使用原来的分配；配置成功不代表正在运行的会话已切换。"
-                : "Choose the model and reasoning effort for new steward sessions on this machine. Existing sessions may retain their earlier allocation; saving a default does not switch a running session."}</p></div>
+                : "Choose the model and reasoning effort for new steward sessions on this machine. Existing sessions may retain their earlier allocation; saving a default does not switch a running session."}</p></ContextHelp></div>
             </section>
           ) : null}
 
           {selected.capability_id === "pull_request_review" ? (
             <section className="personal-capability-behavior-note">
               <ShieldCheck aria-hidden size={18} />
-              <div><strong>{locale === "zh-CN" ? "只改变队列排序" : "Queue ordering only"}</strong><p>{locale === "zh-CN"
+              <div><strong>{locale === "zh-CN" ? "只改变队列排序" : "Queue ordering only"}</strong><ContextHelp label={locale === "zh-CN" ? "PR 队列顺序" : "PR queue order"}><p>{locale === "zh-CN"
                 ? "默认先审阅其他开发者的 PR；选择 owner-first 才会优先当前已认证审阅者自己的 PR。此配置不会发布 review、写 Todo、push 或 merge。"
-                : "The default reviews other developers' PRs first; choose owner-first only when the authenticated reviewer's own PRs should lead. This setting never posts a review, writes Todos, pushes, or merges."}</p></div>
+                : "The default reviews other developers' PRs first; choose owner-first only when the authenticated reviewer's own PRs should lead. This setting never posts a review, writes Todos, pushes, or merges."}</p></ContextHelp></div>
             </section>
           ) : null}
 

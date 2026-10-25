@@ -150,6 +150,26 @@ its original run/window, hashes and literal excerpts. Neither recovery nor
 registration starts analysis or turns an old native measurement into a current
 or countable study result.
 
+## Finding original steward delegations
+
+Open **Delegations** in the steward header, enter request text, a Goal, an Agent
+or a request ID, and choose **Search**. Search matches the original question and
+current brief purpose/context without case sensitivity, before pagination.
+**All records** includes returned and cancelled requests; **Awaiting follow-up**
+keeps the existing unfinished-work contract. Expand a result to inspect its
+current brief, linked work and original conversation. **Clear** restores the list.
+The header count remains the total awaiting follow-up, not the number of search
+matches. Search retains the existing authorized source scope and bounded scan;
+partial/unreadable records stay explicitly incomplete, and **Retry** repeats the
+same query. Browsing does not acknowledge, cancel or execute a request.
+
+在管家页头打开**委派**，输入请求内容、Goal、Agent 或请求 ID 后点**搜索**。
+查询不区分大小写，匹配原始问题及当前交办的目的/背景，先筛选再分页。
+**全部记录**包括已回传和已取消的请求；展开可回看交办、关联工作及原对话。
+**清空**恢复列表。页头数量仍表示全部待跟进请求，并非搜索命中数；读取不完整
+时保留提示，**重试**沿用当前查询。搜索沿用既有来源授权和扫描上限，不确认、
+取消或执行任何请求。
+
 ## Task-first delivery / 从用户任务开始
 
 Use the existing task/PR delivery brief, not a second checklist or approval form.
