@@ -5,7 +5,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shlex
 import socket
 import stat
@@ -14,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 
+from ..control_plane.content_digest import BARE_SHA256_PATTERN
 from ..control_plane.quota.error_codes import QuotaCommandValidationError, QuotaDecisionTransportError
 from ..control_plane.turn_driver.decision_capture import (
     validate_handoff_socket, CONTEXT_CAPTURE_READ_GUIDANCE, context_capture_read_command,
@@ -43,7 +43,7 @@ def _read_capture(value: str, digest: str) -> tuple[Path, bytes, dict[str, Any]]
     """One bounded physical-file/hash check for recovery and saved projection."""
     from ..control_plane.effect_runtime import MAX_REQUEST_BYTES
 
-    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None or not value:
+    if not isinstance(digest, str) or BARE_SHA256_PATTERN.fullmatch(digest) is None or not value:
         raise ValueError("context-read requires the original capture file and its exact SHA-256")
     path = Path(value).expanduser().absolute()
     # Parent aliases such as macOS /tmp are normal capture locations.
@@ -87,7 +87,7 @@ def read_context_capture(args: argparse.Namespace) -> dict[str, Any]:
 
             value, digest = read_codex_context_reference(context_dir,
                 goal_id=getattr(args, "goal_id", None), agent_id=getattr(args, "agent_id", None))
-        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None or not value:
+        if not isinstance(digest, str) or BARE_SHA256_PATTERN.fullmatch(digest) is None or not value:
             raise ValueError("context-read requires the original capture file and its exact SHA-256")
         if type(offset) is not int or offset < 0 or type(size) is not int or not 256 <= size <= 8192:
             raise ValueError("context-read requires a nonnegative byte offset and page-bytes between 256 and 8192")

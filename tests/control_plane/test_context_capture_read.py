@@ -45,7 +45,8 @@ def test_cli_pages_reconstruct_unicode_capture_without_goal_or_runtime(tmp_path)
     assert path.read_bytes() == raw and not runtime.exists() and not registry.exists()
 
 
-@pytest.mark.parametrize("kind", ["digest", "changed_between_pages", "missing", "symlink", "directory",
+@pytest.mark.parametrize("kind", ["digest", "digest_uppercase", "digest_envelope", "digest_newline", "digest_short",
+    "changed_between_pages", "missing", "symlink", "directory",
     "not_json", "not_object", "not_utf8", "offset", "utf8_offset", "small_page", "large_page"])
 def test_invalid_capture_never_returns_partial_context(tmp_path, kind):
     path = tmp_path / "projection.json"
@@ -54,6 +55,14 @@ def test_invalid_capture_never_returns_partial_context(tmp_path, kind):
     args = _args(path, raw)
     if kind == "digest":
         args.capture_sha256 = "0" * 64
+    elif kind in {"digest_uppercase", "digest_envelope", "digest_newline", "digest_short"}:
+        original_digest = args.capture_sha256
+        args.capture_sha256 = {
+            "digest_uppercase": original_digest.upper(),
+            "digest_envelope": "sha256:" + original_digest,
+            "digest_newline": original_digest + "\n",
+            "digest_short": original_digest[:-1],
+        }[kind]
     elif kind == "changed_between_pages":
         first = read_context_capture(args)
         assert first["ok"] and not first["eof"]
