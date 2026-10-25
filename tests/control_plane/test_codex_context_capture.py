@@ -69,7 +69,7 @@ def _delivered(request, digest):
   + [(host, surface, False, True, False) for host in ("benchmark", "code_mode")
      for surface in ("quota_packet", "turn_envelope")]
   + [("code_mode", surface, False, True, True) for surface in ("quota_packet", "turn_envelope")])
-def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, host, surface, failed_primary, resumed, adaptive, hook_loss=None, shared_root=False, checkpoint_handoff=False, handoff_socket=None, native_pragma=False, native_read_batch=2, native_history_tokens=None):
+def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, host, surface, failed_primary, resumed, adaptive, hook_loss=None, shared_root=False, checkpoint_handoff=False, handoff_socket=None, native_pragma=False, native_read_batch=2, native_history_tokens=None, compaction_hooks=False):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     binary, env, workspace, home = _native_fixture(tmp_path)
     env["CODEX_ROLLOUT_TRACE_ROOT"] = str(workspace / "traces")
@@ -96,7 +96,7 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         cli = [installed_cli, "--cli-bin", installed_cli]
     context_option = "--codex-context-root" if shared_root else "--codex-context-dir"
     native_configuration = None
-    if shared_root:
+    if shared_root or compaction_hooks:
         prepared = subprocess.run(cli + ["--format", "json", "quota", "context-config",
             "--context-delivery", "on", "--codex-app", context_option, str(lifecycle), "--goal-id", GOAL_ID, "--agent-id", AGENT_ID],
             capture_output=True, text=True, timeout=15)
@@ -132,10 +132,25 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                + f"os.execv({sys.executable!r}, [{sys.executable!r}, '-m', 'loopx.entrypoint', *sys.argv[1:]])\n"))
         wrapper.chmod(0o700)
         hook_command = shlex.join([str(wrapper), "quota", "context-hook", "--context-delivery", "on", "--codex-app", context_option, str(lifecycle)])
+    if compaction_hooks:
+        # Observe the actual native stdin and the shipped CLI's committed epoch.
+        # This wrapper supplies no events, retention ACKs or recovery output.
+        observer = home / "observe-context-hook.py"
+        observer.write_text(
+            "import json, pathlib, subprocess, sys\n"
+            "event=json.load(sys.stdin)\n"
+            f"result=subprocess.run({shlex.split(hook_command)!r}, input=json.dumps(event), capture_output=True, text=True)\n"
+            f"state=json.loads(pathlib.Path({str(lifecycle / 'session.json')!r}).read_text())\n"
+            f"with pathlib.Path({str(home / 'lifecycle-events.jsonl')!r}).open('a') as stream:\n"
+            "    stream.write(json.dumps({'event':event['hook_event_name'],'source':event.get('source'),\n"
+            "        'epoch':state['context_epoch'],'candidate':bool(state.get('candidate'))})+'\\n')\n"
+            "sys.stdout.write(result.stdout); sys.stderr.write(result.stderr); sys.exit(result.returncode)\n")
+        hook_command = shlex.join([sys.executable, str(observer)])
     handler = {"type": "command", "command": hook_command, "timeout": 10}
     if host != "benchmark":
         (home / "hooks.json").write_text(json.dumps({"hooks": {
-            event: [{"hooks": [handler]}] for event in ("SessionStart", "PreToolUse")}}))
+            event: [{"hooks": [handler]}] for event in
+            (native_configuration["hooks"] if compaction_hooks else ("SessionStart", "PreToolUse"))}}))
     errors, snapshots = [], []
     stages = {"phase": "start", "pages": [], "baseline_confirmed": False, "compact_response": None}
     wires, page_digests, read_paths = {}, {}, {}
@@ -475,6 +490,14 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 assert _app_server(binary, env, workspace, home, True, sandbox="workspace-write",
                                    resume=session_id) == session_id
     assert not errors, errors
+    if compaction_hooks:
+        events = [json.loads(line) for line in (home / "lifecycle-events.jsonl").read_text().splitlines()]
+        compact = [event for event in events if event["event"] in {"PreCompact", "PostCompact"}
+                   or event.get("source") == "compact"]
+        assert {event["event"] for event in compact} == {"PreCompact", "PostCompact", "SessionStart"}
+        assert len({event["epoch"] for event in compact}) == 1
+        assert all(not event["candidate"] for event in compact)
+        assert compact[0]["epoch"] != wires["warm"]["target"]["context_epoch"]
 
     assert stages["phase"] == "done"
     assert len(snapshots) == 2  # compaction/readback never invokes a third guard
@@ -575,3 +598,9 @@ def test_native_benchmark_context_keeps_checkpoint_handoff(tmp_path, monkeypatch
 def test_native_capture_release_preserves_delta_and_recovery(tmp_path, monkeypatch, private_handoff, surface):  # noqa: F811 -- fixture injection
     test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
         "code_mode", surface, False, True, True, handoff_socket=private_handoff)
+
+
+@pytest.mark.parametrize("surface", ["quota_packet", "turn_envelope"])
+def test_native_configured_compaction_hooks_converge_and_recover(tmp_path, monkeypatch, surface):
+    test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, "exec", surface,
+        False, False, False, compaction_hooks=True)

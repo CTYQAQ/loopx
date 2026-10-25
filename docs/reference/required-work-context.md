@@ -214,8 +214,18 @@ under machine on prepares only that private transport leaf and renders the
 existing hooks and recovery instructions. It does not install or trust hooks,
 change host configuration or enable diagnostics in a running parent. The native
 process still needs its exact reviewed hooks and `CODEX_ROLLOUT_TRACE_ROOT`
-configured before startup. Without current-input retention proof, delivery stays
-full. Generated machine-inherited hooks reload the same machine runtime, so off
+configured before startup. Generated hooks register `PreCompact` and `PostCompact`
+alongside `SessionStart` and `PreToolUse`. The shared TypeScript context owner
+invalidates the candidate before/after compaction; repeated or reordered compact
+notifications share one invalidated epoch until a new full candidate is published.
+A later notification then invalidates that candidate conservatively: native hooks
+have no stable event identity that would prove it belongs to an earlier compact.
+Foreign compact/tool events cannot replace another session's recovery. Normal
+tools and turn completion do not invalidate the candidate. These events never
+confirm complete delivery or certify that no hook was missed; current-input
+verification remains required; unknown retention keeps full delivery. See the
+[native hook contract](https://learn.chatgpt.com/docs/hooks).
+Generated machine-inherited hooks reload the same machine runtime, so off
 or removal stops their journal writes. Explicit manual on options remain explicit.
 
 Generate a persistent entrypoint with `heartbeat-prompt --bootstrap`. It retains
@@ -319,9 +329,14 @@ benchmark trial 保留既有 `context_delivery=on` 启用方式。worker 将本�
 
 机器开启后，`quota context-config --codex-app --goal-id GOAL --agent-id AGENT` 只准备
 私有传输末级目录并生成已有 hook 和恢复指令，不安装或信任 hook，也不更改宿主配置。
-原生进程启动前仍须配置已审阅的精确 hook 与 `CODEX_ROLLOUT_TRACE_ROOT`；无法证明当前
-输入保留时返回完整捕获。由机器继承生成的 hook 每次重读同一个 runtime，关闭或移除
-配置后停止 journal 写入；手工显式 on 保留其显式优先级。
+原生进程启动前仍须配置已审阅的精确 hook 与 `CODEX_ROLLOUT_TRACE_ROOT`。生成配置在
+`SessionStart`、`PreToolUse` 外注册 `PreCompact`、`PostCompact`；共享 TypeScript owner
+在压缩前后失效候选。重复或乱序的压缩通知在新全量候选生成前共用一个失效 epoch；
+新候选生成后迟到的通知会保守地再次失效，不猜测它属于哪次压缩。其他会话的压缩或
+工具事件不能替换本会话恢复引用；普通工具和轮次结束不使候选失效。这些事件不能确认
+交付完整或证明 hook 没有漏报；仍保留当前输入校验，无法证明保留时返回完整捕获。
+原生事件语义见[官方 hook 合同](https://learn.chatgpt.com/docs/hooks)。
+由机器继承生成的 hook 每次重读同一个 runtime，关闭或移除配置后停止 journal 写入；手工显式 on 保留其显式优先级。
 
 通过 `heartbeat-prompt --bootstrap` 生成持久入口，仅保留调用者显式参数（包括 off），
 不固化当前机器默认值或自动生成路径。已有 v2 loader 每次唤醒重读设置；旧展开式提示须

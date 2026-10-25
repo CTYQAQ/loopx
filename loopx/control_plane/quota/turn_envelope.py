@@ -115,6 +115,13 @@ def bind_turn_decision_capture(
     )
 
 
+def apply_context_lifecycle(
+    state: Mapping[str, Any], event: Mapping[str, Any], *, next_epoch: str,
+) -> dict[str, Any]:
+    """Adapt native facts to the shared context owner; no retention assertion."""
+    return _turn_envelope_result("context_lifecycle", state=dict(state), event=dict(event), next_epoch=next_epoch)
+
+
 def prepare_context_delivery(
     context: Mapping[str, Any], *, scope: Mapping[str, str], capture_id: str,
     baseline: Mapping[str, Any] | None = None,

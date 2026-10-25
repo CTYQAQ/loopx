@@ -15,6 +15,8 @@ from pathlib import Path
 import stat
 import uuid
 
+from ..quota.turn_envelope import apply_context_lifecycle
+
 from .decision_capture import (
     write_decision_capture, capture_context_projection, project_captured_context, CONTEXT_CAPTURE_READ_GUIDANCE,
 )
@@ -240,7 +242,7 @@ def codex_context_configuration(directory: str, *, goal_id: str, agent_id: str,
         *(["--codex-app"] if scenario == "codex_app_heartbeat" else
           ["--runtime-profile", "generic_cli"]),
         option, directory]), "timeout": 10}
-    return {"hooks": {event: [{"hooks": [handler]}] for event in ("SessionStart", "PreToolUse")},
+    return {"hooks": {event: [{"hooks": [handler]}] for event in ("SessionStart", "PreToolUse", "PreCompact", "PostCompact")},
         "developer_instructions": codex_context_recovery_instructions(directory, goal_id=goal_id,
             agent_id=agent_id, cli_argv=cli_argv, session_root=session_root)}
 
@@ -248,7 +250,8 @@ def codex_context_configuration(directory: str, *, goal_id: str, agent_id: str,
 def codex_context_hook(directory: str | None, event: dict[str, Any]) -> dict[str, Any]:
     """Consume native lifecycle events; emit only same-capture recovery refs.
 
-    Compaction/fork/restart invalidate. Same-session resume keeps only a candidate:
+    Compaction notifications converge until a new candidate is published.
+    Fork/restart invalidate. Same-session resume keeps only a candidate:
     the new active call's actual input must prove every byte before reuse.
     PreToolUse supplies the native call id; it is not retention proof. Failure to update the
     primary journal still returns the existing recovery ref when available.
@@ -266,20 +269,14 @@ def codex_context_hook(directory: str | None, event: dict[str, Any]) -> dict[str
             same = state.get("session_id") == session and state.get("cwd") == event.get("cwd")
             if same:
                 recovery = state.get("recovery")
-            else:
-                state = {"session_id": session, "cwd": event.get("cwd")}
-            resumed = name == "SessionStart" and event.get("source") == "resume" and same
-            if resumed:
-                state["active_call"] = None
-            elif name in ("SessionStart", "PreCompact"):
-                state.update(context_epoch=uuid.uuid4().hex, active_call=None)
-                state.pop("candidate", None)
-            elif name == "PreToolUse" and same and state.get("context_epoch"):
-                state["active_call"] = event.get("tool_use_id")
-            else:
+            facts = {key: event.get(key) for key in
+                ("session_id", "cwd", "hook_event_name", "source", "tool_use_id")}
+            transition = apply_context_lifecycle(state, facts, next_epoch=uuid.uuid4().hex)
+            if not transition["observed"]:
                 return {}
-            _save(root, state)
-    except (OSError, ValueError, TypeError, RecursionError):
+            if transition["state"] != state:
+                _save(root, transition["state"])
+    except (OSError, ValueError, KeyError, TypeError, RecursionError, RuntimeError):
         # A failed primary update cannot suppress a known full-read reference.
         # It also cannot manufacture a fresh active-call observation.
         pass
@@ -409,6 +406,7 @@ def project_codex_context(payload: dict[str, Any], *, directory: str | None, cap
                 if result.get("schema_version") == "context_delivery_v1" and result["mode"] == "full":
                     path = capture_directory / "presentation.json"
                     write_decision_capture(path, result)
+                    state.pop("context_reset_pending", None)
                     state["candidate"] = dict(path=str(path), capture_file=recovery["path"],
                         capture_sha256=recovery["sha256"])
                     _save(root, state)

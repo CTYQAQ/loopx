@@ -2,7 +2,7 @@ import { EffectiveAction } from "./effective_action.generated.ts";
 import { createHash } from "node:crypto";
 import { ENVELOPED_SHA256_PATTERN } from "../content_digest.ts";
 import {omitUnboundExploreResultWriteback, referenceExploreResultWriteback} from "../capabilities/explore_turn_context.ts";
-import {prepareContextDelivery, restoreContextDelivery} from "./context_delivery.ts";
+import {applyContextLifecycle, prepareContextDelivery, restoreContextDelivery} from "./context_delivery.ts";
 
 import {
   interpretQuotaShouldRunPacket,
@@ -1275,6 +1275,7 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
       replan_action_packet: replanActionPacket(payload)};
   }
   if (operation === "build") return buildTurnEnvelope(request);
+  if (operation === "context_lifecycle") return applyContextLifecycle(request);
   if (operation === "context_delivery") return prepareContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);
   if (operation === "context_recovery") return restoreContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);
   if (operation === "bind_capture") return bindTurnDecisionCapture(request);

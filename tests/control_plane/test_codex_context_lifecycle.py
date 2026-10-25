@@ -64,7 +64,7 @@ def test_native_configuration_cli_is_read_only_and_usable_without_registry(tmp_p
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     native = payload["native_config"]
-    assert set(native["hooks"]) == {"SessionStart", "PreToolUse"}
+    assert set(native["hooks"]) == {"SessionStart", "PreToolUse", "PreCompact", "PostCompact"}
     assert "--codex-context-root" in native["developer_instructions"]
     assert "context-read" in native["developer_instructions"]
     assert "hooks.state" not in native and list(tmp_path.iterdir()) == []
@@ -522,3 +522,66 @@ def test_benchmark_activation_uses_existing_explicit_worker_declaration(monkeypa
     result = native_context_activation(args)
     assert result["enabled"] is expected
     assert result["scenario"] == ("codex_benchmark_heartbeat" if expected else None)
+
+
+@pytest.mark.parametrize("events", [
+    ["PreCompact", "PostCompact", "SessionStart"],
+    ["PostCompact", "PreCompact", "SessionStart", "PostCompact"],
+    ["PreCompact", "PreCompact", "SessionStart", "SessionStart"],
+])
+def test_compaction_notifications_share_one_invalidated_epoch(tmp_path, monkeypatch, events):
+    event = setup(tmp_path, monkeypatch)
+    _, original = project(tmp_path)
+    before = context._state(tmp_path)
+    invalidated = None
+    for name in events:
+        result = context.codex_context_hook(str(tmp_path), {**event,
+            "hook_event_name": name, "source": "compact", "trigger": "auto", "turn_id": "turn"})
+        state = context._state(tmp_path)
+        invalidated = invalidated or state["context_epoch"]
+        assert state["context_epoch"] == invalidated != before["context_epoch"]
+        assert "candidate" not in state and state["active_call"] is None
+        assert state["recovery"] == before["recovery"]
+        if name == "SessionStart":
+            assert original["recovery"]["sha256"] in result["hookSpecificOutput"]["additionalContext"]
+        else:
+            assert result == {}  # Compact hooks do not deliver additional context.
+    _, replacement = project(tmp_path, "two")
+    assert replacement["mode"] == "full"
+    assert replacement["target"]["context_epoch"] == invalidated
+    # A later compact must invalidate a newly published candidate, including
+    # when the preceding attempt was cancelled before PostCompact.
+    context.codex_context_hook(str(tmp_path), {**event, "hook_event_name": "PreCompact", "trigger": "auto"})
+    assert context._state(tmp_path)["context_epoch"] != invalidated
+    assert "candidate" not in context._state(tmp_path)
+
+
+@pytest.mark.parametrize("name", ["PreCompact", "PostCompact", "PreToolUse"])
+def test_foreign_lifecycle_event_cannot_replace_same_session_recovery(tmp_path, monkeypatch, name):
+    event = setup(tmp_path, monkeypatch)
+    project(tmp_path)
+    before = (tmp_path / "session.json").read_bytes()
+    assert context.codex_context_hook(str(tmp_path), {**event,
+        "session_id": "other", "hook_event_name": name, "tool_use_id": "other-call"}) == {}
+    assert (tmp_path / "session.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("name", ["PostToolUse", "Stop", "UserPromptSubmit"])
+def test_ordinary_tool_and_turn_notifications_preserve_candidate(tmp_path, monkeypatch, name):
+    event = setup(tmp_path, monkeypatch)
+    project(tmp_path)
+    before = (tmp_path / "session.json").read_bytes()
+    assert context.codex_context_hook(str(tmp_path), {**event, "hook_event_name": name}) == {}
+    assert (tmp_path / "session.json").read_bytes() == before
+
+
+def test_lifecycle_owner_failure_preserves_original_recovery(tmp_path, monkeypatch):
+    event = setup(tmp_path, monkeypatch)
+    _, first = project(tmp_path)
+    before = (tmp_path / "session.json").read_bytes()
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("synthetic typed owner unavailable")
+    monkeypatch.setattr(context, "apply_context_lifecycle", unavailable)
+    result = context.codex_context_hook(str(tmp_path), {**event, "source": "compact"})
+    assert first["recovery"]["sha256"] in result["hookSpecificOutput"]["additionalContext"]
+    assert (tmp_path / "session.json").read_bytes() == before

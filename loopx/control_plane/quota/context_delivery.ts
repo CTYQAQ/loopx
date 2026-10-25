@@ -425,3 +425,38 @@ export function restoreContextDelivery(request: JsonObject, legacyQuotaFields: r
     return {...clone(delivery), context: result};
   } catch { return fallback(); }
 }
+
+
+/** Native lifecycle facts can invalidate a candidate, never confirm delivery.
+ * Keep this transition beside the shared binding/epoch rules. The Python
+ * adapter owns locking and private IO; no event grants work authority. */
+export function applyContextLifecycle(request: JsonObject): JsonObject {
+  const state = jsonObject(request.state) ?? {}, event = requireJsonObject(request.event, "native context event");
+  const session = event.session_id, cwd = event.cwd, name = event.hook_event_name;
+  const ignored = (): JsonObject => ({observed: false, state: clone(state)});
+  if (typeof session !== "string" || !session || typeof cwd !== "string" || !cwd) return ignored();
+  const same = state.session_id === session && state.cwd === cwd;
+  // Only SessionStart establishes identity. A late compact/tool event from
+  // another session must not replace this session's current recovery journal.
+  if (name !== "SessionStart" && !same) return ignored();
+  const next: JsonObject = same ? clone(state) : {session_id: session, cwd};
+  if (name === "SessionStart" && event.source === "resume" && same) {
+    next.active_call = null; // candidate only; current input must still prove it
+  } else if (name === "PreCompact" || name === "PostCompact" || name === "SessionStart") {
+    const compact = name !== "SessionStart" || event.source === "compact";
+    // Pre/Post/SessionStart(compact) all describe invalidation. Until a new
+    // candidate is published, duplicates and reordered notifications converge.
+    // There is no native event id: after new delivery, a late event conservatively
+    // invalidates again rather than guessing which compact it belongs to.
+    if (!compact || next.context_reset_pending !== true
+        || typeof next.context_epoch !== "string" || !next.context_epoch) {
+      next.context_epoch = requireNonEmptyString(request.next_epoch, "next native context epoch");
+    }
+    next.active_call = null;
+    delete next.candidate;
+    next.context_reset_pending = compact;
+  } else if (name === "PreToolUse" && typeof next.context_epoch === "string" && next.context_epoch) {
+    next.active_call = typeof event.tool_use_id === "string" && event.tool_use_id ? event.tool_use_id : null;
+  } else return ignored();
+  return {observed: true, state: next};
+}
