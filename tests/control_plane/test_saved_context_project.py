@@ -45,7 +45,7 @@ def test_saved_projection_checks_original_before_any_publication(tmp_path, failu
 
 
 @pytest.mark.parametrize("root_kind", ["unsafe", "symlink", "missing"])
-def test_optional_cache_failure_returns_original_full_reference(tmp_path, root_kind):
+def test_enabled_cache_preparation_failure_returns_error_with_original_reference(tmp_path, monkeypatch, root_kind):
     from loopx.cli import build_parser
     from loopx.cli_commands.quota_capture import project_saved_context_capture
 
@@ -54,6 +54,13 @@ def test_optional_cache_failure_returns_original_full_reference(tmp_path, root_k
         "heartbeat_receipt": {"turn_instance_id": "saved-turn"}}).encode()
     path.write_bytes(raw)
     context.mkdir(mode=0o700)
+    stale = context / "session.json"
+    stale.write_text(json.dumps({"session_id": "native-session", "cwd": str(tmp_path),
+        "recovery": {"goal_id": "saved-goal", "agent_id": "saved-agent",
+            "path": str(tmp_path / "prior.json"), "sha256": "a" * 64}}))
+    stale_bytes = stale.read_bytes()
+    monkeypatch.setenv("CODEX_THREAD_ID", "native-session")
+    monkeypatch.chdir(tmp_path)
     if root_kind == "unsafe":
         root.mkdir(mode=0o755)
         root.chmod(0o755)
@@ -65,9 +72,99 @@ def test_optional_cache_failure_returns_original_full_reference(tmp_path, root_k
         "--agent-id", "saved-agent", "--turn-instance-id", "saved-turn",
         "--decision-output-root", str(root), "--context-delivery", "on", "--codex-app", "--codex-context-dir", str(context)])
     result = project_saved_context_capture(args)
+    assert result["ok"] is False and result["error_code"] == "quota_decision_transport_failed"
+    assert result["recovery"]["path"] == str(path) and result["recovery"]["sha256"] == digest
+    assert "prior.json" not in json.dumps(result)
+    assert path.read_bytes() == raw and stale.read_bytes() == stale_bytes
+
+
+def test_saved_projection_wire_failure_keeps_committed_current_recovery(tmp_path, monkeypatch):
+    from loopx.cli import build_parser
+    from loopx.cli_commands.quota_capture import project_saved_context_capture
+    from loopx.control_plane.turn_driver import codex_context, decision_capture
+
+    path, root, context = tmp_path / "original.json", tmp_path / "cache", tmp_path / "native"
+    original = {"ok": True, "goal_id": "saved-goal", "agent_identity": {"agent_id": "saved-agent"},
+        "heartbeat_receipt": {"turn_instance_id": "saved-turn"}, "requirement": "Current complete requirements."}
+    raw = json.dumps(original).encode()
+    path.write_bytes(raw)
+    root.mkdir(mode=0o700)
+    context.mkdir(mode=0o700)
+    monkeypatch.setenv("CODEX_THREAD_ID", "native-session")
+    monkeypatch.chdir(tmp_path)
+    codex_context.codex_context_hook(str(context), {"hook_event_name": "SessionStart", "source": "startup",
+        "session_id": "native-session", "cwd": str(tmp_path)})
+    write_capture = decision_capture.write_decision_capture
+
+    def fail_optional_wire(path, payload, **kwargs):
+        if path.name == "delivery.json":
+            raise OSError("optional wire unavailable")
+        return write_capture(path, payload, **kwargs)
+
+    monkeypatch.setattr(decision_capture, "write_decision_capture", fail_optional_wire)
+    digest = hashlib.sha256(raw).hexdigest()
+    args = build_parser().parse_args(["--format", "json", "quota", "context-project",
+        "--capture-file", str(path), "--capture-sha256", digest, "--goal-id", "saved-goal",
+        "--agent-id", "saved-agent", "--turn-instance-id", "saved-turn", "--context-delivery", "on",
+        "--codex-app", "--codex-context-dir", str(context), "--decision-output-root", str(root)])
+    result = project_saved_context_capture(args)
     assert result["ok"] and result["mode"] == "full"
     assert result["path"] == str(path) and result["sha256"] == digest
-    assert path.read_bytes() == raw and list(context.iterdir()) == []
+    recovered_path, recovered_digest = codex_context.read_codex_context_reference(str(context),
+        goal_id="saved-goal", agent_id="saved-agent")
+    recovered = Path(recovered_path).read_bytes()
+    assert hashlib.sha256(recovered).hexdigest() == recovered_digest
+    assert json.loads(recovered) == original and path.read_bytes() == raw
+
+
+def test_saved_projection_recovery_failure_returns_typed_error_and_current_reference(
+    tmp_path, monkeypatch, capsys,
+):
+    from loopx.cli import main
+    from loopx.control_plane.quota.error_codes import QuotaDecisionTransportError
+    from loopx.control_plane.turn_driver import codex_context
+
+    original = {"ok": True, "goal_id": "saved-goal", "agent_identity": {"agent_id": "saved-agent"},
+        "heartbeat_receipt": {"turn_instance_id": "saved-turn", "status": "committed"},
+        "requirement": "Use the current captured decision, never the prior session reference."}
+    raw = json.dumps(original).encode()
+    path, root, context = tmp_path / "original.json", tmp_path / "cache", tmp_path / "native"
+    path.write_bytes(raw)
+    root.mkdir(mode=0o700)
+    context.mkdir(mode=0o700)
+    stale = context / "session.json"
+    stale.write_text(json.dumps({"recovery": {"path": "prior-capture.json"}}))
+    stale_bytes = stale.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+
+    def refuse_recovery(payload, **kwargs):
+        assert payload == original
+        raise QuotaDecisionTransportError(
+            'Current context recovery could not be published or safely invalidated. '
+            'Read the saved original decision/receipt; do not rerun admission.'
+        )
+
+    monkeypatch.setattr(codex_context, "project_codex_context", refuse_recovery)
+    registry, runtime = tmp_path / "absent-registry.json", tmp_path / "absent-runtime"
+    code = main(["--registry", str(registry), "--runtime-root", str(runtime), "--format", "json",
+        "quota", "context-project", "--capture-file", str(path), "--capture-sha256", digest,
+        "--goal-id", "saved-goal", "--agent-id", "saved-agent", "--turn-instance-id", "saved-turn",
+        "--decision-output-root", str(root), "--context-delivery", "on", "--codex-app",
+        "--codex-context-dir", str(context)])
+    result = json.loads(capsys.readouterr().out)
+    assert code == 1 and result["ok"] is False
+    assert result["error_code"] == "quota_decision_transport_failed"
+    assert result["heartbeat_receipt"] == original["heartbeat_receipt"]
+    assert result["capture_sha256"] == digest
+    assert result["recovery"]["path"] == str(path) and result["recovery"]["sha256"] == digest
+    assert "prior-capture" not in json.dumps(result)
+    assert not list(root.glob("*/delivery.json"))
+    assert path.read_bytes() == raw and stale.read_bytes() == stale_bytes
+    assert not registry.exists() and not runtime.exists()
+    code, recovered = _run_cli(registry, runtime, "quota", "context-read",
+        "--capture-file", result["recovery"]["path"], "--capture-sha256", result["recovery"]["sha256"])
+    assert code == 0 and recovered["eof"] and recovered["content"].encode() == raw
+    assert not registry.exists() and not runtime.exists()
 
 
 def test_preflight_instruction_pins_both_projection_and_full_fallback(tmp_path):

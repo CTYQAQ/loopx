@@ -571,6 +571,65 @@ def test_refused_selection_handoff_is_typed_and_keeps_the_committed_capture(tmp_
     assert _heartbeat_receipt_count(runtime, TURN_ID) >= 1
 
 
+@pytest.mark.parametrize('provider', ['file', 'sqlite'])
+@pytest.mark.parametrize('turn_envelope', [False, True])
+def test_native_recovery_failure_keeps_original_receipt_and_capture(
+    tmp_path, monkeypatch, capsys, provider, turn_envelope,
+):
+    from loopx.cli import main
+    from loopx.control_plane.quota.error_codes import QuotaDecisionTransportError
+    from loopx.control_plane.turn_driver import codex_context
+    from tests.control_plane.canonical_authority_fixture import isolate_sqlite_runtime
+    from tests.control_plane.test_quota_settlement_cli import _spend_run_count
+
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    project, runtime, registry = _write_fixture(tmp_path)
+    state = _configure_read_only_todo(project)
+    initialize_canonical_source_fixture(runtime, GOAL_ID, state_path=state, provider=provider)
+    original_state = state.read_bytes()
+    context, captures = tmp_path / 'native', tmp_path / 'captures'
+    context.mkdir(mode=0o700)
+    captures.mkdir(mode=0o700)
+    attempts = []
+
+    def refuse_recovery(payload, **kwargs):
+        saved = kwargs['capture_directory'] / 'decision.json'
+        attempts.append(saved.read_bytes())
+        if turn_envelope:
+            assert payload['schema_version'] == 'loopx_turn_envelope_v0'
+            assert 'heartbeat_receipt' not in payload
+        raise QuotaDecisionTransportError(
+            'Current context recovery could not be published or safely invalidated. '
+            'Read the saved original decision/receipt; do not rerun admission.'
+        )
+
+    monkeypatch.setattr(codex_context, 'project_codex_context', refuse_recovery)
+    args = ['--registry', str(registry), '--runtime-root', str(runtime), '--format', 'json',
+        'quota', 'should-run', '--goal-id', GOAL_ID, '--agent-id', AGENT_ID,
+        '--todo-id', TODO_ID, '--turn-instance-id', TURN_ID, '--codex-app',
+        '--available-capability', 'shell', '--available-capability', 'filesystem_read',
+        '--context-delivery', 'on', '--codex-context-dir', str(context),
+        '--decision-output-root', str(captures)]
+    if turn_envelope:
+        args.append('--turn-envelope')
+    code = main(args)
+    failure = json.loads(capsys.readouterr().out)
+    assert code == 1 and failure['ok'] is False
+    assert failure['error_code'] == 'quota_decision_transport_failed'
+    assert failure['status'] == 'decision_transport_failed'
+    saved = list(captures.glob('*/decision.json'))
+    assert len(saved) == len(attempts) == 1
+    assert saved[0].read_bytes() == attempts[0]
+    original = json.loads(attempts[0])
+    assert original['ok'] is True
+    assert failure['heartbeat_receipt'] == original['heartbeat_receipt']
+    assert failure['rollout_event'] == original['rollout_event']
+    assert failure['captured_decision'] == {'path': str(saved[0])}
+    assert _heartbeat_receipt_count(runtime, TURN_ID) == 1
+    assert _spend_run_count(runtime) == 0
+    assert state.read_bytes() == original_state
+
+
 def test_ended_wake_handoff_endpoint_is_rejected_with_current_wake_remedy(tmp_path):
     from loopx.control_plane.turn_driver.decision_capture import validate_handoff_socket
 

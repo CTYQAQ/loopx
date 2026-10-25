@@ -15,7 +15,9 @@ from pathlib import Path
 import stat
 import uuid
 
-from .decision_capture import write_decision_capture, project_captured_context, CONTEXT_CAPTURE_READ_GUIDANCE
+from .decision_capture import (
+    write_decision_capture, capture_context_projection, project_captured_context, CONTEXT_CAPTURE_READ_GUIDANCE,
+)
 
 # Native adapter activation reuses scheduler-owned host declarations. These
 # settings are presentation opt-ins, never host authentication or authority.
@@ -302,56 +304,93 @@ def _trace_bundle(session: str, tool_id: str) -> str | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _discard_recovery(root: Path) -> None:
+    """Invalidate only this adapter's journal while its private root is locked."""
+    path = root / "session.json"
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if info.st_uid != os.getuid() or not (stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+        raise ValueError("context recovery journal is not an owned file")
+    # unlink never follows a rejected symlink or deletes its target.
+    path.unlink()
+
+
+def _native_context_request(state: dict[str, Any], scope: dict[str, Any]) -> dict[str, Any]:
+    """A saved candidate is reusable only with independent current-input proof."""
+    from .codex_input_trace import codex_context_in_active_input
+
+    request: dict[str, Any] = {"scope": scope}
+    candidate = state.get("candidate")
+    if isinstance(candidate, dict) and isinstance(state.get("active_call"), str):
+        try:
+            baseline = _read(Path(candidate["path"]))
+            trace = _trace_bundle(scope["session_id"], state["active_call"])
+            if trace:
+                observation = dict(trace_bundle=trace, tool_call_id=state["active_call"],
+                    capture_file=candidate["capture_file"], capture_sha256=candidate["capture_sha256"])
+                if codex_context_in_active_input(observation, baseline=baseline, session_id=scope["session_id"]):
+                    request.update(baseline=baseline, retained={"complete": True, "target": baseline["target"]},
+                        native_input=observation)
+        except (OSError, ValueError, KeyError, TypeError, RecursionError):
+            pass  # Missing candidate affects reuse, never the current recovery reference.
+    return request
+
+
 def project_codex_context(payload: dict[str, Any], *, directory: str | None, capture_directory: Path,
                           goal_id: str, agent_id: str, surface: str, capture_id: str) -> dict[str, Any]:
-    """Existing CLI consumer, sharing the rendezvous projector and recovery IO.
+    """Commit current recovery before optional projection or candidate updates.
 
-    Serialization prevents an invalidation from moving the epoch during
-    preparation. The current capture reference is durable before publication,
-    so a later compact event recovers those exact bytes. Full candidates are
-    never advanced from file existence, hook success or a saved delivery flag.
+    Serialization prevents invalidation from moving the epoch during preparation.
+    Full fallback must recover this capture or refuse lookup, never an older one.
+    Candidates still need independent current-input proof before reuse.
     """
-    from .codex_input_trace import codex_context_in_active_input
+    from ..quota.error_codes import QuotaDecisionTransportError
 
     if directory is None:
         return payload
     try:
         with _locked(directory) as root:
-            state = _state(root)
-            session, epoch = state.get("session_id"), state.get("context_epoch")
-            if (not isinstance(session, str) or not isinstance(epoch, str)
-                    or not session or not epoch or session != os.environ.get("CODEX_THREAD_ID")
-                    or Path(state.get("cwd", "")).resolve() != Path.cwd().resolve()):
-                return payload
-            scope = dict(goal_id=goal_id, agent_id=agent_id, session_id=session, context_epoch=epoch)
-            request: dict[str, Any] = {"scope": scope}
-            candidate = state.get("candidate")
-            if isinstance(candidate, dict) and isinstance(state.get("active_call"), str):
-                try:
-                    baseline = _read(Path(candidate["path"]))
-                    trace = _trace_bundle(session, state["active_call"])
-                    if trace:
-                        observation = dict(trace_bundle=trace, tool_call_id=state["active_call"],
-                            capture_file=candidate["capture_file"], capture_sha256=candidate["capture_sha256"])
-                        if codex_context_in_active_input(observation, baseline=baseline, session_id=session):
-                            request.update(baseline=baseline, retained={"complete": True, "target": baseline["target"]},
-                                native_input=observation)
-                except (OSError, ValueError, KeyError, TypeError, RecursionError):
-                    pass  # Missing candidate: publish a new full capture, never an old recovery ref.
-            result = project_captured_context(payload, directory=capture_directory, request=request,
-                goal_id=goal_id, agent_id=agent_id, surface=surface, capture_id=capture_id)
-            if result.get("schema_version") != "context_delivery_v1":
+            recovery_committed = False
+            try:
+                state = _state(root)
+                session, epoch = state.get("session_id"), state.get("context_epoch")
+                native_session = os.environ.get("CODEX_THREAD_ID")
+                if (not isinstance(session, str) or not session
+                        or (native_session and session != native_session)):
+                    return payload  # Do not replace a different native session's recovery.
+                if (not native_session or not isinstance(state.get("cwd"), str)
+                        or Path(state["cwd"]).resolve() != Path.cwd().resolve()):
+                    # A later tool can restore cwd/identity and make an old
+                    # selector eligible again, so invalidate before full fallback.
+                    raise ValueError("context recovery requires the same native session and workspace")
+                if not isinstance(epoch, str) or not epoch:
+                    raise ValueError("context recovery requires a native context epoch")
+                recovery = capture_context_projection(payload, directory=capture_directory)
+                state["recovery"] = {**{key: recovery[key] for key in ("path", "sha256", "command")},
+                                     "goal_id": goal_id, "agent_id": agent_id}
+                _save(root, state)
+                recovery_committed = True
+
+                scope = dict(goal_id=goal_id, agent_id=agent_id, session_id=session, context_epoch=epoch)
+                result = project_captured_context(payload, directory=capture_directory,
+                    request=_native_context_request(state, scope), captured_recovery=recovery,
+                    goal_id=goal_id, agent_id=agent_id, surface=surface, capture_id=capture_id)
+                if result.get("schema_version") == "context_delivery_v1" and result["mode"] == "full":
+                    path = capture_directory / "presentation.json"
+                    write_decision_capture(path, result)
+                    state["candidate"] = dict(path=str(path), capture_file=recovery["path"],
+                        capture_sha256=recovery["sha256"])
+                    _save(root, state)
                 return result
-            recovery = result["recovery"]
-            state["recovery"] = {**{key: recovery[key] for key in ("path", "sha256", "command")},
-                                 "goal_id": goal_id, "agent_id": agent_id}
-            if result["mode"] == "full":
-                path = capture_directory / "presentation.json"
-                write_decision_capture(path, result)
-                state["candidate"] = dict(path=str(path), capture_file=recovery["path"],
-                    capture_sha256=recovery["sha256"])
-            _save(root, state)
-            return result
-    except (OSError, ValueError, KeyError, TypeError, RecursionError):
-        # A broken optional adapter preserves the already admitted full result.
-        return payload
+            except (OSError, ValueError, KeyError, TypeError, RecursionError):
+                if not recovery_committed:
+                    _discard_recovery(root)
+                return payload
+    except (OSError, ValueError, KeyError, TypeError, RecursionError) as exc:
+        # No safe fallback if the old selector cannot be invalidated under lock.
+        raise QuotaDecisionTransportError(
+            "Current context recovery could not be published or safely invalidated. "
+            "Read the saved original decision and receipt; do not rerun admission."
+        ) from exc

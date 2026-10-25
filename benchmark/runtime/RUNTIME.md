@@ -114,8 +114,12 @@ native tool presents the saved decision using the same current-input observer;
 no guard, checkpoint, admission or debit is repeated. Cold delivery supplies the
 full body and its target; qualified warm delivery supplies the exact delta.
 The small response points to bounded reads and an original full-read fallback.
-No native setup, invalid cache or uncertain retention keeps full input. A bad
-source hash/scope is refused before publication. This does not renew decision
+Uncertain retention keeps full input. If enabled native preparation cannot
+establish safe recovery, the command returns a typed transport failure with the
+original full-read reference and receipt; use that explicit reference without
+rerunning admission. An optional cache write after recovery is established can
+still fall back to the same full input. A bad source hash/scope is refused before
+publication. This does not renew decision
 freshness or establish autonomous solver benefit. Default-off preloading is
 unchanged. Include the projection command, descriptor, recovery and page reads
 in subsequent total-cost comparisons.

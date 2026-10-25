@@ -492,6 +492,7 @@ def _emit_quota_result(
         agent = payload.get("agent_identity")
         decision_identity = (str(payload.get("goal_id") or ""),
             str(agent.get("agent_id") or "") if isinstance(agent, Mapping) else str(args.agent_id or ""))
+    captured_payload = payload
     payload = _project_quota_cli_payload(
         payload, args, detail_sections,
         context.scheduler_context if context is not None else None,
@@ -530,8 +531,19 @@ def _emit_quota_result(
                 capture_directory=capture_directory, goal_id=decision_identity[0], agent_id=decision_identity[1],
                 surface="turn_envelope" if getattr(args, "turn_envelope", False) else "quota_packet",
                 capture_id=capture_id)
-        except (OSError, ValueError):
-            pass  # Lost optional capture: keep the admitted full payload, never rerun its guard.
+        except (QuotaDecisionTransportError, OSError, ValueError) as exc:
+            if not isinstance(exc, QuotaDecisionTransportError):
+                exc = QuotaDecisionTransportError(
+                    "Current context recovery could not be prepared. Read the saved "
+                    "original decision and receipt; do not rerun admission."
+                )
+            # The original receipt survives even when the selected presentation
+            # is a Turn envelope without the quota packet's receipt fields.
+            failure = quota_decision_transport_failure_payload(
+                args, captured_payload, exc, capture_directory=capture_directory,
+            )
+            print_payload(failure, args.format, _quota_renderer(args))
+            return 1
     print_payload(payload, args.format, _quota_renderer(args))
     return 0 if succeeded else 1
 

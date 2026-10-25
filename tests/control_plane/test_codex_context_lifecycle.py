@@ -186,16 +186,160 @@ def test_primary_write_failure_preserves_small_recovery_and_does_not_create_ack(
     result = context.codex_context_hook(str(tmp_path), {**event, "source": "compact"})
     assert wire["recovery"]["sha256"] in result["hookSpecificOutput"]["additionalContext"]
     assert (tmp_path / "session.json").read_bytes() == before
-    # A primary store failure during publication returns the whole admitted
-    # payload. It cannot leak an untracked candidate delta.
-    payload, full = project(tmp_path, "two")
-    assert full == payload
 
 
-@pytest.mark.parametrize("damage", ["missing", "corrupt", "symlink", "public", "other_workspace"])
-def test_invalid_journal_falls_back_to_original_full(tmp_path, monkeypatch, damage):
+def _assert_recovery_after_fallback(root, event, source, capture):
+    import argparse
+    import hashlib
+    from loopx.cli_commands.quota_capture import read_context_capture
+
+    hook = context.codex_context_hook(str(root), {**event, "source": source})
+    args = argparse.Namespace(codex_context_dir=str(root), goal_id="fixture", agent_id="agent",
+                              offset=0, page_bytes=8192)
+    page = read_context_capture(args)
+    if capture is None:
+        assert hook == {} and page["ok"] is False and "content" not in page
+        return
+    raw = capture.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    assert page["ok"] is True and page["sha256"] == digest
+    assert page["content"].encode() == raw[:len(page["content"].encode())]
+    assert digest in hook["hookSpecificOutput"]["additionalContext"]
+
+
+@pytest.mark.parametrize("source", ["compact", "resume"])
+def test_oversized_warm_request_keeps_current_full_recovery(tmp_path, monkeypatch, source):
+    from test_codex_input_retention import fixture
+    from loopx.control_plane.effect_runtime import EffectRuntimeRejected, MAX_REQUEST_BYTES
+    from loopx.control_plane.quota.turn_envelope import prepare_context_delivery
+    from loopx.control_plane.turn_driver.codex_input_trace import codex_context_in_active_input
+
+    event = setup(tmp_path, monkeypatch)
+    before = {"ok": True, "goal_id": "fixture", "stop": "Stop before publication.",
+              "plan_summary": {"requirements": "x" * (MAX_REQUEST_BYTES // 2 + 8192)}}
+    after = {**before, "stop": "Stop before publication or deployment."}
+    _, first = project(tmp_path, payload=before)
+    original = Path(first["recovery"]["path"]).read_bytes()
+    assert len(original) < MAX_REQUEST_BYTES
+    traces = tmp_path / "traces"
+    traces.mkdir()
+    observation, _, _, _ = fixture(traces)
+    bundle = Path(observation["trace_bundle"])
+    # Actual production verifier consumes these synthetic native trace files;
+    # neither the projector nor the RPC size limit is mocked.
+    request = bundle / "payloads/input.json"
+    request.write_text(json.dumps({"input": [{"type": "function_call_output", "output": json.dumps(first)}]}))
+    assert request.stat().st_size < MAX_REQUEST_BYTES
+    current_bundle = traces / "trace-live"
+    bundle.rename(current_bundle)
+    observation.update(trace_bundle=str(current_bundle), capture_file=first["recovery"]["path"],
+                       capture_sha256=first["recovery"]["sha256"])
+    assert codex_context_in_active_input(observation, baseline=first, session_id="session")
+    monkeypatch.setenv("CODEX_ROLLOUT_TRACE_ROOT", str(traces))
+    context.codex_context_hook(str(tmp_path), {**event, "hook_event_name": "PreToolUse", "tool_use_id": "guard"})
+    scope = {key: first["target"][key] for key in ("goal_id", "agent_id", "session_id", "context_epoch")}
+    with pytest.raises(EffectRuntimeRejected) as rejected:
+        prepare_context_delivery(after, scope=scope, capture_id="two", surface="quota_packet",
+                                 baseline=first, retained={"complete": True, "target": first["target"]})
+    assert rejected.value.diagnostic_code == "request_too_large"
+    _, delivered = project(tmp_path, "two", payload=after)
+    assert delivered.get("context", delivered) == after
+    current_capture = tmp_path / "two/projection.json"
+    assert current_capture.stat().st_size < MAX_REQUEST_BYTES
+    assert json.loads(current_capture.read_bytes()) == after
+    _assert_recovery_after_fallback(tmp_path, event, source, current_capture)
+    assert Path(first["recovery"]["path"]).read_bytes() == original
+
+
+@pytest.mark.parametrize("source", ["compact", "resume"])
+@pytest.mark.parametrize("failed_write", ["recovery", "candidate"])
+def test_journal_failure_never_recovers_previous_capture(tmp_path, monkeypatch, source, failed_write):
+    event = setup(tmp_path, monkeypatch)
+    _, first = project(tmp_path)
+    original = Path(first["recovery"]["path"]).read_bytes()
+    current_capture = tmp_path / "two/projection.json"
+    original_save, failures = context._save, []
+
+    def fail_current_write(root, state):
+        current_recovery = state.get("recovery", {}).get("sha256") not in (None, first["recovery"]["sha256"])
+        current_candidate = state.get("candidate", {}).get("capture_file") == str(current_capture)
+        if current_recovery and (failed_write == "recovery" or current_candidate):
+            failures.append(failed_write)
+            raise OSError("synthetic current publication unavailable")
+        original_save(root, state)
+
+    with monkeypatch.context() as publication:
+        publication.setattr(context, "_save", fail_current_write)
+        payload, delivered = project(tmp_path, "two", payload={"ok": True, "goal_id": "fixture",
+            "requirements": "Preserve the changed source and stop before deployment."})
+    assert failures and delivered.get("context", delivered) == payload
+    assert json.loads(current_capture.read_bytes()) == payload
+    _assert_recovery_after_fallback(tmp_path, event, source,
+                                   current_capture if failed_write == "candidate" else None)
+    assert Path(first["recovery"]["path"]).read_bytes() == original
+
+
+@pytest.mark.parametrize("source", ["compact", "resume"])
+@pytest.mark.parametrize("caller", ["subdirectory", "missing_session", "foreign_session"])
+def test_fallback_identity_restoration_keeps_recovery_scoped(tmp_path, monkeypatch, source, caller):
+    event = setup(tmp_path, monkeypatch)
+    _, first = project(tmp_path)
+    original_capture = Path(first["recovery"]["path"])
+    original = original_capture.read_bytes()
+    context.codex_context_hook(str(tmp_path), {**event, "hook_event_name": "PreToolUse", "tool_use_id": "guard"})
+    with monkeypatch.context() as native_tool:
+        if caller == "subdirectory":
+            subdirectory = tmp_path / "subdirectory"
+            subdirectory.mkdir()
+            native_tool.chdir(subdirectory)
+        elif caller == "missing_session":
+            native_tool.delenv("CODEX_THREAD_ID")
+        else:
+            native_tool.setenv("CODEX_THREAD_ID", "foreign-session")
+        payload, delivered = project(tmp_path, "two", payload={"ok": True, "goal_id": "fixture",
+            "requirements": "Changed source; stop before deployment."})
+    assert delivered == payload
+    _assert_recovery_after_fallback(tmp_path, event, source,
+        original_capture if caller == "foreign_session" else None)
+    assert original_capture.read_bytes() == original
+
+
+@pytest.mark.parametrize("failure", ["invalidation", "lock"])
+def test_unavailable_recovery_boundary_refuses_current_publication(tmp_path, monkeypatch, failure):
+    from loopx.control_plane.quota.error_codes import QuotaDecisionTransportError
+
     setup(tmp_path, monkeypatch)
+    _, first = project(tmp_path)
+    journal = tmp_path / "session.json"
+    original = journal.read_bytes()
+    unlink = Path.unlink
+
+    def unavailable(*args, **kwargs):
+        raise OSError("synthetic journal publication unavailable")
+
+    def cannot_invalidate(path, *args, **kwargs):
+        if path == journal:
+            raise OSError("synthetic journal invalidation unavailable")
+        return unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as publication:
+        publication.setattr(context, "_save", unavailable)
+        publication.setattr(Path, "unlink", cannot_invalidate)
+        if failure == "lock":
+            publication.setattr(context, "_locked", unavailable)
+        with pytest.raises(QuotaDecisionTransportError):
+            project(tmp_path, "two", payload={"ok": True, "goal_id": "fixture", "requirements": "Current source."})
+    assert journal.read_bytes() == original
+    assert json.loads(Path(first["recovery"]["path"]).read_bytes())["requirements"] == "Preserve final stop condition."
+
+
+@pytest.mark.parametrize("damage", ["missing", "corrupt", "symlink", "public", "other_workspace",
+    "missing_epoch", "invalid_epoch", "read_failure", "projection_failure"])
+def test_invalid_journal_falls_back_to_original_full(tmp_path, monkeypatch, damage):
+    event = setup(tmp_path, monkeypatch)
+    project(tmp_path)
     path = tmp_path / "session.json"
+    before = path.read_bytes()
     if damage == "missing":
         path.unlink()
     elif damage == "corrupt":
@@ -210,8 +354,22 @@ def test_invalid_journal_falls_back_to_original_full(tmp_path, monkeypatch, dama
         state = context._state(tmp_path)
         state["cwd"] = str(tmp_path.parent)
         context._save(tmp_path, state)
-    payload, full = project(tmp_path)
+    elif damage in {"missing_epoch", "invalid_epoch"}:
+        state = context._state(tmp_path)
+        state.pop("context_epoch")
+        if damage == "invalid_epoch":
+            state["context_epoch"] = 3
+        context._save(tmp_path, state)
+    with monkeypatch.context() as failed:
+        if damage in {"read_failure", "projection_failure"}:
+            def unavailable(*args, **kwargs):
+                raise OSError("synthetic pre-publication IO unavailable")
+            failed.setattr(context, "_state" if damage == "read_failure" else "capture_context_projection", unavailable)
+        payload, full = project(tmp_path, "two")
     assert full == payload
+    if damage == "symlink":
+        assert other.read_bytes() == before
+    _assert_recovery_after_fallback(tmp_path, event, "compact", None)
 
 
 def test_real_hook_cli_is_transport_only_without_registry_or_installation(tmp_path):

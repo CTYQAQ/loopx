@@ -115,9 +115,24 @@ def context_capture_read_command(path: Path, digest: str, *, offset: int = 0, pa
         "--offset", str(offset), "--page-bytes", str(page_bytes)])
 
 
+def capture_context_projection(payload: dict[str, Any], *, directory: Path) -> dict[str, Any]:
+    """Save the full projection independently of the optional presentation codec."""
+    projection = directory / "projection.json"
+    write_decision_capture(projection, payload)
+    digest = hashlib.sha256(projection.read_bytes()).hexdigest()
+    return {
+        "path": str(projection), "sha256": digest,
+        "instruction": "Complete JSON for this original capture. If the baseline is missing, compacted, "
+            "truncated or uncertain, use this full projection before dependent work. "
+            + CONTEXT_CAPTURE_READ_GUIDANCE,
+        "command": context_capture_read_command(projection, digest),
+    }
+
+
 def project_captured_context(
     payload: dict[str, Any], *, directory: Path | None, request: dict[str, Any] | None,
     goal_id: str, agent_id: str, surface: str, capture_id: str,
+    captured_recovery: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Adapt an admitted capture to the shared TS presentation owner.
 
@@ -126,6 +141,8 @@ def project_captured_context(
     delivery. Unsupported ordinary CLI clients never supply this request. Every
     opt-in attempt saves the complete projected JSON for same-capture recovery;
     neither malformed requests nor optimization failures rerun the guard.
+    A native caller may pass its already-published recovery reference, never a
+    reference supplied in the external request.
     """
     if request is None or directory is None:
         return payload
@@ -133,8 +150,8 @@ def project_captured_context(
     from ..quota.turn_envelope import prepare_context_delivery
 
     try:
-        projection = directory / "projection.json"
-        write_decision_capture(projection, payload)
+        recovery = captured_recovery if captured_recovery is not None else capture_context_projection(
+            payload, directory=directory)
         scope = request.get("scope")
         if not isinstance(scope, dict) or scope.get("goal_id") != goal_id or scope.get("agent_id") != agent_id:
             return payload
@@ -155,13 +172,7 @@ def project_captured_context(
         delivery = prepare_context_delivery(payload, scope=scope,
             capture_id=capture_id, surface=surface,
             baseline=request.get("baseline"), retained=retained)
-        delivery["recovery"] = {
-            "path": str(projection), "sha256": hashlib.sha256(projection.read_bytes()).hexdigest(),
-            "instruction": "Complete JSON for this original capture. If the baseline is missing, compacted, "
-                "truncated or uncertain, use this full projection before dependent work. "
-                + CONTEXT_CAPTURE_READ_GUIDANCE,
-        }
-        delivery["recovery"]["command"] = context_capture_read_command(projection, delivery["recovery"]["sha256"])
+        delivery["recovery"] = recovery
         return delivery
     except (OSError, ValueError, TypeError, EffectRuntimeRemoteError, EffectRuntimeStartupError):
         # The original full payload is already available. An unavailable optional

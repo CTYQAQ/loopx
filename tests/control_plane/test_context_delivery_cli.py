@@ -116,6 +116,8 @@ def test_real_cli_host_rendezvous_sends_delta_and_keeps_same_capture_full(tmp_pa
     before_source = state.read_bytes()
     root = tmp_path / "captures"
     root.mkdir()
+    native_directory = tmp_path / "unobserved-native-state"
+    native_directory.mkdir(mode=0o700)
     scope = dict(goal_id=GOAL_ID, agent_id=AGENT_ID, session_id="host-session", context_epoch="epoch-1")
     saved = []
 
@@ -151,7 +153,7 @@ def test_real_cli_host_rendezvous_sends_delta_and_keeps_same_capture_full(tmp_pa
                         "--turn-instance-id", "host-context-delivery",
                         "--context-delivery", setting,
                         "--decision-output-root", str(root), "--decision-handoff-socket", str(endpoint),
-                        *(["--codex-context-dir", str(tmp_path / "unavailable-native-state")] if native_context else []),
+                        *(["--codex-context-dir", str(native_directory)] if native_context else []),
                         *(["--turn-envelope"] if surface == "turn_envelope" else []), cwd=project)
                     path, raw = future.result(timeout=30)
         assert code == 0, wire
@@ -251,7 +253,7 @@ def test_native_context_cli_without_retention_stays_full_and_preserves_receipt(t
     assert _spend_run_count(runtime) == 0 and state.read_bytes() == original
 
 
-@pytest.mark.parametrize("native_failure", [False, True])
+@pytest.mark.parametrize("native_failure", [None, "projection", "directory"])
 def test_native_projection_never_layers_host_projection(tmp_path, monkeypatch, native_failure):
     from loopx.cli import build_parser
     from loopx.cli_commands import quota
@@ -259,7 +261,8 @@ def test_native_projection_never_layers_host_projection(tmp_path, monkeypatch, n
 
     args = build_parser().parse_args(["--format", "json", "quota", "should-run",
         "--goal-id", "fixture", "--agent-id", "worker", "--context-delivery", "on", "--codex-app", "--codex-context-dir", str(tmp_path)])
-    original = {"ok": True, "goal_id": "fixture", "agent_identity": {"agent_id": "worker"}}
+    original = {"ok": True, "goal_id": "fixture", "agent_identity": {"agent_id": "worker"},
+        "heartbeat_receipt": {"turn_instance_id": "original-turn", "status": "committed"}}
     monkeypatch.setattr(quota, "handoff_decision", lambda *args: ({"scope": "host-request"}, "digest"))
     monkeypatch.setattr(quota, "_project_quota_cli_payload", lambda payload, *args, **kwargs: payload)
 
@@ -268,17 +271,30 @@ def test_native_projection_never_layers_host_projection(tmp_path, monkeypatch, n
 
     def native(payload, **kwargs):
         assert payload == original
-        if native_failure:
+        if native_failure == "directory":
+            pytest.fail("failed native directory preparation must not reach projection")
+        if native_failure == "projection":
             raise OSError("native observation unavailable")
         return {"native_projection": payload}
 
+    def unavailable_directory(**kwargs):
+        raise OSError("native directory unavailable")
+
     monkeypatch.setattr(quota, "project_captured_context", competing)
     monkeypatch.setattr(codex_context, "project_codex_context", native)
+    if native_failure == "directory":
+        monkeypatch.setattr(codex_context, "codex_context_directory", unavailable_directory)
     printed = []
     assert quota._emit_quota_result(original, args, context=None, registry_path=tmp_path / "absent.json",
         heartbeat_turn_id=None, usage_quota_started=0, capture_directory=tmp_path,
-        detail_sections=frozenset(), print_payload=lambda value, *args: printed.append(value)) == 0
-    assert printed == [original if native_failure else {"native_projection": original}]
+        detail_sections=frozenset(), print_payload=lambda value, *args: printed.append(value)) == (1 if native_failure else 0)
+    if native_failure:
+        assert len(printed) == 1 and printed[0]["ok"] is False
+        assert printed[0]["error_code"] == "quota_decision_transport_failed"
+        assert printed[0]["heartbeat_receipt"] == original["heartbeat_receipt"]
+        assert printed[0]["captured_decision"] == {"path": str(tmp_path / "decision.json")}
+    else:
+        assert printed == [{"native_projection": original}]
     assert json.loads((tmp_path / "decision.json").read_text()) == original
 
 
