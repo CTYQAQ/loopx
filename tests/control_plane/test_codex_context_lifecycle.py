@@ -208,10 +208,12 @@ def _assert_recovery_after_fallback(root, event, source, capture):
 
 
 @pytest.mark.parametrize("source", ["compact", "resume"])
-def test_oversized_warm_request_keeps_current_full_recovery(tmp_path, monkeypatch, source):
+@pytest.mark.parametrize("snapshot_unavailable", [False, True], ids=["snapshot", "snapshot_io_failure"])
+def test_oversized_warm_request_keeps_current_full_recovery(tmp_path, monkeypatch, source, snapshot_unavailable):
     from test_codex_input_retention import fixture
+    from loopx.control_plane import effect_runtime
     from loopx.control_plane.effect_runtime import EffectRuntimeRejected, MAX_REQUEST_BYTES
-    from loopx.control_plane.quota.turn_envelope import prepare_context_delivery
+    from loopx.control_plane.quota.turn_envelope import prepare_context_delivery, restore_context_delivery
     from loopx.control_plane.turn_driver.codex_input_trace import codex_context_in_active_input
 
     event = setup(tmp_path, monkeypatch)
@@ -221,6 +223,7 @@ def test_oversized_warm_request_keeps_current_full_recovery(tmp_path, monkeypatc
     _, first = project(tmp_path, payload=before)
     original = Path(first["recovery"]["path"]).read_bytes()
     assert len(original) < MAX_REQUEST_BYTES
+    candidate = context._state(tmp_path)["candidate"]
     traces = tmp_path / "traces"
     traces.mkdir()
     observation, _, _, _ = fixture(traces)
@@ -238,12 +241,37 @@ def test_oversized_warm_request_keeps_current_full_recovery(tmp_path, monkeypatc
     monkeypatch.setenv("CODEX_ROLLOUT_TRACE_ROOT", str(traces))
     context.codex_context_hook(str(tmp_path), {**event, "hook_event_name": "PreToolUse", "tool_use_id": "guard"})
     scope = {key: first["target"][key] for key in ("goal_id", "agent_id", "session_id", "context_epoch")}
+    params = dict(context=after, scope=scope, capture_id="two", surface="quota_packet",
+                  baseline=first, retained={"complete": True, "target": first["target"]})
+    # The inline wire still refuses the combined request before dispatch.
+    # The shared Turn adapter then uses its existing bounded snapshot transport.
     with pytest.raises(EffectRuntimeRejected) as rejected:
-        prepare_context_delivery(after, scope=scope, capture_id="two", surface="quota_packet",
-                                 baseline=first, retained={"complete": True, "target": first["target"]})
+        effect_runtime.effect_runtime_result("quota.turn_envelope.evaluate", {"operation": "context_delivery", **params})
     assert rejected.value.diagnostic_code == "request_too_large"
-    _, delivered = project(tmp_path, "two", payload=after)
-    assert delivered.get("context", delivered) == after
+    prepared = prepare_context_delivery(**params)
+    current_full = prepare_context_delivery(after, scope=scope, capture_id="two", surface="quota_packet")
+    assert prepared["mode"] == "delta"
+    assert restore_context_delivery(prepared, baseline=first, current=current_full)["context"] == after
+
+    failed_staging = []
+    original_open = os.open
+    def unavailable_snapshot(path, flags, *args, **kwargs):
+        if Path(path).name == "params.json" and Path(path).parent.name.startswith("loopx-effect-"):
+            failed_staging.append(True)
+            raise OSError("synthetic snapshot publication unavailable")
+        return original_open(path, flags, *args, **kwargs)
+
+    with monkeypatch.context() as publication:
+        if snapshot_unavailable:
+            publication.setattr(effect_runtime.os, "open", unavailable_snapshot)
+        _, delivered = project(tmp_path, "two", payload=after)
+    if snapshot_unavailable:
+        assert failed_staging and delivered == after
+    else:
+        assert delivered["mode"] == "delta"
+        assert restore_context_delivery(delivered, baseline=first, current=current_full)["context"] == after
+    # Neither a prepared delta nor a failed presentation promotes a candidate.
+    assert context._state(tmp_path)["candidate"] == candidate
     current_capture = tmp_path / "two/projection.json"
     assert current_capture.stat().st_size < MAX_REQUEST_BYTES
     assert json.loads(current_capture.read_bytes()) == after
