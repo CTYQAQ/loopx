@@ -83,8 +83,8 @@ export function AnswerReportPage({sessionId, messageId, statusUrl}: {
         {state.kind === "missing" ? <p role="alert">{zh ? "找不到这份答复。它可能已被清理，或链接有误。" : "This answer was not found. It may have been removed, or the link may be incorrect."}</p> : null}
         {answer ? <>
           <div className="answer-report-content"><MarkdownText text={answerText}/></div>
-          <footer><p>{zh ? "来自本机保存的对话消息；打开此页不会重新运行 Agent。" : "From a locally saved conversation message. Opening this page does not rerun the Agent."}</p>
-            <details><summary>{zh ? "来源与版本" : "Source and version"}</summary>
+          <footer>
+            <details><summary>{zh ? "来源与版本" : "Source and version"}</summary><p>{zh ? "来自本机保存的对话消息；打开此页不会重新运行 Agent。" : "From a locally saved conversation message. Opening this page does not rerun the Agent."}</p>
               <dl><dt>{zh ? "消息" : "Message"}</dt><dd><code>{answer.message_id}</code></dd>
                 <dt>Session</dt><dd><code>{sessionId}</code></dd></dl>
               {sourceQuestion?.text ? <p><strong>{zh ? "原问题：" : "Original question: "}</strong>{sourceQuestion.text}</p> : null}

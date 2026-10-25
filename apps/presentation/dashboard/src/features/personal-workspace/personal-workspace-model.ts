@@ -116,6 +116,7 @@ export type WorkspaceConversationDirectory = {
   onOpenOriginal?: (target: BoundConversationTarget) => void;
   bound?: { target: BoundConversationTarget; session?: ChatSessionSummary; source?: PrivateConversation;
     error?: string; retry: () => void };
+  managed?: {target: import("../../data/chat").ManagedConversationTarget; session?: import("../../data/chat").ChatSessionSummary; error?: string; retry: () => void};
 };
 
 export type WorkspaceTodo = WorkspaceAgentTodo & {
@@ -625,6 +626,7 @@ export type PersonalWorkspaceCallbacks = {
   onSelectTodo?: (todoId: string | null) => void;
   onSelectView?: (view: WorkspaceGoalTab) => void;
   onSelectWorkAgent?: (agentId: string | null) => void;
+  onSelectWorkSession?: (sessionId: string, replace?: boolean) => void;
   onOpenNotificationSettings?: (goalId?: string) => void;
   onFetchNotificationTargets?: () => Promise<Array<{ enabled: boolean; provider: string; target_name: string }>>;
   onSetupGoalChannel?: (options: { execute: boolean; goalId: string; target: string }) => Promise<{ ok: boolean; blocker?: string; public_summary?: string; status?: string }>;

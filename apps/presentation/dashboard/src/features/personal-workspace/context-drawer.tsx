@@ -1,3 +1,4 @@
+import {ContextHelp} from "./context-help";
 import { ZCodeGoalControl } from "./zcode-goal-control";
 import { GoalAcceptanceObservationCard } from "./goal-acceptance-observation-card";
 import { AttentionActions } from "./attention-actions";
@@ -42,7 +43,7 @@ import type {
 } from "./personal-workspace-model";
 import type { LarkGoalConnection } from "../../data/chat";
 import { localizedGoalState, localizedSessionStatus, useWorkspaceI18n } from "./i18n";
-import { formatCostUsd, formatDurationMs, formatTokenCount, formatUsageValue } from "./personal-workspace-model";
+import { formatCostUsd, formatDurationMs, formatTokenCount, formatUsageValue, hasGoalUsage } from "./personal-workspace-model";
 import { TeamPlanResult } from "./team-plan-result";
 import { TaskRequest } from "./task-request";
 import { parseTodoResumeCondition } from "./todo-resume-condition";
@@ -616,7 +617,7 @@ export function ContextDrawer({ agents, attentionHistory = [], onSelectAttention
       role="dialog"
     >
       <header className={`personal-drawer-header${selection.kind === "todo" ? " is-task-inspector" : ""}`}>
-        <div><h2 id="personal-drawer-title" ref={titleRef} tabIndex={-1}>{title}</h2><p>{contextLabel}</p></div>
+        <div><h2 id="personal-drawer-title" ref={titleRef} tabIndex={-1}>{title}</h2>{selection.kind !== "goal" ? <p>{contextLabel}</p> : null}</div>
         <div className="personal-drawer-header-actions">
           {selection.kind === "todo" && onToggleInspectorSize ? <button aria-label={inspectorExpanded ? t("drawer.inspectorHalf") : t("drawer.inspectorFull")} className="personal-icon-button personal-inspector-size" onClick={onToggleInspectorSize} title={inspectorExpanded ? t("drawer.inspectorHalfView") : t("drawer.inspectorFullView")} type="button">
             {inspectorExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
@@ -762,17 +763,23 @@ export function ContextDrawer({ agents, attentionHistory = [], onSelectAttention
 
         {selection.kind === "goal" ? (
           <>
-            <section className="personal-detail-card">
+            <section className="personal-detail-card personal-goal-detail-summary">
               <small>{localizedGoalState(selection.item.state, locale)}</small>
               <h3>{selection.item.title}</h3>
               <p>{selection.item.agentSentence}</p>
-              <dl>
-                <div><dt>{t("drawer.tokens")}</dt><dd>{formatUsageValue(selection.item.usage?.tokens24h, t("drawer.usageNotMeasured"), formatTokenCount)} / {formatUsageValue(selection.item.usage?.tokens7d, t("drawer.usageNotMeasured"), formatTokenCount)}</dd></div>
-                <div><dt>{t("drawer.cost")}</dt><dd>{formatUsageValue(selection.item.usage?.costUsd24h, t("drawer.usageNotMeasured"), formatCostUsd)} / {formatUsageValue(selection.item.usage?.costUsd7d, t("drawer.usageNotMeasured"), formatCostUsd)}</dd></div>
-                <div><dt>{t("drawer.duration")}</dt><dd>{formatUsageValue(selection.item.usage?.durationMs24h, t("drawer.usageNotMeasured"), formatDurationMs)} / {formatUsageValue(selection.item.usage?.durationMs7d, t("drawer.usageNotMeasured"), formatDurationMs)}</dd></div>
-              </dl>
             </section>
             <GoalAcceptanceObservationCard goal={selection.item} />
+            <section className="personal-detail-card personal-goal-detail-usage">
+              <h3>{t("drawer.goalUsage")}</h3>
+              {hasGoalUsage(selection.item.usage) ? <table>
+                <thead><tr><td /><th scope="col">{t("drawer.period24h")}</th><th scope="col">{t("drawer.period7d")}</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">{t("drawer.tokensShort")}</th><td>{formatUsageValue(selection.item.usage.tokens24h, t("drawer.usageNotMeasured"), formatTokenCount)}</td><td>{formatUsageValue(selection.item.usage.tokens7d, t("drawer.usageNotMeasured"), formatTokenCount)}</td></tr>
+                  <tr><th scope="row">{t("drawer.costShort")}</th><td>{formatUsageValue(selection.item.usage.costUsd24h, t("drawer.usageNotMeasured"), formatCostUsd)}</td><td>{formatUsageValue(selection.item.usage.costUsd7d, t("drawer.usageNotMeasured"), formatCostUsd)}</td></tr>
+                  <tr><th scope="row">{t("drawer.durationShort")}</th><td>{formatUsageValue(selection.item.usage.durationMs24h, t("drawer.usageNotMeasured"), formatDurationMs)}</td><td>{formatUsageValue(selection.item.usage.durationMs7d, t("drawer.usageNotMeasured"), formatDurationMs)}</td></tr>
+                </tbody>
+              </table> : <p>{t("drawer.usageNotMeasured")}</p>}
+            </section>
             {(() => {
               const notification = goalNotifications.find((row) => row.goalId === selection.item.goalId);
               const connection = larkConnections.find((row) => row.goal_id === selection.item.goalId);
@@ -816,11 +823,11 @@ export function ContextDrawer({ agents, attentionHistory = [], onSelectAttention
                   ) : (
                     <>
                       <h3>{t("drawer.larkNotConfigured")}</h3>
-                      <p>{t("drawer.larkNotConfiguredDescription")}</p>
+                      <ContextHelp label={t("drawer.larkNotConfigured")}><p>{t("drawer.larkNotConfiguredDescription")}</p></ContextHelp>
                     </>
                   )}
                   <button className="personal-secondary-action" onClick={() => callbacks.onOpenNotificationSettings?.(selection.item.goalId)} type="button"><Bell size={16} />{connection ? t("drawer.larkConfigure") : t("drawer.larkConnect")}</button>
-                  </section> : <section className="personal-detail-card personal-goal-notification"><small>{t("drawer.larkConnection")}</small><h3>{t("drawer.remoteDetailsUnavailable")}</h3><p>{t("drawer.remoteDetailsDescription")}</p></section>}
+                  </section> : <section className="personal-detail-card personal-goal-notification"><small>{t("drawer.larkConnection")}</small><h3>{t("drawer.remoteDetailsUnavailable")}</h3><ContextHelp label={t("drawer.remoteDetailsUnavailable")}><p>{t("drawer.remoteDetailsDescription")}</p></ContextHelp></section>}
                 </>
               );
             })()}
@@ -835,7 +842,7 @@ export function ContextDrawer({ agents, attentionHistory = [], onSelectAttention
               ) : (
                 <>
                   <h3>{t("drawer.noRun")}</h3>
-                  <p>{t("drawer.noRunDescription")}</p>
+                  <ContextHelp label={t("drawer.noRun")}><p>{t("drawer.noRunDescription")}</p></ContextHelp>
                 </>
               )}
             </section>
@@ -969,7 +976,7 @@ export function ContextDrawer({ agents, attentionHistory = [], onSelectAttention
                   </label>
                   <button className="personal-secondary-action" disabled={subagentBusy} type="button" onClick={() => { setSubagentModel("gpt-5.6-luna"); setSubagentEffort("max"); setSubagentPreview(null); setSubagentMutationState("idle"); setSubagentFeedback(null); }}>{t("drawer.subagentLunaPreset")}</button>
                   <button className="personal-secondary-action" disabled={subagentBusy} type="button" onClick={() => { setSubagentModel(""); setSubagentEffort(""); setSubagentPreview(null); setSubagentMutationState("idle"); setSubagentFeedback(null); }}>{t("drawer.subagentClearModel")}</button>
-                  <p>{t("drawer.subagentModelHint")}</p>
+                  <ContextHelp label={t("drawer.subagentModel")}><p>{t("drawer.subagentModelHint")}</p></ContextHelp>
                   <label>
                     <span>{t("drawer.subagentExecutionConfig")}</span>
                     <input

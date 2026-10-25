@@ -19,6 +19,7 @@ import { AgentScopeFrontierAction } from "../agents/agent_scope_frontier.generat
 import { resumeConditionHasKnownPendingTarget } from "../todos/resume_condition.ts";
 import { parseTodoTimestampMicros } from "../runtime_timestamp.ts";
 import { monitorIsActive } from "../todos/summary_lanes.ts";
+import {compactTodoContextSource} from "../quota/context_delivery.ts";
 
 function exactBlockedSuccessorWait(request: JsonObject, monitorWait = false): JsonObject | null {
   const wait = jsonObject(request.vision_wait_state);
@@ -677,7 +678,9 @@ function interactionRequiredReads(request: JsonObject): JsonObject {
   const settlementOnly = requireBoolean(request.settlement_only, "settlement_only");
   const checksPresent = requireBoolean(request.goal_acceptance_checks_present, "goal_acceptance_checks_present");
   const goalId = readArgument(request.goal_id, "goal_id");
-  if (!shouldRun || !deliveryAllowed || selectionRequired || settlementOnly || !goalId
+  // Semantic replan is an admitted planning attempt, even when ordinary work
+  // delivery is forbidden. It still needs the original Goal and acceptance.
+  if (!shouldRun || (!deliveryAllowed && !hasReplan) || selectionRequired || settlementOnly || !goalId
       || request.effective_action === EffectiveAction.GOVERNED_CAPABILITY_INTENT) {
     return {required_reads: reads};
   }
@@ -697,7 +700,7 @@ function interactionRequiredReads(request: JsonObject): JsonObject {
   };
   const stateFile = readArgument(request.goal_state_file, "goal_state_file");
   if (stateFile) add(`cat -- ${shellQuote(stateFile)}`, "goal_state",
-    "Read complete Goal intent, acceptance and stops. A registered source may deliver all text outside explicitly generated Todo regions inline, with full-file revision and excluded-region lineage; exact canonical Todo reads own task state/claims. Otherwise consume this full progressive read. Source failure or changed requirements require a fresh guard; summaries cannot replace either read.");
+    "Read full Goal intent, acceptance, stops. No summaries; failed/changed sources need a fresh guard.");
   if (request.goal_objective_present === true) add(`${prefix} --format json goal-acceptance inspect --goal-id ${goalArg}`,
     "goal_acceptance", "Use the canonical goal_objective before the older source text. Only if your adoption is missing/stale, review your own work, reconcile Todo/Vision changes, then use adopt-objective with your Agent id, exact revision/digest, own objective_work_digest and review_summary. New execution is held until your adoption. Other peers adopt independently; existing Turn settlement/release remains available. Preserve root acceptance, permissions and stops. Adopt once per objective revision, never per Turn or work/peer update. Reuse complete inline context without extra reads/writes.");
   if (checksPresent || request.goal_outcomes_present === true) add(`${prefix} --format json goal-acceptance inspect --goal-id ${goalArg}`,
@@ -763,7 +766,7 @@ export function projectInteractionWorkContext(request: JsonObject): JsonObject {
     const matches = results.filter(result => result.command === read.command);
     if (matches.length === 0) { pending.push(read); continue; }
     const result = matches[0];
-    const content = jsonObject(result.content);
+    let content = jsonObject(result.content);
     let valid = matches.length === 1 && content !== null && content.ok !== false && !result.error_code;
     let selectedTodoRecord: JsonObject | null = null;
     if (valid && read.source === "selected_todo") {
@@ -789,6 +792,10 @@ export function projectInteractionWorkContext(request: JsonObject): JsonObject {
     if (valid && read.source === "goal_acceptance") {
       valid = (!!configuredGoalChecks(jsonObject(content!.goal_acceptance_contract)) || !!jsonObject(content!.goal_acceptance_contract)?.outcome_requirements || !!jsonObject(content!.goal_acceptance_contract)?.goal_objective);
     }
+    if (valid && read.source === "selected_todo") {
+      content = compactTodoContextSource(content!);
+      selectedTodoRecord = jsonObject(content.todo);
+    }
     if (!valid) {
       pending.push(read);
       failures.push({source: read.source ?? read.kind, command: read.command,
@@ -799,7 +806,9 @@ export function projectInteractionWorkContext(request: JsonObject): JsonObject {
       sources.push({...read, content: content!});
       pending.push(read);
     } else if (read.source === "goal_state") {
-      if (completeGoalNarrative(content!)) sources.push({...read, content: content!});
+      if (completeGoalNarrative(content!)) sources.push({...read,
+        reason: `${String(read.reason ?? "")} This registered source delivers all text outside explicitly generated Todo regions inline, with full-file revision and excluded-region lineage; exact canonical Todo reads own task state/claims.`,
+        content: content!});
       else {
         pending.push(read);
         if (Object.hasOwn(content!, "excluded_todo_regions")) failures.push({
@@ -865,7 +874,7 @@ export function projectInteractionWorkContext(request: JsonObject): JsonObject {
     ...(selectedTodoAuthority ? {selected_todo_authority: selectedTodoAuthority} : {}),
     ...(sources.length ? {sources} : {}),
     ...(unavailable ? {unavailable_context: unavailable} : {}),
-    ...(includeUserTodos ? {user_todos: users} : {}), ...(failures.length ? {failures} : {}),
+    ...(includeUserTodos ? {user_todos: compactTodoContextSource(users!)} : {}), ...(failures.length ? {failures} : {}),
     instruction: "Read current sources and pending required_reads before work. Do not repeat this guard's fulfilled pre-work reads. " +
       "Use a bounded working brief of evidenced progress/change, current blockers, next work, acceptance and stops. " +
       "Missing comparison evidence is unknown, not unchanged; summaries cannot replace full requirements. " +

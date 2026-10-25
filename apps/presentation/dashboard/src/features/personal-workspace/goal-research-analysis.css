@@ -20,15 +20,19 @@
 .analysis-error { color: var(--pw-red); }
 .analysis-finding { padding-block: 12px 8px; margin-top: 12px; max-width: 76ch; }
 .analysis-finding h4 { margin-top: 8px; }
+.analysis-episodes { color: var(--pw-text); }
 .analysis-episode-columns, .analysis-episode > summary { display: grid; grid-template-columns: minmax(0, 1fr) 8rem 6rem 9rem 1rem; align-items: baseline; gap: 16px; }
 .analysis-episode-columns { color: var(--pw-muted); padding-block: 8px; border-bottom: 1px solid var(--pw-line); }
+.analysis-episode-reading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-block: 8px 16px; }
+.analysis-episode-reading > span { color: var(--pw-muted); font-size: var(--text-body); }
+.analysis-episode-reading > button { color: var(--pw-text); }
 .analysis-episode-group + .analysis-episode-group { margin-top: 12px; }
 .research-analysis .analysis-shared-question { margin: 12px 0 4px; max-width: 76ch; color: var(--pw-muted); font-size: var(--text-body); }
 .analysis-episode { border-block-end: 1px solid var(--pw-line); }
 .analysis-episode > summary { min-height: 48px; padding-block: 12px; cursor: pointer; list-style: none; }
 .analysis-episode > summary::-webkit-details-marker { display: none; }
 .analysis-episode-name { min-width: 0; max-width: 76ch; font-weight: 500; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.analysis-episode[open] > summary .analysis-episode-name { display: block; }
+.analysis-episode[open] > summary .analysis-episode-name { display: block; -webkit-line-clamp: unset; overflow: visible; }
 .analysis-verdict-label { display: none; }
 .analysis-episode-exceptions { display: flex; flex-direction: column; color: var(--pw-muted); }
 .analysis-episode > summary > svg { flex-shrink: 0; }
@@ -55,17 +59,26 @@
 .analysis-source { border: 1px solid var(--pw-line); border-radius: 8px; padding: 16px; margin-block: 16px; }
 .analysis-source p { font-size: var(--text-caption); color: var(--pw-muted); }
 .analysis-source pre { font-family: var(--font-mono); font-size: var(--text-body); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.analysis-source-command + .analysis-source-command { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--pw-line); }
+.analysis-source-command-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--pw-muted); }
+.analysis-source pre.analysis-source-output { font-size: var(--text-lead); line-height: var(--leading-prose); max-height: none; overflow: visible; }
+.analysis-source p.analysis-source-empty { font-size: var(--text-lead); color: var(--pw-text); }
+.analysis-source-content details > summary { min-height: 44px; padding-block: 10px; cursor: pointer; }
+.analysis-source-raw { margin-top: 12px; border-top: 1px solid var(--pw-line); }
 .analysis-method { border-block-start: 1px solid var(--pw-line); margin-top: 16px; padding-top: 12px; color: var(--pw-muted); font-size: var(--text-lead); }
-.analysis-method summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--pw-text); }
+.analysis-method > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--pw-text); }
 .analysis-method dl { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 8px 16px; }
 .analysis-method dd { margin: 0; color: var(--pw-text); }
-.analysis-continuation { margin-block: 16px; border-block: 1px solid var(--pw-line); padding-block: 12px; }
+.analysis-continuation { margin-block: 8px; }
+.analysis-continuation-controls { display: flow-root; }
+.analysis-continuation-controls > details { min-width: 0; }
+.analysis-continuation-controls > button { float: inline-end; margin-inline-start: 16px; }
+.analysis-continuation-controls > details[open] { padding-block-end: 12px; }
 .analysis-continuation-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
 .analysis-continuation-summary strong { font-weight: 500; }
 .analysis-continuation-summary > span { color: var(--pw-muted); }
-.analysis-continuation-summary button { margin-inline-start: auto; }
 .analysis-continuation .analysis-method { border: 0; margin: 0; padding: 0; }
-.analysis-continuation .analysis-method > summary { display: list-item; list-style-position: inside; min-height: 36px; }
+.analysis-continuation .analysis-method > summary { display: list-item; list-style-position: inside; min-height: 44px; }
 .analysis-spin { animation: analysis-request-spin 1s linear infinite; }
 @keyframes analysis-request-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .analysis-spin { animation: none; } }
@@ -80,9 +93,9 @@
 @media (max-width: 640px) { .research-analysis { padding: 16px; } .analysis-episode-context { grid-template-columns: 1fr; gap: 12px; } .analysis-method dl { grid-template-columns: 1fr; gap: 2px; } .analysis-method dd { margin-bottom: 8px; } .analysis-pack-choice { flex-direction: column; align-items: stretch; } }
 
 /* Readback has one status surface, shared by the summary and its detail. */
-.analysis-read-error,.analysis-read-empty{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-block:12px;color:var(--pw-muted)}
-.analysis-read-error>button,.analysis-read-empty>button{display:inline-flex;align-items:center;gap:4px;min-height:44px;border:1px solid var(--pw-line);border-radius:6px;padding:8px 12px;color:var(--pw-text);background:var(--pw-bg);font:inherit;cursor:pointer}
-.analysis-read-error>button:disabled,.analysis-read-empty>button:disabled{opacity:.5;cursor:default}
+.analysis-read-error{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-block:12px;color:var(--pw-muted)}
+.analysis-read-error>button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:44px;border:1px solid var(--pw-line);border-radius:6px;padding:8px 12px;color:var(--pw-text);background:var(--pw-bg);font:inherit;cursor:pointer}
+.analysis-read-error>button:disabled{opacity:.5;cursor:default}
 .analysis-read-loading{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding-block:16px}
 .analysis-read-loading>span{height:5rem;border-radius:6px;background:var(--pw-line)}
 @media(max-width:640px){.analysis-read-loading{grid-template-columns:repeat(2,minmax(0,1fr))}}

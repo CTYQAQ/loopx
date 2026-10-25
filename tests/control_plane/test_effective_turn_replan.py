@@ -22,8 +22,7 @@ from tests.control_plane.test_quota_settlement_cli import (
     _initialize_fixture_authority,
     ALTERNATIVE_TODO_ID,
 )
-from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
-from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+from canonical_authority_fixture import isolate_sqlite_runtime
 from loopx.control_plane.work_items.replan_history_codec import (
     effective_turn_cadence_context,
 )
@@ -47,6 +46,7 @@ def test_open_todo_settled_turn_cadence_and_evidence_linked_review(
     if declare_outcome:
         fixture["goals"][0]["status"] = "active"
     registry.write_text(json.dumps(fixture))
+    _initialize_fixture_authority(project, runtime)
     if device_count is not None:
         machine_registry = build_builtin_machine_configuration_registry()
         configuration = {
@@ -83,7 +83,6 @@ def test_open_todo_settled_turn_cadence_and_evidence_linked_review(
     )
     original_outcomes = None
     if declare_outcome:
-        _initialize_fixture_authority(project, runtime)
         rc, basis = _run_cli(registry, runtime, "goal-acceptance", "inspect", "--goal-id", GOAL_ID)
         assert rc == 0, basis
         outcome_path = tmp_path / "ongoing-outcome.json"
@@ -204,7 +203,11 @@ def test_open_todo_settled_turn_cadence_and_evidence_linked_review(
     assert obligation is not None, next_guard
     assert "periodic_review_due" in json.dumps(obligation)
     if original_outcomes:
-        assert obligation["replan_context"]["core_goal"]["acceptance_contract"]["outcome_requirements"] == original_outcomes
+        core = obligation["replan_context"]["core_goal"]
+        assert core["acceptance_contract_ref"] == (
+            "$.planning_horizon.core_goal.acceptance_contract"
+        )
+        assert next_guard["planning_horizon"]["core_goal"]["acceptance_contract"]["outcome_requirements"] == original_outcomes
         assert original_outcomes["acceptance_gaps"] == [], "periodic review must include requirements covered by open work"
     else:
         assert obligation["replan_context"]["core_goal"]["acceptance_contract"] is None
@@ -337,11 +340,7 @@ def test_due_stride_review_survives_successor_transition_until_decision(
     data = json.loads(registry.read_text())
     data["goals"][0]["quota"]["allowed_slots"] = 12
     registry.write_text(json.dumps(data))
-    rc, listed = _run_cli(registry, runtime, "todo", "list", "--goal-id", GOAL_ID)
-    assert rc == 0, listed
-    initialize_canonical_authority(runtime, GOAL_ID, build_todo_runtime_shadow_projection(
-        goal_id=GOAL_ID, todos=listed["todos"], handoff_mode="soft_claim", leases=[]),
-        state_path=project / data["goals"][0]["state_file"], provider=provider)
+    _initialize_fixture_authority(project, runtime, provider=provider)
 
     def call(*args: str, expected_code: int = 0) -> dict:
         code, result = _run_cli(registry, runtime, *args, cwd=project)

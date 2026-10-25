@@ -349,9 +349,9 @@ test("receipt-owned replan settlement returns to its original writer without adm
     ...quota.replan_action_packet, decision: "replan_required", settlement_only: false}}})).capture, true);
 });
 
-test("the selection hop that binds a Todo is released as pending closeout, not an identity failure", async () => {
-  // Real-CLI shape: the agent selects a Todo on the Turn whose original guard
-  // owns the replan. The receipt view is "upgraded" with the new binding.
+test("a bound selection with explicit closeout is released; binding alone preserves the replan", async () => {
+  // "upgraded" records the binding, not work completion. Only the explicit
+  // closeout fact makes this a pending closeout instead of the original replan.
   const id = "replan-0123456789abcdef", turn = "fixture-turn";
   const identity = {goal_id: "fixture-goal", agent_id: "fixture-agent", turn_instance_id: turn,
     todo_id: "todo_selected", effect_id: `fixture-goal:fixture-agent:todo_selected:${turn}`};
@@ -362,6 +362,12 @@ test("the selection hop that binds a Todo is released as pending closeout, not a
   const request = {action: "select_replan", quota, goal_id: "fixture-goal", agent_id: "fixture-agent", turn_instance_id: turn};
   assert.deepEqual(await checkpointArtifacts(request), {
     capture: false, reason: "turn_closeout_pending", execution_authority_granted: false,
+  });
+  const {closeout_required: _closeout, ...boundReceipt} = quota.heartbeat_receipt;
+  assert.deepEqual(await checkpointArtifacts({...request, quota: {...quota,
+    heartbeat_receipt: boundReceipt}}), {
+    capture: true, obligation_id: id, settlement_effect_id: identity.effect_id,
+    execution_authority_granted: false,
   });
   // Statuses outside the durable receipt views stay refused, now as a typed
   // request rejection whose reason survives the runtime boundary.

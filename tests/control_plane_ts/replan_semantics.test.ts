@@ -126,7 +126,7 @@ test("verified original writeback projects only its outstanding debit even after
 test("obligation source governs both authoring projection and semantic discharge", () => {
   const projection = projectReplanSemantics({operation: "requirements", obligation});
   assert.match(String(projection.cli_semantic_args), /--agent-vision-json/);
-  assert.deepEqual((projection.writeback_contract as Record<string, unknown>).vision_authoring, visionAuthoringContract());
+  assert.deepEqual((projection.writeback_contract as Record<string, unknown>).vision_authoring, visionAuthoringContract(true));
   assert.equal(projectReplanSemantics({operation: "qualify", obligation,
     observation_delta: {delta_kinds: ["new_surface"]}}).accepted, false);
   const delta = projectReplanSemantics({operation: "qualify", obligation, agent_vision: vision});
@@ -225,7 +225,7 @@ test("external progress review: renamed identifiers discharge only behind new ev
   const contract = projection.writeback_contract as Record<string, unknown>;
   assert.equal(contract.identity_outcomes_require_new_evidence, true);
   assert.match(String(contract.alternative_cli_semantic_args), /--agent-vision-json/);
-  assert.deepEqual(contract.vision_authoring, visionAuthoringContract());
+  assert.deepEqual(contract.vision_authoring, visionAuthoringContract(true));
 
   const qualify = (observation_delta?: Record<string, unknown>, agent_vision?: Record<string, unknown>) =>
     projectReplanSemantics({operation: "qualify", obligation: review, observation_delta, agent_vision});

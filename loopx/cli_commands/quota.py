@@ -4,8 +4,13 @@ import argparse
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
-from .quota_capture import bind_capture_selection_transport, capture_decision, handoff_decision, prepare_decision_capture
+from .quota_capture import (
+    bind_capture_selection_transport, capture_decision, handoff_decision,
+    prepare_decision_capture, handle_native_context_command,
+)
+from ..control_plane.turn_driver.decision_capture import project_captured_context
 from ..usage_goal import observe_quota_result
 
 from ..capabilities.explore.composition_frontier import (
@@ -463,11 +468,16 @@ def _emit_quota_result(
             turn_id=_effective_spend_turn_instance_id(payload, heartbeat_turn_id=heartbeat_turn_id),
             started_at=usage_quota_started,
         )
+    from .quota_capture import native_context_activation
+
+    context_delivery_enabled = payload.get("ok") is True and native_context_activation(args)["enabled"]
     bind_capture_selection_transport(payload, args)
+    delivery_request = None
+    decision_identity = ("", "")
     try:
         capture_decision(capture_directory, payload)
         if payload.get("ok") is True:
-            handoff_decision(capture_directory, getattr(args, "decision_handoff_socket", None))
+            delivery_request = handoff_decision(capture_directory, getattr(args, "decision_handoff_socket", None), context_delivery_enabled)
     except QuotaDecisionTransportError as exc:
         # The guard already ran. Report that typed fact with the durable receipt
         # and saved decision, never a new collection failure that could replace
@@ -477,6 +487,12 @@ def _emit_quota_result(
         )
         print_payload(failure, args.format, _quota_renderer(args))
         return 1
+    if (delivery_request is not None or getattr(args, "codex_context_dir", None)
+            or getattr(args, "codex_context_root", None)):
+        agent = payload.get("agent_identity")
+        decision_identity = (str(payload.get("goal_id") or ""),
+            str(agent.get("agent_id") or "") if isinstance(agent, Mapping) else str(args.agent_id or ""))
+    captured_payload = payload
     payload = _project_quota_cli_payload(
         payload, args, detail_sections,
         context.scheduler_context if context is not None else None,
@@ -491,8 +507,106 @@ def _emit_quota_result(
             payload,
             registry_path=registry_path,
         )
+    succeeded = bool(payload.get("ok"))
+    # Handoff releases the immutable original before any presentation. Native
+    # actual-input observation owns its projection when explicitly selected;
+    # never wrap one context-delivery wire in a second projection.
+    native_context = context_delivery_enabled and bool(getattr(args, "codex_context_dir", None) or getattr(args, "codex_context_root", None))
+    if (args.format == "json" and succeeded and delivery_request is not None and not native_context
+            and context_delivery_enabled):
+        payload = project_captured_context(payload, directory=capture_directory,
+            request=delivery_request[0], capture_id=delivery_request[1],
+            goal_id=decision_identity[0], agent_id=decision_identity[1],
+            surface="turn_envelope" if getattr(args, "turn_envelope", False) else "quota_packet")
+    if (args.format == "json" and succeeded and capture_directory
+            and native_context):
+        import hashlib
+        from ..control_plane.turn_driver.codex_context import codex_context_directory, project_codex_context
+
+        try:
+            capture_id = hashlib.sha256((capture_directory / "decision.json").read_bytes()).hexdigest()
+            directory = codex_context_directory(directory=args.codex_context_dir,
+                root=getattr(args, "codex_context_root", None), create=True)
+            payload = project_codex_context(payload, directory=directory,
+                capture_directory=capture_directory, goal_id=decision_identity[0], agent_id=decision_identity[1],
+                surface="turn_envelope" if getattr(args, "turn_envelope", False) else "quota_packet",
+                capture_id=capture_id)
+        except (QuotaDecisionTransportError, OSError, ValueError) as exc:
+            if not isinstance(exc, QuotaDecisionTransportError):
+                exc = QuotaDecisionTransportError(
+                    "Current context recovery could not be prepared. Read the saved "
+                    "original decision and receipt; do not rerun admission."
+                )
+            # The original receipt survives even when the selected presentation
+            # is a Turn envelope without the quota packet's receipt fields.
+            failure = quota_decision_transport_failure_payload(
+                args, captured_payload, exc, capture_directory=capture_directory,
+            )
+            print_payload(failure, args.format, _quota_renderer(args))
+            return 1
     print_payload(payload, args.format, _quota_renderer(args))
-    return 0 if payload.get("ok") else 1
+    return 0 if succeeded else 1
+
+
+def _record_non_guard_quota_event(
+    payload: dict[str, Any], args: argparse.Namespace, *, registry_path: Path,
+    runtime_root_arg: str | None, context: QuotaCommandContext | None, goal_ref: dict[str, str] | None,
+    rollout_todo_id: str | None, rollout_replan_obligation_id: str | None,
+    spend_turn_instance_id: str | None, rollout_details: dict[str, Any],
+    append_cli_rollout_event: RolloutEventAppender,
+) -> None:
+    """Record the CLI event before settlement readback and optional memory ingest."""
+    append_cli_rollout_event(
+        payload,
+        registry_path=registry_path,
+        runtime_root_arg=runtime_root_arg,
+        event_kind=QUOTA_EVENT_KINDS[args.quota_command],
+        goal_ref=goal_ref,
+        agent_id=args.agent_id,
+        todo_id=rollout_todo_id,
+        run_id=(
+            spend_turn_instance_id
+            if args.quota_command == "spend-slot"
+            else None
+        ),
+        status=str(
+            payload.get("effective_action")
+            or payload.get("decision")
+            or payload.get("mode")
+            or args.quota_command
+        ),
+        summary=(
+            f"quota {args.quota_command} decision="
+            f"{payload.get('decision') or payload.get('mode')} "
+            f"state={payload.get('state') or ''}"
+        ),
+        details=rollout_details,
+        allow_failed=args.quota_command == "should-run",
+    )
+    if args.quota_command == "spend-slot" and spend_turn_instance_id:
+        assert context is not None  # A settlement requires a prepared authority context.
+        attach_spend_settlement_result(
+            payload,
+            runtime_root=context.runtime_root,
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+            todo_id=rollout_todo_id,
+            turn_instance_id=spend_turn_instance_id,
+            replan_obligation_id=rollout_replan_obligation_id,
+            goal_ref=goal_ref,
+        )
+        attach_reward_memory_ingest_after_spend(
+            payload,
+            execute=bool(args.execute),
+            runtime_root=context.runtime_root,
+            registry_path=registry_path,
+            goal_id=args.goal_id,
+            agent_id=args.agent_id,
+            todo_id=rollout_todo_id,
+            turn_instance_id=spend_turn_instance_id,
+            replan_obligation_id=rollout_replan_obligation_id,
+            goal_ref=goal_ref,
+        )
 
 
 def handle_quota_command(
@@ -504,6 +618,9 @@ def handle_quota_command(
     append_cli_rollout_event: RolloutEventAppender,
     capture_directory: Path | None = None,
 ) -> int:
+    native_result = handle_native_context_command(args, print_payload=print_payload)
+    if native_result is not None:
+        return native_result
     usage_quota_started = time.time_ns() // 1_000_000
     heartbeat_turn_id: str | None = None
     heartbeat_receipt_existing: dict[str, object] | None = None
@@ -522,6 +639,9 @@ def handle_quota_command(
             getattr(args, "decision_output_dir", None) is not None
             or getattr(args, "decision_output_root", None) is not None
             or getattr(args, "decision_handoff_socket", None) is not None
+            or getattr(args, "codex_context_dir", None) is not None
+            or getattr(args, "codex_context_root", None) is not None
+            or getattr(args, "context_delivery", "off") != "off"
         ):
             validate_quota_command_context_request(args)
             capture_directory = prepare_decision_capture(args)
@@ -915,56 +1035,14 @@ def handle_quota_command(
                         ),
                     )
         else:
-            append_cli_rollout_event(
-                payload,
-                registry_path=registry_path,
-                runtime_root_arg=runtime_root_arg,
-                event_kind=QUOTA_EVENT_KINDS[args.quota_command],
-                goal_ref=goal_ref,
-                agent_id=args.agent_id,
-                todo_id=rollout_todo_id,
-                run_id=(
-                    spend_turn_instance_id
-                    if args.quota_command == "spend-slot"
-                    else None
-                ),
-                status=str(
-                    payload.get("effective_action")
-                    or payload.get("decision")
-                    or payload.get("mode")
-                    or args.quota_command
-                ),
-                summary=(
-                    f"quota {args.quota_command} decision="
-                    f"{payload.get('decision') or payload.get('mode')} "
-                    f"state={payload.get('state') or ''}"
-                ),
-                details=rollout_details,
-                allow_failed=args.quota_command == "should-run",
+            _record_non_guard_quota_event(
+                payload, args, registry_path=registry_path,
+                runtime_root_arg=runtime_root_arg, context=context, goal_ref=goal_ref,
+                rollout_todo_id=rollout_todo_id,
+                rollout_replan_obligation_id=rollout_replan_obligation_id,
+                spend_turn_instance_id=spend_turn_instance_id, rollout_details=rollout_details,
+                append_cli_rollout_event=append_cli_rollout_event,
             )
-            if args.quota_command == "spend-slot" and spend_turn_instance_id:
-                attach_spend_settlement_result(
-                    payload,
-                    runtime_root=runtime_root,
-                    goal_id=args.goal_id,
-                    agent_id=args.agent_id,
-                    todo_id=rollout_todo_id,
-                    turn_instance_id=spend_turn_instance_id,
-                    replan_obligation_id=rollout_replan_obligation_id,
-                    goal_ref=goal_ref,
-                )
-                attach_reward_memory_ingest_after_spend(
-                    payload,
-                    execute=bool(args.execute),
-                    runtime_root=runtime_root,
-                    registry_path=registry_path,
-                    goal_id=args.goal_id,
-                    agent_id=args.agent_id,
-                    todo_id=rollout_todo_id,
-                    turn_instance_id=spend_turn_instance_id,
-                    replan_obligation_id=rollout_replan_obligation_id,
-                    goal_ref=goal_ref,
-                )
     attach_reward_memory_recall_after_should_run(
         payload,
         quota_command=args.quota_command,

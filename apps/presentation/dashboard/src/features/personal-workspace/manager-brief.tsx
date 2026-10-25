@@ -1,5 +1,6 @@
+import {ContextHelp} from "./context-help";
+import {ArrowRight, Check, CircleHelp} from "lucide-react";
 import type { ReactNode } from "react";
-import { ArrowRight, Check } from "lucide-react";
 import { useWorkspaceI18n } from "./i18n";
 import type { WorkspaceActionPreview, WorkspaceGoal } from "./personal-workspace-model";
 import { workspaceHomeLaneForGoal } from "./personal-workspace-model";
@@ -31,7 +32,7 @@ function BriefTile({ count, empty, kind, live = false, onSelectGoal, onSelectOpe
   const { t } = useWorkspaceI18n();
   return (
     <section className={`personal-brief-tile is-${kind}${live ? " is-live" : ""}`} data-empty={count === 0 || undefined} data-testid={`personal-brief-${kind}`}>
-      <header><span>{title}</span><b>{count}</b></header>
+      <header><span>{title}{!rows.length ? <ContextHelp label={empty} icon={CircleHelp}><p>{empty}</p></ContextHelp> : null}</span><b>{count}</b></header>
       {rows.length ? <div className="personal-brief-rows">
         {rows.slice(0, briefRowLimit).map((row) => (
           <button className="personal-brief-row" key={row.key} data-operation-id={row.proposal?.previewId}
@@ -41,7 +42,7 @@ function BriefTile({ count, empty, kind, live = false, onSelectGoal, onSelectOpe
             <ArrowRight aria-hidden size={14} />
           </button>
         ))}
-      </div> : <p className="personal-brief-empty">{empty}</p>}
+      </div> : null}
       {total ? <footer>{total}</footer> : null}
       {onViewAll && rows.length > briefRowLimit ? <footer><button type="button" onClick={onViewAll}>{t("brief.viewAll", { count: rows.length })}</button></footer> : null}
     </section>

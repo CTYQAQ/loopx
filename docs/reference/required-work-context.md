@@ -46,6 +46,17 @@ selection and fulfillment policy in both ordinary packets and TurnEnvelope.
 `work_context.complete` means no known source failure, not that pending reads
 have been consumed. TurnEnvelope signs the same content and obligations; its
 size warning never truncates current requirements or removes a pending read.
+Full progressive reads carry the complete-Goal, no-summary and fresh-guard
+obligations. Only a fulfilled registered narrative adds the generated-region
+and canonical-Todo ownership explanation; pending reads do not repeat that
+inapplicable explanation. Todo-bound semantic replanning also uses the same
+autonomous Vision authoring contract in its action and settlement projections,
+so exact in-response references retain complete replacement and replan rules.
+Ordinary settlement and all execution/receipt checks keep their existing rules.
+An existing receipt-bound Todo retains its original Task identity during a
+semantic replan. Only an unbound fallback yields to the original Todo-less
+planning obligation; that obligation must match its signed Goal, Agent and
+Turn. Neither route admits ordinary work while delivery remains withheld.
 
 Preferences remain conditional on scoped records. The existing preference and
 Explore hooks return their actual read context through registered adapters;
@@ -54,6 +65,15 @@ receipts stay separate from the single content carrier. Unconfigured hooks
 preserve their off-state. User Todo inventory views disappear only from exact
 Todo responses; scoped User decisions and gates remain in the work context
 and retain their existing admission/notification authority.
+
+Todo context retains complete scoped records and canonical read provenance,
+including the record schema, snapshot digest, count and provider revision. It
+omits the known canonical reader's `contract_fields` dictionary: field names
+describe the reader's record format, not additional task requirements. Empty
+scoped User results still retain their source proof. Unknown read schemas and
+malformed dictionaries remain verbatim. The explicit canonical Todo commands
+keep their full read metadata; this default context compaction requires no
+cross-Turn baseline and leaves all record values, gates and stops intact.
 
 Source failure retains the unresolved read, identifies the unavailable source,
 and blocks dependent delivery until recovery and a fresh guard. Reading current
@@ -117,6 +137,37 @@ upgrades installed automations nor proves model adoption or token/latency gains.
 To roll back, install the prior revision and regenerate prompts; changing a
 transport flag does not restore the old exact Todo schema.
 
+## Opt-in native reuse
+
+The existing [native context delivery option](../heartbeat-automation-prompt.md#opt-in-native-context-delivery)
+uses one TypeScript codec for ordinary quota and TurnEnvelope. Within a confirmed
+baseline, both representations repeat `planning_horizon.core_goal`'s original
+objective, provenance and availability, including a changed or missing objective.
+The complete `acceptance_contract` and registered planning trees use exact
+reuse, subtree changes or a complete refresh; the acceptance tree is not treated
+as the original Goal sentence. Unknown horizon fields remain current input.
+
+The same codec retains complete static closure guidance in quota channels and
+the Turn contract capsule. Current closure decisions, conditions, identities,
+commands and unknown controls remain current input. Explore's registered owner
+also permits exact reuse of branch evidence audits and its evidence-link template;
+branch identity, selection, status, resume facts and orchestration gates remain
+current. Reordering, refutation, removed evidence and changed guidance reconstruct
+the exact current source; no timestamp, revision or text is normalized away.
+
+Object edits may group complete current fields in `values`, alongside recursive
+`changed` edits and `removed` keys. Array edits use exact indices in `items` and
+`values`, with `length` for resizing. These literals are present in the current
+input; grouping saves repeated wrappers rather than omitting controls. The
+codec compares this encoding with ordinary edits and full replacement before
+choosing. A reader that does not recognize the edit recovers the full capture.
+
+These are presentation rules within the existing default-off option, not a new
+configuration or admission policy. Missing retention, a changed epoch, a damaged
+patch or an incompatible reader automatically recovers the same original full
+capture. Recovery never reruns the guard, asks the owner, spends quota or grants
+execution. Wire reduction alone does not establish actual model costs or outcomes.
+
 ## 中文
 
 普通 Heartbeat/quota 默认在 `agent_channel.work_context` 返回完整选定 Todo、
@@ -138,6 +189,9 @@ Goal adapter 仍完整读取文件、校验 UTF-8，并以全部字节计算修�
 偏好只在对应作用域有记录时出现；Explore 和偏好沿用各自 hook 的真实 adapter，
 读取范围由 capability owner 决定。来源失败保留未完成必读项并阻止依赖交付，恢复后
 重新准入；User gate 仍生效。大小告警不截断验收或移除剩余必读项。
+已有 receipt 绑定的 Todo 在语义重规划中保留原 Task 身份；只有未绑定的备选任务才让位于
+原无 Todo 规划义务，该义务必须与签名中的 Goal、Agent 和 Turn 一致。两条路径都不会
+在普通交付被禁止时授权执行业务工作。
 
 已选定工作时，验收 adapter 复用 canonical owner 的精确 Todo 读取，顶层 `tasks`
 只携带该工作的关联观察；完整 Goal 合同、已配置 scope、检查、受阻工作和累计 outcome
@@ -160,3 +214,39 @@ Goal adapter 仍完整读取文件、校验 UTF-8，并以全部字节计算修�
 
 安装后重新生成旧展开式 heartbeat 提示；此 PR 不热更新 runtime/automation，
 也不证明模型已采用或获得质量收益。回滚需恢复旧版本并重新生成提示。
+
+既有默认关闭的原生 context delivery 由同一 TypeScript codec 处理普通 quota 与
+TurnEnvelope。确认基线保留后，两入口仍逐轮发送 `planning_horizon.core_goal` 的
+原始目标、来源和可用性，包括目标改变或缺失。完整 `acceptance_contract` 与已登记
+规划树按精确复用、子树变化或全量交付；累计验收树不等于原始目标句。未知 horizon
+字段仍作为本轮输入。quota 通道与 Turn 契约摘要复用完整静态收口指导，当前收口判断、
+条件、身份、命令与未知控制仍逐轮发送。Explore owner 登记分支证据审计与证据关联
+模板的精确复用；分支身份、选择、状态、恢复事实与编排门仍是当前输入。重排、反证、
+移除与指导变更完整重建当前来源，不规范化时间戳、修订或正文。
+对象编辑可以在 `values` 中合并携带本轮完整字段，同时保留递归 `changed` 与删除
+`removed`；数组的 `items` 与 `values` 使用精确索引，`length` 调整长度。
+字段仍在本轮输入中，只减少重复 wrapper；codec 比较普通编辑、合并字段
+与完整替换后选择，无法识别该编辑的读者恢复完整 capture。
+这些只改变既有选项内的展示，不新增配置或准入。保留不明、epoch 改变、patch 损坏
+或读者不兼容时，自动恢复同一原始 full capture，不重跑 guard、不问询、不扣额，
+也不授予执行权限。传输减少本身不证明实际模型费用或结果改善。
+
+### Saved context cache / 已保存上下文缓存
+
+For `quota context-project`, enabling context delivery no longer requires a
+second cache-directory setup step. Omitting `--decision-output-root` reuses the
+native session's private context directory. An explicit missing leaf is created
+with mode `0700` under an existing parent; existing directories must remain
+private, physically addressed and owned by the current user. Existing symlinks,
+non-directories and unsafe permissions are rejected without changing them.
+Normal platform parent aliases are resolved before validating the leaf.
+Read-only recovery never creates a cache. With context delivery off, projection
+remains inert and reads the original capture. Failures retain that capture's
+exact digest and Turn receipt; they never rerun admission or spend quota.
+
+`quota context-project` 开启上下文投递后，不再要求另外手工准备缓存目录。
+省略 `--decision-output-root` 时复用原生会话的私有上下文目录；显式指定的新目录
+在已存在的父目录下以 `0700` 创建。已有目录仍须属于当前用户、权限私有且不是
+符号链接；不修改不安全目录的权限。平台正常的父路径别名先解析再检查末级目录。
+只读恢复不创建缓存；关闭上下文投递时保持无副作用，读取原始 capture。失败仍保留
+原始摘要和 Turn 回执，不重新准入或扣减额度。

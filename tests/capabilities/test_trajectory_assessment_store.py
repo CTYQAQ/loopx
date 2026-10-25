@@ -84,6 +84,11 @@ def pack(tmp_path):
             )
         ],
         "limitations": ["Synthetic process; not model quality evidence"],
+        "synthesis": {
+            "summary": {"text": "A valid negative result narrows the next investigation.", "episode_ids": ["episode"],
+                        "citations": [dict(source_id="source", first_line=2, last_line=2)]},
+            "findings": [], "next_experiments": [],
+        },
     }
     executable = tmp_path / "codex-fixture"
     executable.write_text(
@@ -146,6 +151,52 @@ def test_scope_discovery_execute_read_citation_and_changed_source_history(pack):
     )
 
 
+def test_repeated_artifact_excerpts_share_one_fresh_read(pack, monkeypatch):
+    scope, _, _, input_path, sources, _ = pack
+    data = json.loads(input_path.read_text())
+    data["sources"].append({**data["sources"][0], "id": "prior", "first_line": 1, "text": "Prior question"})
+    data["episodes"][0]["source_ids"].append("prior")
+    input_path.write_text(json.dumps(data))
+    calls = []
+    original = type(input_path).read_bytes
+
+    def observed(path):
+        if path == sources / "result.txt":
+            calls.append(path)
+        return original(path)
+
+    monkeypatch.setattr(type(input_path), "read_bytes", observed)
+    registered = register_pack(**scope, input_path=input_path, source_root=sources, title="Multiple excerpts")
+    assert len(calls) == 1
+    calls.clear()
+    before = inspect_pack(**scope, pack_id=registered["pack_id"])
+    assert before["availability"] == "available" and len(calls) == 1
+    # No cross-request cache: same-length replacement with restored timestamps
+    # must still invalidate the pack, rather than trusting path/size/mtime.
+    path = sources / "result.txt"
+    stat = path.stat()
+    original_bytes = original(path)
+    path.write_bytes(original_bytes.replace(b"Prior", b"Other"))
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    calls.clear()
+    after = inspect_pack(**scope, pack_id=registered["pack_id"])
+    assert after["reason_code"] == "source_changed" and len(calls) == 1
+
+
+@pytest.mark.parametrize("correction,reason", [
+    ({"artifact_sha256": "0" * 64}, "source_changed"),
+    ({"text": "An unsupported second excerpt"}, "excerpt_mismatch"),
+])
+def test_shared_artifact_does_not_skip_later_digest_or_excerpt(pack, correction, reason):
+    scope, _, _, input_path, sources, _ = pack
+    data = json.loads(input_path.read_text())
+    data["sources"].append({**data["sources"][0], "id": "later", **correction})
+    data["episodes"][0]["source_ids"].append("later")
+    input_path.write_text(json.dumps(data))
+    with pytest.raises(PackUnavailable, match=reason):
+        register_pack(**scope, input_path=input_path, source_root=sources, title="Invalid later excerpt")
+
+
 def test_continuation_reuses_identical_excerpts_despite_other_capture_bytes(pack):
     scope, operation, registered, path, sources, provider = pack
     assert execute_pack(**operation, codex=provider)["status"] == "succeeded"
@@ -168,7 +219,8 @@ def test_continuation_reuses_identical_excerpts_despite_other_capture_bytes(pack
     completed = execute_pack(**new_operation, codex="must-not-run")
     assert completed["reused"] and completed["reused_from_analysis_key"] == operation["analysis_key"]
     reused_output = json.loads((old_directory.parent / successor["analysis_key"] / "model-output.json").read_text())
-    assert set(reused_output) == {"assessments", "limitations"}
+    assert set(reused_output) == {"assessments", "limitations", "synthesis"}
+    assert reused_output["synthesis"] == original["synthesis"]
     view = inspect_pack(**scope)
     assert view["result"]["scope"]["revision"] == "capture-2"
     assert view["result"]["metrics"] == original["metrics"]
@@ -195,7 +247,10 @@ def test_new_evidence_reassesses_old_judgments_and_complete_denominator(pack, tm
     assert before["continuation"]["can_reuse"] is False
     assert before["continuation"]["reassessed_episode_ids"] == ["episode", "follow-up"]
     assert before["continuation"]["new_pair_count"] == 1
+    assert before["continuation"]["compared_pair_count"] is None
     revised = {"assessments": [dict(episode_id=e, metric="benefit_test", verdict=v, reason="Later evidence corrects the earlier interpretation", citations=[dict(source_id="later", first_line=1, last_line=1)] if v != "unknown" else []) for e, v in [("episode", "no"), ("follow-up", "unknown")]], "limitations": ["Synthetic counterevidence"]}
+    revised["synthesis"] = {"summary": {"text": "The earlier interpretation was refuted by later evidence.", "episode_ids": ["episode"],
+                                      "citations": [dict(source_id="later", first_line=1, last_line=1)]}, "findings": [], "next_experiments": []}
     executable = tmp_path / "reassessment"
     executable.write_text(f"#!{sys.executable}\nimport sys\nfrom pathlib import Path\nprompt=sys.stdin.read()\nassert 'The earlier proxy' in prompt and '原始测量' in prompt\nPath(sys.argv[sys.argv.index('-o')+1]).write_text({json.dumps(revised)!r})\n")
     executable.chmod(0o700)
@@ -205,7 +260,33 @@ def test_new_evidence_reassesses_old_judgments_and_complete_denominator(pack, tm
     benefit = next(row for row in view["result"]["metrics"] if row["metric"] == "benefit_test")
     assert (benefit["yes"], benefit["no"], benefit["unknown"], benefit["eligible"]) == (0, 1, 1, 2)
     assert view["continuation"]["verdict_changes"] == [dict(episode_id="episode", metric="benefit_test", before="yes", after="no")]
+    assert view["continuation"]["compared_pair_count"] == 1
     assert inspect_pack(**scope, pack_id=registered["pack_id"])["result"] == previous
+
+
+def test_disjoint_research_units_have_zero_comparisons_without_overwriting_prior_result(pack, tmp_path):
+    scope, operation, registered, path, sources, provider = pack
+    execute_pack(**operation, codex=provider)
+    previous = inspect_pack(**scope)["result"]
+    old_files = {p: p.read_bytes() for p in scope["runtime_root"].glob("benchmark/trajectory-assessments/*/jobs/*/*") if p.is_file()}
+    raw = json.loads(next(p for p in old_files if p.name == "model-output.json").read_text())
+    data = json.loads(path.read_text())
+    data["scope"]["revision"] = "different-research-unit"
+    data["episodes"][0]["id"] = "new-question"
+    raw["assessments"][0]["episode_id"] = "new-question"
+    raw["synthesis"]["summary"]["episode_ids"] = ["new-question"]
+    path.write_text(json.dumps(data))
+    successor = register_pack(**scope, input_path=path, source_root=sources, title="Different research unit", base_pack_id=registered["pack_id"])
+    assert inspect_pack(**scope)["continuation"]["compared_pair_count"] is None
+    executable = tmp_path / "disjoint-output-fixture"
+    executable.write_text(f"#!{sys.executable}\nimport sys\nfrom pathlib import Path\nsys.stdin.read()\nPath(sys.argv[sys.argv.index('-o')+1]).write_text({json.dumps(raw)!r})\n")
+    executable.chmod(0o700)
+    execute_pack(**scope, pack_id=successor["pack_id"], analysis_key=successor["analysis_key"], codex=str(executable))
+    delta = inspect_pack(**scope)["continuation"]
+    assert (delta["compared_pair_count"], delta["new_pair_count"], delta["removed_pair_count"]) == (0, 1, 1)
+    assert delta["verdict_changes"] == []
+    assert inspect_pack(**scope, pack_id=registered["pack_id"])["result"] == previous
+    assert all(p.read_bytes() == content for p, content in old_files.items())
 
 
 def test_continuation_does_not_cross_owner_run_or_revoked_source(pack, tmp_path):
@@ -228,6 +309,7 @@ def test_continuation_does_not_cross_owner_run_or_revoked_source(pack, tmp_path)
     view = inspect_pack(**scope)
     assert view["availability"] == "available"
     assert not view["continuation"]["base_available"] and not view["continuation"]["can_reuse"]
+    assert view["continuation"]["compared_pair_count"] is None
     assert view["continuation"]["reassessed_episode_ids"] == ["episode"]
     result = execute_pack(**scope, pack_id=successor["pack_id"], analysis_key=successor["analysis_key"], codex=provider)
     assert result["status"] == "succeeded" and not result["reused"]
@@ -540,6 +622,7 @@ def translation(field):
     return "译文：" + field["text"]
 output = {"assessments":[{"episode_id":"episode","metric":"benefit_test","verdict":"unknown","reason":"合成过程测试，未验证实际收益。","citations":[]}],
           "limitations":["合成译文，非模型质量验收。"], "episode_questions":[{"episode_id":"episode","question":"是否有帮助？"}],
+          "synthesis":{"summary":{"text":"原生测量为负，不能推断更广泛的收益。","episode_ids":["episode"],"citations":[{"source_id":"source","first_line":2,"last_line":2}]},"findings":[],"next_experiments":[]},
           "display_translations":[{"field_id":f["field_id"], "text":translation(f)} for f in fields[:-1]]}
 Path(sys.argv[sys.argv.index('-o')+1]).write_text(json.dumps(output))
 print(json.dumps({"type":"turn.completed", "usage":{"input_tokens":19,"output_tokens":7}}))
@@ -629,6 +712,35 @@ def test_method_upgrade_reads_verified_old_result_without_rejudging(pack, monkey
     result_file.write_text("{}", encoding="utf-8")
     with pytest.raises(PackUnavailable, match="historical_result_unverified"):
         inspect_pack(**scope)
+
+
+def test_revised_producer_preserves_frozen_legacy_job_and_requires_new_execution(pack):
+    from loopx.capabilities.benchmark_toolkit.trajectory_assessment import prepare
+
+    scope, operation, current, input_path, sources, provider = pack
+    assert current["config"]["research_synthesis_revision"] == 2
+    prepared = prepare(input_path, model="gpt-6.1-sol", effort="max", service_tier="fast")
+    assert prepared["analysis_key"] == current["analysis_key"]
+    legacy = register_pack(**scope, input_path=input_path, source_root=sources,
+        title="Frozen legacy analysis", config={key: value for key, value in current["config"].items()
+                                              if key != "research_synthesis_revision"})
+    legacy_operation = {**scope, "pack_id": legacy["pack_id"], "analysis_key": legacy["analysis_key"]}
+    execute_pack(**legacy_operation, codex=provider)
+    old = inspect_pack(**scope, pack_id=legacy["pack_id"])
+    before = {path: path.read_bytes() for path in scope["runtime_root"].glob("**/jobs/*/*") if path.is_file()}
+    assert current["analysis_key"] != legacy["analysis_key"]
+    pending = inspect_pack(**scope, pack_id=current["pack_id"])
+    assert pending["job"] is None and pending["result"] is None
+    execute_pack(**operation, codex=provider)
+    new = inspect_pack(**scope, pack_id=current["pack_id"])
+    assert new["result"]["method_version"] == "research-episodes-synthesis-v2"
+    assert new["result"]["metrics"] == old["result"]["metrics"]
+    assert inspect_pack(**scope, pack_id=legacy["pack_id"]) == old
+    assert all(path.read_bytes() == content for path, content in before.items())
+    # Both frozen versions still use the same literal, source-qualified reader.
+    for op in [legacy_operation, operation]:
+        assert read_citation(**op, source_id="source", first_line=2, last_line=2)["text"] == (
+            "The native measurement did not improve utility · 原始测量。")
 
 
 def _usage_fixture():

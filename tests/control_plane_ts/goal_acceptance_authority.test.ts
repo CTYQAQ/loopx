@@ -584,6 +584,7 @@ for (const provider of providers) {
     assert.deepEqual(await head(store), after, "task-scoped planning has no provider write");
     assert.equal(((inspection.contract as JsonObject).criteria as JsonObject[])[0].validation_timeout_seconds, 5);
     assert.ok((inspection.tasks as JsonObject[]).every(task => typeof task.todo_semantic_digest === "string"));
+    assert.ok((inspection.tasks as JsonObject[]).every(task => typeof task.todo_id === "string"));
     const projection = projectGoalAcceptance(after.head, goal);
     assert.equal(projection.status, "held");
     assert.deepEqual(projection.held_todo_ids, ["todo_second"]);

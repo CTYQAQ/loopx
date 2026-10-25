@@ -318,6 +318,7 @@ def _deliver_lark_inbox_outbound(
     text: str,
     content_format: str = "text",
     reply_placement: str | None = None,
+    delivery_id: str | None = None,
     execute: bool = False,
     provider_preflight: bool = False,
     runner: CommandRunner = _default_runner,
@@ -412,12 +413,16 @@ def _deliver_lark_inbox_outbound(
         )
         else "source_thread"
     )
+    if delivery_id is not None and (not isinstance(delivery_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}", delivery_id)):
+        raise ValueError("invalid native delivery identity")
     digest = hashlib.sha256(
         json.dumps(
             {
                 "message_id": source_message_id,
                 "placement": placement,
                 "text": reply_text,
+                **({"delivery_id": delivery_id} if delivery_id is not None else {}),
                 **({"content_format": "markdown"} if markdown else {}),
                 **({"attachment_keys": attachment_keys} if attachment_keys else {}),
             },
@@ -587,6 +592,7 @@ def _deliver_lark_inbox_outbound(
                         "source_membership_verifier": source_membership_verifier,
                         "source_authority_verifier": source_authority_verifier,
                         **({"reply_placement": reply_placement} if reply_placement is not None else {}),
+                        **({"delivery_id": delivery_id} if delivery_id is not None else {}),
                         "finalize_reactions": finalize_reactions,
                         "attachment_keys": attachment_keys, "attachment_names": attachment_names})
     guidance = None
@@ -810,6 +816,7 @@ def reply_lark_event_inbox(
     text: str,
     content_format: str = "text",
     reply_placement: str | None = None,
+    delivery_id: str | None = None,
     execute: bool = False,
     provider_preflight: bool = False,
     runner: CommandRunner = _default_runner,
@@ -853,6 +860,7 @@ def reply_lark_event_inbox(
         text=text,
         content_format=content_format,
         reply_placement=reply_placement,
+        delivery_id=delivery_id,
         execute=execute,
         provider_preflight=provider_preflight,
         runner=runner,
@@ -878,6 +886,7 @@ def verify_lark_inbox_reply(
     config_path: str | Path,
     message_id: str,
     reply_placement: str | None = None,
+    delivery_id: str | None = None,
     text: str,
     attempt: Mapping[str, Any],
     runner: CommandRunner = _default_runner,
@@ -922,7 +931,7 @@ def verify_lark_inbox_reply(
     if batch:
         original = reply_lark_event_inbox(project=project, config_path=config_path,
             message_id=message_id, text=text, content_format="markdown", attachment_keys=attachment_keys,
-            reply_placement=reply_placement)
+            reply_placement=reply_placement, delivery_id=delivery_id)
         receipt = original["idempotency_key"]
         return verify_post_parts(receipt=receipt, intent_digest=_intent_digest(profile, chat_id, receipt),
             attempt=attempt, resume=resume_parts, arguments={"project": project,
@@ -930,6 +939,7 @@ def verify_lark_inbox_reply(
                 "source_membership_verifier": source_membership_verifier,
                 "source_authority_verifier": source_authority_verifier,
                 **({"reply_placement": reply_placement} if reply_placement is not None else {}),
+                **({"delivery_id": delivery_id} if delivery_id is not None else {}),
                 "before_send": before_send, "finalize_reactions": finalize_reactions,
                 "text": normalize_lark_outbound_text(text, limit=None, preserve_format=True),
                 "attachment_keys": attachment_keys, "attachment_names": attachment_names})
@@ -947,6 +957,7 @@ def verify_lark_inbox_reply(
             text=candidate_text,
             content_format=content_format,
             reply_placement=reply_placement,
+            delivery_id=delivery_id,
             execute=False,
             runner=runner,
             attachment_keys=attachment_keys,

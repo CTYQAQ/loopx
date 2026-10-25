@@ -109,6 +109,7 @@ def build_codex_app_settlement_plan(
     delivery_boundary: str | None = None,
     quota_spend_source: str = "heartbeat",
     goal_ref: Mapping[str, object] | None = None,
+    autonomous_replan: bool = False,
 ) -> SettlementPlan:
     return build_turn_scoped_cli_settlement_plan(
         goal_id=goal_id,
@@ -123,6 +124,7 @@ def build_codex_app_settlement_plan(
         delivery_boundary=delivery_boundary,
         quota_spend_source=quota_spend_source,
         goal_ref=goal_ref,
+        autonomous_replan=autonomous_replan,
     )
 
 
@@ -140,6 +142,7 @@ def build_turn_scoped_cli_settlement_plan(
     delivery_boundary: str | None = None,
     quota_spend_source: str = "heartbeat",
     goal_ref: Mapping[str, object] | None = None,
+    autonomous_replan: bool = False,
 ) -> SettlementPlan:
     if bool(todo_id) == bool(replan_obligation_id):
         raise ValueError(
@@ -199,6 +202,7 @@ def build_turn_scoped_cli_settlement_plan(
     )
     payload = effect_runtime_result("settlement.turn_scoped_cli_plan", {
         "identity": identity.as_dict(), "delivery_boundary": delivery_boundary,
+        "autonomous_replan": autonomous_replan,
         "delivery_batch_scale_choices": list(DELIVERY_BATCH_SCALE_INPUT_CHOICES),
         **({"goal_ref": normalized_goal_ref} if normalized_goal_ref is not None else {}),
         "command_templates": {

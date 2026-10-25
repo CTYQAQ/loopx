@@ -149,6 +149,7 @@ class QuotaRunDecision:
     state: str
     quota: dict[str, Any]
     replan_decision_allowed: bool
+    goal_route_hint_override: dict[str, Any] | None = None
 
 
 def refine_quota_recommended_action(
@@ -272,6 +273,12 @@ def resolve_quota_run_decision(
     ) if replan_required and not (inbox_reply_due or inbox_material_review_due) else {}
     repair_action = (stall_self_repair.get("effective_action")
         if isinstance(stall_self_repair, dict) else None)
+    task_orchestration_lane_count = 0
+    if task_orchestration_contract is not None:
+        lanes = task_orchestration_contract.get("eligible_child_lanes")
+        if not isinstance(lanes, list):
+            lanes = task_orchestration_contract.get("eligible_peer_lanes")
+        task_orchestration_lane_count = len(lanes) if isinstance(lanes, list) else 0
     result = effect_runtime_result("quota.run_decision", {
         "normal_delivery_allowed": normal_delivery_allowed,
         "recovery_delivery_allowed": recovery_delivery_allowed,
@@ -291,9 +298,15 @@ def resolve_quota_run_decision(
         "inbox_material_review_due": inbox_material_review_due,
         "terminal_no_followup": goal_frontier_is_terminal_no_followup(
             projection=goal_frontier_projection),
+        "task_orchestration_lane_count": task_orchestration_lane_count,
         "task_orchestration_contract": _guard_strings(
             task_orchestration_contract, ("execution_state", "mode")),
     })
     patch = result.pop("quota_patch")
+    route_hint_override = result.pop("goal_route_hint_override", None)
     # Only typed edits cross the wire; preserve source numbers and unmodified metadata.
-    return QuotaRunDecision(quota={**quota, **patch} if patch else quota, **result)
+    return QuotaRunDecision(
+        quota={**quota, **patch} if patch else quota,
+        goal_route_hint_override=route_hint_override,
+        **result,
+    )

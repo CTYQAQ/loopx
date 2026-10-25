@@ -111,6 +111,15 @@ def test_selected_acceptance_read_keeps_global_requirements_and_exact_binding(
         )
     channel = packet["interaction_contract"]["agent_channel"]
     assert channel["delivery_allowed"] is True and channel["work_context"]["complete"] is True
+    # The public canonical reader retains its full format metadata. Host context
+    # needs the same complete scoped records and source proof, not the dictionary.
+    users = cli("todo", "list", "--goal-id", goal, "--role", "user",
+        "--status", "open", "--agent-id", "agent-a")
+    proof = deepcopy(users["authority_read"])
+    assert proof["todo_read_model"].pop("contract_fields")
+    assert channel["work_context"]["user_todos"] == {
+        "source": users["source"], "authority_read": proof, "todos": users["todos"],
+    }
     observed = next(row["content"] for row in channel["work_context"]["sources"]
         if row.get("source") == "goal_acceptance")
     assert observed == exact

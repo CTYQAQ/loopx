@@ -33,3 +33,8 @@
 
 .conversation-request-toggle {grid-column:1;grid-row:1 / span 2;align-self:center;color:var(--pw-muted);}
 .conversation-request-row[open] > summary .conversation-request-toggle {transform:rotate(90deg);}
+
+.conversation-requests-search {display:flex;gap:8px;padding:12px 24px;}
+.conversation-requests-search input {min-width:0;flex:1;border:1px solid var(--pw-line);border-radius:6px;background:var(--pw-bg);color:var(--pw-text);font:inherit;padding:8px 12px;}
+.conversation-requests-search + .conversation-requests-body {max-height:calc(100dvh - 280px);}
+@media(max-width:640px) {.conversation-requests-search {padding-inline:16px;flex-wrap:wrap;}.conversation-requests-search input {flex-basis:100%;}.conversation-requests-search + .conversation-requests-body {max-height:calc(100dvh - 290px);}}

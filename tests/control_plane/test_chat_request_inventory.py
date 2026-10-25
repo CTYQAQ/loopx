@@ -58,6 +58,11 @@ def test_revision_and_cancellation_reuse_current_control_and_preserve_history(ap
     assert _inventory(api, route["session_id"])[1]["pending_count"] == 0
     historical = _inventory(api, route["session_id"], view="history")[1]["rows"][0]
     assert historical["brief"] == changed and not historical["unfinished"] and historical["control_state"] == "cancelled"
+    assert _inventory(api, route["session_id"], search="corrected artifact")[1]["rows"] == []
+    searched = _inventory(api, route["session_id"], view="history", search="  CORRECTED artifact  ")[1]
+    assert searched["matched"] == 1 and searched["rows"][0] == historical
+    assert searched["pending_count"] == 0
+    assert _inventory(api, route["session_id"], view="history", search="Corrected source")[1]["matched"] == 1
 
 
 def test_earlier_source_session_survives_reopen_and_other_audiences_are_excluded(api):
@@ -75,6 +80,8 @@ def test_earlier_source_session_survives_reopen_and_other_audiences_are_excluded
     deliver(f["runtime"], f["registry"], session=project, turn=turn,
         request={"goal_id": f["ref"]["goal_id"], "agent_id": "agent-b"}, source_store=store)
     assert "Private project request" not in str(_inventory(api, fresh["session_id"])[1])
+    scoped = _inventory(api, fresh["session_id"], search="Private project request")[1]
+    assert scoped["matched"] == 0 and scoped["rows"] == [] and scoped["pending_count"] == 1
     assert _inventory(api, project["session_id"])[1]["pending_count"] == 1
     external = store.create_session(goal_id="loopx-manager", agent_id="codex", adapter_kind="codex_app_server",
         upstream_thread_id="another-user", channel_id="manager.external.foreign")
@@ -99,12 +106,27 @@ def test_paging_and_unreadable_source_do_not_report_empty_or_mutate_receipts(api
     assert len(second["rows"]) == 1 and second["next_offset"] is None
     assert second["snapshot_digest"] == first["snapshot_digest"]
     assert not {row["request_id"] for row in first["rows"]} & {row["request_id"] for row in second["rows"]}
+    # Locate the oldest retained row without loading or filtering the first page.
+    oldest = second["rows"][0]
+    searched = _inventory(api, route["session_id"], search=oldest["request_id"])[1]
+    assert searched["rows"] == [oldest] and searched["matched"] == 1
+    assert searched["pending_count"] == 13 and searched["next_offset"] is None
+    assert _inventory(api, route["session_id"], search="AGENT-A")[1]["matched"] == 13
+    assert _inventory(api, route["session_id"], search=f["ref"]["goal_id"])[1]["matched"] == 13
+    assert _inventory(api, route["session_id"], search="   ")[1]["rows"] == first["rows"]
+    missing_a = _inventory(api, route["session_id"], search="missing-A")[1]
+    missing_b = _inventory(api, route["session_id"], search="missing-B")[1]
+    assert missing_a["rows"] == missing_b["rows"] == []
+    assert missing_a["snapshot_digest"] != missing_b["snapshot_digest"]
+    assert _inventory(api, route["session_id"], search="x" * 201)[0] == 400
     source = _root(f["runtime"]) / "roundtrips" / (route["request_id"] + ".json")
     saved = source.read_bytes()
     source.write_text("{damaged")
     partial = _inventory(api, route["session_id"])[1]
     assert partial["coverage"]["unreadable"] == 1 and partial["pending_count"] == 12
     assert partial["snapshot_digest"] != first["snapshot_digest"]
+    no_match = _inventory(api, route["session_id"], search="nothing-matches")[1]
+    assert no_match["matched"] == 0 and no_match["coverage"]["unreadable"] == 1
     source.write_bytes(saved)
     assert _inventory(api, route["session_id"])[1]["pending_count"] == 13
     source.unlink()

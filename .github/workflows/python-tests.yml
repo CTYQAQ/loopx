@@ -190,6 +190,7 @@ jobs:
         run: |
           npm run smoke:chat-turn-acceptance-retry
           npm run smoke:chat-upgrade
+          npm run smoke:delegation-search
       - name: Qualify packaged team evidence and feedback recovery
         if: matrix.shard == 2
         working-directory: apps/presentation/dashboard
@@ -852,6 +853,11 @@ jobs:
       - name: Verify native Windows test Python discovery
         run: node --no-warnings --experimental-strip-types --test tests/control_plane_ts/test_python_runtime.test.ts
 
+      - name: Qualify live pytest worker diagnostics on Windows
+        run: >-
+          python -m pytest -q tests/test_ci_pytest_timing.py
+          -k stall_snapshot_is_visible_before_the_blocked_test_returns
+
       - name: Qualify the canary plan's repository path rendering
         run: >-
           python -m pytest -q
@@ -893,6 +899,7 @@ jobs:
           tests/test_doctor_install_freshness.py
           tests/test_file_lock.py
           tests/test_file_lock_cross_process.py
+          tests/test_host_thread_activity.py
           tests/control_plane/test_effect_runtime_integration.py
           tests/control_plane/test_shadow_observation_retirement.py
           tests/test_python_install_owner_platform.py

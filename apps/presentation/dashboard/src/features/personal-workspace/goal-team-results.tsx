@@ -1,5 +1,6 @@
+import {Check, FileText, RefreshCw, TriangleAlert} from "lucide-react";
+import {ContextHelp} from "./context-help";
 import {useEffect, useRef, useState} from "react";
-import {Check, FileText, RefreshCw} from "lucide-react";
 import {fetchLoopXTeamWork, readLoopXTeamWork, type DelegationInventory, type DelegationReadback} from "../../data/chat";
 import {TeamArtifactReport, isMarkdownArtifact, type TeamArtifact} from "./team-artifact-content";
 import {GoalTeamLineage} from "./goal-team-lineage";
@@ -107,7 +108,7 @@ export function GoalTeamResults({sessionId, zh, refreshKey}: {sessionId: string;
       <button type="button" disabled={busy} onClick={() => void list()}><RefreshCw size={14} aria-hidden="true"/>{zh ? "刷新成果" : "Refresh results"}</button></header>
     {busy ? <p role="status">{zh ? "正在核验产物…" : "Verifying artifacts…"}</p> : null}
     {error ? <p role="alert">{error}</p> : null}
-    {pages.some(page => !page.page_readback_complete) ? <p role="status">{zh ? "已检查的工作中有无法核验的记录；当前报告只代表它自己的验收，不代表整个团队。" : "Some inspected work cannot be verified. This report reflects only its own acceptance, not the whole team."}</p> : null}
+    {pages.some(page => !page.page_readback_complete) ? <ContextHelp label={zh ? "团队记录未完全核验" : "Team records partially verified"} icon={TriangleAlert}><p role="status">{zh ? "已检查的工作中有无法核验的记录；当前报告只代表它自己的验收，不代表整个团队。" : "Some inspected work cannot be verified. This report reflects only its own acceptance, not the whole team."}</p></ContextHelp> : null}
     <div className="goal-team-results-layout">
       {pages.length ? <nav className="goal-team-result-list" aria-label={zh ? "选择团队产物" : "Choose a team artifact"}>{rows.map(row => {
         const artifact = row.artifacts!.find(item => isMarkdownArtifact(item.ref)) ?? row.artifacts![0];

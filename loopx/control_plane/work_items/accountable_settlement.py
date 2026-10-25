@@ -28,6 +28,7 @@ def build_accountable_work_item_settlement_plan(
     delivery_boundary: str | None = None,
     command_prefix: str = "loopx",
     goal_ref: Mapping[str, object] | None = None,
+    autonomous_replan: bool = False,
 ) -> SettlementPlan | None:
     if runtime_profile in APP_HEARTBEAT_SETTLEMENT_RUNTIME_PROFILES:
         normalized_turn_instance_id = normalize_turn_instance_id(turn_instance_id)
@@ -42,6 +43,7 @@ def build_accountable_work_item_settlement_plan(
             turn_instance_id_ref=normalized_turn_instance_id,
             delivery_boundary=delivery_boundary,
             goal_ref=goal_ref,
+            autonomous_replan=autonomous_replan,
         )
     if runtime_profile in VISIBLE_GOAL_SETTLEMENT_RUNTIME_PROFILES:
         normalized_turn_instance_id = normalize_turn_instance_id(turn_instance_id)
@@ -59,6 +61,7 @@ def build_accountable_work_item_settlement_plan(
             delivery_boundary=delivery_boundary,
             quota_spend_source="visible-goal",
             goal_ref=goal_ref,
+            autonomous_replan=autonomous_replan,
         )
     if runtime_profile is not SchedulerRuntimeProfile.GENERIC_CLI_AGENT_LOOP:
         return None
@@ -76,4 +79,5 @@ def build_accountable_work_item_settlement_plan(
         turn_instance_id=normalized_turn_instance_id,
         delivery_boundary=delivery_boundary,
         goal_ref=goal_ref,
+        autonomous_replan=autonomous_replan,
     )

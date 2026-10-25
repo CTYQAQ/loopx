@@ -65,6 +65,7 @@ def codex_homes(env: Mapping[str, str] | None = None, user_home: Path | None = N
     Otherwise ``CODEX_HOME``, ``~/.codex`` and sibling ``~/.codex-*`` homes are
     searched, because Codex App installs can each keep their own home.
     Preserve distinct path names: callers also use them as profile aliases.
+    Relative entries use the process working directory when their store is read.
     """
 
     env = os.environ if env is None else env
@@ -109,14 +110,16 @@ def _query_threads(uri: str, thread_ids: list[str]) -> dict[str, tuple[Any, Any]
 
 
 def _thread_rows(db: Path, thread_ids: list[str]) -> dict[str, tuple[Any, Any]]:
+    # Configured homes may be relative; SQLite file URIs require an absolute path.
+    uri = db.absolute().as_uri()
     try:
-        return _query_threads(f"{db.as_uri()}?mode=ro", thread_ids)
+        return _query_threads(f"{uri}?mode=ro", thread_ids)
     except sqlite3.OperationalError:
         # A WAL store whose -shm is absent cannot be read with mode=ro.
         # Without a -wal file the main file is the whole store.
         if Path(f"{db}-wal").exists():
             raise
-        return _query_threads(f"{db.as_uri()}?immutable=1", thread_ids)
+        return _query_threads(f"{uri}?immutable=1", thread_ids)
 
 
 def current_codex_execution_identity(

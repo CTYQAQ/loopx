@@ -50,6 +50,7 @@ const ctx = {
   sessionManager: { getSessionFile: () => process.argv[3] || undefined },
   ui: { setWidget() {}, notify: (message, kind) => notices.push({message, kind}) }
 };
+if (process.argv[4]) await commands.get('loopx').handler(process.argv[4], ctx);
 await commands.get('loopx').handler('Continue the synthetic documentation task', ctx);
 // A model cannot activate with a guessed token, even after a legal startup.
 const rejected = await tools.get('loopx_goal_activate').execute('test', {
@@ -67,9 +68,12 @@ def _thread_id(file: Path) -> str:
     return label + "-" + hashlib.sha256(str(file).encode()).hexdigest()[:16]
 
 
-@pytest.mark.parametrize("case", ["bound", "sole", "multiple", "none", "ephemeral"])
+@pytest.mark.parametrize("case", ["bound", "bound_after_status", "sole", "multiple", "none", "ephemeral"])
 @pytest.mark.parametrize("selected_goal", [False, True])
 def test_pi_start_preserves_native_identity_authority(tmp_path, monkeypatch, case, selected_goal):
+    preview_command = "status" if case == "bound_after_status" else ""
+    if preview_command:
+        case = "bound"
     node = shutil.which("node")
     assert node, "Node.js >=22.22.3 is required for the shipped Pi adapter"
     project = tmp_path / "project"
@@ -128,12 +132,15 @@ def test_pi_start_preserves_native_identity_authority(tmp_path, monkeypatch, cas
         node, "--input-type=module", "-e", HOST,
         str(REPO / "loopx" / "pi_goal_mode" / "loopx-goal.ts"),
         str(project), "" if case == "ephemeral" else str(session),
+        preview_command,
     ], capture_output=True, text=True, timeout=90, env=os.environ.copy())
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
     assert len(result["packets"]) == 1, result["notices"]
     packet = result["packets"][0]
     argv = [json.loads(line) for line in calls.read_text().splitlines()]
+    if preview_command:
+        assert argv.pop(0) == ["--format", "json", "bootstrap-command-pack", "--project", "."]
     assert len(argv) == 1, "startup must not auto-bind/register or probe quota"
     assert argv[0][2] == "start-goal"
     if case == "ephemeral":

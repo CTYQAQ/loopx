@@ -1,5 +1,6 @@
 """Public synthetic provider/native Core journeys, never private credentials."""
 import json
+import re
 import time
 import http.client
 import threading
@@ -22,6 +23,8 @@ class Provider:
         self.calls = []
         self.writes = []
         self.topic_writes = []
+        self.delivery_ids = {}
+        self.lose_next_reply = False
         self.verify_replies = True
         self.reactions = {}
         self.reaction_creates = []
@@ -100,7 +103,12 @@ class Provider:
             if "--dry-run" in args:
                 data = {"ok": True, "api": [{"body": {"content": content, "msg_type": kind}}]}
             else:
+                delivery_id = (profile, args[args.index("--idempotency-key") + 1])
+                if delivery_id in self.delivery_ids:
+                    return {"returncode": 0, "stdout": json.dumps({"ok": True,
+                        "data": {"message_id": self.delivery_ids[delivery_id]}}), "stderr": ""}
                 ref = f"om_out_{len(self.writes)}"
+                self.delivery_ids[delivery_id] = ref
                 self.writes.append((profile, text))
                 target = self.messages[args[args.index("--message-id") + 1]] if "+messages-reply" in args else None
                 self.messages[ref] = {"message_id": ref, "msg_type": kind, "body": {"content": content},
@@ -111,6 +119,9 @@ class Provider:
                     root = target.get("root_id") or target["message_id"]
                     self.messages[ref].update(root_id=root, parent_id=target["message_id"], thread_id=f"omt_{root}")
                     self.topic_writes.append((target["chat_id"], root, text))
+                if self.lose_next_reply:
+                    self.lose_next_reply = False
+                    raise OSError("synthetic lost provider response after write")
                 data = {"ok": True, "data": {"message_id": ref}}
         elif "reactions" in args:
             ref = args[args.index("--message-id") + 1]
@@ -169,6 +180,135 @@ def connect_group(fixture):
     transport.bindings.configure(transport_ref="notes-app", project_ref=binding["project_ref"],
         executor_endpoint_id="codex", audience="group", group_refs=refs, available_group_refs=refs)
     return store, runtime, provider, transport
+
+
+def _app_projection_journey(fixture):
+    store, runtime, provider, transport = connect(fixture)
+    event = provider.event("notes-app", "original-app-chat", "Original source conversation")
+    transport.admit("notes-app", event)
+    original = next(row for row in transport.core.pending() if row["message"] == event["content"])
+    runtime.wait_for_turn(session_id=original["session_id"], turn_id=original["turn_id"], timeout_sec=10)
+    transport.reconcile()
+    before = len(provider.writes)
+    turns = []
+    for client in ["app-input-one", "app-input-two"]:
+        status, result = fixture[3](f"/api/chat/sessions/{original['session_id']}/turns",
+            {"message": "Same App input", "client_turn_id": client})
+        assert status == 202
+        assert runtime.wait_for_turn(session_id=original["session_id"],
+            turn_id=result["turn_id"], timeout_sec=10)["status"] == "completed"
+        turns.append(result["turn_id"])
+    return store, runtime, provider, transport, original, turns, before
+
+
+def _drain_app_projection(transport, predicate):
+    deadline = time.monotonic() + 10
+    while not predicate():
+        transport.reconcile()
+        assert time.monotonic() < deadline, transport.health()
+        time.sleep(.02)
+
+
+def test_app_messages_and_answers_reach_the_original_chat_once_without_new_execution(ordinary):  # noqa: F811
+    store, runtime, provider, transport, original, turns, before = _app_projection_journey(ordinary)
+    sid = original["session_id"]
+    canonical = [message for message in store.messages(sid) if message.get("turn_id") in turns]
+    requests_before = ordinary[4].read_text()
+    try:
+        _drain_app_projection(transport, lambda: len(provider.writes) >= before + len(canonical))
+        projected = provider.writes[before:]
+        assert len(projected) == len(canonical)
+        # Repeated content remains two distinct messages, in canonical order.
+        for (profile, text), message in zip(projected, canonical):
+            assert profile == "notes-app" and message["text"] in text
+            assert ("你（App）" if message["role"] == "user" else "LoopX（App）") in text
+        restarted = LarkPrivateConversations(controller=runtime, runtime_root=transport.runtime_root,
+            runner=provider, cli_bin="lark-cli")
+        for _ in range(3):
+            restarted.reconcile()
+        assert provider.writes[before:] == projected
+        assert ordinary[4].read_text() == requests_before
+        assert len(store.list_sessions()) == 1
+        # Provider echoes are Bot-authored, never a second human input.
+        assert len([m for m in store.messages(sid) if m.get("origin") == "web"]) == 2
+    finally:
+        runtime.close()
+
+
+def test_app_projection_recovers_original_receipt_and_revocation_blocks_remaining_messages(ordinary):  # noqa: F811
+    store, runtime, provider, transport, original, turns, before = _app_projection_journey(ordinary)
+    provider.verify_replies = False
+    try:
+        _drain_app_projection(transport, lambda: len(provider.writes) > before)
+        attempted = list(provider.writes)
+        transport.reconcile()
+        assert provider.writes == attempted
+        provider.verify_replies = True
+        transport.reconcile()
+        # A verified old receipt may advance; the remaining canonical messages
+        # retain the same grant and are denied after revocation.
+        binding = transport._binding("notes-app")
+        transport.bindings.disconnect(binding["binding_id"], expected_revision=transport.bindings.read()["revision"])
+        revoked_writes = list(provider.writes)
+        for _ in range(3):
+            transport.reconcile()
+        assert provider.writes == revoked_writes
+        assert len(store.list_sessions()) == 1
+    finally:
+        runtime.close()
+
+
+def test_app_long_return_keeps_all_parts_and_does_not_repeat_identical_parts(ordinary):  # noqa: F811
+    store, runtime, provider, transport, original, turns, before = _app_projection_journey(ordinary)
+    text = ("A repeated output paragraph with its complete evidence.\n" * 4000) + "UNIQUE FINAL END"
+    store.append_message(original["session_id"], role="agent", text=text,
+        turn_id=turns[-1], message_id="synthetic-long-result")
+    try:
+        _drain_app_projection(transport, lambda: any("UNIQUE FINAL END" in t for _, t in provider.writes[before:]))
+        # Each canonical character survives transport splitting; an identical
+        # paragraph in different parts cannot reuse the same provider UUID.
+        parts = [t for _, t in provider.writes[before:]
+                 if "A repeated output paragraph" in t or "UNIQUE FINAL END" in t]
+        assert len(parts) > 1
+        combined = "".join(re.sub(r"^（\d+/\d+）\n\n", "", part) for part in parts)
+        assert combined == "**LoopX（App）**\n\n" + text
+        sent = list(provider.writes)
+        transport.reconcile()
+        assert provider.writes == sent
+    finally:
+        runtime.close()
+
+
+def test_app_projection_does_not_retry_a_write_without_a_provider_locator(ordinary):  # noqa: F811
+    store, runtime, provider, transport, original, turns, before = _app_projection_journey(ordinary)
+    provider.lose_next_reply = True
+    try:
+        _drain_app_projection(transport, lambda: len(provider.writes) > before)
+        attempted = list(provider.writes)
+        requests = ordinary[4].read_text()
+        restarted = LarkPrivateConversations(controller=runtime, runtime_root=transport.runtime_root,
+            runner=provider, cli_bin="lark-cli")
+        for _ in range(3):
+            restarted.reconcile()
+        assert provider.writes == attempted
+        assert ordinary[4].read_text() == requests
+        assert restarted.health()[original["binding_id"]]["recovery_count"] == 1
+    finally:
+        runtime.close()
+
+
+def test_app_projection_refuses_a_replaced_provider_identity(ordinary):  # noqa: F811
+    store, runtime, provider, transport, original, turns, before = _app_projection_journey(ordinary)
+    provider.profile_apps["notes-app"] = "cli_replaced_app"
+    try:
+        restarted = LarkPrivateConversations(controller=runtime, runtime_root=transport.runtime_root,
+            runner=provider, cli_bin="lark-cli")
+        for _ in range(3):
+            restarted.reconcile()
+        assert len(provider.writes) == before
+        assert len(store.list_sessions()) == 1
+    finally:
+        runtime.close()
 
 
 def finish_group_turn(runtime, transport, *, message):

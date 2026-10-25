@@ -6,7 +6,7 @@ import {
 } from "../effect_program.ts";
 import {VISION_MATERIAL_CLOSEOUT_HINT, visionAuthoringContract} from "../goals/vision_checkpoint.ts";
 import {parseExactGoalRef} from "../goals/goal_instance_identity.ts";
-import {requireJsonObject, requireNonEmptyString, requireStringArray} from "../runtime_decode.ts";
+import {requireBoolean, requireJsonObject, requireNonEmptyString, requireStringArray} from "../runtime_decode.ts";
 import {MATERIAL_DELIVERY_OUTCOMES} from "../work_items/delivery_outcome.ts";
 import {DELIVERY_BOUNDARIES} from "../turn_driver/delivery_continuity.ts";
 import {PROGRESS_RESULT_CLASSES} from "../work_items/replan_history.ts";
@@ -49,6 +49,8 @@ export function turnScopedCliSettlementPlan(params: JsonObject): SettlementPlan 
     throw new Error("settlement plan GoalRef is invalid or does not match identity");
   }
   const inFlight = params.delivery_boundary === "in_flight_continuation";
+  const autonomousReplan = params.autonomous_replan === undefined ? false
+    : requireBoolean(params.autonomous_replan, "autonomous_replan");
   const validation: SettlementStep = {
     kind: "validation", owner: "agent", idempotency_key_ref: "$.identity.effect_id",
     expected_receipt: "validation_receipt",
@@ -84,7 +86,8 @@ export function turnScopedCliSettlementPlan(params: JsonObject): SettlementPlan 
       command_template: writeback,
       // In-flight continuation uses its projected flags without a material vision packet.
       // Autonomous replan already carries this owner in its writeback contract.
-      ...(identity.binding_kind === "todo" && !inFlight ? {vision_authoring: visionAuthoringContract()} : {}),
+      ...(identity.binding_kind === "todo" && !inFlight
+        ? {vision_authoring: visionAuthoringContract(autonomousReplan)} : {}),
     },
     {
       kind: "quota_spend", owner: "agent",

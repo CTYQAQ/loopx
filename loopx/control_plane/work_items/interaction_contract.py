@@ -461,6 +461,7 @@ def _turn_scoped_cli_settlement_context(
         scoped_cli_args=scoped_cli_args,
         lifecycle_actor_args=f" --agent-id {shlex.quote(agent_id)}",
         turn_instance_id=turn_instance_id,
+        autonomous_replan=semantic_replan_obligation_id is not None,
         delivery_boundary=(
             str(selected_todo.get("delivery_boundary"))
             if selected_todo.get("delivery_boundary")

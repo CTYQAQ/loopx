@@ -700,10 +700,12 @@ export type ConversationContext =
   | { kind: "manager" }
   | { kind: "goal"; goalId: string }
   | { kind: "project"; projectRef: string }
+  | ({ kind: "managed" } & ManagedConversationTarget)
   // A UI address for an existing source-owned Session, never a new Core channel.
   | ({ kind: "bound" } & BoundConversationTarget);
 
 export type BoundConversationTarget = { bindingId: string; sessionId: string };
+export type ManagedConversationTarget = {goalId: string; agentId: string; sessionId: string};
 
 /** Goal projections cannot answer a source-owned or ordinary workspace Chat. */
 export function conversationSupportsStatusProjection(context: ConversationContext) {
@@ -715,12 +717,17 @@ const PROJECT_CONVERSATION_KEY_PREFIX = "project/";
 
 export function conversationContextKey(context: ConversationContext): string {
   if (context.kind === "manager") return "manager";
+  if (context.kind === "managed") return `managed/${encodeURIComponent(context.goalId)}/${encodeURIComponent(context.agentId)}/${encodeURIComponent(context.sessionId)}`;
   if (context.kind === "bound") return `bound/${encodeURIComponent(context.bindingId)}/${encodeURIComponent(context.sessionId)}`;
   return context.kind === "goal" ? context.goalId : `${PROJECT_CONVERSATION_KEY_PREFIX}${context.projectRef}`;
 }
 
 export function conversationContextOfKey(key: string): ConversationContext {
   if (key === "manager") return { kind: "manager" };
+  if (key.startsWith("managed/")) {
+    const [, goalId = "", agentId = "", sessionId = ""] = key.split("/");
+    return {kind: "managed", goalId: decodeURIComponent(goalId), agentId: decodeURIComponent(agentId), sessionId: decodeURIComponent(sessionId)};
+  }
   if (key.startsWith("bound/")) {
     const [, bindingId = "", sessionId = ""] = key.split("/");
     return { kind: "bound", bindingId: decodeURIComponent(bindingId), sessionId: decodeURIComponent(sessionId) };
@@ -733,6 +740,7 @@ export function conversationContextOfKey(key: string): ConversationContext {
 
 export function conversationChannelId(context: ConversationContext): string {
   if (context.kind === "manager") return "manager";
+  if (context.kind === "managed") return `agent.${context.agentId}`;
   if (context.kind === "bound") return conversationContextKey(context);
   return context.kind === "goal" ? `goal.${context.goalId}` : `project.${context.projectRef}`;
 }
@@ -745,6 +753,14 @@ export async function createChatSession(
   agentModelId?: string,
   agentReasoningEffort?: string,
 ) {
+  if (context.kind === "managed") {
+    if (mode !== "resume_latest" || agentModelId || agentReasoningEffort) {
+      throw new Error("An original Agent Session cannot be replaced or reconfigured here.");
+    }
+    const session = await resolveManagedChatSession(context, signal);
+    if (!session.resumable || (agentId && agentId !== session.agent_id)) throw new Error("The original managed Session is unavailable.");
+    return {ok: true as const, resumed: true, session_id: session.session_id, agent_id: session.agent_id, goal_id: session.goal_id, session};
+  }
   if (context.kind === "bound") {
     if (mode !== "resume_latest" || agentModelId || agentReasoningEffort) {
       throw new Error("An original conversation cannot be replaced or reconfigured here.");
@@ -804,6 +820,8 @@ export type ChatSessionSummary = {
   goal_id: string | null;
   project_ref?: string | null;
   agent_id: string;
+  managed_agent_id?: string;
+  goal_instance_id?: string | null;
   agent_model_id?: string | null;
   agent_reasoning_effort?: string | null;
   agent_service_tier?: string | null;
@@ -920,6 +938,26 @@ export async function fetchChatSession(sessionId: string, signal?: AbortSignal) 
   return requestJson<ChatSessionSnapshot>(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { signal });
 }
 
+/** Read-only discovery through the existing Core Goal/Agent/Session identity. */
+export async function fetchManagedAgentSessions(goalId: string, agentId: string, signal?: AbortSignal) {
+  if (!/^[A-Za-z0-9._-]{1,160}$/.test(goalId) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(agentId)) throw new Error("Invalid registered Agent address.");
+  const listed = await requestJson<{ok: true; schema_version: "loopx_chat_session_list_v1"; goal_id: string; managed_agent_id: string; goal_instance_id: string | null; sessions: ChatSessionSummary[]}>(
+    `/api/chat/sessions?${new URLSearchParams({goal_id: goalId, managed_agent_id: agentId})}`, {signal});
+  if (listed.ok !== true || listed.schema_version !== "loopx_chat_session_list_v1" || listed.goal_id !== goalId || listed.managed_agent_id !== agentId || !Array.isArray(listed.sessions)
+    || !Object.hasOwn(listed, "goal_instance_id") || listed.sessions.some(row => row.goal_id !== goalId || row.managed_agent_id !== agentId
+      || row.goal_instance_id !== listed.goal_instance_id || row.channel_id !== `agent.${agentId}` || row.session_mode !== "managed_runtime")) {
+    throw new Error("This service cannot verify the registered Agent's original Sessions. Update LoopX and retry.");
+  }
+  return listed;
+}
+
+export async function resolveManagedChatSession(target: ManagedConversationTarget, signal?: AbortSignal) {
+  const listed = await fetchManagedAgentSessions(target.goalId, target.agentId, signal);
+  const sessions = listed.sessions.filter(row => row.session_id === target.sessionId);
+  if (sessions.length !== 1) throw new Error("The original managed Session is no longer available from this Agent.");
+  return sessions[0];
+}
+
 export async function fetchChatSessions(options: {
   agentId?: string;
   channelId?: string;
@@ -999,25 +1037,31 @@ export async function fetchChatHistory(options: {
   channelId: string;
   goalId?: string;
   bound?: BoundConversationTarget;
+  managed?: ManagedConversationTarget;
 }, previous?: ChatHistory): Promise<ChatHistory> {
   // Source authorization must be re-read even when recovering an older snapshot.
-  const listed = (!options.bound ? previous : undefined) ?? await fetchChatSessions({ ...options, signal: AbortSignal.timeout(5000) });
+  const exact = Boolean(options.bound || options.managed);
+  const listed = options.managed ? {sessions: [await resolveManagedChatSession(options.managed, AbortSignal.timeout(5000))]}
+    : (!options.bound ? previous : undefined) ?? await fetchChatSessions({ ...options, signal: AbortSignal.timeout(5000) });
   const known = new Map(previous?.snapshots.map((snapshot) => [snapshot.session.session_id, snapshot]));
   // A failed historical read is not an empty transcript. Retrying only the
   // missing snapshots keeps this recovery read-only and bounds repeated work.
   const missing = listed.sessions.filter((session) => {
     const saved = known.get(session.session_id)?.session;
-    return !saved || (options.bound && (!session.transcript_revision
+    return !saved || (exact && (!session.transcript_revision
       || session.transcript_revision !== saved.transcript_revision
       || session.updated_at !== saved.updated_at || session.active_turn_id !== saved.active_turn_id
       || session.status !== saved.status));
   });
-  if (options.bound) for (const session of missing) known.delete(session.session_id);
+  if (exact) for (const session of missing) known.delete(session.session_id);
   const results = await Promise.allSettled(missing.map(async (session) => {
     const snapshot = await fetchChatSession(session.session_id, AbortSignal.timeout(5000));
     if (snapshot.session.session_id !== session.session_id || snapshot.session.agent_id !== session.agent_id) {
       throw new Error("The original Session identity changed during history read.");
     }
+    if (options.managed && (snapshot.ok !== true || snapshot.schema_version !== "loopx_chat_store_v1" || snapshot.session.goal_id !== session.goal_id || snapshot.session.managed_agent_id !== session.managed_agent_id
+      || snapshot.session.goal_instance_id !== session.goal_instance_id || snapshot.session.channel_id !== session.channel_id
+      || snapshot.session.session_mode !== "managed_runtime")) throw new Error("The original managed Session scope changed during history read.");
     return snapshot;
   }));
   for (const result of results) {

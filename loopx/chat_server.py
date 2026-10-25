@@ -644,7 +644,7 @@ class ChatRequestHandler(
     def _create_session(self) -> None:
         try:
             body = self._read_json()
-            unknown = set(body) - {"goal_id", "agent_id", "agent_model_id", "agent_reasoning_effort", "mode", "context_kind", "project_ref"}
+            unknown = set(body) - {"goal_id", "agent_id", "managed_agent_id", "agent_model_id", "agent_reasoning_effort", "mode", "context_kind", "project_ref"}
             if unknown:
                 raise ValueError("unknown session field")
             goal_id: str | None = _compact_text(body.get("goal_id"), limit=160) or self.server.selected_goal_id or ""
@@ -697,6 +697,7 @@ class ChatRequestHandler(
                 mode=mode,
                 requested_endpoint=requested_endpoint,
                 agent_model_id=requested_model,
+                **({"managed_agent_id": body["managed_agent_id"]} if "managed_agent_id" in body else {}),
                 **({"agent_reasoning_effort": requested_effort} if requested_effort is not None else {}),
                 **({"project_ref": project_ref} if context_kind == "project" else {}),
             )
@@ -948,8 +949,58 @@ class ChatRequestHandler(
         except KeyError:
             self._send_error("chat session was not found", status=404)
 
+    def _managed_native_turn(self, session_id: str, *, execute: bool = False) -> None:
+        from .capabilities.native_chat.steward_managed_mode import ManagedSessionTurn
+        service = ManagedSessionTurn(self.server.runtime_controller)
+        try:
+            if execute:
+                body = self._read_json()
+                if set(body) - {"agent_id", "operation_id", "todo_id"}:
+                    raise ValueError("unsupported managed Turn arguments")
+                turn, created = service.submit(session_id, **body)
+                return self._send_json({"ok": True, "session_id": session_id, "turn": turn, "created": created}, status=202)
+            query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+            self._send_json(service.inspect(session_id, agent_id=query.get("agent_id", [None])[0],
+                operation_id=query.get("operation_id", [None])[0]))
+        except KeyError:
+            self._send_error("chat session was not found", status=404)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            self._send_error(str(exc), status=409, error_code="managed_turn_unavailable")
+
     def _list_sessions(self) -> None:
         query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+        if "managed_agent_id" in query:
+            # Agent registration is distinct from the executor's agent_id.
+            # Reuse Core's exact original identity admission; an older service
+            # ignoring this selector must not look like a successful discovery.
+            from .capabilities.native_chat.steward_managed_mode import StewardManagedMode, managed_session_identity
+            if (set(query) != {"goal_id", "managed_agent_id"}
+                    or any(len(values) != 1 or not values[0] for values in query.values())):
+                return self._send_error("select one exact registered Goal and Agent", status=400)
+            goal_id, managed_agent_id = query["goal_id"][0], query["managed_agent_id"][0]
+            try:
+                goal = StewardManagedMode(self.server.runtime_controller, None)._goal(goal_id)
+                if not goal:
+                    raise ValueError("original Goal unavailable")
+                workspace = Path(goal["workspace_path"])
+                identity = managed_session_identity(self.server.runtime_controller,
+                    goal_id=goal_id, agent_id=managed_agent_id, workspace=workspace)
+                sessions = []
+                for row in self.server.chat_store.list_sessions(goal_id=goal_id, channel_id=identity["channel_id"]):
+                    session = self.server.chat_store.load_session(row["session_id"])
+                    if not session or session.get("managed_agent_id") != managed_agent_id:
+                        continue
+                    try:
+                        managed_session_identity(self.server.runtime_controller, goal_id=goal_id,
+                            agent_id=managed_agent_id, workspace=workspace, session=session)
+                    except (ValueError, RuntimeError):
+                        continue
+                    sessions.append(row)
+                return self._send_json({"ok": True, "schema_version": "loopx_chat_session_list_v1",
+                    "goal_id": goal_id, "managed_agent_id": managed_agent_id,
+                    "goal_instance_id": identity["goal_instance_id"], "sessions": sessions})
+            except (ValueError, RuntimeError, OSError, KeyError):
+                return self._send_error("The registered Agent's original managed conversations are unavailable.", status=409)
         if "conversation_binding_id" in query:
             if set(query) != {"conversation_binding_id"} or len(query["conversation_binding_id"]) != 1 or not query["conversation_binding_id"][0]:
                 return self._send_error("select one exact conversation binding without other Session filters", status=400)
@@ -1636,6 +1687,8 @@ class ChatRequestHandler(
         if len(action_parts) == 3 and action_parts[:2] == ["api", "actions"]:
             return self._action_snapshot(action_parts[2])
         session_parts = path.strip("/").split("/")
+        if len(session_parts) == 5 and session_parts[:3] == ["api", "chat", "sessions"] and session_parts[4] == "native-turn":
+            return self._managed_native_turn(session_parts[3])
         if len(session_parts) == 5 and session_parts[:3] == ["api", "chat", "sessions"] and session_parts[4] == "loopx":
             return handle_loopx_request(self, session_parts[3])
         if len(session_parts) == 4 and session_parts[:3] == ["api", "chat", "sessions"]:
@@ -1686,6 +1739,8 @@ class ChatRequestHandler(
         if path in post_dispatch:
             return post_dispatch[path]()
         session_action_parts = path.strip("/").split("/")
+        if len(session_action_parts) == 5 and session_action_parts[:3] == ["api", "chat", "sessions"] and session_action_parts[4] == "native-turn":
+            return self._managed_native_turn(session_action_parts[3], execute=True)
         if len(session_action_parts) == 5 and session_action_parts[:3] == ["api", "chat", "sessions"] and session_action_parts[4] == "loopx":
             return handle_loopx_request(self, session_action_parts[3], apply=True)
         if len(session_action_parts) == 5 and session_action_parts[:3] == ["api", "chat", "sessions"] and session_action_parts[4] == "resume":

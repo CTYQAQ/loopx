@@ -1,3 +1,4 @@
+import {ContextHelp} from "./context-help";
 import {hasConfiguredGoalChecks} from "../../data/goal-acceptance-observation";
 import {GoalOutcomeRequirements} from "./goal-outcome-requirements";
 import {useEffect, useRef, useState, type ReactNode} from "react";
@@ -180,8 +181,7 @@ export function GoalAcceptanceContractSection({goalId, contract: retained, copy,
         </details>
       </div> : null}
       {checksConfigured ? <div className="delivery-check-result">
-        <p role="status"><strong>{fresh ? overview && criteria.length === 1 ? criterionText(criteria[0]) : copy.verificationState[goalAcceptanceDisplayStatus(contract)] : copy.retained}</strong></p>
-        <p className="delivery-check-boundary">{copy.boundary}</p>
+        <div className="delivery-check-state"><p role="status"><strong>{fresh ? overview && criteria.length === 1 ? criterionText(criteria[0]) : copy.verificationState[goalAcceptanceDisplayStatus(contract)] : copy.retained}</strong></p><ContextHelp label={zh ? "交付检查范围" : "Delivery check scope"}><p>{copy.boundary}</p></ContextHelp></div>
         {overview ? <details className="delivery-check-inspection" open={detailsExpanded} onToggle={event => setDetailsExpanded(event.currentTarget.open)}>
           <summary className="delivery-check-summary">{criteriaSummary ?? (zh ? "检查细节" : "Check details")}</summary>
           {resultDetails}

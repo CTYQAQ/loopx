@@ -41,13 +41,15 @@ def _write(path: Path, value: Any) -> None:
 
 
 def prepare(
-    input_path: Path, *, model: str, effort: str, service_tier: str
+    input_path: Path, *, model: str, effort: str, service_tier: str,
+    research_synthesis: bool = True,
 ) -> dict[str, Any]:
     return effect_runtime_result(
         "benchmark.trajectory.prepare",
         {
             "input": json.loads(input_path.read_text(encoding="utf-8")),
-            "config": {"model": model, "effort": effort, "service_tier": service_tier},
+            "config": {"model": model, "effort": effort, "service_tier": service_tier,
+                       **({"research_synthesis": True, "research_synthesis_revision": 2} if research_synthesis else {})},
         },
     )
 
@@ -65,6 +67,22 @@ def request_cancel(directory: Path) -> dict[str, Any]:
         # The process owner handles its own child. Never signal a PID from a file.
         (directory / "cancel.request").touch(exist_ok=True)
     return {**receipt, "cancel_requested": receipt["status"] == "running"}
+
+
+def _observed_usage(directory: Path) -> dict | None:
+    """Provider observation survives output/qualification failure; not a fee estimate."""
+    events = directory / "events.jsonl"
+    if not events.exists():
+        return None
+    usage = None
+    for line in events.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
+            usage = event["usage"]
+    return usage
 
 
 def execute(
@@ -220,7 +238,7 @@ def execute(
             # Requalify against the new exact manifest; never splice labels or
             # add old metric totals to new ones. This path launches no child.
             output = {key: reuse_from["output"][key] for key in
-                      ("assessments", "limitations", "episode_questions", "display_translations")
+                      ("assessments", "limitations", "episode_questions", "display_translations", "synthesis")
                       if key in reuse_from["output"]}
             result = effect_runtime_result(
                 "benchmark.trajectory.qualify", {**prepared, "output": output}
@@ -282,15 +300,7 @@ def execute(
             receipt.update(
                 status="succeeded", ok=True, **_result_proof(directory, prepared)
             )
-        for line in (
-            (directory / "events.jsonl").read_text(encoding="utf-8").splitlines()
-        ):
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") == "turn.completed":
-                receipt["usage"] = event.get("usage")
+        receipt["usage"] = _observed_usage(directory)
         receipt["analysis_wall_seconds"] = time.monotonic() - started
         _write(directory / "receipt.json", receipt)
         return receipt
@@ -310,6 +320,7 @@ def execute(
                 status="cancelled" if isinstance(exc, KeyboardInterrupt) else "failed",
                 error=str(exc),
                 analysis_wall_seconds=time.monotonic() - started,
+                usage=_observed_usage(directory),
             )
             _write(directory / "receipt.json", receipt)
         raise

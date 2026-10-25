@@ -1,3 +1,5 @@
+import {CircleHelp} from "lucide-react";
+import {ContextHelp} from "./context-help";
 import {z} from "zod";
 import {useEffect, useRef, useState} from "react";
 import {useWorkspaceI18n} from "./i18n";
@@ -89,7 +91,7 @@ export function ContentMediaWorkbench({goalId}: {goalId: string}) {
     {error ? <p role="alert">{error}</p> : null}
     {!library && !error ? <p role="status">{copy("正在读取作品…", "Loading compositions…")}</p> : null}
     {library && !providerReady ? <p className="content-media-notice" role="status">{copy("本机视频扩展未就绪。作品与来源保留，安装并启用 loopx-media 后即可制作。", "The local video extension is unavailable. Prepared work is retained; install and enable loopx-media to render.")}</p> : null}
-    {library && !selected ? <p className="content-media-empty">{copy("还没有准备好的作品。把想讲的内容交给 Agent，它会通过 Content-Ops 保存可制作的脚本。", "No prepared compositions yet. Tell your Agent what to explain; it can save a renderable brief through Content-Ops.")}</p> : null}
+    {library && !selected ? <ContextHelp label={copy("暂无作品", "No prepared work")} icon={CircleHelp}><p className="content-media-empty">{copy("还没有准备好的作品。把想讲的内容交给 Agent，它会通过 Content-Ops 保存可制作的脚本。", "No prepared compositions yet. Tell your Agent what to explain; it can save a renderable brief through Content-Ops.")}</p></ContextHelp> : null}
     {selected ? <div className="content-media-workspace">
       <nav aria-label={copy("选择作品", "Choose a composition")}>{library!.compositions.map(item => <button key={item.composition_id} type="button" aria-pressed={item.composition_id === selected.composition_id}
         disabled={busy} onClick={() => {setWatching(false); setError(""); setSelectedId(item.composition_id);}}><span>{item.title}</span><small>{seconds(item.duration_seconds)} · {status[item.status] ?? item.status}</small></button>)}</nav>

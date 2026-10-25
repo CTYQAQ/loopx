@@ -53,6 +53,8 @@ class LarkPrivateConversations:
         self.reaction_feedback = reaction_feedback
         self.root = controller.store.root / "lark-private-deliveries"
         self._context_recovery_probe_at: dict[Path, float] = {}
+        self._web_projection_scan_at = 0.0
+        self._web_projection_snapshots: dict[str, tuple[int, int]] = {}
         from .owner_attention import LarkOwnerAttention
         self.owner_attention = LarkOwnerAttention(self)
         from .private_ingress import PrivateIngressObserver
@@ -97,7 +99,7 @@ class LarkPrivateConversations:
 
     def health(self) -> dict[str, dict[str, int]]:
         health: dict[str, dict[str, int]] = {}
-        for path in self.root.glob("*.json"):
+        for path in [*self.root.glob("*.json"), *self.root.glob("web-projections/*.json")]:
             row = _read_json(path)
             entry = health.setdefault(row["binding_id"], {"pending_count": 0, "recovery_count": 0})
             if row["status"] != "delivered":
@@ -815,7 +817,8 @@ class LarkPrivateConversations:
 
     def _deliver(self, path: Path, record: dict[str, Any], phase: str, text: str, *, inbox: Callable[[], Path],
                  edit_only: bool = False, authorization_check: Callable[[], bool] | None = None,
-                 reply_placement: str | None = None) -> bool:
+                 reply_placement: str | None = None, delivery_id: str | None = None,
+                 finalize_source: bool = True) -> bool:
         if not text:
             return False
         if reply_placement is not None and (record["event"].get("chat_type") != "p2p"
@@ -841,7 +844,8 @@ class LarkPrivateConversations:
         kwargs = dict(project=self.runtime_root, config_path=config,
             message_id=record["event"]["message_id"], text=text, runner=self._reply_runner,
             **({"reply_placement": reply_placement} if reply_placement is not None else {}),
-            finalize_reactions=not edit_only and kind not in {"admission", "progress", "periodic_report"} and not (kind == "terminal" and record.get("commission_resources")),
+            **({"delivery_id": delivery_id} if delivery_id is not None else {}),
+            finalize_reactions=finalize_source and not edit_only and kind not in {"admission", "progress", "periodic_report"} and not (kind == "terminal" and record.get("commission_resources")),
             source_authority_verifier=lambda profile, chat, message: (
                 self._source_authority(record, profile, chat, message)
                 if authorization_check is None or authorization_check() else (None, False)))
@@ -1119,7 +1123,127 @@ class LarkPrivateConversations:
                 self._context_recovery_probe_at[path] = time.monotonic() + 60
                 if legacy_recovery_repairs(row) or self.core.context_recovery_candidate(row["request_ref"]):
                     paths.append(path)
-        return paths
+        return [*paths, *self._web_projection_paths()]
+
+    def _web_projection_paths(self) -> list[Path]:
+        """Discover committed App messages, using the existing reply workers.
+
+        These files are provider outboxes, not input requests or model work.
+        The original Core transcript and grant are re-read before each effect.
+        File observations only avoid rereading unchanged local Chat JSONL; they
+        never authorize a send, acknowledge input or advance a delivery cursor.
+        """
+        root = self.root / "web-projections"
+        if time.monotonic() >= self._web_projection_scan_at:
+            self._web_projection_scan_at = time.monotonic() + 5
+            enabled = {row["binding_id"] for row in self.bindings.read()["bindings"]
+                       if row.get("enabled") is True and row.get("audience", "owner") == "owner"}
+            sources: dict[str, dict[str, Any]] = {}
+            for path in sorted(self.root.glob("*.json")):
+                row = _read_json(path)
+                if (row.get("binding_id") in enabled and row.get("session_id")
+                        and row.get("event", {}).get("chat_type") == "p2p"
+                        and not row.get("agent_target") and row.get("status") in {"accepted", "delivered"}):
+                    sources.setdefault(row["session_id"], row)
+            store = self.core.controller.store
+            for sid, source in sources.items():
+                try:
+                    stat = (store.sessions_root / sid / "messages.jsonl").stat()
+                    snapshot = (stat.st_mtime_ns, stat.st_size)
+                    if self._web_projection_snapshots.get(sid) == snapshot:
+                        continue
+                    messages = store.messages(sid)
+                    web_turns = {message["turn_id"] for message in messages
+                                 if message.get("role") == "user" and message.get("origin") == "web"}
+                    selected = [message for message in messages if message.get("turn_id") in web_turns
+                                and message.get("role") in {"user", "agent"}]
+                    if selected:
+                        key = identity_ref(source["binding_id"], sid)
+                        path = root / f"{key}.json"
+                        with exclusive_file_lock(path, operation="discover_web_conversation_projection"):
+                            row = _read_json(path) if path.exists() else {
+                                "schema_version": "lark_private_web_projection_v0",
+                                "projection_id": key, "request_ref": source["request_ref"],
+                                "binding_id": source["binding_id"], "profile": source["profile"],
+                                "source": source["source"], "event": source["event"],
+                                "session_id": sid, "deliveries": {}, "status": "pending"}
+                            if any(not row["deliveries"].get("web." + message["message_id"], {}).get("verified")
+                                   for message in selected):
+                                row["status"] = "pending"
+                                _atomic_write_json(path, row)
+                    self._web_projection_snapshots[sid] = snapshot
+                except (OSError, ValueError, KeyError):
+                    # An unreadable source is unknown. Keep any prior outbox;
+                    # it retains fresh source and canonical-message checks.
+                    continue
+        return [path for path in sorted(root.glob("*.json")) if _read_json(path).get("status") == "pending"]
+
+    def _web_projection_messages(self, row: dict[str, Any]) -> list[dict[str, Any]]:
+        store = self.core.controller.store
+        source = _read_json(self.root / f"{row['request_ref']}.json")
+        native = self.core.read_request(row["request_ref"])
+        if (any(row.get(key) != source.get(key) for key in
+                ("request_ref", "binding_id", "profile", "source", "event", "session_id"))
+                or any(native.get(key) != row.get(key) for key in ("binding_id", "source", "session_id"))
+                or source.get("agent_target") or row["event"].get("chat_type") != "p2p"):
+            raise ValueError("original App projection source changed")
+        session = store.load_session(row["session_id"])
+        if session is None:
+            raise ValueError("original App projection Session unavailable")
+        saved = session.get("steward_context") or session.get("project_context") or {}
+        if (saved.get("binding_id") != row["binding_id"] or saved.get("audience") != "bound_owner"
+                or saved.get("source_ref") != row["source"]["source_ref"]):
+            raise ValueError("original App projection audience changed")
+        with self.bindings.input_context(saved, origin="web", session=session, store=store):
+            messages = store.messages(session["session_id"])
+            web_turns = {message["turn_id"] for message in messages
+                         if message.get("role") == "user" and message.get("origin") == "web"}
+            selected = []
+            for message in messages:
+                if message.get("turn_id") not in web_turns or message.get("role") not in {"user", "agent"}:
+                    continue
+                turn = store.load_turn(session["session_id"], message["turn_id"])
+                if not turn or turn.get("origin") != "web" or turn.get("session_id") != session["session_id"]:
+                    raise ValueError("canonical App input identity changed")
+                selected.append(message)
+            return selected
+
+    def _reconcile_web_projection(self, path: Path) -> int:
+        # The existing worker pool serializes this outbox with a durable fence.
+        # Recovery reads the same provider attempt; it never starts a Core Turn.
+        with exclusive_file_lock(path, operation="deliver_web_conversation_projection"):
+            row = _read_json(path)
+            try:
+                messages = self._web_projection_messages(row)
+                pending = next((message for message in messages
+                    if not row["deliveries"].get("web." + message["message_id"], {}).get("verified")), None)
+                if pending is None:
+                    row["status"] = "partial" if any(message.get("attachments") for message in messages) else "delivered"
+                    _atomic_write_json(path, row)
+                    return 0
+                def authorized() -> bool:
+                    try:
+                        return pending in self._web_projection_messages(row)
+                    except (OSError, ValueError, KeyError):
+                        return False
+                who = "你" if pending["role"] == "user" else "LoopX"
+                text = f"**{who}（App）**\n\n{pending['text']}"
+                if pending.get("attachments"):
+                    text += "\n\n（此条 App 附件尚未同步，请在原 App 查看。）"
+                delivery_id = hashlib.sha256(json.dumps(
+                    [row["binding_id"], row["session_id"], pending["message_id"]],
+                    separators=(",", ":")).encode()).hexdigest()
+                delivered = self._deliver(path, row, "web." + pending["message_id"], text,
+                    inbox=lambda: self._inbox(row), authorization_check=authorized,
+                    reply_placement="chat_root", delivery_id=delivery_id, finalize_source=False)
+                if delivered:
+                    row.pop("blocker", None)
+                _atomic_write_json(path, row)
+                return int(delivered)
+            except (OSError, ValueError, KeyError):
+                row["blocker"] = "original_web_projection_unavailable"
+                _atomic_write_json(path, row)
+                return 0
 
     def reconcile(self) -> int:
         return sum(self.reconcile_request(path) for path in self.pending_delivery_paths())
@@ -1191,6 +1315,8 @@ class LarkPrivateConversations:
             self._feedback(path, record, inbox=lambda: self._inbox(record, observation=selected["observation"]))
 
     def reconcile_request(self, path: Path) -> int:
+        if path.parent == self.root / "web-projections":
+            return self._reconcile_web_projection(path)
         # Repair only this persisted source. Core still owns admission, recovery
         # and the shared Session queue/fence; transport workers never run models.
         row = _read_json(path)

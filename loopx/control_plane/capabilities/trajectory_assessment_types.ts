@@ -16,6 +16,9 @@ export interface TrajectoryInput {
   objective: string;
   selection: {rule: string; population_episodes: number | null; exhaustive: boolean};
   sources: TrajectorySource[]; episodes: TrajectoryEpisode[];
+  /** Explicit curator binding to a complete source-bound native capture.
+   * Context constrains interpretation without widening episode evidence. */
+  native_outcomes_source_id?: string;
   /** Trusted curator's complete Explore history capture, already in sources.
    * Omission keeps the existing assessment contract and identity unchanged. */
   display_snapshot?: {schema_version: 'research_display_snapshot_v1'; source_id: string; source_namespace: string;
@@ -29,6 +32,16 @@ export interface EpisodeAssessment {
   episode_id: string; metric: TrajectoryMetric; verdict: AssessmentVerdict;
   reason: string; citations: AssessmentCitation[];
 }
+/** Observer interpretation of the declared sample, never a source finding,
+ * scientific qualification or an instruction to launch an experiment. */
+export interface TrajectoryResearchSynthesis {
+  summary: {text: string; episode_ids: string[]; citations: AssessmentCitation[]};
+  findings: Array<{title: string; observation: string; interpretation: string;
+    alternative_explanations: string[]; episode_ids: string[]; citations: AssessmentCitation[]}>;
+  next_experiments: Array<{question: string; why_priority: string; intervention: string;
+    controls: string; prediction: string; disconfirming_result: string;
+    episode_ids: string[]; citations: AssessmentCitation[]}>;
+}
 export interface TrajectoryAssessment {
   schema_version: 'trajectory_assessment_v1'; method_version: string; analysis_key: string;
   scope: TrajectoryInput['scope']; selection: TrajectoryInput['selection'];
@@ -39,6 +52,7 @@ export interface TrajectoryAssessment {
   limitations: string[];
   output_language?: TrajectoryOutputLanguage;
   episode_questions?: Array<{episode_id: string; question: string}>;
+  synthesis?: TrajectoryResearchSynthesis;
   display?: TrajectoryDisplay;
 }
 
@@ -62,6 +76,8 @@ export interface TrajectoryContinuation {
   episodes: {added: string[]; revised: string[]; removed: string[]};
   can_reuse: boolean; configuration_changed: boolean; objective_changed: boolean;
   reassessed_episode_ids: string[]; new_pair_count: number; removed_pair_count: number;
+  /** Shared episode/metric rows in two qualified outputs; null if either is unavailable. */
+  compared_pair_count: number | null;
   verdict_changes: Array<{episode_id: string; metric: TrajectoryMetric; before: AssessmentVerdict; after: AssessmentVerdict}>;
 }
 

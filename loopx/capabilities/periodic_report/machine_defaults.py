@@ -287,6 +287,13 @@ def _normalized_goal_subscription(
         "route_ref": route_ref,
         "timezone": timezone_name,
     }
+    if profile_preset == "session-task" or "task" in config:
+        from .goal_configuration import normalize_configuration
+        # A machine default must never enroll a Goal into executable work.
+        if source != "goal_override":
+            raise ValueError("session tasks require an explicit Goal override")
+        normalized = normalize_configuration(config)
+        subscription["task"] = normalized["task"]
     schedule = normalize_report_cadence(config.get("schedule"))
     if schedule is not None:
         if schedule["timezone"] != timezone_name:

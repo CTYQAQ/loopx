@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from loopx.control_plane.quota.effective_action import EffectiveAction
 from loopx.control_plane.quota.turn_envelope import build_turn_envelope
 from loopx.control_plane.turn_driver.turn_contract_generated import LoopXTurnRoute
@@ -98,9 +100,42 @@ def test_repair_like_unknown_actions_do_not_gain_repair_authority() -> None:
         assert _route_for(action) == "ready_for_host", action
 
 
-def test_replan_actions_reach_the_replan_route() -> None:
+@pytest.mark.parametrize("delivery_allowed", [True, False])
+def test_replan_actions_reach_the_replan_route(delivery_allowed: bool) -> None:
     for action in sorted(REPLAN_ACTIONS):
-        assert _route_for(action) == "replan_required", action
+        decision = _run_decision(effective_action=action)
+        decision["interaction_contract"]["agent_channel"]["delivery_allowed"] = delivery_allowed
+        envelope = build_turn_envelope(decision)
+        assert envelope["action"]["delivery_allowed"] is delivery_allowed
+        assert _typed_route(envelope) is LoopXTurnRoute.REPLAN_REQUIRED, action
+
+
+@pytest.mark.parametrize("control", ["should_run", "must_attempt"])
+@pytest.mark.parametrize("action", ["autonomous_replan_required", "successor_replan_required"])
+def test_replan_still_requires_an_admitted_attempt(control: str, action: str) -> None:
+    decision = _run_decision(effective_action=action)
+    channel = decision["interaction_contract"]["agent_channel"]
+    channel["delivery_allowed"] = False
+    if control == "should_run":
+        decision["should_run"] = False
+    else:
+        channel["must_attempt"] = False
+    assert _typed_route(build_turn_envelope(decision)) is LoopXTurnRoute.BLOCKED
+
+
+@pytest.mark.parametrize("action", ["normal_run", "control_plane_repair", "future_repair"])
+def test_replan_does_not_admit_other_delivery_routes(action: str) -> None:
+    decision = _run_decision(effective_action=action)
+    decision["interaction_contract"]["agent_channel"]["delivery_allowed"] = False
+    assert _typed_route(build_turn_envelope(decision)) is LoopXTurnRoute.BLOCKED
+
+
+def test_replan_still_requires_the_action_signature() -> None:
+    decision = _run_decision(effective_action="autonomous_replan_required")
+    decision["interaction_contract"]["agent_channel"]["delivery_allowed"] = False
+    envelope = build_turn_envelope(decision)
+    envelope["action_signature"]["matches"] = False
+    assert _typed_route(envelope) is LoopXTurnRoute.CONTRACT_ERROR
 
 
 def test_remaining_registered_actions_reach_the_host_route() -> None:

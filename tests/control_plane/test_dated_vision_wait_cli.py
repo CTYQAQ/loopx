@@ -277,11 +277,13 @@ def test_bound_monitor_keeps_exact_turn_and_agent_fences(tmp_path, isolated_effe
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("historical_gap", [False, True])
 def test_blocked_replan_closes_without_debit_and_retains_scheduled_work(
-    tmp_path, isolated_effect, monkeypatch, provider,
+    tmp_path, isolated_effect, monkeypatch, provider, historical_gap,
 ):
     from canonical_authority_fixture import initialize_canonical_authority
     from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    from loopx.control_plane.todos.active_state_todo_parser import parse_active_state_todos
 
     registry, runtime, state = fixture(tmp_path)
     with state.open("a", encoding="utf-8") as output:
@@ -292,20 +294,43 @@ def test_blocked_replan_closes_without_debit_and_retains_scheduled_work(
             "cadence=30m next_due_at=2099-01-01T00:00:00Z "
             "consecutive_no_change=8 max_no_change_before_replan=5 result_hash=source-v1 -->\n"
         )
+        if historical_gap:
+            output.write(
+                "\n- [x] [P1] Retain an independent completed result.\n"
+                f"  <!-- loopx:todo todo_id=todo_prior_result status=done claimed_by={AGENT} "
+                "task_class=advancement_task action_kind=validate completion_continuation=active_goal -->\n"
+                "\n- [ ] [P1] Keep the peer's independent work.\n"
+                "  <!-- loopx:todo todo_id=todo_peer_work status=open claimed_by=peer-worker "
+                "task_class=advancement_task action_kind=validate -->\n"
+            )
+    if historical_gap:
+        # Peer work keeps the shared Goal advancing but is not selectable by
+        # this Agent; its old lifecycle warning must not veto another duty.
+        document = json.loads(registry.read_text())
+        document["goals"][0]["coordination"]["registered_agents"].append("peer-worker")
+        registry.write_text(json.dumps(document))
     if provider == "sqlite":
         monkeypatch.setenv("NODE_OPTIONS", os.environ.get("NODE_OPTIONS", "") + " --experimental-sqlite")
-    rc, before = cli(registry, runtime, "todo", "list", "--goal-id", GOAL)
-    assert rc == 0, before
+    # Provision the synthetic canonical source before exercising real CLI reads;
+    # normal readers must not fall back to an unmigrated Markdown source.
+    todos = parse_active_state_todos(state.read_text(), item_limit=None)["agent_todos"]["items"]
     initialize_canonical_authority(
         runtime, GOAL,
-        build_todo_runtime_shadow_projection(goal_id=GOAL, handoff_mode="soft_claim", todos=before["todos"]),
+        build_todo_runtime_shadow_projection(goal_id=GOAL, handoff_mode="soft_claim", todos=todos),
         state_path=state, provider=provider,
     )
+    rc, before = cli(registry, runtime, "todo", "list", "--goal-id", GOAL)
+    assert rc == 0, before
+    if historical_gap:
+        assert before["agent_todos"]["completed_without_successor_count"] == 1
     turn = "blocked-source-review"
     rc, guard = cli(registry, runtime, "quota", "should-run", "--codex-app", "--goal-id", GOAL,
                     "--agent-id", AGENT, "--turn-instance-id", turn)
     assert rc == 0, guard
     assert guard["effective_action"] == "autonomous_replan_required"
+    assert [row["kind"] for row in guard["autonomous_replan_obligation"]["triggers"]] == [
+        "monitor_no_change_streak",
+    ]
     identity = guard["heartbeat_receipt"]["settlement_identity"]
     obligation = identity["replan_obligation_id"]
     assert identity["binding_kind"] == "autonomous_replan"
@@ -356,8 +381,9 @@ def test_blocked_replan_closes_without_debit_and_retains_scheduled_work(
         assert refused["ok"] is False and not refused.get("appended"), refused
         assert state.read_bytes() == unchanged_state
     rc, refreshed = cli(registry, runtime, *refresh_args)
-    assert rc == 0, refreshed
+    assert rc == 0, json.dumps(refreshed)
     assert refreshed["settlement_identity"] == identity
+    assert refreshed["autonomous_replan_ack"]["semantic_delta"]["accepted"] is True
     assert refreshed["settlement_progress"]["state"] == "settled", refreshed["settlement_progress"]
     assert refreshed["settlement_progress"]["closeout_kind"] == "typed_blocked_writeback_no_spend"
     rc, replay = cli(registry, runtime, *refresh_args)
@@ -372,9 +398,13 @@ def test_blocked_replan_closes_without_debit_and_retains_scheduled_work(
     rc, later = cli(registry, runtime, "quota", "should-run", "--codex-app", "--goal-id", GOAL,
                     "--agent-id", AGENT, "--turn-instance-id", "after-blocked-review")
     assert rc == 0, later
+    assert (later.get("autonomous_replan_obligation") or {}).get("obligation_id") != obligation
     assert later["interaction_contract"]["agent_channel"]["must_attempt"] is False
     rc, after = cli(registry, runtime, "todo", "list", "--goal-id", GOAL)
     assert rc == 0, after
+    if historical_gap:
+        assert after["agent_todos"]["completed_without_successor_count"] == 1
+        assert next(row for row in after["todos"] if row["todo_id"] == "todo_peer_work")["claimed_by"] == "peer-worker"
     for original in before["todos"]:
         current = next(row for row in after["todos"] if row["todo_id"] == original["todo_id"])
         for field in ("status", "text", "claimed_by", "resume_when", "consecutive_no_change",

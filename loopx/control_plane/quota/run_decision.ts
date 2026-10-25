@@ -23,6 +23,7 @@ interface RunFacts {
   inbox_material_review_due: boolean;
   terminal_no_followup: boolean;
   task_orchestration_contract: JsonObject | null;
+  task_orchestration_lane_count: number;
 }
 
 interface RunDecision extends JsonObject {
@@ -37,6 +38,7 @@ interface RunDecision extends JsonObject {
   state: string;
   quota_patch: JsonObject;
   replan_decision_allowed: boolean;
+  goal_route_hint_override: JsonObject | null;
 }
 
 function text(value: unknown, label: string): string {
@@ -51,6 +53,8 @@ function optionalRecord(value: unknown, label: string): JsonObject | null {
 }
 
 function decodeRunFacts(params: JsonObject): RunFacts {
+  const taskOrchestrationContract = optionalRecord(params.task_orchestration_contract,
+    "task_orchestration_contract");
   return {
     normal_delivery_allowed: requireBoolean(params.normal_delivery_allowed, "normal_delivery_allowed"),
     recovery_delivery_allowed: requireBoolean(params.recovery_delivery_allowed, "recovery_delivery_allowed"),
@@ -69,8 +73,16 @@ function decodeRunFacts(params: JsonObject): RunFacts {
     inbox_reply_due: requireBoolean(params.inbox_reply_due, "inbox_reply_due"),
     inbox_material_review_due: requireBoolean(params.inbox_material_review_due, "inbox_material_review_due"),
     terminal_no_followup: requireBoolean(params.terminal_no_followup, "terminal_no_followup"),
-    task_orchestration_contract: optionalRecord(params.task_orchestration_contract, "task_orchestration_contract"),
+    task_orchestration_lane_count: nonNegativeCount(params.task_orchestration_lane_count,
+      "task_orchestration_lane_count"),
+    task_orchestration_contract: taskOrchestrationContract,
   };
+}
+
+function nonNegativeCount(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0)
+    throw new EffectRuntimeRequestError(`${label} must be a non-negative safe integer`);
+  return Number(value);
 }
 
 function guardReason(guard: JsonObject | null, fallback: string): string {
@@ -178,6 +190,19 @@ function taskOrchestrationEffectiveAction(facts: RunFacts, decision: RunDecision
   return [decision.effective_action, decision.reason];
 }
 
+function taskOrchestrationRouteHint(contract: JsonObject | null, laneCount: number): JsonObject | null {
+  if (!contract || (text(contract.execution_state ?? "", "execution_state") || "ready") !== "ready") return null;
+  return {
+    omit_current_agent_next_action: true,
+    kind: "task_orchestration",
+    route_decision: "coordinate_task_bundle",
+    reason: contract.mode === "adaptive"
+      ? "task-scoped coordinator may spawn admitted child lanes"
+      : "task-scoped coordinator must activate/resume eligible peer lanes",
+    peer_lane_count: laneCount,
+  };
+}
+
 /** Compose base quota admission after source reads; receipt-bound overlays keep their owners. */
 export function resolveQuotaRunDecision(params: JsonObject): JsonObject {
   const facts = decodeRunFacts(params);
@@ -188,11 +213,14 @@ export function resolveQuotaRunDecision(params: JsonObject): JsonObject {
     capability_repair_allowed: false, workspace_repair_allowed: false,
     should_run: false, effective_action: EffectiveAction.QUOTA_SKIP,
     reason: facts.reason, state: facts.state, quota_patch: {}, replan_decision_allowed: false,
+    goal_route_hint_override: null,
   };
   applyDeliveryGuards(facts, decision);
   decision.effective_action = quotaEffectiveAction(facts, decision);
   applyGoalOverrides(facts, decision);
   applyInboxOverrides(facts, decision);
   [decision.effective_action, decision.reason] = taskOrchestrationEffectiveAction(facts, decision);
+  decision.goal_route_hint_override = taskOrchestrationRouteHint(
+    facts.task_orchestration_contract, facts.task_orchestration_lane_count);
   return decision;
 }

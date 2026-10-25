@@ -315,6 +315,7 @@ class OpenVikingContextProvider:
         args: Sequence[str],
         *,
         timeout_seconds: float,
+        deadline: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         command = [self.executable]
         if (
@@ -329,13 +330,18 @@ class OpenVikingContextProvider:
         ):
             command.extend(["--actor-peer-id", self.actor_peer_id])
         command.extend(args)
+        timeout = max(1.0, timeout_seconds)
+        if deadline is not None:
+            timeout = min(timeout, deadline - time.monotonic())
+            if timeout <= 0:
+                raise subprocess.TimeoutExpired(command, timeout_seconds)
         return self.runner(
             command,
             text=True,
             encoding="utf-8",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            timeout=max(1.0, timeout_seconds),
+            timeout=timeout,
             env=self.env,
             check=False,
         )
@@ -345,9 +351,12 @@ class OpenVikingContextProvider:
         *,
         timeout_seconds: float,
         peer_scope_required: bool = False,
+        deadline: float | None = None,
     ) -> tuple[str | None, str | None]:
         try:
-            version_result = self._run(["--version"], timeout_seconds=timeout_seconds)
+            version_result = self._run(
+                ["--version"], timeout_seconds=timeout_seconds, deadline=deadline
+            )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return None, "provider_cli_unavailable"
         if version_result.returncode != 0:
@@ -367,7 +376,7 @@ class OpenVikingContextProvider:
         if peer_scope_required:
             try:
                 server_version_result = self._run(
-                    ["version"], timeout_seconds=timeout_seconds
+                    ["version"], timeout_seconds=timeout_seconds, deadline=deadline
                 )
             except subprocess.TimeoutExpired:
                 return version, "provider_server_version_timeout"
@@ -390,6 +399,7 @@ class OpenVikingContextProvider:
             status_result = self._run(
                 ["status", "-o", "json", "-c", "true"],
                 timeout_seconds=timeout_seconds,
+                deadline=deadline,
             )
         except subprocess.TimeoutExpired:
             return version, "provider_service_timeout"
@@ -620,6 +630,7 @@ class OpenVikingContextProvider:
         target: str,
         source_content: str,
         timeout_seconds: float,
+        deadline: float | None = None,
     ) -> str:
         """Classify an uncertain write without retrying it.
 
@@ -628,10 +639,17 @@ class OpenVikingContextProvider:
         the immutable target before deciding whether another write is safe.
         """
 
+        reconciliation_deadline = time.monotonic() + max(0.0, timeout_seconds)
+        deadline = (
+            min(deadline, reconciliation_deadline)
+            if deadline is not None
+            else reconciliation_deadline
+        )
         try:
             exact = self._run(
                 ["read", target, "-o", "json", "-c", "true"],
                 timeout_seconds=timeout_seconds,
+                deadline=deadline,
             )
         except subprocess.TimeoutExpired:
             return "reconciliation_unavailable"
@@ -648,6 +666,7 @@ class OpenVikingContextProvider:
             tree = self._run(
                 ["tree", target, "-L", "3", "-o", "json", "-c", "true"],
                 timeout_seconds=timeout_seconds,
+                deadline=deadline,
             )
         except subprocess.TimeoutExpired:
             return "reconciliation_unavailable"
@@ -667,6 +686,7 @@ class OpenVikingContextProvider:
                         read = self._run(
                             ["read", ref, "-o", "json", "-c", "true"],
                             timeout_seconds=timeout_seconds,
+                            deadline=deadline,
                         )
                     except subprocess.TimeoutExpired:
                         continue
@@ -702,6 +722,7 @@ class OpenVikingContextProvider:
             listing = self._run(
                 ["ls", parent, "-n", "100", "-o", "json", "-c", "true"],
                 timeout_seconds=timeout_seconds,
+                deadline=deadline,
             )
         except subprocess.TimeoutExpired:
             return "reconciliation_unavailable"
@@ -731,6 +752,7 @@ class OpenVikingContextProvider:
         execute: bool,
     ) -> ContextProviderSync:
         started = time.monotonic()
+        deadline = started + max(0.0, timeout_seconds)
         namespace = _compact(namespace, limit=120)
         if len(resources) > MAX_OPENVIKING_SYNC_RESOURCES:
             raise ValueError(
@@ -754,6 +776,7 @@ class OpenVikingContextProvider:
         version, blocker = self._preflight(
             timeout_seconds=timeout_seconds,
             peer_scope_required=any(scope.actor_binding_required for scope in scopes),
+            deadline=deadline,
         )
         if blocker:
             return ContextProviderSync(
@@ -780,6 +803,7 @@ class OpenVikingContextProvider:
                     existing = self._run(
                         ["read", target, "-o", "json", "-c", "true"],
                         timeout_seconds=remaining,
+                        deadline=deadline,
                     )
                 except subprocess.TimeoutExpired:
                     preflight_reason = "provider_sync_target_preflight_timeout"
@@ -792,6 +816,7 @@ class OpenVikingContextProvider:
                     parent_probe = self._run(
                         ["ls", parent, "-n", "1", "-o", "json", "-c", "true"],
                         timeout_seconds=remaining,
+                        deadline=deadline,
                     )
                 except subprocess.TimeoutExpired:
                     preflight_reason = "provider_sync_target_preflight_timeout"
@@ -860,6 +885,7 @@ class OpenVikingContextProvider:
                 existing = self._run(
                     ["read", target, "-o", "json", "-c", "true"],
                     timeout_seconds=remaining,
+                    deadline=deadline,
                 )
             except subprocess.TimeoutExpired:
                 sync_reason = "provider_sync_timeout"
@@ -880,6 +906,7 @@ class OpenVikingContextProvider:
                     tree_result = self._run(
                         ["tree", target, "-L", "3", "-o", "json", "-c", "true"],
                         timeout_seconds=remaining,
+                        deadline=deadline,
                     )
                 except subprocess.TimeoutExpired:
                     sync_reason = "provider_sync_timeout"
@@ -903,6 +930,7 @@ class OpenVikingContextProvider:
                         tree_read = self._run(
                             ["read", tree_ref, "-o", "json", "-c", "true"],
                             timeout_seconds=remaining,
+                            deadline=deadline,
                         )
                     except subprocess.TimeoutExpired:
                         sync_reason = "provider_sync_timeout"
@@ -941,6 +969,7 @@ class OpenVikingContextProvider:
                     parent_probe = self._run(
                         ["ls", parent, "-n", "1", "-o", "json", "-c", "true"],
                         timeout_seconds=remaining,
+                        deadline=deadline,
                     )
                 except subprocess.TimeoutExpired:
                     sync_reason = "provider_sync_timeout"
@@ -950,6 +979,7 @@ class OpenVikingContextProvider:
                         mkdir_result = self._run(
                             ["mkdir", parent, "-o", "json", "-c", "true"],
                             timeout_seconds=remaining,
+                            deadline=deadline,
                         )
                     except subprocess.TimeoutExpired:
                         sync_reason = "provider_sync_timeout"
@@ -957,6 +987,7 @@ class OpenVikingContextProvider:
                     if mkdir_result.returncode != 0:
                         sync_reason = "provider_sync_parent_create_failed"
                         break
+            remaining = max(0.0, deadline - time.monotonic())
             reserve = min(15.0, max(1.0, remaining * 0.2))
             write_timeout = max(1.0, remaining - reserve)
             write_args = (
@@ -982,8 +1013,6 @@ class OpenVikingContextProvider:
                     "--mode",
                     "create",
                     "--wait",
-                    "--timeout",
-                    str(max(1, int(write_timeout))),
                     "-o",
                     "json",
                     "-c",
@@ -991,7 +1020,12 @@ class OpenVikingContextProvider:
                 ]
             )
             try:
-                result = self._run(write_args, timeout_seconds=write_timeout)
+                # Content-write 0.5.2 rejects body.timeout. Omit that optional
+                # field on all supported servers; the process deadline still
+                # bounds --wait, with time reserved for uncertain-write readback.
+                result = self._run(
+                    write_args, timeout_seconds=write_timeout, deadline=deadline
+                )
             except subprocess.TimeoutExpired:
                 result = None
             reconciliation_performed = True
@@ -999,6 +1033,7 @@ class OpenVikingContextProvider:
                 target=target,
                 source_content=source_content,
                 timeout_seconds=reserve,
+                deadline=deadline,
             )
             if reconciliation == "verified_success":
                 completed_refs.append(target)

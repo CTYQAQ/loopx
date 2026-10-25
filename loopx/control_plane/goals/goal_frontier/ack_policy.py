@@ -11,6 +11,7 @@ from ...todos.contract import (
     replan_successor_semantic_binding,
 )
 from ...todos.todo_semantics import todo_item_is_actionable_open, todo_item_task_class
+from ...todos.succession_warning import TODO_SUCCESSION_WARNING_REASON_CODE
 from ...work_items.progress_observation import (
     replan_obligation_trigger_checkpoints,
     replan_obligation_trigger_kinds,
@@ -70,7 +71,13 @@ def autonomous_replan_ack_satisfies_obligation(
         if str(item or "").strip()
     }
     required = set(required_semantic_outcomes(replan_obligation or {}))
-    if todo_succession_gap_open:
+    # Other completed work keeps its own succession duty. It must not veto an
+    # exact accepted receipt for an independent monitor or review obligation.
+    if (
+        todo_succession_gap_open
+        and TODO_SUCCESSION_WARNING_REASON_CODE
+        in replan_obligation_trigger_kinds(replan_obligation or {})
+    ):
         outcomes.intersection_update({"new_runnable_successor"})
     return bool(outcomes & required)
 

@@ -41,7 +41,7 @@
 </section>
 
 <section id="matrix"><h2>2. 两个研究阶段，分别比较</h2>
-<p>研究分成两个阶段。早期以 Portfolio 风险校准与 Lean 证明，检查反馈可信性、持续工作与证据采用；近期以 Portfolio、Graph 的成熟状态研究后半程选路，并准备 Ad Placement 的可恢复研究点。下表保留早期五类执行方式，<strong>不是当前的重跑矩阵</strong>。第九节保留较早两臂均启用 stride 的历史对照；第十节更新已执行的三题 donor 与两臂均关闭 stride 的上下文比较。</p>
+<p>早期 Portfolio 与 Lean 研究反馈、持续工作和证据采用，后续从成熟研究点检查选路。下表保留早期五类方式，<strong>不是当前启动矩阵</strong>。第9节保留早期 stride 开启的对照；第10节将10月17日 stride 关闭的研究，与后续 Sol 新旧版、Astra Official/LoopX 及切模型接续分开陈述。</p>
 <table><thead><tr><th>执行方式</th><th>保留什么</th><th>用来回答什么</th></tr></thead><tbody>
 <tr><td>官方 worker</td><td>官方 stop hook 与继续路径</td><td>官方执行机制能推进到哪里</td></tr>
 <tr><td>单次 Codex</td><td>一次调用，自然结束</td><td>没有外层续跑时会做多少工作</td></tr>
@@ -50,7 +50,7 @@
 <tr><td>LoopX Explore</td><td>Resume 加可选证据记录与探索规划</td><td>结构化证据是否进入下一次决策</td></tr>
 </tbody></table>
 <p>Portfolio 的历史设计覆盖五种执行方式 × native/blind 十臂；后续只补关键消融。Lean 主要比较 blind。native 可以取得 judge 反馈；blind 保留公开任务、训练数据、本地测试与验证工具，但无法取得 judge 分数和隐藏诊断。后台自动评测是研究者的观察，不向 blind solver 返回。因此 blind 是“无 judge 反馈”，不是“没有反馈”。</p>
-<p>模型沿用 <code>gpt-6.1-sol / xhigh</code>。历史 Portfolio/Lean 数值各自保留原预算、采样、评分版本与日期；更早的 18 小时或部分 Lean 延长至 36 小时，不追溯改写。近期 Graph/Portfolio 接续是在保留已用时间、机会和冷却的累计 36 小时上限内研究；这也不等于新起 donor 各获 36 小时。新方案采用 Portfolio/Graph/Ad 的 12/18/18 小时原题上限，见末节。</p>
+<p>早期 Portfolio/Lean 和10月17日研究使用 <code>gpt-6.1-sol / xhigh</code>，后续批次分别声明模型与 effort。历史数字保留原预算、采样、评分与日期。Graph/Portfolio 接续保留已用时间、机会与冷却，受其累计36小时上限约束，不是每个 donor 新获36小时；较短观察窗也不代表原计划正常完成。</p>
 <p>早期比较过预置阶段 Todo（seeded）与由原目标形成计划（planned）、复盘周期、上下文和 Explore。后续研究选择 planned + Explore，并明确每六个已结算有效工作 Turn 复盘；这是当前研究配置，不把旧批次的三 Turn 设置冒充新值，也不改写产品中显式配置的单位。提示、runner 与契约曾一起变化，因此早期 planned 结果不能单独证明普遍优势。</p>
 <h3>早期观察到的整体进步：保留原窗口</h3>
 <p>Lean 提供了较直接的共同时间窗证据。相同 blind 条件下，早期 LoopX v14 与该期 #5844 的有效采样点如下；同一时间能推进更多可验证证明，是实际进展，不能因为尚未拆清贡献就忽略。</p>
@@ -147,6 +147,20 @@
 <p>近期 Portfolio 的一次固定 2×2 检查覆盖 14 个本地案例、56 行结果，其中 5 个为公开案例、9 个为合成案例。2×2 比较原 V7 与自适应协方差两种策略，以及对目标总持仓取整与对持仓变动量取整两种执行方式。以下成交数、费用与 Sharpe 均值均取这 5 个公开案例，固定 V7，仅改为持仓变动量取整：平均成交数从 451.2 降到 235.4，约少 47.8%；但费用从 62,683.15 只降到 62,682.18，约少 0.00154%，平均 Sharpe 仅增加 0.000133。另在全部 14 个案例中，有 10 个回撤变差。操作次数变化很大，原目标的变化却很小。这使“减少成交”从看似显著的改进，变成了需要与收益空间比较的候选机制。</p>
 <p>solver 报告局部计算约用 25.25 CPU 秒；容纳这项研究的两次完整唤醒却约用 29.66 分钟，执行 90 条命令并输出约 6.80 万 token。另一个已完成的协方差研究段，7 次唤醒合计约 68.05 分钟墙钟与 14.47 万输出 token。这里包括模型思考、控制、编写、工具和等待，不是纯解码时间；部分诊断有信息价值，也不能全算管理浪费。但只报告小脚本的秒数，会遗漏决定是否值得继续的主要成本。</p>
 <p>后续按完整研究段记录代价，再分开活跃工作、恢复、等待与原生评测。会话累计用量必须差分并去重，不能把祖先历史反复加总。局部计算更快、命令更少或 packet 更短，都只有在保持决策信息、并改善有效产出或完整成本时，才构成效率收益。</p>
+<h3 id="staged-context">减少 hint，也要让真实调用方使用同一事实来源</h3>
+<p>10月24日的改进把交互分为<strong>读事实 → 自主选路 → 读写回格式</strong>：减少指定策略的提示，保留原目标、累计要求、公开反馈和执行边界。但源码有 reader，不代表模型已经使用：此前一个名义 test 仍收到旧 guard 和规划提示；后续 Host 审计又发现全量读取指令，以及入口与 writer 重复的结算计划。<a href="https://github.com/loopx-project/loopx/pull/7269">提案 #7269</a> 在已评审版本 <code>0ddd08ad</code> 收敛 CLI 与 native Host/journal 交付，每轮保留核心 Goal 和当前 horizon，结算计划只交付一次。完整签名原件仍用于核验和恢复；缺少安全 reader 的旧归档保留兼容。它复用既有上下文差分 owner，没有新增缓存或阅读 ACK。下文冻结实验尚未采用这份提案。</p>
+<details id="staged-transport"><summary>整段读取的传输：一条路径变小，另一条可能变大</summary>
+<p>固定四个 Schema/Grid 历史快照，对照前一提案与已评审版本。UTF-8 总量包含入口、review、全部已提供的验收补读、适用时的 Explore 和 writer；恢复再加入完整原件。这是离线传输诊断，不是模型 token 或 benchmark 效果。</p>
+<table><thead><tr><th>读取路径</th><th>此前字节</th><th>修订后字节</th><th>变化</th></tr></thead><tbody>
+<tr><td>Captured CLI</td><td>550,039</td><td>562,429</td><td>+2.25%</td></tr>
+<tr><td>结构化 Host</td><td>622,317</td><td>263,115</td><td>−57.72%</td></tr>
+<tr><td>Native renderer</td><td>647,687</td><td>257,599</td><td>−60.23%</td></tr>
+<tr><td>Native 加完整原件恢复</td><td>647,687</td><td>688,962</td><td>+6.37%</td></tr>
+</tbody></table>
+<p>native 路径把一次完整原件读取换成两到三次分段 CLI 读取；工具往返和恢复会抵销部分正常输入节省。与验证并发采集的局部耗时，不是受控延迟实验；外部证据工具正文、模型缓存、输出与账单仍未测。</p>
+<p>另一项较早的结算诊断在预热后，每个后端交替做八对样本。SQLite 独立/组合 CLI 的中位耗时为 0.807/0.995 秒，File 为 0.796/1.018 秒；回传字节约少 46%，配对进程时间却约多 24%。一次操作者调用仍启动两个完整 CLI 并回读权威状态。可能减少的模型交互尚未实测，旧轨迹两次工具之间的时间也含推理与验证。</p>
+</details>
+<p>成本覆盖同样重要。下文有限 Sol/max 接续的逐响应核对，在 compaction 邻近找回 native notice 漏掉的 Schema 三条、Grid 两条用量：分别为 23,740 和 14,619 输出 token。正式 replan 占外层时钟 7.35% 和 8.94%，但首个原生任务之前已用约 21%。准备包含恢复、验证、修复和启动间隙，不全是复盘。因此<strong>全部机制合计 15%</strong> 的参考线仍未资格化：有效研究、控制、失败、共享资源与真实费用尚未全部拆账。</p>
 </section>
 
 <section id="lean"><h2>7. Lean 的历史反例：中期减速与候选分配</h2>
@@ -221,7 +235,7 @@
 </section>
 
 <span id="measure"></span><span id="distribution"></span><section id="rerun"><h2>10. 从可恢复的点，走到真实研究选择</h2>
-<p class="figure-note">本节更新至 2026-10-17 11:16 UTC。替换上一版“尚待启动”的三题方案；第九节的历史四臂仍保留原源码、分数与停止状态。以下是选定研究点的过程观察，未完成整场科学验收。</p>
+<p class="figure-note">新增证据至 2026-10-24 19:37 UTC。下文10月17日观察仍保留原11:16 UTC截点，后续批次单列；第9节保留原冻结版本、分数与停止状态。以下观察未完成整场科学验收。</p>
 <h3 id="new-study">已执行的比较：固定 stride，改变复盘上下文</h3>
 <p>新的 Portfolio、Graph、Ad Placement donor 已从原目标启动，采用 <code>gpt-6.1-sol / xhigh</code>、planned + Explore。宿主仍执行有限预算，但 <a href="https://github.com/loopx-project/loopx/pull/6671">#6671</a> 不再把宿主倒计时或常驻 runtime guidance 塞入模型研究输入。checkpoint 独立开启，TurnEnvelope 与 stride 关闭，Goal horizon 显式开启；原生反馈仍由模型主动提交触发，受理后冷却一小时，无周期或额外尾评。各冻结运行保留自己的版本，跨题结果不合并估计策略效果。</p>
 <p>当前已从 Portfolio 与 Graph 各一个成熟点分出保留上下文和 fresh 两臂。<strong>这次两臂均为 stride-off，检验的是复盘上下文。</strong>fresh 在任何本次准备或复盘之前重置，再从同一研究证据与原目标作决定。原点不改，模型、Goal、评分器、反馈与累计预算保持一致；fresh 的操作说明、独立会话与共享宿主竞争仍是混杂，单点两臂不能建立上下文策略的一般因果结论。Ad 的同点对照尚未准入。</p>
@@ -248,9 +262,44 @@
 <p>fresh 组根据均值影响审计，试验一个固定的 Equity 观测修复。部分训练均值改善，却在 2020 缺宏观输入的压力路径上将 Sharpe 从约 0.826 降到 −0.684、回撤从约 3.00% 增至 5.34%，终值相对减少约 52.95 万。模型保留全部结果并拒绝推广，继续保留原生 incumbent。固定规则的这个反例不排除所有稳健估计方法；它说明离线输入指标改善还必须经过真实持仓、离散选仓与成本链检验。</p>
 <p>保留组也进入了不同机制：持有期 serial covariance 估计未通过信息门槛；完全抑制中间日自主短仓调整，虽改善部分年度结果，却损害半年度表现及空头相关性等要求，两条路线都未推广。fresh 后续的锥优化审计在四小时截止仍未完成，之后产生的重放与 panel 产物不追记为截止前成果，更不能当作全局最优性证明。完整实验、信息性反例、候选采用与原题收益需要分层记账；重叠窗口和 case-session 数量不是独立样本量。</p>
 <p>成本排序也随窗口反转：fresh 的已回执未缓存输入，相对保留组在一小时约多 2.34%，两小时少 3.22%，四小时多 17.64%；四小时缓存输入多 6.65%，输出少 6.42%。统计扣除了继承线程计数，纳入 compaction 和截止时未闭合 Turn 已返回的用量。此外，fresh 首次任务事件的上下文窗口元数据为 258,400，保留组为 475,000，之后两组均为 475,000；事件元数据不等于已证明的实际响应上限，仍是需披露的差异。未返回响应、评测资源、宿主准入与完整账单仍需单列；共享宿主的资格验证和其他研究会影响时间。token 向量不能直接压成净效率胜负。</p>
-<p>后续继续按原共同窗口检查：负结果是否改变了下一项实际完成的实验，采用的确切源码是否改善原生主目标，首次增益用了多少准备、研究、工具和评测成本，以及下一个点是否仍可恢复。历史 Official 保留作描述参照；它不是当前同版本、同预算的 native 重复。原始归档未随文章公开，本节公开的是范围、方法与汇总观察，尚不能支持读者独立重建全部运行。</p>
+<h3 id="later-common-windows">后续共同窗口：同时保留正向与负向批次</h3>
+<p>后续窗口的结果分化：新版 Sol 集成在 Schema、Ad 领先；Astra LoopX 在 Schema、Grid 落后 Official。下表各比较保留自己的模型、版本、时钟与有效性限制。</p>
+<table><thead><tr><th>批次 / 题目 / 方向</th><th>对照 → LoopX test 最佳</th></tr></thead><tbody>
+<tr><td>Sol 新旧版 · 14h<br>Schema ↑</td><td>0.723684<br>→ 0.804620</td></tr>
+<tr><td>Sol 新旧版 · 14h<br>Ad Placement ↑</td><td>49,589,589,573<br>→ 49,615,495,839</td></tr>
+<tr><td>Astra Official/LoopX · 12h<br>Schema ↑</td><td>0.881813<br>→ 0.786257</td></tr>
+<tr><td>Astra Official/LoopX · 12h<br>Grid ↓</td><td>1810<br>→ 2118</td></tr>
+</tbody></table>
+<p>Sol test 两题均领先，但轨迹改变了解释。Schema 首次原生结果已经是 0.794620 对 0.713158，且获知时刻不同；从首次到14h，分别只改善 0.010000 与 0.010526。后期生产代码持续变化，原生最好分却不变；更多本地修复没有完成六项原始目标。Ad 则是“长程必然平台期”的正向反例：test 在固定2h窗口落后，14h领先；其后较差候选被拒绝，能取得的终态工作副本对应保留最佳，而不是最后一次提交。其余三臂缺少同等终态工作副本证明。</p>
+<p>Astra 批次中，Schema 两臂在6h至12h均未提高最好分。Grid LoopX 从 2159→2118，Official 从 1862→1810：研究持续发生，差距却未缩小。LoopX 做更深 lookahead 和更宽 mutation 搜索，再拒绝同分或更差候选；Official 将速度变化与搜索变化分开，连续取得新原生成果。Schema 平台期也有大量生产路径变化。除了控制成本，还要审查实验选择与原目标转移，不能把分数持平直接写成代码没变。</p>
+<details id="later-usage"><summary>完整观察窗的已记录用量与比较限制</summary>
+<table><thead><tr><th>批次 / 实验臂</th><th>未缓存输入 token</th><th>缓存输入 token</th><th>输出 token</th></tr></thead><tbody>
+<tr><td>Sol 14h · Schema base</td><td>5,536,252</td><td>381,548,928</td><td>1,621,142</td></tr>
+<tr><td>Sol 14h · Schema test</td><td>7,444,288</td><td>479,636,096</td><td>2,078,121</td></tr>
+<tr><td>Sol 14h · Ad base</td><td>5,896,042</td><td>328,260,864</td><td>1,656,988</td></tr>
+<tr><td>Sol 14h · Ad test</td><td>4,069,556</td><td>319,238,784</td><td>1,341,356</td></tr>
+<tr><td>Astra 12h · Schema Official</td><td>1,663,308</td><td>133,393,152</td><td>613,099</td></tr>
+<tr><td>Astra 12h · Schema LoopX</td><td>8,850,328</td><td>298,377,600</td><td>1,410,510</td></tr>
+<tr><td>Astra 12h · Grid Official</td><td>1,529,949</td><td>95,668,352</td><td>924,127</td></tr>
+<tr><td>Astra 12h · Grid LoopX</td><td>3,479,450</td><td>213,635,840</td><td>1,203,790</td></tr>
+</tbody></table>
+<p>后续 Sol 新旧版比较同时改变 LoopX core 与 benchmark runner：planned + Explore、<code>Sol/xhigh</code>、TurnEnvelope 关闭、公开原生反馈、无周期评测，提交受理后冷却一小时。每题每臂仅一次运行。14小时窗口是在读过较早结果后，按最早实际终止之前的最大完整小时选择，不按分数选臂，也不称跑满18小时。另一批 Astra/xhigh Official/LoopX 取各臂原外层时钟前12小时，准备计入。不同处理组合不合并成一个效果估计。</p>
+<p>Sol 窗口核对 7,522 个唯一 response ID 与52项已收到原生结果；Astra 为 5,277 个响应与45项结果。Grid LoopX 包含一次完成但超时、无数值的结果，不填零。会话累计计数不重复相加，reasoning 已含在输出中。Schema 换号恢复，包括所选点之后到旧会话停止前的工作，仍计入原外层时钟；继承结果的别名不产生新机会。</p>
+<p>Astra Schema LoopX 记录36次完成的 compaction，Official 为四次，未缓存输入约为其 5.32 倍。压缩可能与工作重叠，也不全是 LoopX 开销；Official 同样会在部分冷却窗口等待，两者都需归因。评分器、core/runner、评测并发、实际启动、自适应重起和共享宿主负载存在差异；较早一次操作者读取还暴露过 Official 终局 aggregate。每臂一次运行，账单、失败与资源拆账不完整，不能下干净因果或净费用结论。取消与 runner_invalid 保留历史，单次原生结果有效不认证整臂完整性。</p>
+</details>
+<h3 id="staged-replan-outcomes">真正使用分段复盘以后：采用更清楚，决策质量仍是混合结果</h3>
+<p>此前名义“with #7197”的一臂没有收到分段 reader，不能算有效 treatment。后续诊断沿同源点观察实际事实读取、自主选择与写回：旧 Astra/xhigh control 对 Sol/max 接续，版本及两小时/四小时窗口不同，<strong>不是单变量消融</strong>。两个新 test 按原有限时钟停止，保留 runner 失败和 grading unknown；可以逐项分析已接受原生提交，不能将整臂提升为合格 benchmark 结果。</p>
+<table><thead><tr><th>首个明确 replan</th><th>旧 control</th><th>分段接续</th></tr></thead><tbody>
+<tr><td>Schema · 分钟 / 命令</td><td>6.14 / 22</td><td>2.93 / 11</td></tr>
+<tr><td>Schema · 未缓存 / 缓存 / 输出 token</td><td>146,208 / 1,979,648 / 6,753</td><td>33,478 / 3,791,872 / 4,221</td></tr>
+<tr><td>Grid · 分钟 / 命令</td><td>5.40 / 20</td><td>14.74 / 23</td></tr>
+<tr><td>Grid · 未缓存 / 缓存 / 输出 token</td><td>70,829 / 2,204,416 / 10,636</td><td>36,689 / 5,723,776 / 21,904</td></tr>
+</tbody></table>
+<p>Schema 较便宜的首轮选择了合法后继，却未完成允许再次捕获的语义写回；连同反馈后复盘，旧版 17.86 分钟、新版 17.64 分钟，两轮工作内容仍不同。最初都选择 CLI checks/configured statuses；新版生命周期测试发现注册选项陈旧，本地从 4/10→10/10。后续实际执行 stateful，比旧版兼容性绕行更直接补原配置缺口；原生最好仍为 0.786257，六阶段仅一项完整通过，新增三次已接受结果没有超过继承最佳。</p>
+<p>Grid 旧 control 本来就会建立后继、调整优先级并比较独立候选，分段没有凭空创造自主性。新版取消了 Agent 自加的“任何局部退步都否决”规则，保留硬有效性/资源约束，完成更深搜索实验；已接受原生分从继承点 2172→2163，后又退至 2165，仍保留2163。另一个更晚历史点已有2104。这是有价值的局部决定与结果链，不证明每次复盘都更聪明或额外复盘已经回本。下一项有区分力的问题，是原验收缺口或可证伪的搜索/速度假设，是否改变下一项实际完成实验及完整成本，而不是复盘数量是否增加。</p>
+<p>原始归档未随文章公开：读者得到的是范围、方法与汇总观察，不能独立重建全部运行。源码资格、模型采用、保留的原生增益和完整成本分别判断；上文调用链收敛提案已有功能验证，本节没有它的新模型结果。</p>
 </section>
-<footer><p>研究范围：早期 EdgeBench Portfolio Risk Calibration 与 Lean Analysis Proofs；近期 Portfolio、Graph 同点接续研究及 Ad Placement donor 与研究点资格验证。数字来自文中指定的冻结窗口、终末重放或合成用例，口径互不替代。公开实现入口：<a href="https://github.com/loopx-project/loopx">LoopX</a>；任务与评分修复：<a href="https://github.com/ByteDance-Seed/EdgeBench/pull/14">EdgeBench #14</a>。原始轨迹、隐藏评测材料与运行环境凭证不随本文发布。</p></footer>
+<footer><p>研究范围：早期 EdgeBench Portfolio/Lean、Portfolio/Graph 同点研究、后续 Sol Schema/Ad 与 Astra Schema/Grid，以及有限 Sol/max 接续。数字保留各自窗口、版本和有效性边界。公开实现：<a href="https://github.com/loopx-project/loopx">LoopX</a>；任务与评分修复：<a href="https://github.com/ByteDance-Seed/EdgeBench/pull/14">EdgeBench #14</a>。原始轨迹、隐藏评测材料和运行凭证不随文发布。</p></footer>
 
 <nav class="article-route" aria-label="延伸阅读"><p>本文保留阶段性实验与反证。先建立系统全貌，可读 <a href="../semantic-software-development/">开发范式短分享</a>。 <a href="../#reading-routes">全部阅读路线</a></p></nav>
 </main></body></html>

@@ -1,6 +1,7 @@
 import { EffectiveAction } from "./effective_action.generated.ts";
 import { createHash } from "node:crypto";
 import { ENVELOPED_SHA256_PATTERN } from "../content_digest.ts";
+import {prepareContextDelivery, restoreContextDelivery} from "./context_delivery.ts";
 
 import {
   interpretQuotaShouldRunPacket,
@@ -44,6 +45,9 @@ export function readMonitorHeartbeatRecommendation(decision: JsonObject): JsonOb
 export function monitorHeartbeatDecisionFields(decision: JsonObject): JsonObject {
   return {heartbeat_recommendation: readMonitorHeartbeatRecommendation(decision)};
 }
+// The legacy adapter owns its field names. The codec receives this local binding
+// from the adapter, never from request data or a second legacy-field reader.
+const LEGACY_QUOTA_CONTEXT_FIELDS = Object.keys(monitorHeartbeatDecisionFields({}));
 /** Keep legacy heartbeat fields at their existing quota projection boundary;
  * the interaction owner still decides required reads and scheduler arbitration.
  */
@@ -998,6 +1002,8 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
   const request = requireJsonObject(value, "turn envelope request");
   const operation = request.operation;
   if (operation === "build") return buildTurnEnvelope(request);
+  if (operation === "context_delivery") return prepareContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);
+  if (operation === "context_recovery") return restoreContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);
   if (operation === "bind_capture") return bindTurnDecisionCapture(request);
   if (operation === "replan_settlement_identity") return {identity: turnEnvelopeReplanSettlementIdentity(
     requireJsonObject(request.envelope, "turn_envelope"), request.turn_instance_id,

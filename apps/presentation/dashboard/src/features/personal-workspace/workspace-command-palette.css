@@ -14,3 +14,5 @@
 .workspace-command-palette li[aria-selected="true"] { background: var(--pw-blue-soft); color: var(--pw-blue-ink); }
 .workspace-command-palette li[aria-disabled="true"] { cursor: default; }
 .workspace-command-palette li[aria-disabled="true"] span { opacity: .65; }
+
+.workspace-command-palette-title { display: flex; align-items: center; gap: 8px; }

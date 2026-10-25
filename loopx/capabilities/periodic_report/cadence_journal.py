@@ -75,7 +75,7 @@ def read_cadence_journal(*, runtime_root: Path, goal_id: str) -> dict[str, Any] 
     fields = {
         "schema_version", "goal_id", "window", "admitted_at", "publication",
     }
-    if not isinstance(value, dict) or set(value) - {"supersedes", "retirement"} != fields or value["schema_version"] != JOURNAL_SCHEMA or value["goal_id"] != goal_id:
+    if not isinstance(value, dict) or set(value) - {"supersedes", "retirement", "task_completion"} != fields or value["schema_version"] != JOURNAL_SCHEMA or value["goal_id"] != goal_id:
         raise ValueError("cadence journal contract is invalid")
     if "supersedes" in value and not re.fullmatch(r"cadence_[0-9a-f]{64}", str(value["supersedes"])):
         raise ValueError("cadence journal predecessor is invalid")
@@ -90,16 +90,54 @@ def read_cadence_journal(*, runtime_root: Path, goal_id: str) -> dict[str, Any] 
     ):
         raise ValueError("cadence journal publication reference is invalid")
     retirement = value.get("retirement")
-    if retirement is not None and (publication is not None or not isinstance(retirement, dict)
+    completion = value.get("task_completion")
+    if completion is not None and (publication is not None or not isinstance(completion, dict)
+            or window["profile_ref"].get("profile_id") != "session_task"
+            or set(completion) != {"todo_id", "turn_instance_id", "message_id", "message_sha256", "completed_at"}
+            or any(not isinstance(item, str) or not item for item in completion.values())
+            or not ENVELOPED_SHA256_PATTERN.fullmatch(completion["message_sha256"])):
+        raise ValueError("cadence task completion reference is invalid")
+    if retirement is not None and (publication is not None or completion is not None or not isinstance(retirement, dict)
             or set(retirement) != {"reason", "source_receipt_id", "retired_at"}
-            or retirement["reason"] != "owner_cancelled_failed_generation"
+            or retirement["reason"] not in {"owner_cancelled_failed_generation", "owner_cancelled_failed_task"}
             or any(not isinstance(item, str) or not item for item in retirement.values())):
         raise ValueError("cadence journal retirement reference is invalid")
     return value
 
 
+def record_cadence_task_completion(*, runtime_root: Path, goal_id: str,
+                                   expected_window_id: str, receipt: dict[str, str]) -> dict[str, Any]:
+    """Checkpoint the native owner's independently read Task and Core reply.
+
+    This is a finite task completion, not a report publication. The caller
+    verifies native commit, Task validation and the exact original Core body.
+    Reconciliation after a lost write must supply the same receipt.
+    """
+    path = cadence_journal_path(runtime_root, goal_id)
+    with exclusive_file_lock(path, policy=LockAcquisitionPolicy.MUTATION,
+                             operation="complete_managed_calendar_task"):
+        current = read_cadence_journal(runtime_root=runtime_root, goal_id=goal_id)
+        if (not current or current["window"]["window_id"] != expected_window_id
+                or current["window"]["profile_ref"].get("profile_id") != "session_task"
+                or current["publication"] is not None or current.get("retirement")):
+            raise ValueError("the original unpublished calendar task changed")
+        if current.get("task_completion"):
+            if current["task_completion"] != receipt:
+                raise ValueError("the calendar task completion changed its original result")
+            return current
+        proposed = {**current, "task_completion": receipt}
+        # Validate before writing using the same receipt shape as readback.
+        if (set(receipt) != {"todo_id", "turn_instance_id", "message_id", "message_sha256", "completed_at"}
+                or any(not isinstance(item, str) or not item for item in receipt.values())
+                or not ENVELOPED_SHA256_PATTERN.fullmatch(receipt["message_sha256"])):
+            raise ValueError("cadence task completion reference is invalid")
+        atomic_write_json(path, proposed)
+        return proposed
+
+
 def retire_failed_cadence_window(*, runtime_root: Path, goal_id: str,
-                                expected_window_id: str, source_receipt_id: str) -> dict[str, Any]:
+                                expected_window_id: str, source_receipt_id: str,
+                                reason: str = "owner_cancelled_failed_generation") -> dict[str, Any]:
     """Retain an explicitly cancelled known failure; never invent publication.
 
     The original execution owner must prove a terminal failed generation with
@@ -107,21 +145,30 @@ def retire_failed_cadence_window(*, runtime_root: Path, goal_id: str,
     This retires admission only; it neither retries a model nor drops evidence.
     """
     path = cadence_journal_path(runtime_root, goal_id)
-    if not isinstance(source_receipt_id, str) or not source_receipt_id:
-        raise ValueError("failed cadence retirement requires its original receipt")
     with exclusive_file_lock(path, policy=LockAcquisitionPolicy.MUTATION,
                              operation="retire_failed_report_window"):
-        current = read_cadence_journal(runtime_root=runtime_root, goal_id=goal_id)
-        if not current or current["window"]["window_id"] != expected_window_id or current["publication"] is not None:
-            raise ValueError("the unpublished failed report window changed")
-        if current.get("retirement"):
-            if current["retirement"]["source_receipt_id"] != source_receipt_id:
-                raise ValueError("the failed window retirement changed its source")
-            return current
-        current["retirement"] = {"reason": "owner_cancelled_failed_generation",
-            "source_receipt_id": source_receipt_id, "retired_at": datetime.now(timezone.utc).isoformat()}
-        atomic_write_json(path, current)
+        return _retire_failed_cadence_window_locked(runtime_root=runtime_root, goal_id=goal_id,
+            expected_window_id=expected_window_id, source_receipt_id=source_receipt_id, reason=reason)
+
+
+def _retire_failed_cadence_window_locked(*, runtime_root: Path, goal_id: str,
+                                       expected_window_id: str, source_receipt_id: str,
+                                       reason: str = "owner_cancelled_failed_generation") -> dict[str, Any]:
+    """Reuse the transition while the settings owner holds the cadence lock."""
+    if (not isinstance(source_receipt_id, str) or not source_receipt_id
+            or reason not in {"owner_cancelled_failed_generation", "owner_cancelled_failed_task"}):
+        raise ValueError("failed cadence retirement requires its original receipt")
+    current = read_cadence_journal(runtime_root=runtime_root, goal_id=goal_id)
+    if not current or current["window"]["window_id"] != expected_window_id or current["publication"] is not None or current.get("task_completion"):
+        raise ValueError("the unpublished failed report window changed")
+    if current.get("retirement"):
+        if current["retirement"]["source_receipt_id"] != source_receipt_id or current["retirement"]["reason"] != reason:
+            raise ValueError("the failed window retirement changed its source")
         return current
+    current["retirement"] = {"reason": reason,
+        "source_receipt_id": source_receipt_id, "retired_at": datetime.now(timezone.utc).isoformat()}
+    atomic_write_json(cadence_journal_path(runtime_root, goal_id), current)
+    return current
 
 
 def _archive_predecessor(path: Path, previous: dict[str, Any]) -> str:
@@ -175,20 +222,32 @@ def _admit_cadence_window_locked(
     if subscription.get("enabled") is not True or subscription.get("schedule") is None:
         return {"status": "disabled", "mutated": False, "window": None}
     calculated = report_cadence_window(subscription["schedule"], now=now)
-    from .presets import build_periodic_report_preset_activation
-    activation = build_periodic_report_preset_activation(str(subscription.get("profile_preset") or ""))
-    profile = activation.get("profile")
-    if activation.get("active") is not True or not isinstance(profile, Mapping) or (
-        "cadence_due" not in profile.get("trigger_policy", {}).get("enabled_kinds", [])
-    ):
-        raise ValueError("periodic-report profile does not support calendar reports")
+    if subscription.get("profile_preset") == "session-task":
+        from .goal_configuration import managed_session_report_destination, normalize_session_task
+        if subscription.get("source") != "goal_override" or not managed_session_report_destination(subscription):
+            raise ValueError("calendar tasks require an explicit original managed Session")
+        normalize_session_task(subscription.get("task"))
+        # Reuse the native calendar, without advertising a report renderer or
+        # a report source adapter that an ordinary Task never invokes.
+        profile_ref = {"profile_id": "session_task", "profile_version": "v1"}
+        profile_ref["profile_digest"] = _digest(profile_ref)
+        trigger_policy = {"enabled_kinds": ["cadence_due"], "minimum_interval_seconds": 0}
+    else:
+        from .presets import build_periodic_report_preset_activation
+        activation = build_periodic_report_preset_activation(str(subscription.get("profile_preset") or ""))
+        profile = activation.get("profile")
+        if activation.get("active") is not True or not isinstance(profile, Mapping) or (
+            "cadence_due" not in profile.get("trigger_policy", {}).get("enabled_kinds", [])
+        ):
+            raise ValueError("periodic-report profile does not support calendar reports")
+        profile_ref = {"profile_id": profile["profile_id"], "profile_version": profile["profile_version"],
+            "profile_digest": activation["profile_digest"]}
+        trigger_policy = profile["trigger_policy"]
     proposed = {
         "schema_version": CADENCE_WINDOW_SCHEMA, "goal_id": goal_id,
         "agent_id": agent_id, "subscription_revision": subscription.get("effective_revision"),
-        "profile_ref": {"profile_id": profile["profile_id"],
-                        "profile_version": profile["profile_version"],
-                        "profile_digest": activation["profile_digest"]},
-        "trigger_policy": profile["trigger_policy"],
+        "profile_ref": profile_ref,
+        "trigger_policy": trigger_policy,
         **calculated,
     } if calculated is not None else None
     if proposed is not None:
@@ -199,7 +258,7 @@ def _admit_cadence_window_locked(
     supersedes = None
     if previous is not None:
         old = previous["window"]
-        if previous["publication"] is None and not previous.get("retirement"):
+        if previous["publication"] is None and not previous.get("retirement") and not previous.get("task_completion"):
             # Import lazily to keep the pure calendar evaluator independent
             # of subscription and generation composition.
             from .incremental import read_periodic_report_publication_cursor
@@ -230,6 +289,11 @@ def _admit_cadence_window_locked(
             if proposed is None or old["due_at"] >= proposed["due_at"]:
                 return {"status": "retired", "mutated": False, "window": old}
             supersedes = _archive_predecessor(path, previous)
+        if previous.get("task_completion"):
+            if proposed is not None and old["due_at"] >= proposed["due_at"]:
+                return {"status": "already_completed", "mutated": False, "window": old}
+            if proposed is not None:
+                supersedes = _archive_predecessor(path, previous)
         # A route/profile edit is not a second report for the same due
         # boundary. Clock rollback likewise cannot replay a delivered one.
         if proposed is not None and supersedes is None and old["due_at"] >= proposed["due_at"]:

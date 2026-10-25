@@ -33,7 +33,7 @@ def _last_event(values):
 
 
 def read_conversation_requests(root, registry, store, session, *, goal_ids, core_goal_ids,
-                               validate_source_session, history=False, offset=0, limit=12):
+                               validate_source_session, history=False, offset=0, limit=12, search=""):
     """Read only this host's exact source Session, with fresh caller read scope.
 
     The caller supplies provider-validated Goal visibility and rechecks it after
@@ -41,6 +41,9 @@ def read_conversation_requests(root, registry, store, session, *, goal_ids, core
     """
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 12:
         raise ValueError("invalid request page")
+    if not isinstance(search, str) or len(search) > 200:
+        raise ValueError("request search must be at most 200 characters")
+    query = search.strip().casefold()
     paths = sorted((_root(root) / "entries").glob("*/*.json"))
     rows, unreadable, cache = [], 0, {}
     for path in paths[:2000]:
@@ -115,11 +118,17 @@ def read_conversation_requests(root, registry, store, session, *, goal_ids, core
     rows = list({row["request_id"]: row for row in rows}.values())
     pending_count = sum(row["unfinished"] for row in rows)
     visible = [row for row in rows if history or row["unfinished"]]
+    # Presentation-only search over already authorized, version-consistent reads.
+    # The typed agenda above remains the sole owner of unfinished status.
+    if query:
+        visible = [row for row in visible if any(query in str(value or "").casefold() for value in (
+            row["request_id"], row["goal_id"], row["agent_id"], row["source_question"],
+            (row.get("brief") or {}).get("purpose"), (row.get("brief") or {}).get("context")))]
     visible.sort(key=lambda row: (row.get("last_event_at") or "", row["request_id"]), reverse=True)
     page = visible[offset:offset + limit]
     coverage = {"scan_complete": len(paths) <= 2000, "unreadable": unreadable}
     # A page fence over observations, not an atomic snapshot or a new ledger.
-    snapshot_digest = hashlib.sha256(json.dumps([visible, coverage], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    snapshot_digest = hashlib.sha256(json.dumps([visible, coverage, query], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return {"ok": True, "session_id": session["session_id"], "rows": page,
         "pending_count": pending_count, "matched": len(visible),
         "snapshot_digest": snapshot_digest,

@@ -8,6 +8,103 @@ from pathlib import Path
 
 import pytest
 
+from loopx.control_plane.testing.canary_harness import import_fixture_authority
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("complete_prior", [False, True])
+def test_projected_autonomous_example_updates_evidence_without_changing_goal(
+    tmp_path, monkeypatch, provider, complete_prior,
+):
+    from canonical_authority_fixture import isolate_sqlite_runtime
+
+    if provider == "sqlite":
+        isolate_sqlite_runtime(tmp_path, monkeypatch)
+    source = Path(__file__).resolve().parents[2] / "examples/project/goal-vision-refresh-state-budget-smoke.py"
+    spec = importlib.util.spec_from_file_location("replan_authoring_fixture", source)
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    registry, runtime, project = fixture.write_fixture(tmp_path)
+    state = project / ".codex/goals" / fixture.GOAL_ID / "ACTIVE_GOAL_STATE.md"
+    original_goal = "## Goal\n\nPreserve the original objective and verify each scoped result.\n\n"
+    state.write_text(state.read_text().replace("## Next Action", original_goal + "## Next Action"))
+    import_fixture_authority(registry, fixture.GOAL_ID, provider=provider)
+    document = tmp_path / "vision.json"
+    prior_patch = {"acceptance_summary": "Original evidence pending."}
+    if complete_prior:
+        prior_patch.update({
+            "vision_summary": "Verify the whole original delivery with evidence.",
+            "role_scope": "Own this bounded verification; do not change peer work.",
+            "advancement_policy": "repeat_until_closed",
+            "replan_trigger_summary": "Keep the remaining evidence frontier visible.",
+            "dreaming_policy": "Propose only evidence-backed alternatives.",
+            "last_patch_summary": "Retain the existing role and continuation intent.",
+        })
+    fixture.write_json(document, {"vision_patch": prior_patch})
+    fixture.run_cli(registry, runtime, vision_path=document, check=True,
+                    dry_run=False, autonomous_replan_recorded=False)
+
+    guard = fixture.run_quota(registry, runtime)
+    assert guard["effective_action"] == "autonomous_replan_required"
+    assert guard["requires_user_action"] is False
+    contract = guard["replan_action_packet"]["writeback_contract"]["vision_authoring"]
+    packet = copy.deepcopy(contract["minimal_example"])
+    assert "JSON replaces the complete packet" in contract["authoring_hint"]
+    assert "full vision_patch" in contract["authoring_hint"]
+    if complete_prior:
+        # Follow the returned authoring procedure using the complete current
+        # Agent packet from a separate read, not fields reconstructed by a model.
+        current = fixture.run_status(registry, runtime)
+        goal = next(g for g in current["run_history"]["goals"] if g["id"] == fixture.GOAL_ID)
+        current_packet = copy.deepcopy(goal["latest_runs"][0]["agent_vision"])
+        assert current_packet["agent_id"] == fixture.AGENT_ID
+        current_packet["vision_patch"].update(packet["vision_patch"])
+        current_packet["path_delta"] = packet["path_delta"]
+        packet = current_packet
+    fixture.write_json(document, packet)
+    result = fixture.run_cli(registry, runtime, vision_path=document,
+        check=False, dry_run=False, autonomous_replan_recorded=True)
+    accepted = fixture.payload(result)
+    assert result.returncode == 0, accepted.get("error") or accepted
+    assert accepted["ok"] and accepted["appended"]
+    assert accepted["agent_vision"]["path_delta"]["outcome"] == "replan"
+    assert original_goal in state.read_text()
+
+    # A separate CLI read must preserve every existing field, not merely echo
+    # an accepted summary while discarding direction, role or repeat policy.
+    expected_patch = prior_patch | packet["vision_patch"]
+    cold = fixture.run_status(registry, runtime)
+    goal = next(g for g in cold["run_history"]["goals"] if g["id"] == fixture.GOAL_ID)
+    assert goal["latest_runs"][0]["agent_vision"]["vision_patch"] == expected_patch
+    index = runtime / "goals" / fixture.GOAL_ID / "runs/index.jsonl"
+    assert json.loads(index.read_text().splitlines()[-1])["agent_vision"]["vision_patch"] == expected_patch
+    if complete_prior:
+        assert goal["latest_runs"][0]["agent_vision"]["state"] == current_packet["state"]
+
+    # Updating evidence is still a durable change under the existing rule.
+    # A caller replacing the projected disposition must fail before writing.
+    before = index.read_bytes()
+    packet["vision_patch"]["acceptance_summary"] = "Another evidence update."
+    packet["path_delta"]["outcome"] = "continue"
+    fixture.write_json(document, packet)
+    rejected = fixture.run_cli(registry, runtime, vision_path=document,
+        check=False, dry_run=False, autonomous_replan_recorded=True)
+    assert rejected.returncode == 1
+    assert "changes durable fields acceptance_summary" in fixture.payload(rejected)["error"]
+    assert index.read_bytes() == before
+
+    # A review that retains the durable fields may continue without changing
+    # the Goal, asking its owner, or inventing a direction change.
+    packet["vision_patch"] = accepted["agent_vision"]["vision_patch"]
+    for disposition in ("continue", "no_change"):
+        packet["path_delta"]["outcome"] = disposition
+        fixture.write_json(document, packet)
+        retained = fixture.payload(fixture.run_cli(registry, runtime, vision_path=document,
+            check=True, dry_run=False, autonomous_replan_recorded=True))
+        assert retained["agent_vision"]["vision_patch"] == packet["vision_patch"]
+        assert retained["agent_vision"]["path_delta"]["outcome"] == disposition
+        assert original_goal in state.read_text()
+
 
 @pytest.mark.parametrize("character", ["x", "界"])
 def test_full_budget_roundtrips_without_erasing_replan_or_partial_writes(tmp_path, character):
@@ -16,6 +113,7 @@ def test_full_budget_roundtrips_without_erasing_replan_or_partial_writes(tmp_pat
     fixture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixture)
     registry, runtime, project = fixture.write_fixture(tmp_path / "current")
+    import_fixture_authority(registry, fixture.GOAL_ID, provider="file")
     packet = {
         "state": "vision_closed",
         "vision_patch": {
@@ -34,6 +132,7 @@ def test_full_budget_roundtrips_without_erasing_replan_or_partial_writes(tmp_pat
     baseline["path_delta"]["prior_assumption"] = character * 220
     baseline["path_delta"]["observed_reality"] = character * 220
     baseline_registry, baseline_runtime, _ = fixture.write_fixture(tmp_path / "control")
+    import_fixture_authority(baseline_registry, fixture.GOAL_ID, provider="file")
     fixture.write_json(path, baseline)
     fixture.run_cli(baseline_registry, baseline_runtime, vision_path=path, check=True,
                     dry_run=False, autonomous_replan_recorded=False)
@@ -78,6 +177,7 @@ def test_misplaced_delta_rejects_before_write_and_corrected_packet_roundtrips(tm
     fixture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixture)
     registry, runtime, project = fixture.write_fixture(tmp_path)
+    import_fixture_authority(registry, fixture.GOAL_ID, provider="file")
     state = project / ".codex/goals" / fixture.GOAL_ID / "ACTIVE_GOAL_STATE.md"
     before = state.read_bytes()
     delta = {"schema_version": "goal_path_delta_v0", "outcome": "replan",
@@ -112,6 +212,7 @@ def test_authoring_example_material_closeout_has_no_missing_path_replan(tmp_path
     fixture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixture)
     registry, runtime, _ = fixture.write_fixture(tmp_path)
+    import_fixture_authority(registry, fixture.GOAL_ID, provider="file")
     contract = replan_writeback_requirements({
         "satisfying_semantic_outcomes": ["fresh_vision_path_outcome"],
     })["writeback_contract"]["vision_authoring"]
@@ -139,7 +240,7 @@ def test_authoring_example_material_closeout_has_no_missing_path_replan(tmp_path
         assert checks["path_outcome_valid"] is (omitted == "evidence_refs")
     else:
         persisted = result["agent_vision"]
-        assert persisted["path_delta"]["outcome"] == "continue"
+        assert persisted["path_delta"]["outcome"] == "replan"
         assert persisted["path_delta"]["evidence_refs"]
 
 
@@ -149,6 +250,7 @@ def test_historical_stride_probe_whitespace_roundtrips_with_strategy_off(tmp_pat
     fixture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixture)
     registry, runtime, _ = fixture.write_fixture(tmp_path)
+    import_fixture_authority(registry, fixture.GOAL_ID, provider="file")
     expected = {"scope": "One complete experiment.", "prediction": "Distinguish the remaining explanations.",
                 "adoption_criterion": "Retain a validated gain.", "cost_bound": "One bounded comparison."}
     packet = {"vision_patch": {"vision_summary": "Preserve the historical proposal."},

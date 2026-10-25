@@ -85,6 +85,18 @@ test("in-flight progress neither executes completion nor rewrites the declaratio
   assert.equal(plan.steps[3].conditional, true);
 });
 
+test("Todo-bound semantic planning shares its exact autonomous authoring contract", () => {
+  const ordinary = turnScopedCliSettlementPlan(input);
+  assert.deepEqual(turnScopedCliSettlementPlan({...input, autonomous_replan: false}), ordinary);
+  const replan = turnScopedCliSettlementPlan({...input, autonomous_replan: true});
+  assert.deepEqual(replan.steps[1].vision_authoring, visionAuthoringContract(true));
+  assert.deepEqual({...replan, steps: replan.steps.map((step, i) => i === 1
+    ? {...step, vision_authoring: ordinary.steps[1].vision_authoring} : step)}, ordinary);
+  for (const autonomous_replan of [null, "true", 1]) {
+    assert.throws(() => turnScopedCliSettlementPlan({...input, autonomous_replan}), /must be a boolean/);
+  }
+});
+
 test("autonomous replan never manufactures a Todo completion step", () => {
   const plan = turnScopedCliSettlementPlan({...input,
     identity: {goal_id: "goal", agent_id: "agent", replan_obligation_id: "replan", turn_instance_id: "turn"},

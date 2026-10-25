@@ -306,6 +306,19 @@ test("shared requirement reads use final admission and add no work on non-delive
     ["existing", "goal_state", "goal_acceptance"]);
 });
 
+test("semantic replan retains Goal reads while ordinary delivery is forbidden", () => {
+  const facts: JsonObject = {...readFacts(), has_replan: true, delivery_allowed: false};
+  const projected = projectInteractionRequiredReads(facts);
+  const reads = projected.required_reads as JsonObject[];
+  assert.deepEqual(reads.map(read => read.source), ["existing", "goal_state", "goal_acceptance"]);
+  assert.match(String(reads[1]!.reason), /(?:full|complete) Goal intent, acceptance(?: and|,) stops/);
+  assert.equal(projected.delivery_allowed, undefined, "context cannot grant work authority");
+  for (const patch of [{should_run: false}, {selection_required: true}, {settlement_only: true}]) {
+    assert.deepEqual(projectInteractionRequiredReads({...facts, ...patch}).required_reads,
+      facts.required_reads, JSON.stringify(patch));
+  }
+});
+
 test("shared reads follow adaptive primary and never fabricate a missing Goal source", () => {
   const facts: JsonObject = {...readFacts(), goal_state_file: null, goal_acceptance_checks_present: false,
     task_orchestration_contract: {schema_version: "task_orchestration_contract_v2", mode: "adaptive", primary_todo_id: "todo_primary"}};
@@ -362,6 +375,33 @@ test("inline context fulfills every source without truncating acceptance or inve
   assert.deepEqual(context.user_todos, request.user_todos);
   assert.equal(result.delivery_allowed, undefined);
   assert.deepEqual(request, before);
+});
+
+test("scoped User context retains every record and source proof without a record-format dictionary", () => {
+  const gate = {todo_id: "todo_owner", text: "Stop before deployment.", role: "user",
+    global_gate: true, blocks_agent: "agent-a", resume_condition: {kind: "manual"},
+    unknown_future_field: {retained: true}};
+  for (const todos of [[], [gate]]) {
+    const model = {schema_version: "loopx_todo_canonical_read_record_v0", todo_count: 9,
+      records_sha256: "source-snapshot", contract_fields: ["text", "global_gate", "unknown_future_field"],
+      unknown_metadata: {complete: false}};
+    const users = {source: "sqlite_authority", todos, authority_read: {
+      source_authority: "sqlite_v0", provider_revision: "sqlite:snapshot:9", cursor: "9",
+      decision_read_from_provider: true, legacy_fallback_used: false, todo_read_model: model}};
+    const original = structuredClone(users);
+    const projected = projectInteractionWorkContext({required_reads: [], source_results: [], user_todos: users});
+    const context = projected.work_context as JsonObject;
+    const {contract_fields: _dictionary, ...metadata} = model;
+    assert.deepEqual(context.user_todos, {...users, authority_read: {...users.authority_read, todo_read_model: metadata}});
+    assert.equal(context.complete, true);
+    assert.equal(projected.delivery_allowed, undefined);
+    assert.deepEqual(users, original);
+    for (const patch of [{schema_version: "unknown_record_schema"}, {contract_fields: ["text", 1]}]) {
+      const unknown = {...users, authority_read: {...users.authority_read, todo_read_model: {...model, ...patch}}};
+      const result = projectInteractionWorkContext({required_reads: [], source_results: [], user_todos: unknown});
+      assert.deepEqual((result.work_context as JsonObject).user_todos, unknown);
+    }
+  }
 });
 
 test("failed, ambiguous or changed work never fulfills a pre-work read", () => {
@@ -608,7 +648,12 @@ test("Goal narrative fulfillment needs complete source and ordered region lineag
   });
   const fulfilled = project(content);
   assert.deepEqual(fulfilled.required_reads, []);
-  assert.deepEqual((fulfilled.work_context as JsonObject).sources, [{...read, content}]);
+  const [source] = (fulfilled.work_context as JsonObject).sources as JsonObject[];
+  const {reason, ...captured} = source;
+  assert.deepEqual(captured, {...read, content});
+  assert.match(String(reason), /all text outside explicitly generated Todo regions inline/);
+  assert.match(String(reason), /full-file revision and excluded-region lineage/);
+  assert.match(String(reason), /exact canonical Todo reads own task state\/claims/);
   for (const invalid of [
     {...content, text: null}, {...content, revision: "invalid"}, {...content, state_file: ""},
     {...content, excluded_todo_regions: []},

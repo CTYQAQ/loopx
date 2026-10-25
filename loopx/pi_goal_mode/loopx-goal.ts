@@ -312,20 +312,15 @@ export default function (pi: ExtensionAPI) {
     return candidate;
   };
 
-  const inspectLoopx = async (key: string, ctx: ExtensionContext) => {
+  const inspectLoopx = async (ctx: ExtensionContext) => {
     try {
       const stdout = await runLoopxCli(
         ["--format", "json", "bootstrap-command-pack", "--project", "."],
         ctx.cwd,
       );
       const packet = parseJsonObject(stdout);
-      if (packet) {
-        try {
-          establishSessionAuthority(key, packet);
-        } catch {
-          // A status-only packet may intentionally stop before host activation.
-        }
-      }
+      // Preview packets must not mint or lock session authority. Only explicit
+      // Pi startup verifies the identity and capabilities used for activation.
       const display = typeof packet?.message === "string" ? packet.message : stdout;
       // The packet preview is a long multi-section document. A widget is a
       // fixed-height area near the editor, so dumping the preview into it gets
@@ -428,7 +423,7 @@ export default function (pi: ExtensionAPI) {
           await loop.resume(key);
           return;
         }
-        await inspectLoopx(key, ctx);
+        await inspectLoopx(ctx);
         return;
       }
       await startLoopx(trimmed, key, store, ctx);

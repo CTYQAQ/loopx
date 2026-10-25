@@ -7,6 +7,7 @@ or a second Goal/work authority. Each concrete part keeps its own exact receipt.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,12 @@ from .manager_reply_delivery import write_delivery
 from .presentation.markdown_parts import split_lark_markdown_posts
 
 POST_PARTS_LOCATOR = re.compile(r"^lark-parts:([a-f0-9]{64})$")
+
+
+def _part_identity(arguments, index):
+    identity = arguments.get("delivery_id")
+    return ({"delivery_id": hashlib.sha256(f"{identity}:part:{index}".encode()).hexdigest()}
+            if identity is not None else {})
 
 
 def _path(project, config_path, intent_digest):
@@ -124,6 +131,7 @@ def deliver_post_parts(*, receipt, intent_digest, template, reply_text, argument
                 "source_authority_verifier": arguments.get("source_authority_verifier"),
                 **({"reply_placement": arguments["reply_placement"]}
                    if arguments.get("reply_placement") is not None else {}),
+                **_part_identity(arguments, index),
                 "before_send": (lambda _part_intent: outer_hook(intent_digest))
                 if outer_hook
                 else None,
@@ -249,6 +257,7 @@ def verify_post_parts(*, receipt, intent_digest, attempt, arguments, resume=Fals
             source_authority_verifier=arguments.get("source_authority_verifier"),
             **({"reply_placement": arguments["reply_placement"]}
                if arguments.get("reply_placement") is not None else {}),
+            **_part_identity(arguments, index),
             finalize_reactions=False,
             attachment_keys=arguments.get("attachment_keys", ()) if final else (),
             attachment_names=arguments.get("attachment_names", ()) if final else (),

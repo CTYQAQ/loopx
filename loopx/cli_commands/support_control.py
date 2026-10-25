@@ -407,6 +407,9 @@ def handle_support_control_command(
                 turn_instance_id=args.turn_instance_id,
                 decision_output_root=args.decision_output_root,
                 decision_handoff_socket=args.decision_handoff_socket,
+                codex_context_dir=args.codex_context_dir,
+                codex_context_root=args.codex_context_root,
+                context_delivery=args.context_delivery,
                 turn_envelope=args.turn_envelope,
                 reward_memory_enabled=reward_memory_enabled,
             )

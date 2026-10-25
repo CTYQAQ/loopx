@@ -105,3 +105,32 @@ def bind_turn_decision_capture(
         captured_decision_path=captured_decision_path,
         turn_instance_id=turn_instance_id, turn_key=turn_key,
     )
+
+
+def prepare_context_delivery(
+    context: Mapping[str, Any], *, scope: Mapping[str, str], capture_id: str,
+    baseline: Mapping[str, Any] | None = None,
+    retained: Mapping[str, Any] | None = None,
+    surface: str = "work_context",
+) -> dict[str, Any]:
+    """Prepare at a Host's final input boundary, never from CLI self-attestation.
+
+    Quota and Turn hosts pass their complete immutable projection (or the shared
+    work_context) and its capture id. Surface binding prevents cross-projection reuse.
+    Unsupported hosts omit retention and keep complete delivery. A candidate is
+    not an ACK: only intact final model-input assembly may confirm its target.
+    """
+    return _turn_envelope_result("context_delivery", context=dict(context),
+        scope=dict(scope), capture_id=capture_id, surface=surface,
+        baseline=dict(baseline) if baseline is not None else None,
+        retained=dict(retained) if retained is not None else None)
+
+
+def restore_context_delivery(
+    delivery: Mapping[str, Any], *, baseline: Mapping[str, Any] | None,
+    current: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate/reconstruct or return the same-capture full body without effects."""
+    return _turn_envelope_result("context_recovery", delivery=dict(delivery),
+        baseline=dict(baseline) if baseline is not None else None,
+        current=dict(current))

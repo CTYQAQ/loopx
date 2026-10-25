@@ -11,6 +11,7 @@ const sourceContent = ({artifact_sha256: _hash, ...source}: TrajectoryInput['sou
 const evidenceContent = (input: TrajectoryInput) => ({scope: {...input.scope, revision: undefined},
   objective: input.objective, selection: input.selection,
   sources: ordered(input.sources).map(sourceContent), episodes: ordered(input.episodes).map(episodeContent),
+  ...(input.native_outcomes_source_id ? {native_outcomes_source_id: input.native_outcomes_source_id} : {}),
   ...(input.display_snapshot ? {display_snapshot: input.display_snapshot} : {})});
 function differences<T extends {id: string}>(before: T[], after: T[], content: (item: T) => unknown) {
   const old = new Map(before.map(item => [item.id, item]));
@@ -43,14 +44,17 @@ export function compareTrajectoryAssessments(params: Record<string, unknown>): T
   const eligibleBefore = new Set(base.input.episodes.flatMap(e => e.eligible_metrics.map(metric => `${e.id}\0${metric}`)));
   const newPairs = new Set(current.input.episodes.flatMap(e => e.eligible_metrics.map(metric => `${e.id}\0${metric}`)));
   const result = params.output === undefined ? null : qualifyTrajectoryAssessment({...params, analysis_key: current.analysis_key});
+  const shared = (result?.assessments ?? []).flatMap(after => {
+    const before = oldPairs.get(pair(after));
+    return before ? [{before, after}] : [];
+  });
   return {base_analysis_key: base.analysis_key, base_scope: base.input.scope,
     current_scope: current.input.scope, sources, episodes, can_reuse,
     configuration_changed: !same(base.config, current.config), objective_changed: base.input.objective !== current.input.objective,
     reassessed_episode_ids: can_reuse ? [] : current.input.episodes.map(e => e.id),
     new_pair_count: [...newPairs].filter(key => !eligibleBefore.has(key)).length,
     removed_pair_count: [...eligibleBefore].filter(key => !newPairs.has(key)).length,
-    verdict_changes: (result?.assessments ?? []).flatMap(a => {
-      const old = oldPairs.get(pair(a));
-      return old && old.verdict !== a.verdict ? [{episode_id: a.episode_id, metric: a.metric, before: old.verdict, after: a.verdict}] : [];
-    })};
+    compared_pair_count: oldResult !== null && result !== null ? shared.length : null,
+    verdict_changes: shared.flatMap(({before, after}) => before.verdict !== after.verdict
+      ? [{episode_id: after.episode_id, metric: after.metric, before: before.verdict, after: after.verdict}] : [])};
 }

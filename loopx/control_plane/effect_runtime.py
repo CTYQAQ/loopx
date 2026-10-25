@@ -55,6 +55,7 @@ LOCAL_SNAPSHOT_METHODS = frozenset({
     "work_item.task_graph.goal_topology",
     "work_item.replan_semantics.project",
     "quota.settlement.read",
+    "quota.spend.commit",
     "goal.checkpoint_read_context.resolve",
     "goal.checkpoint_read_context.commit",
     "goal.checkpoint_read_context.inspect_replay",

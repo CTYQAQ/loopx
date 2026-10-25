@@ -72,6 +72,7 @@ class BenchmarkCodex(CodexOffline):
         task_entry=None,
         planning_timeout_sec=None,
         turn_envelope=False,
+        context_delivery="off",
         native_goal_continue=False,
         task_objective=None,
         execution_observation=None,
@@ -96,6 +97,7 @@ class BenchmarkCodex(CodexOffline):
             validation_command if validation_command is not None else (),
             task_entry,
             turn_envelope,
+            context_delivery,
         )
         if planning_timeout_sec is not None:
             raise ValueError(
@@ -167,7 +169,8 @@ class BenchmarkCodex(CodexOffline):
         super().__init__(*args, **kwargs)
 
     def _turn_envelope_receipt(self) -> dict:
-        return turn_envelope_receipt(explicit=self.execution.turn_envelope)
+        return {**turn_envelope_receipt(explicit=self.execution.turn_envelope),
+                **({"context_delivery": "on"} if self.execution.context_delivery != "off" else {})}
 
     def _planning_receipt(self) -> dict:
         return {"native_goal_continue": True} if self.native_goal_continue else {}
@@ -611,6 +614,7 @@ class BenchmarkCodex(CodexOffline):
                 **({"LOOPX_CHECKPOINT_REQUEST": self.checkpoint_request_path}
                    if self.checkpoint_request_path is not None else {}),
                 **({"LOOPX_TURN_ENVELOPE": "1"} if self.execution.turn_envelope else {}),
+                **({"LOOPX_CONTEXT_DELIVERY": "on"} if self.execution.context_delivery != "off" else {}),
                 **({"LOOPX_NATIVE_GOAL_CONTINUE": "1"} if self.native_goal_continue else {}),
                 "LOOPX_ITERATION_CONTEXT": self.execution.context,
                 "LOOPX_CODEX_SANDBOX": self.execution.sandbox,

@@ -10,6 +10,32 @@ import {EXPLORE_WRITEBACK_SUMMARY_LIMIT, exploreResultWritebackAffordance} from 
 import {EXPLORE_RESULT_PAGE_MAX, normalizeExploreResultPages} from "./explore_result_page.ts";
 import {projectExploreMeasurementFeedback} from "./explore_measurements.ts";
 
+/** Reusable evidence and instructions in this owner's read model. Current
+ * selection, eligibility, source revisions and pagination stay outside this
+ * split. Exact array edits retain every change, including its status,
+ * provenance and applicability; no timestamp or revision is normalized away. */
+export function exploreReusableContextPaths(content: JsonObject = {}): (string | number)[][] {
+  return [
+    ...["recent_nodes", "recent_findings", "writeback_results", "measurement_feedback",
+      "path_delta_attachment_template", "linked_question_attachment_template",
+      "optional_question_evolution_example", "result_writeback_guidance",
+      "result_attachment_template", "optional_measurement_example", "measurement_guidance",
+      "record_node_template", "record_finding_template", "guidance",
+      "result_writeback_option", "result_writeback_inline_option", "result_writeback_inline_field",
+      "result_attachment_schema", "path_delta_attachment_schema"].map(key => ["graph", key]),
+    ["harness", "guidance"], ["harness", "link_evidence_template"],
+    // The branch's identity, selection, status and resume facts stay fresh.
+    // Its evidence audit is a read model, not an eligibility or execution grant.
+    ...["selected_branches", "comparison_candidates", "rejected_candidates", "frontier"].flatMap(lane => {
+      const branches = (content.harness as JsonObject | undefined)?.[lane];
+      return Array.isArray(branches) ? branches.flatMap((branch, index) =>
+        branch !== null && typeof branch === "object" && !Array.isArray(branch)
+          && typeof branch.todo_id === "string" && branch.todo_id
+          ? [["harness", lane, index, "typed_evidence_audit"]] : []) : [];
+    }),
+  ];
+}
+
 function rows(value: unknown): JsonObject[] {
   return Array.isArray(value) ? value.map(item => requireJsonObject(item, "Explore row")) : [];
 }

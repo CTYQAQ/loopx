@@ -24,6 +24,7 @@ from .chat_coordination import PROJECT_COORDINATION_GUIDANCE, PROJECT_CONTEXT_VE
 from .capabilities.native_chat import codex_context, project_context as project_context_policy
 from .capabilities.native_chat.codex_adapter import CodexAppServerAdapter
 from .capabilities.native_chat.machine_defaults import codex_profile_home, load_codex_chat_defaults
+from .capabilities.native_chat.steward_managed_mode import prepare_managed_session_route, require_managed_agent_session
 from .capabilities.native_chat.turn_release import TurnReleaseWakeup
 from .control_plane.collaboration import conversation_scope
 from .capabilities.manager_runtime import (
@@ -362,12 +363,6 @@ class ChatRuntimeController:
         return settings
 
     @staticmethod
-    def _managed_upstream_mode(session: dict[str, Any]) -> str:
-        if session.get("agent_id") == "codex":
-            return CODEX_GOAL_CHAT_MODE if session.get("upstream_mode") == CODEX_GOAL_CHAT_MODE else "chat"
-        return str(session.get("upstream_mode") or "default")
-
-    @staticmethod
     def _session_objective(
         *,
         goal_id: str | None,
@@ -562,6 +557,7 @@ class ChatRuntimeController:
         channel_id: str | None = None,
         agent_goal_id: str | None = None,
         goal_instance_id: str | None = None,
+        managed_agent_id: str | None = None,
         manager_executor_allocation: Mapping[str, Any] | None = None,
         project_ref: str | None = None,
         conversation_binding_id: str | None = None,
@@ -608,6 +604,10 @@ class ChatRuntimeController:
             work_dir, objective = context["project"], context["objective"]
         elif goal_id is None:
             raise ValueError("goal_id or an authorized project_ref is required")
+        selected_scope = prepare_managed_session_route(self, goal_id=goal_id, executor=agent_id, workspace=work_dir,
+            channel_id=selected_channel, goal_instance_id=goal_instance_id, managed_agent_id=managed_agent_id,
+            project_context=project_context, steward_context=steward_context)
+        selected_channel, goal_instance_id = selected_scope["channel_id"], selected_scope["goal_instance_id"]
         if project_context is not None:
             project_context_policy.validate_project_executor_scope(agent_id, project_context, self.capabilities, capability)
         manager_runtime = (
@@ -665,7 +665,8 @@ class ChatRuntimeController:
                 # starts a new Session while the old context and history remain intact.
                 if latest is not None and project_context is not None and latest.get("project_context") != project_context:
                     latest = None
-                if latest is not None and goal_instance_id is not None and latest.get("goal_instance_id") != goal_instance_id:
+                if latest is not None and ((goal_instance_id is not None and latest.get("goal_instance_id") != goal_instance_id)
+                        or managed_agent_id is not None and (latest.get("managed_agent_id") != managed_agent_id or latest.get("goal_instance_id") != goal_instance_id)):
                     latest = None
                 if latest is not None and (latest.get("active_turn_id") or latest.get("upstream_mode") == CODEX_GOAL_CHAT_MODE or latest.get("session_mode") == CHAT_SESSION_MODE_ATTACHED):
                     if ((agent_reasoning_effort and latest.get("agent_reasoning_effort") != agent_reasoning_effort)
@@ -684,7 +685,7 @@ class ChatRuntimeController:
             codex_defaults = {}
             selected_codex_home = self.codex_home
             if (agent_id == "codex" and goal_id != MANAGER_AGENT_GOAL_ID
-                and conversation_scope({"channel_id": selected_channel, "goal_id": goal_id})["kind"] == "owner_goal"
+                and conversation_scope(selected_scope)["kind"] == "owner_goal"
                 and not (latest and (latest.get("active_turn_id") or latest.get("upstream_mode") == CODEX_GOAL_CHAT_MODE))):
                 codex_defaults = load_codex_chat_defaults(self.coordination_runtime_root)
                 selected_codex_home = codex_profile_home(self.codex_home, codex_defaults)
@@ -709,7 +710,7 @@ class ChatRuntimeController:
                 goal_id=agent_goal_id or goal_id,
                 objective=objective,
                 execution_mode=selected_channel.startswith("task."),
-                project_coordination=conversation_scope({"channel_id": selected_channel, "goal_id": goal_id})["kind"] == "owner_goal",
+                project_coordination=conversation_scope(selected_scope)["kind"] == "owner_goal",
                 manager_runtime=manager_runtime,
                 project_context=project_context,
                 executor_model=alloc.manager_executor_model(manager_executor_allocation),
@@ -719,10 +720,12 @@ class ChatRuntimeController:
                 codex_home_override=selected_codex_home,
             )
             try:
+                require_managed_agent_session(self, selected_scope, work_dir)
                 observed_settings = self._observed_model_settings(adapter, agent_reasoning_effort, agent_model_id)
                 persisted = self.store.create_session(
                     goal_id=goal_id,
                     goal_instance_id=goal_instance_id,
+                    **({"managed_agent_id": managed_agent_id, "managed_workspace_path": str(work_dir.resolve())} if managed_agent_id is not None else {}),
                     agent_id=agent_id,
                     executor_endpoint_id=agent_id,
                     adapter_kind=str(capability["adapter_kind"]),
@@ -761,13 +764,6 @@ class ChatRuntimeController:
         with self.lock:
             return self.session_adapter_locks.setdefault(session_id, threading.Lock())
 
-    def _check_codex_home(self, session: dict[str, Any]) -> Path:
-        if session.get("agent_id") != "codex" or session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
-            return self.codex_home
-        selected = codex_context.session_base_home(self.codex_home, session)
-        codex_context.require_session_home(selected, session)
-        return selected
-
     def _ensure_adapter(
         self,
         session: dict[str, Any],
@@ -799,6 +795,7 @@ class ChatRuntimeController:
         if current_session is None or current_session.get("status") == "closed":
             raise KeyError("chat session was not found")
         session = current_session
+        require_managed_agent_session(self, session, work_dir)
         if session.get("steward_context") is not None:
             self.project_contexts.session_context(session)
         if session.get("project_context") is not None:
@@ -821,7 +818,7 @@ class ChatRuntimeController:
             objective = manager_agent_objective(
                 str(manager_runtime["runtime_profile"])
             )
-        selected_codex_home = self._check_codex_home(session)
+        selected_codex_home = codex_context.checked_session_home(self.codex_home, session)
         if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
             raise CodexChatAgentError(
                 "The attached host Session must be served by its existing host bridge.",
@@ -1056,7 +1053,7 @@ class ChatRuntimeController:
                 self.store.restore_managed_session_if_idle(
                     session_id,
                     upstream_thread_id=adapter.upstream_thread_id,
-                    upstream_mode=self._managed_upstream_mode(session),
+                    upstream_mode=codex_context.managed_upstream_mode(session),
                 )
         except Exception:
             with self.lock:
@@ -1111,7 +1108,8 @@ class ChatRuntimeController:
             session = self.store.load_session(session_id)
             if session is None or session.get("status") == "closed":
                 raise KeyError("chat session was not found")
-            self._check_codex_home(session)
+            require_managed_agent_session(self, session, work_dir)
+            codex_context.checked_session_home(self.codex_home, session)
             try:
                 with commit():
                     if loopx_execution and session.get("loopx_tools") is not True:
@@ -1229,6 +1227,7 @@ class ChatRuntimeController:
         session = self.store.load_session(session_id)
         if session is None or session.get("status") == "closed":
             raise KeyError("chat session was not found")
+        require_managed_agent_session(self, session, Path(session.get("managed_workspace_path") or "."))
         if session.get("steward_context") is not None:
             raise ValueError("bound steward Chat requires its external source admission")
         if session.get("project_context") is not None:
@@ -1935,7 +1934,7 @@ class ChatRuntimeController:
         """Compare the original request and current grants/config, not prose."""
         session = self.store.load_session(session_id) or {}
         turn = self.store.load_turn(session_id, turn_id) or {}
-        self._check_codex_home(session)
+        codex_context.checked_session_home(self.codex_home, session)
         if session.get("project_context") is not None or session.get("steward_context") is not None:
             self.project_contexts.session_context(session)
         if session.get("project_context") is not None:
@@ -2253,7 +2252,8 @@ class ChatRuntimeController:
             session = self.store.load_session(session_id)
             if session is None or session.get("status") == "closed":
                 raise KeyError("chat session was not found")
-            self._check_codex_home(session)
+            require_managed_agent_session(self, session, work_dir)
+            codex_context.checked_session_home(self.codex_home, session)
             if session.get("session_mode") == CHAT_SESSION_MODE_ATTACHED:
                 return resume_attached_agent_session(
                     store=self.store,
@@ -2281,7 +2281,7 @@ class ChatRuntimeController:
                 with goal_commit():
                     return self.store.restore_managed_session_if_idle(
                         session_id, upstream_thread_id=adapter.upstream_thread_id,
-                        upstream_mode=self._managed_upstream_mode(session))
+                        upstream_mode=codex_context.managed_upstream_mode(session))
             except Exception:
                 with self.lock:
                     owns_adapter = self.adapters.get(session_id) is adapter

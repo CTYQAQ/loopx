@@ -126,7 +126,7 @@ def build_loopx_turn_transaction_plan(
     session_action: str,
     scheduler_owner: str = "none",
     turn_instance_id: str | None = None,
-    goal_ref: Mapping[str, str] | None = None,
+    goal_ref: Mapping[str, object] | None = None,
     settlement_identity: SettlementIdentity | None = None,
 ) -> dict[str, Any]:
     normalized_instance_id = normalize_turn_instance_id(turn_instance_id)
@@ -186,7 +186,7 @@ def build_loopx_turn_transaction_plan(
             ),
         ),
     )
-    plan = {
+    plan: dict[str, Any] = {
         "schema_version": LOOPX_TURN_TRANSACTION_PLAN_SCHEMA_VERSION,
         "status": "planned" if planned else "not_applicable",
         "turn_key": turn_key,

@@ -16,7 +16,8 @@ from ...control_plane.effect_runtime import EffectRuntimeRejected, effect_runtim
 from ...file_lock import exclusive_file_lock
 from .trajectory_assessment import _digest, _write, execute, read_job, request_cancel
 
-DEFAULT_CONFIG = {"model": "gpt-6.1-sol", "effort": "max", "service_tier": "fast"}
+DEFAULT_CONFIG = {"model": "gpt-6.1-sol", "effort": "max", "service_tier": "fast", "research_synthesis": True,
+                  "research_synthesis_revision": 2}
 
 
 class PackUnavailable(ValueError):
@@ -68,16 +69,25 @@ def _prepared(record: dict, output_language: str | None = None) -> dict:
 
 
 def _verify_sources(record: dict) -> None:
+    # One byte observation per declared artifact in this verification only.
+    # Check every digest/excerpt; later calls still read and verify fresh bytes.
+    artifacts: dict[str, list[dict]] = {}
     for source in record["input"]["sources"]:
-        path = _source_path(Path(record["source_root"]), source["artifact"])
+        artifacts.setdefault(source["artifact"], []).append(source)
+    for artifact, sources in artifacts.items():
+        path = _source_path(Path(record["source_root"]), artifact)
         data = path.read_bytes()
-        if hashlib.sha256(data).hexdigest() != source["artifact_sha256"]:
-            raise PackUnavailable("source_changed")
-        lines = data.decode("utf-8").split("\n")
-        start = source["first_line"] - 1
-        count = len(source["text"].split("\n"))
-        if "\n".join(lines[start : start + count]) != source["text"]:
-            raise PackUnavailable("excerpt_mismatch")
+        digest = hashlib.sha256(data).hexdigest()
+        lines = None
+        for source in sources:
+            if digest != source["artifact_sha256"]:
+                raise PackUnavailable("source_changed")
+            if lines is None:
+                lines = data.decode("utf-8").split("\n")
+            start = source["first_line"] - 1
+            count = len(source["text"].split("\n"))
+            if "\n".join(lines[start : start + count]) != source["text"]:
+                raise PackUnavailable("excerpt_mismatch")
 
 
 def _source_path(source_root: Path, artifact: str) -> Path:
@@ -655,6 +665,10 @@ def read_citation(
     citations = [c for a in (result or {}).get("assessments", []) for c in a["citations"]]
     citations.extend(c for field in ((result or {}).get("display") or {}).get("fields", [])
                      for c in field.get("context_citations", []))
+    synthesis = (result or {}).get("synthesis")
+    if synthesis:
+        citations.extend(c for item in [synthesis["summary"], *synthesis["findings"], *synthesis["next_experiments"]]
+                         for c in item["citations"])
     native = (view.get("native_outcomes") or {}).get("projection") or {}
     native_citations = [native[key]["citation"] for key in ("initial", "best_valid", "retained", "final_valid") if native.get(key)]
     improvement = native.get("retained_improvement") or {}
