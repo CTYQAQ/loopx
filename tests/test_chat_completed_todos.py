@@ -182,7 +182,7 @@ def test_goal_report_page_names_unavailable_rows_instead_of_hiding_the_rest(monk
 
 @pytest.mark.parametrize("count", [85, 4087])
 @pytest.mark.parametrize("archived", [False, True])
-def test_http_history_reads_real_markdown_without_writes(tmp_path, count, archived):
+def test_http_history_reads_full_retained_content_without_writes(tmp_path, count, archived):
     state = tmp_path / "active.md"
     text = f"Inspect {tmp_path}/results.txt " + " ".join(["complete task description"] * 25)
     evidence = f"Verified output at {tmp_path}/results.txt"
@@ -203,7 +203,18 @@ def test_http_history_reads_real_markdown_without_writes(tmp_path, count, archiv
             lines.insert(first + 2, "\n## Completed Work Archive\n")
             state.write_text("\n".join(lines).replace("status=done ", "role=agent status=done "))
     registry = tmp_path / "registry.json"
-    registry.write_text(json.dumps({"runtime_root": str(tmp_path / "runtime"), "goals": [{"id": "history-goal", "repo": str(tmp_path), "state_file": "active.md"}]}))
+    runtime = tmp_path / "runtime"
+    registry.write_text(json.dumps({"common_runtime_root": str(runtime), "goals": [{"id": "history-goal", "repo": str(tmp_path), "state_file": "active.md"}]}))
+    from tests.control_plane.canonical_authority_fixture import initialize_canonical_authority
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    from loopx.control_plane.todos.active_state_todo_parser import parse_todo_source
+    active, history, _ = parse_todo_source(state.read_text())
+    rows = active["agent"] + history
+    for row in rows:
+        row["schema_version"] = "todo_item_v0"
+    initialize_canonical_authority(runtime, "history-goal",
+        build_todo_runtime_shadow_projection(goal_id="history-goal", todos=rows, handoff_mode="soft_claim"),
+        state_path=state, provider="file")
     before = state.read_bytes()
     server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
     server.registry_path = registry
@@ -244,7 +255,8 @@ def test_http_history_reads_real_markdown_without_writes(tmp_path, count, archiv
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_canonical_history_includes_archives_without_widening_active_lists(tmp_path, monkeypatch, provider):
+@pytest.mark.parametrize("separate_chat_store", [False, True])
+def test_canonical_history_includes_archives_without_widening_active_lists(tmp_path, monkeypatch, provider, separate_chat_store):
     from pathlib import Path
     monkeypatch.syspath_prepend(str(Path(__file__).parent / "control_plane"))
     from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
@@ -303,7 +315,9 @@ def test_canonical_history_includes_archives_without_widening_active_lists(tmp_p
     with pytest.raises(ValueError, match="read_scope must be"):
         list_goal_todos(registry_path=registry, goal_id="history-goal", read_scope="unknown")
     server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
-    server.registry_path, server.runtime_root_override, server.verbose = registry, runtime, False
+    server.registry_path, server.runtime_root_override, server.verbose = (
+        registry, tmp_path / "private-chat" if separate_chat_store else runtime, False
+    )
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:

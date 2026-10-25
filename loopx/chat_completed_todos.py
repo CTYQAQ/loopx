@@ -11,6 +11,7 @@ from time import monotonic
 from urllib.parse import parse_qs, urlparse
 
 from .paths import resolve_runtime_root
+from .capabilities.native_chat.project_context import coordination_runtime_root
 from .status_server import is_loopback_host
 
 
@@ -128,9 +129,10 @@ class CompletedTodoRequestMixin:
         if not self._require_loopback_origin():
             return None
         registry, _goal = self._registry_and_goal(goal_id)
-        return resolve_runtime_root(
-            registry, self.server.runtime_root_override,
-            registry_path=self.server.registry_path,
+        return coordination_runtime_root(
+            self.server.registry_path,
+            resolve_runtime_root(registry, self.server.runtime_root_override,
+                                 registry_path=self.server.registry_path),
         )
 
     def _goal_results(self) -> None:
@@ -193,13 +195,20 @@ class CompletedTodoRequestMixin:
             if len(search) > 256:
                 raise ValueError("history_search_too_long")
             search = search.casefold()
-            self._registry_and_goal(goal_id)
+            registry, _goal = self._registry_and_goal(goal_id)
+            runtime_root_arg = self.server.runtime_root_override
+            if registry.get("common_runtime_root"):
+                runtime_root_arg = str(coordination_runtime_root(
+                    self.server.registry_path,
+                    resolve_runtime_root(registry, runtime_root_arg,
+                                         registry_path=self.server.registry_path),
+                ))
 
             def load():
                 payload = list_goal_todos(
                     registry_path=self.server.registry_path, goal_id=goal_id,
                     role="agent", status="done", read_scope="completed_history",
-                    runtime_root_arg=self.server.runtime_root_override,
+                    runtime_root_arg=runtime_root_arg,
                 )
                 ordered = sorted(enumerate(payload["todos"]), key=lambda pair: (str(pair[1].get("completed_at") or ""), pair[0]), reverse=True)
                 return [
