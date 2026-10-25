@@ -12,7 +12,7 @@ from ..control_plane.collaboration.goal_instance_scope import collaboration_goal
 from ..control_plane.collaboration.inbox import _entry, _read, _root
 from ..control_plane.collaboration.request_amendment import control_request
 from ..control_plane.collaboration.source_chat_observation import is_source_chat_host
-from ..control_plane.effect_runtime import EffectRuntimeRemoteError, EffectRuntimeStartupError
+from ..control_plane.effect_runtime import EffectRuntimeRemoteError, EffectRuntimeStartupError, effect_runtime_request_scope
 from ..control_plane.goals.goal_ref_validation import exact_goal_ref
 from ..control_plane.projects.registry_codec import load_project_registry
 from ..capabilities.manager_context import target_authority
@@ -75,6 +75,7 @@ class RequestControlMixin:
                 registry_path=self.server.registry_path) or []
         return session, goals, core
 
+    @effect_runtime_request_scope()
     def _request_inventory_read(self) -> None:
         from ..control_plane.collaboration.conversation_inventory import read_conversation_requests
 
@@ -88,18 +89,29 @@ class RequestControlMixin:
                 raise ValueError("invalid request inventory view")
             session, goals, core = self._request_inventory_scope(query["session_id"][0])
             controller = self.server.runtime_controller
+            def source_basis(source):
+                return conversation_scope(source), source.get("steward_context")
+            # Provider identity belongs to a source, not to every historical row.
+            # Keep this proof within one read and fence every observed source
+            # again before returning any content. Receipt/grant IO stays live.
+            sources = {session["session_id"]: (source_basis(session), goals, core)}
             def validate_source(source):
-                observed, permitted, _ = self._request_inventory_scope(source["session_id"])
-                if observed["channel_id"] != session["channel_id"] or permitted != goals:
+                sid = source["session_id"]
+                if sid not in sources:
+                    observed, permitted, evidence = self._request_inventory_scope(sid)
+                    if observed["channel_id"] != session["channel_id"] or permitted != goals:
+                        raise ValueError("original conversation authorization changed")
+                    sources[sid] = source_basis(observed), permitted, evidence
+                if source_basis(source) != sources[sid][0]:
                     raise ValueError("original conversation authorization changed")
             result = read_conversation_requests(controller.coordination_runtime_root, self.server.registry_path,
                 self.server.chat_store, session, goal_ids=goals, core_goal_ids=core,
                 validate_source_session=validate_source, history=view == "history", offset=int(query.get("offset", ["0"])[0]),
                 search=query.get("search", [""])[0])
-            current, current_goals, current_core = self._request_inventory_scope(session["session_id"])
-            if (current["channel_id"], current.get("steward_context"), current_goals, current_core) != (
-                    session["channel_id"], session.get("steward_context"), goals, core):
-                raise ValueError("conversation authorization changed during read")
+            for sid, proof in sources.items():
+                current, current_goals, current_core = self._request_inventory_scope(sid)
+                if (source_basis(current), current_goals, current_core) != proof:
+                    raise ValueError("conversation authorization changed during read")
             self._send_json(_operator_payload(result))
         except (OSError, ValueError, TypeError, KeyError, EffectRuntimeRemoteError, EffectRuntimeStartupError) as exc:
             self._send_error(redact_local_paths(str(exc)), status=400, error_code="request_inventory_unavailable")
