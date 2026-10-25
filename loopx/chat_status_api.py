@@ -332,7 +332,6 @@ class ChatStatusRequestMixin(ExtensionPresentationRequestMixin):
                     "goal_map": goal_map,
                     "acceptance": goal.get("acceptance_observation"),
                 }
-                validate_public_safe_value(projection)
             protected_paths = [
                 self.server.registry_path,
                 *self.server.scan_roots,
@@ -345,6 +344,9 @@ class ChatStatusRequestMixin(ExtensionPresentationRequestMixin):
                     protected_paths=protected_paths,
                 )
             )
+            if delivery_review:
+                # Validate the outbound view, after removing owner-local paths.
+                validate_public_safe_value(projection)
         except Exception as exc:  # noqa: BLE001 - do not expose local projection failures.
             # The storage owner already exposes inspection and reviewed import.
             # Preserve its typed refusal, not private paths or migration payloads.
