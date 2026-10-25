@@ -8,6 +8,21 @@ import {
 } from "./fixture.mjs";
 import { openWorkspacePage } from "./scenario-context.mjs";
 
+async function readContextHelp(page, container, label, expected) {
+  const trigger = container.getByRole("button", { name: label, exact: true });
+  await trigger.click();
+  const tooltip = trigger.locator("..").getByRole("tooltip");
+  await tooltip.waitFor({ state: "visible" });
+  if (!(await tooltip.locator("p").allTextContents()).join("\n").includes(expected)) {
+    throw new Error(`Contextual help lost its explanation: ${label}`);
+  }
+  await page.keyboard.press("Escape");
+  await tooltip.waitFor({ state: "hidden" });
+  if (!await trigger.evaluate(element => document.activeElement === element)) {
+    throw new Error(`Closing contextual help lost its trigger focus: ${label}`);
+  }
+}
+
 export const navigationSortingScenario = {
   id: "navigation-sorting",
   async run({ browser, collectCoverage, url }) {
@@ -109,25 +124,43 @@ export const navigationSortingScenario = {
       await stoppedDirectory.locator("summary").click();
       if (await page.locator(".personal-timeline-row").filter({ hasText: /纠偏/u }).count()) throw new Error("Browse rows expose repeated correction actions");
       pass(2, "Browse rows are full-row click targets and Session rows state that they open execution progress and results.");
-      const workspaceSettingsEntry = page.locator('.personal-sidebar-utility[aria-label="设置"]');
-      const settingsEntryVisual = await workspaceSettingsEntry.evaluate((element) => {
-        const style = getComputedStyle(element);
-        const icon = element.querySelector(".personal-sidebar-utility-icon")?.getBoundingClientRect();
-        const rect = element.getBoundingClientRect();
-        return {
-          backgroundColor: style.backgroundColor,
-          borderTopWidth: style.borderTopWidth,
-          height: rect.height,
-          iconHeight: icon?.height ?? 0,
-          width: rect.width,
-        };
-      });
-      if (settingsEntryVisual.height < 52 || settingsEntryVisual.iconHeight < 32 || settingsEntryVisual.width < 180) {
-        throw new Error(`Settings entry is not a prominent navigation target: ${JSON.stringify(settingsEntryVisual)}`);
+      // design.md uses practical 44px interaction targets. The compact footer
+      // shares space with quick navigation; decorative icon wrappers and fills
+      // do not establish whether owners can reach the correct settings scope.
+      const selectedGoal = new URL(page.url()).searchParams.get("goalId");
+      for (const [width, height] of [[1512, 982], [1280, 540], [390, 844]]) {
+        await page.setViewportSize({ width, height });
+        if (width === 390) await page.locator(".personal-mobile-menu").click();
+        const workspaceSettingsEntry = page.getByRole("button", { name: "设置", exact: true });
+        await workspaceSettingsEntry.waitFor({ state: "visible" });
+        const settingsTarget = await workspaceSettingsEntry.evaluate(element => {
+          const rect = element.getBoundingClientRect();
+          const quick = element.parentElement.querySelector('.personal-sidebar-search button').getBoundingClientRect();
+          const icon = element.querySelector("svg").getBoundingClientRect();
+          return {
+            usable: rect.width >= 44 && rect.height >= 44 && icon.width > 0 && icon.height > 0,
+            inViewport: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
+            separate: rect.right <= quick.left || quick.right <= rect.left || rect.bottom <= quick.top || quick.bottom <= rect.top,
+            label: element.innerText,
+          };
+        });
+        if (!settingsTarget.usable || !settingsTarget.inViewport || !settingsTarget.separate || settingsTarget.label !== "设置") {
+          throw new Error(`Settings must remain a visible, labeled target separate from quick navigation at ${width}px: ${JSON.stringify(settingsTarget)}`);
+        }
+        await workspaceSettingsEntry.click();
+        const settings = page.locator(".personal-settings-page");
+        await settings.waitFor({ state: "visible" });
+        if (!await settings.getByRole("radio", { name: "本机设置", exact: true }).isChecked()
+          || await settings.getByRole("combobox", { name: "目标 Goal", exact: true }).count()) {
+          throw new Error("Global settings silently selected the background Goal instead of this device");
+        }
+        await settings.getByRole("button", { name: "返回工作区", exact: true }).click();
+        await settings.waitFor({ state: "hidden" });
+        if (new URL(page.url()).searchParams.get("goalId") !== selectedGoal) {
+          throw new Error("Returning from device settings lost the selected Goal");
+        }
       }
-      if (settingsEntryVisual.borderTopWidth === "0px" || settingsEntryVisual.backgroundColor === "rgba(0, 0, 0, 0)") {
-        throw new Error(`Settings entry still renders as a weak transparent footer row: ${JSON.stringify(settingsEntryVisual)}`);
-      }
+      await page.setViewportSize({ width: 1512, height: 982 });
       await page.screenshot({ path: resolve(outputDir, "desktop-first-screen.png"), fullPage: false, animations: "disabled" });
       pass(4, "First viewport exposes populated Goal lanes; stopped Goals remain in the sidebar and an empty running lane and empty history do not compete with active work.");
       pass(15, "Desktop viewport matches the approved single-sidebar/channel/drawer composition.");
@@ -143,11 +176,18 @@ export const navigationSortingScenario = {
       const overview = page.locator(".goal-overview");
       if (await overview.locator(".goal-overview-attention").count()) throw new Error("A quiet Goal still reserved a full attention card");
       if (await overview.getByRole("button", { name: /查看任务|查看成果/ }).count()) throw new Error("Overview duplicated adjacent tab navigation");
-      const usageVitals = page.getByTestId("goal-vitals").locator(".goal-vital").filter({ has: page.locator(".goal-vital-label", { hasText: /^(Agent 用时|成本)$/ }) });
-      const unknownUsage = await usageVitals.evaluateAll(cells => cells.map(cell => `${cell.querySelector(".goal-vital-value")?.textContent}|${cell.querySelector(".goal-vital-sub")?.textContent}`));
-      if (unknownUsage.length !== 2 || unknownUsage.some(value => value !== "—|未采集")) throw new Error(`Unknown usage became a zero or disappeared: ${unknownUsage}`);
+      const usageVitals = page.getByTestId("goal-vitals").locator(".goal-vital-cell")
+        .filter({ has: page.locator(".goal-vital-label", { hasText: /^(Agent 用时|成本)$/ }) });
+      const unknownUsage = await usageVitals.locator(".goal-vital-value").allTextContents();
+      if (unknownUsage.length !== 2 || unknownUsage.some(value => value !== "—")) {
+        throw new Error(`Unknown usage became a zero or disappeared: ${unknownUsage}`);
+      }
+      for (const label of ["Agent 用时", "成本"]) {
+        const cell = usageVitals.filter({ has: page.getByText(label, { exact: true }) });
+        await readContextHelp(page, cell, `${label} · 未采集`, "未采集");
+      }
       await overview.getByRole("alert").filter({ hasText: "交付快照读取失败" }).waitFor({ state: "visible" });
-      await overview.getByText("验收观测不可用，Goal 是否达成仍未知。", { exact: true }).waitFor({ state: "visible" });
+      await readContextHelp(page, overview, "验收观察未获取", "验收观测不可用，Goal 是否达成仍未知。");
       // An optional media reader must reject an incomplete successful response
       // without unmounting the Goal's existing reports or navigation.
       let mediaReadable = false;
@@ -167,7 +207,7 @@ export const navigationSortingScenario = {
       await page.getByRole("button", { name: /关闭详情/ }).click();
       mediaReadable = true;
       await media.getByRole("button", {name: "重新读取", exact: true}).click();
-      await media.getByText(/还没有准备好的作品/).waitFor();
+      await readContextHelp(page, media, "暂无作品", "还没有准备好的作品。把想讲的内容交给 Agent，它会通过 Content-Ops 保存可制作的脚本。");
       if (await media.getByRole("alert").count()) throw new Error("A valid media read did not recover the optional region");
       pass(26, "Overview keeps direct decisions, explicit unknown usage and read failures; output provenance is one click away.");
       await page.locator(".personal-goal-link").filter({ hasText: "Progress Projection" }).click();
@@ -260,7 +300,7 @@ export const navigationSortingScenario = {
       if (await remote.getByRole("button", { name: "Goal 设置", exact: true }).count()) throw new Error("Remote Goal exposed local capability settings");
       await remote.getByRole("button", { name: "概览", exact: true }).click();
       await remote.getByRole("group", { name: "工作视图", exact: true }).getByRole("button", { name: "关系图", exact: true }).click();
-      await remote.getByText("此来源仅提供同步的状态与验收观察，交付链需要实时本机来源。", { exact: true }).waitFor({ state: "visible" });
+      await readContextHelp(remote, remote.locator(".goal-overview"), "来源读取范围", "此来源仅提供同步的状态与验收观察，交付链需要实时本机来源。");
       if (await remote.locator(".delivery-review").count()) throw new Error("Remote Overview queried the local delivery source");
       await remote.getByRole("button", { name: "任务", exact: true }).click();
       await remote.locator(".personal-object-list", { hasText: "进行中" }).locator("button").first().click();
