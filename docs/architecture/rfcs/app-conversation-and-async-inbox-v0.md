@@ -1288,6 +1288,24 @@ unreadable current Session blocks ordinary send until its exact record recovers;
 never infer an empty conversation or create a replacement driver from a read
 failure. A recovered read does not prove receiver adoption or native GQ02/GQ09.
 
+Equal-timestamp messages retain the original Session's append order: opaque
+message IDs are identity, not chronology. The shared history merge preserves
+complete bodies and repeated text, deduplicates only the same Session/message
+identity, and uses a deterministic Session tie across independent snapshots.
+Browser recovery waits for asynchronous hydration and for the held stale reader
+to settle, including an aborted request; it does not require a response from an
+already timed-out fetch. [Synthetic source-order captures](../../assets/personal-workspace/conversation-history/README.md)
+qualify this read/display boundary, not full history pagination, reply threading
+or installed App/Lark bidirectional delivery.
+
+Following the newest reply also survives a resized viewport or timeline, including
+image layout and expanded replies, without waiting for another message. Scrolling
+up keeps the reader in history across layout changes; the existing latest-message
+button resumes following. This stays in the shared conversation view, without a
+new session or execution owner. The [synthetic desktop and narrow captures](../../assets/personal-workspace/conversation-layout-follow/README.md)
+qualify this layout boundary; they do not establish installed native input,
+complete history pagination, provider delivery or bidirectional Lark media.
+
 App 历史恢复由管家与 Goal 对话共用的 TS 读取边界负责。旧 Session 读取失败不应
 隐藏可用消息、丢失原结果位置或重启当前流；应明确展示历史不完整，退避重读缺失
 快照，并保留实时文本与草稿。当前 Session 无法读取时，普通发送等待原记录恢复，

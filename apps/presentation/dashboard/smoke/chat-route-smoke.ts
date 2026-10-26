@@ -569,6 +569,24 @@ async function checkSessionHistoryRecoveryContract() {
         === "message-old,message-new",
       "messages from multiple local sessions should retain chronological order",
     );
+    const tied = historySnapshot("session-tied", "ready", [
+      { message_id: "z-request", turn_id: null, role: "user", text: "Original question", created_at: "2026-08-10T02:00:00Z" },
+      { message_id: "a-answer", turn_id: null, role: "agent", text: "完整正文".repeat(3000), created_at: "2026-08-10T02:00:00Z" },
+      { message_id: "m-repeat", turn_id: null, role: "user", text: "Original question", created_at: "2026-08-10T02:00:00Z" },
+    ]);
+    const sameIdElsewhere = historySnapshot("session-other", "ready", [
+      { ...tied.messages[0], text: "Other session" },
+    ]);
+    const ordered = mergeChatSessionMessages([tied, sameIdElsewhere, tied]);
+    check(ordered.filter(row => row.session_id === "session-tied").map(row => row.message_id).join(",")
+      === "z-request,a-answer,m-repeat", "Timestamp ties must retain the original Session's append order, not random ID order");
+    check(ordered.find(row => row.message_id === "a-answer")?.text === tied.messages[1].text,
+      "History ordering must retain the full long answer");
+    check(ordered.length === 4 && ordered.filter(row => row.text === "Original question").length === 2,
+      "Deduplicate only exact stored identities; repeated bodies and colliding cross-session IDs remain");
+    check(mergeChatSessionMessages([sameIdElsewhere, tied]).map(row => `${row.session_id}:${row.message_id}`).join("|")
+      === ordered.map(row => `${row.session_id}:${row.message_id}`).join("|"), "Equal-time cross-session ordering is stable across read completion order");
+
   } finally {
     globalThis.fetch = originalFetch;
   }

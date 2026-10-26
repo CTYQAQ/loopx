@@ -1025,9 +1025,12 @@ export function mergeChatSessionMessages(snapshots: ChatSessionSnapshot[]) {
       messages.set(`${snapshot.session.session_id}:${message.message_id}`, { ...message, session_id: snapshot.session.session_id });
     }
   }
+  // Store rows are append-ordered; opaque IDs cannot break timestamp ties.
+  // Stable sort retains that order within a Session, with a deterministic tie
+  // across Sessions even when their snapshots finish in a different order.
   return [...messages.values()].sort((left, right) =>
     left.created_at.localeCompare(right.created_at)
-      || left.message_id.localeCompare(right.message_id)
+      || (left.session_id ?? "").localeCompare(right.session_id ?? "")
   );
 }
 

@@ -237,6 +237,15 @@ export const researchHistoryScenario = {
       assert(await synthesis.locator('.research-synthesis-summary').evaluate(e => parseFloat(getComputedStyle(e).fontSize) >= 16), 'Main research account must be readable body text');
       assert.equal(await synthesis.locator('details[open]').count(), 0, 'Ordinary reading starts with observations; reasoning is optional detail');
       assert.equal(await synthesisPage.locator('.research-effect-metrics:visible').count(), 0, 'Metric counts do not replace the research account');
+      const processJudgments = synthesisPage.locator('.research-progress > details').filter({hasText: '六项过程判读'});
+      assert.equal(await processJudgments.count(), 1, 'Ordinary reading retains process judgments when the report has its own reading layer');
+      assert.equal(await processJudgments.evaluate(e => e.open), false, 'Process judgments remain optional detail');
+      await processJudgments.locator(':scope > summary').click();
+      assert.equal(await processJudgments.locator('[data-metric]').count(), 6);
+      assert.match(await processJudgments.locator('[data-metric="evidence_adoption"]').getAttribute('aria-label'), /0 \/ 1.*未知 1/);
+      assert.match(await processJudgments.locator('[data-metric="goal_alignment"]').getAttribute('aria-label'), /不适用/);
+      await processJudgments.locator(':scope > summary').click();
+      assert.equal(await synthesisPage.locator('.research-effect-metrics:visible').count(), 0);
       await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-ordinary-desktop.png'), animations: 'disabled'});
       assert(await synthesisPage.evaluate(() => {
         const results = document.querySelector('.research-progress');
