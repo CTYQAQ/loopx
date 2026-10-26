@@ -329,15 +329,22 @@ def _installed_automation_intervals(
 
     intervals: dict[tuple[str, str, str], int] = {}
     ambiguous: set[tuple[str, str, str]] = set()
-    identities: set[Path] = set()
+    identities: set[tuple[int, int]] = set()
     for home in codex_homes() if homes is None else homes:
         # Discovery retains logical profile names; read each physical store only
         # once here so an alias cannot masquerade as a second installed heartbeat.
-        identity = home.resolve()
-        if identity in identities:
+        try:
+            directory = home.stat()
+            identity = (directory.st_dev, directory.st_ino)
+            if identity in identities:
+                continue
+            paths = sorted((home / "automations").glob("*/automation.toml"))
+        except OSError:
+            # A discovered home can disappear or become unreadable during the
+            # scan. Preserve healthy sources and retry this home on the next read.
             continue
         identities.add(identity)
-        for path in sorted((home / "automations").glob("*/automation.toml")):
+        for path in paths:
             try:
                 item = tomllib.loads(path.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
