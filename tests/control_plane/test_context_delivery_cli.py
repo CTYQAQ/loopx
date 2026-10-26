@@ -597,3 +597,32 @@ def test_larger_pages_need_explicit_output_budget_and_preserve_every_byte(tmp_pa
     assert not read_context_capture(args)["ok"]
     args.max_page_output_bytes = 7900
     assert not read_context_capture(args)["ok"]
+
+
+@pytest.mark.parametrize("declaration,limit", [(None, 7900), ("64000", 64000), ("999999", 7900), ("unknown", 7900)])
+def test_native_configuration_budget_keeps_guard_small_and_continuations_complete(tmp_path, monkeypatch, declaration, limit):
+    from loopx.cli import build_parser
+    from loopx.cli_commands.quota_capture import native_context_capture_view, read_context_capture
+
+    if declaration is None:
+        monkeypatch.delenv("LOOPX_CONTEXT_PAGE_OUTPUT_BYTES", raising=False)
+    else:
+        monkeypatch.setenv("LOOPX_CONTEXT_PAGE_OUTPUT_BYTES", declaration)
+    page = native_context_capture_view({"requirements": '汉🙂"\\\t\n' * 12000,
+        "last": "Stop before publication."}, tmp_path)
+    original = Path(page["path"]).read_bytes()
+    assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 7900
+    collected, sizes = b"", []
+    while True:
+        assert page["ok"] and page["offset"] == len(collected)
+        collected += page["content"].encode()
+        sizes.append(len(page["content"].encode()))
+        if page["eof"]:
+            break
+        args = build_parser().parse_args(shlex.split(page["next_command"])[1:])
+        assert args.max_page_output_bytes == limit
+        page = read_context_capture(args)
+        assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= limit
+    assert collected == original and hashlib.sha256(collected).hexdigest() == page["sha256"]
+    if declaration == "64000":
+        assert max(sizes) > 32000 and len(sizes) < len(original) / 20000

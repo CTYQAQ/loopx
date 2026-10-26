@@ -1299,6 +1299,8 @@ def test_context_discovery_keeps_solver_configuration_and_unrelated_hooks(tmp_pa
     overrides = {trusted[i + 1].split("=", 1)[0]: trusted[i + 1].split("=", 1)[1]
                  for i, value in enumerate(trusted) if value == "-c"}
     assert not any(key.startswith("model_provider") for key in overrides)
+    assert overrides["tool_output_token_limit"] == "20000"
+    assert json.loads(overrides["shell_environment_policy.set.LOOPX_CONTEXT_PAGE_OUTPUT_BYTES"]) == "64000"
     assert "CODEX_ROLLOUT_TRACE_ROOT" not in env
     assert not (home / "context-traces").exists()
 

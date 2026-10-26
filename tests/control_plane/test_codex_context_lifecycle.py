@@ -71,6 +71,11 @@ def test_native_configuration_cli_is_read_only_and_usable_without_registry(tmp_p
     assert "ROLLOUT_TRACE" not in json.dumps(payload)
     assert "--codex-context-root" in native["developer_instructions"]
     assert "context-read" in native["developer_instructions"]
+    assert native["config_overrides"] == {
+        "tool_output_token_limit": 20000,
+        "shell_environment_policy.set.LOOPX_CONTEXT_PAGE_OUTPUT_BYTES": "64000"}
+    assert "--max-page-output-bytes 64000" in native["developer_instructions"]
+    assert "max_output_tokens=22000" in native["developer_instructions"]
     assert "hooks.state" not in native and list(tmp_path.iterdir()) == []
     missing_identity = subprocess.run(command[:-2], cwd=tmp_path,
         env={**os.environ, "PYTHONPATH": str(repo)}, capture_output=True, text=True, timeout=15)

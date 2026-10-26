@@ -102,4 +102,6 @@ def prepare_context_delivery(env: dict[str, str], home: Path) -> None:
     # a failed SessionStart handler cannot erase the read-only recovery route.
     native_args = ["-c", "hooks.state={" + ",".join(entries) + "}",
         "-c", "developer_instructions=" + json.dumps(configuration["developer_instructions"])]
+    native_args += [argument for key, value in configuration["config_overrides"].items()
+        for argument in ("-c", key + "=" + json.dumps(value))]
     env["LOOPX_CODEX_CONTEXT_TRUST_ARGS"] = json.dumps(native_args)
