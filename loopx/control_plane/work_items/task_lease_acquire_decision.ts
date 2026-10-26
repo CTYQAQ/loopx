@@ -189,25 +189,68 @@ function globTokens(pattern: string): GlobToken[] {
   return tokens;
 }
 
-function classMatch(body: string, value: string, foldCase: boolean): boolean {
-  const contains = (candidate: string) => {
-    for (let index = 0; index < body.length; index += 1) {
-      if (index + 2 < body.length && body[index + 1] === "-") {
-        if (body[index] <= candidate && candidate <= body[index + 2]) return true;
-        index += 2;
-      } else if (body[index] === candidate) {
-        return true;
-      }
-    }
-    return false;
-  };
-  const candidates = new Set([value]);
-  if (foldCase) {
-    for (const candidate of [value.toLowerCase(), value.toUpperCase(), caseFold(value)]) {
-      if ([...candidate].length === 1) candidates.add(candidate);
+type CharacterClass = {
+  literals: readonly string[];
+  ranges: readonly (readonly [string, string])[];
+};
+
+function characterClass(body: string): CharacterClass {
+  const literals: string[] = [];
+  const ranges: Array<readonly [string, string]> = [];
+  for (let index = 0; index < body.length; index += 1) {
+    if (index + 2 < body.length && body[index + 1] === "-") {
+      ranges.push([body[index], body[index + 2]]);
+      index += 2;
+    } else {
+      literals.push(body[index]);
     }
   }
-  return [...candidates].some(contains);
+  return {literals, ranges};
+}
+
+/** Single-character case variants, so a range keeps its original interval. */
+function singleCharacterVariants(value: string): string[] {
+  const variants = new Set<string>();
+  for (const candidate of [value, value.toLowerCase(), value.toUpperCase(), caseFold(value)]) {
+    if ([...candidate].length === 1) variants.add(candidate);
+  }
+  return [...variants];
+}
+
+/**
+ * Class membership is a symmetric fold equivalence: a member and the compared text
+ * match when their canonical fold is equal. That covers non-reciprocal Unicode
+ * aliases (a class member ς against Σ) and folds that change length (ß against SS).
+ * Ranges keep their original interval and only ever consume one unit.
+ */
+function classMemberMatches(body: string, candidate: string, foldCase: boolean): boolean {
+  const {literals, ranges} = characterClass(body);
+  const folded = foldCase ? caseFold(candidate) : candidate;
+  for (const literal of literals) {
+    if (literal === candidate || (foldCase && caseFold(literal) === folded)) return true;
+  }
+  if ([...candidate].length !== 1) return false;
+  for (const [low, high] of ranges) {
+    for (const variant of (foldCase ? singleCharacterVariants(candidate) : [candidate])) {
+      if (low <= variant && variant <= high) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * A class consumes one unit by default. Case folding may consume several when the
+ * compared text folds to the same string as a member (ß/SS, ﬃ/FFI).
+ */
+function classMatchLengths(body: string, value: string, start: number, foldCase: boolean): number[] {
+  const lengths: number[] = [];
+  const maximum = foldCase ? 3 : 1;
+  for (let length = 1; length <= maximum && start + length <= value.length; length += 1) {
+    if (classMemberMatches(body, value.slice(start, start + length), foldCase)) {
+      lengths.push(length);
+    }
+  }
+  return lengths;
 }
 
 function fnmatchcase(value: string, pattern: string, foldCase = false): boolean {
@@ -230,9 +273,11 @@ function fnmatchcase(value: string, pattern: string, foldCase = false): boolean 
       } else if (token.kind === "question") {
         result = match(valueIndex + 1, tokenIndex + 1);
       } else if (token.kind === "class") {
-        const matches = classMatch(token.body, value[valueIndex], foldCase);
-        result = (token.negated ? !matches : matches) &&
-          match(valueIndex + 1, tokenIndex + 1);
+        // Negation applies after the union of every fold-equivalent candidate.
+        const lengths = classMatchLengths(token.body, value, valueIndex, foldCase);
+        result = token.negated
+          ? lengths.length === 0 && match(valueIndex + 1, tokenIndex + 1)
+          : lengths.some((length) => match(valueIndex + length, tokenIndex + 1));
       } else {
         result = false;
         for (let end = valueIndex + 1; end <= value.length; end += 1) {

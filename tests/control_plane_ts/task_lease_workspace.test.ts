@@ -311,13 +311,18 @@ test("scope comparison folds case aliases without rewriting retained or request 
     ["src/Σ/", "src/ς/file.ts"],
     ["src/ß/*.ts", "src/SS/file.ts"],
     ["src/[Σ]x", "src/ςx"],
+    ["src/[ς]x", "src/Σx"],
+    ["src/[ß]x", "src/SSx"],
   ]) {
     assert.equal(evaluateTaskLeaseWriteScopesOverlap({left: [left], right: [right]}).overlap, true, `${left} overlaps ${right}`);
   }
-  assert.equal(evaluateTaskLeaseWriteScopesOverlap({
-    left: ["src/[!Σ]x"],
-    right: ["src/ςx"],
-  }).overlap, false);
+  for (const [left, right] of [
+    ["src/[!Σ]x", "src/ςx"],
+    ["src/[!ς]x", "src/Σx"],
+    ["src/[!ß]x", "src/SSx"],
+  ]) {
+    assert.equal(evaluateTaskLeaseWriteScopesOverlap({left: [left], right: [right]}).overlap, false, `${left} excludes ${right}`);
+  }
 });
 test("scope comparison and matching share literal right-bracket character classes", () => {
   for (const [scope, target] of [

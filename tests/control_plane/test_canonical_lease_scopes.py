@@ -165,6 +165,8 @@ def test_unicode_case_aliases_conflict_at_atomic_todo_claim(scope_goal, first_sc
     ("src/[]/./]x", "src/]x"),
     ("src/[!]/./]x", "src/ax"),
     ("src/[A-b]x", "src/cx"),
+    ("src/[ς].ts", "src/Σ.ts"),
+    ("src/[ß].ts", "src/SS.ts"),
 ])
 def test_glob_class_members_keep_exclusive_scope_coverage(scope_goal, scope, target):
     cli, current = scope_goal
@@ -177,6 +179,38 @@ def test_glob_class_members_keep_exclusive_scope_coverage(scope_goal, scope, tar
     assert rejected["error_code"] == "write_scope_conflict" and current() == before
 
 
+@pytest.mark.parametrize("scope,target", [
+    ("src/[ς].ts", "src/Σ.ts"),
+    ("src/[ß].ts", "src/SS.ts"),
+])
+def test_unicode_glob_class_aliases_conflict_at_atomic_todo_claim(scope_goal, scope, target):
+    cli, current = scope_goal
+    repository = "git:github.com/example/project"
+
+    def add_todo(label, write_scope):
+        return cli("todo", "add", "--role", "agent", "--priority", "P1",
+            "--text", f"Unicode class scope {label}", "--task-repository", repository,
+            "--required-write-scope", write_scope,
+            "--operation-id", f"unicode-class-add-{label}")["todo_id"]
+
+    first = add_todo("a", scope)
+    claimed = cli("todo", "claim", "--todo-id", first, "--claimed-by", "agent-a", "--agent-id", "agent-a",
+        "--claim-operation-id", "unicode-class-claim-a",
+        "--task-lease-idempotency-key", "unicode-class-claim-a",
+        "--task-lease-expected-version", "0")
+    assert claimed["ok"]
+    assert cli("task-lease", "inspect", "--todo-id", first)["lease"]["write_scopes"] == [scope]
+
+    second = add_todo("b", target)
+    before = current()
+    rejected = cli("todo", "claim", "--todo-id", second, "--claimed-by", "agent-b", "--agent-id", "agent-b",
+        "--claim-operation-id", "unicode-class-claim-b",
+        "--task-lease-idempotency-key", "unicode-class-claim-b",
+        "--task-lease-expected-version", "0", expected_exit=1)
+    assert rejected["error_code"] == "write_scope_conflict"
+    assert current() == before
+
+
 def test_case_folded_negated_glob_class_excludes_case_variant(scope_goal):
     cli, _ = scope_goal
     acquired = cli("task-lease", "acquire", "--todo-id", "todo_scope_a", "--owner", "agent-a",
@@ -184,4 +218,19 @@ def test_case_folded_negated_glob_class_excludes_case_variant(scope_goal):
     assert acquired["acquired"]
     allowed = cli("task-lease", "acquire", "--todo-id", "todo_scope_b", "--owner", "agent-b",
         "--idempotency-key", "case-class-b", "--write-scope", "src/cx", "--expected-version", "0")
+    assert allowed["acquired"]
+
+
+@pytest.mark.parametrize("scope,target", [
+    ("src/[!Σ]x", "src/ςx"),
+    ("src/[!ς]x", "src/Σx"),
+    ("src/[!ß]x", "src/SSx"),
+])
+def test_case_folded_negated_glob_class_excludes_unicode_alias(scope_goal, scope, target):
+    cli, _ = scope_goal
+    acquired = cli("task-lease", "acquire", "--todo-id", "todo_scope_a", "--owner", "agent-a",
+        "--idempotency-key", "unicode-negated-a", "--write-scope", scope, "--expected-version", "0")
+    assert acquired["acquired"]
+    allowed = cli("task-lease", "acquire", "--todo-id", "todo_scope_b", "--owner", "agent-b",
+        "--idempotency-key", "unicode-negated-b", "--write-scope", target, "--expected-version", "0")
     assert allowed["acquired"]
