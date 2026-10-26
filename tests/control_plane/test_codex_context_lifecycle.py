@@ -66,6 +66,7 @@ def test_native_configuration_cli_is_read_only_and_usable_without_registry(tmp_p
     payload = json.loads(result.stdout)
     native = payload["native_config"]
     assert set(native["hooks"]) == set(context.CONTEXT_LIFECYCLE_HOOKS)
+    assert native["hooks"]["Interrupt"][0]["hooks"][0]["timeout"] == 3
     assert "model_provider" not in native and "model_providers" not in native
     assert "ROLLOUT_TRACE" not in json.dumps(payload)
     assert "--codex-context-root" in native["developer_instructions"]

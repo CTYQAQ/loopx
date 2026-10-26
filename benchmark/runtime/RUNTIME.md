@@ -94,13 +94,13 @@ It returns native hooks and persistent recovery instructions, without installing
 files or changing trust. A shared root isolates journals by native session;
 the trial-local single-session `--codex-context-dir` remains supported.
 See [heartbeat setup](../../docs/heartbeat-automation-prompt.md#opt-in-native-context-delivery)
-for activation, diagnostics, readback and rollback. Generated setup and a native
+for activation, readback and rollback. Generated setup and a native
 app-server test do not by themselves prove installed desktop adoption.
 
 A simultaneous `fresh_replan` checkpoint listener retains ownership of the same
 original capture. It validates and holds the original full decision before any
 context projection, then releases its exact digest. Only afterward may the
-native observer project full/delta for an uninterrupted tool. A refused/lost
+native projector present full/delta for an uninterrupted tool. A refused/lost
 release remains the original typed transport failure, without publishing an
 optimized result or rerunning the guard. An interrupted guard continues with
 the original full packet; no delta is required for checkpoint recovery. Native
@@ -110,11 +110,11 @@ Darwin native-checkpoint refusal remains in force.
 The host-side checkpoint preflight still captures the complete original decision.
 With context delivery enabled, its prompt now supplies `quota context-project`
 with that original path/hash, Goal/Agent/Turn and private cache location. The
-native tool presents the saved decision using the same current-input observer;
+native tool presents the saved decision using the same native lifecycle projector;
 no guard, checkpoint, admission or debit is repeated. Cold delivery supplies the
 full body and its target; qualified warm delivery supplies the exact delta.
 The small response points to bounded reads and an original full-read fallback.
-Uncertain retention keeps full input. If enabled native preparation cannot
+Invalidated or unavailable baselines keep full input. If enabled native preparation cannot
 establish safe recovery, the command returns a typed transport failure with the
 original full-read reference and receipt; use that explicit reference without
 rerunning admission. An optional cache write after recovery is established can
