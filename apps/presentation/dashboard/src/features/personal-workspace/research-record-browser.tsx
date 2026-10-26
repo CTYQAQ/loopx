@@ -8,9 +8,10 @@ import {exportResearchRecords} from "./research-record-export";
 import {downloadReport} from "./report-download";
 
 /** Local read controls over the existing validated history snapshot. */
-export function ResearchRecordSearch({goalId, events, displayEvents, renderBody, complete, stale, busy, zh, stateLabel, timeLabel}: {
+export function ResearchRecordSearch({goalId, events, displayEvents, renderBody, renderSummary, complete, stale, busy, zh, stateLabel, timeLabel}: {
   goalId: string;
   displayEvents?: readonly ExploreHistoryEvent[]; renderBody?: (event: ExploreHistoryEvent) => ReactNode;
+  renderSummary?: (event: ExploreHistoryEvent) => ReactNode;
   events: readonly ExploreHistoryEvent[]; complete: boolean; stale: boolean; busy: boolean; zh: boolean;
   stateLabel: (status: string) => string; timeLabel: (at: string) => string;
 }) {
@@ -81,7 +82,8 @@ export function ResearchRecordSearch({goalId, events, displayEvents, renderBody,
         </dl>
         {event.evidence_refs.map(ref => <code key={ref}>{ref}</code>)}
         </details>
-        <ResearchRecordComparison events={events} selected={event} zh={zh} stateLabel={stateLabel} timeLabel={timeLabel}/>
+        <ResearchRecordComparison events={events} selected={event} displayed={displayed} renderSummary={renderSummary}
+          zh={zh} stateLabel={stateLabel} timeLabel={timeLabel}/>
       </details>
     </li>;})}</ol>
     {limit < matches.length ? <button type="button" onClick={() => setLimit(value => value + 50)}>{zh ? "继续展开记录" : "Show more records"} · {Math.min(limit, matches.length)} / {matches.length}</button> : null}

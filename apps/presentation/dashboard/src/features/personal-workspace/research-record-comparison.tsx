@@ -1,4 +1,4 @@
-import {useState} from "react";
+import {useState, type ReactNode} from "react";
 import type {ExploreHistoryEvent} from "../../../../../../loopx/control_plane/presentation/explore_history.ts";
 import {changedResearchFields, researchComparisonFields, researchRecordVersions, type ResearchComparisonField} from "./research-record-versions.ts";
 import {ExploreMeasurements} from "./explore-measurements";
@@ -15,8 +15,9 @@ const labels: Record<ResearchComparisonField, [string, string]> = {
 };
 
 /** Requested original-source detail; no analysis, acceptance or write path. */
-export function ResearchRecordComparison({events, selected, zh, stateLabel, timeLabel}: {
+export function ResearchRecordComparison({events, selected, displayed, renderSummary, zh, stateLabel, timeLabel}: {
   events: readonly ExploreHistoryEvent[]; selected: ExploreHistoryEvent; zh: boolean;
+  displayed?: ReadonlyMap<string, ExploreHistoryEvent>; renderSummary?: (event: ExploreHistoryEvent) => ReactNode;
   stateLabel: (status: string) => string; timeLabel: (at: string) => string;
 }) {
   const versions = researchRecordVersions(events, selected);
@@ -31,18 +32,24 @@ export function ResearchRecordComparison({events, selected, zh, stateLabel, time
   const changed = changedResearchFields(selected, comparison);
   const value = (event: ExploreHistoryEvent, field: ResearchComparisonField) => {
     const raw = event[field];
+    const shown = displayed?.get(event.event_id) ?? event;
     if (raw === undefined || raw === null || raw === "" || (Array.isArray(raw) && !raw.length)) return <span className="research-comparison-missing">{zh ? "未记录" : "Not recorded"}</span>;
     if (field === "measurements") return <ExploreMeasurements measurements={event.measurements ?? []} zh={zh}/>;
     if (field === "status") return stateLabel(event.status);
     if (Array.isArray(raw)) return <ul>{raw.map((item, i) => <li key={i}><code>{String(item)}</code></li>)}</ul>;
-    if (typeof raw === "object") return <pre>{JSON.stringify(raw, null, 2)}</pre>;
-    return String(raw);
+    const narrative = field === "summary" && renderSummary;
+    const content = narrative ? renderSummary(shown)
+      : typeof raw === "object" ? <pre>{JSON.stringify(shown[field], null, 2)}</pre> : String(shown[field]);
+    return <>{content}{narrative || JSON.stringify(shown[field]) !== JSON.stringify(raw) ? <details>
+      <summary>{zh ? "完整原文" : "Full original text"}</summary>
+      {typeof raw === "object" ? <pre>{JSON.stringify(raw, null, 2)}</pre> : <p>{String(raw)}</p>}
+    </details> : null}</>;
   };
   return <details className="research-record-comparison" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>{zh ? "比较记录版本" : "Compare recorded versions"} · {versions.length}</summary>
     {open ? <>
       <label>{zh ? "比较对象" : "Compare with"}<select value={comparison.event_id} onChange={event => setChosen(event.target.value)}>
-        {alternatives.map(event => <option key={event.event_id} value={event.event_id}>{timeLabel(event.recorded_at)} · {event.title} · {event.event_id}</option>)}
+        {alternatives.map(event => <option key={event.event_id} value={event.event_id}>{timeLabel(event.recorded_at)} · {(displayed?.get(event.event_id) ?? event).title} · {event.event_id}</option>)}
       </select></label>
       <div className="research-comparison-controls">
         <span role="status">{zh ? `${changed.length} 个字段不同` : `${changed.length} fields differ`}</span>
@@ -57,7 +64,7 @@ export function ResearchRecordComparison({events, selected, zh, stateLabel, time
         {[selected, comparison].map((event, i) => <div key={event.event_id}><strong>{i === 0 ? (zh ? "所选记录" : "Selected record") : (zh ? "对照记录" : "Comparison record")}</strong><p>{timeLabel(event.recorded_at)}</p></div>)}
       </div>
       {(showAll ? researchComparisonFields : changed).map(field => <section key={field} className="research-comparison-field">
-        <h4>{labels[field][zh ? 1 : 0]}</h4>
+        <h4>{field === "summary" && renderSummary ? (zh ? "记录正文" : "Recorded text") : labels[field][zh ? 1 : 0]}</h4>
         <div className="research-comparison-pair">{[selected, comparison].map((event, i) => <div key={event.event_id}>
           <span className="research-comparison-side">{i === 0 ? (zh ? "所选记录" : "Selected record") : (zh ? "对照记录" : "Comparison record")}</span>
           <div>{value(event, field)}</div>
