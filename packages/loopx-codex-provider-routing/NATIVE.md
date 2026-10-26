@@ -48,6 +48,24 @@ TypeScript selector. Enrol accounts through the native owner's official login.
 Click **Switch automatically when quota runs out** to authorize the listed slots
 as destinations. Installation alone grants no account effect. The App observer
 runs with its serving LoopX process and rehydrates the saved opt-in on restart.
+Version 0.12.8 uses the registry's declared runtime owner for this policy even when Chat
+history uses a separate `--runtime-root`. The settings page and the native CLI
+therefore read and update the same policy; no history or credential data is
+copied. A registry without `common_runtime_root` retains the explicit Chat
+runtime for its policy, so an isolated setup cannot fall back to the user's
+global policy. Explicit separate registry/runtime owners remain isolated. For a CLI
+watch, pass that registry owner's runtime to `--runtime-root` as usual.
+
+An App observer and CLI `watch` sharing that policy elect one active observer
+with a private process lock. Contenders perform no native account observations
+or switches; they wait up to five seconds between ownership checks and can take
+over when the active owner exits. Stopping a contender releases its thread
+without stopping the active owner. The existing transaction lock still serializes
+configuration, explicit checks and switches. Turning the policy off affects the
+actual observer, while an already dispatched credential transaction retains its
+normal completion/recovery contract. Upgrade and restart all existing observers
+before relying on this ownership fence; an older process does not acquire it.
+
 Client restart is a separate permission, off by default and absent from older
 policies. Enabling it also permits a subsequent explicit manual switch to quit
 and reopen the GPT instance. Neither permission is enabled by installation.
@@ -290,3 +308,33 @@ exercised, followed by a fresh successful check without changing the account.
 ![Desktop force-quit settings / 桌面强关设置](docs/assets/native-accounts-force-desktop.png)
 
 ![Narrow settings / 窄屏设置](docs/assets/native-accounts-force-narrow.png)
+
+### Shared policy owner / 共用策略来源
+
+The settings page and CLI use the registry-declared native account owner even
+when Chat history has a separate runtime directory. Without a declared owner,
+an explicit isolated Chat runtime remains isolated. Version 0.12.8 also holds a
+process lock for the observer lifetime: another App or CLI stays passive until
+the owner exits. Upgrade and restart every existing observer before relying on
+this guarantee; an older observer does not participate in the new lock.
+
+设置页与 CLI 共用 registry 声明的原生账号策略来源，会话历史仍保留在原目录。
+未声明公共来源时，显式隔离的 Chat runtime 保持隔离。0.12.8 通过跨进程锁保证同一
+策略来源只有一个自动观察器；原观察器退出后，等待者接管。升级时需要重启所有旧
+观察器，旧版本不会自动遵守新锁。
+
+The actual packaged page and HTTP service below use synthetic A/B/C accounts.
+Turning automatic switching off and back on persisted to the shared owner and
+survived reload without changing the separate conversation policy. Unknown
+allowance kept account A selected; a fresh successful check recovered. These
+images do not qualify a real credential switch.
+
+以下为实际打包网页与 HTTP 服务，账号 A/B/C 为合成数据。关闭、重新开启和刷新后
+均读回共用策略，会话目录中的独立旧策略未被改写。额度未知时保留 A，重新检查后
+恢复；不代表已完成真实账号切换。
+
+![Shared account policy, desktop / 桌面](docs/assets/native-policy-owner-desktop.png)
+
+![Shared account policy, narrow / 窄屏](docs/assets/native-policy-owner-narrow.png)
+
+![Unknown allowance preserves selection / 额度未知保留当前账号](docs/assets/native-policy-owner-unknown-narrow.png)
