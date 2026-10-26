@@ -39,7 +39,7 @@ def scope_goal(tmp_path, monkeypatch, request):
         selected_repo = Path(os.environ.get("LOOPX_LEASE_SCOPE_CONSUMER", REPO)) if cwd is None else cwd
         child = subprocess.run([sys.executable, "-m", "loopx.cli", "--registry", str(registry),
             "--runtime-root", str(runtime), "--format", "json", *args, "--goal-id", goal],
-            cwd=selected_repo, capture_output=True, text=True, timeout=60, check=False)
+            cwd=selected_repo, capture_output=True, text=True, encoding="utf-8", timeout=60, check=False)
         assert child.returncode == expected_exit, child.stdout + child.stderr
         return json.loads(child.stdout)
 
@@ -110,6 +110,52 @@ def test_case_aliases_remain_exclusive_write_scopes(scope_goal):
     rejected = cli("task-lease", "acquire", "--todo-id", "todo_scope_b", "--owner", "agent-b",
         "--idempotency-key", "case-b", "--expected-version", "0", "--write-scope", "src/main.ts",
         expected_exit=1)
+    assert rejected["error_code"] == "write_scope_conflict"
+    assert current() == before
+
+
+@pytest.mark.parametrize("first_scope,second_scope", [
+    ("src/Σ.ts", "src/ς.ts"),
+    ("src/ß.ts", "src/SS.ts"),
+])
+def test_unicode_case_aliases_remain_exclusive_write_scopes(scope_goal, first_scope, second_scope):
+    cli, current = scope_goal
+    acquired = cli("task-lease", "acquire", "--todo-id", "todo_scope_a", "--owner", "agent-a",
+        "--idempotency-key", "unicode-a", "--expected-version", "0", "--write-scope", first_scope)
+    assert acquired["lease"]["write_scopes"] == [first_scope]
+    before = current()
+    rejected = cli("task-lease", "acquire", "--todo-id", "todo_scope_b", "--owner", "agent-b",
+        "--idempotency-key", "unicode-b", "--expected-version", "0", "--write-scope", second_scope,
+        expected_exit=1)
+    assert rejected["error_code"] == "write_scope_conflict"
+    assert current() == before
+
+
+@pytest.mark.parametrize("first_scope,second_scope", [
+    ("src/Σ.ts", "src/ς.ts"),
+    ("src/ß.ts", "src/SS.ts"),
+])
+def test_unicode_case_aliases_conflict_at_atomic_todo_claim(scope_goal, first_scope, second_scope):
+    cli, current = scope_goal
+    repository = "git:github.com/example/project"
+
+    def add_todo(label, scope):
+        return cli("todo", "add", "--role", "agent", "--priority", "P1", "--text", f"Unicode scope {label}",
+            "--task-repository", repository, "--required-write-scope", scope,
+            "--operation-id", f"unicode-add-{label}")["todo_id"]
+
+    first = add_todo("a", first_scope)
+    claimed = cli("todo", "claim", "--todo-id", first, "--claimed-by", "agent-a", "--agent-id", "agent-a",
+        "--claim-operation-id", "unicode-claim-a", "--task-lease-idempotency-key", "unicode-claim-a",
+        "--task-lease-expected-version", "0")
+    assert claimed["ok"]
+    assert cli("task-lease", "inspect", "--todo-id", first)["lease"]["write_scopes"] == [first_scope]
+
+    second = add_todo("b", second_scope)
+    before = current()
+    rejected = cli("todo", "claim", "--todo-id", second, "--claimed-by", "agent-b", "--agent-id", "agent-b",
+        "--claim-operation-id", "unicode-claim-b", "--task-lease-idempotency-key", "unicode-claim-b",
+        "--task-lease-expected-version", "0", expected_exit=1)
     assert rejected["error_code"] == "write_scope_conflict"
     assert current() == before
 
