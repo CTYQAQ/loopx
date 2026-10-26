@@ -58,23 +58,27 @@ and `LOOPX_CONTEXT_DELIVERY=on` into the native tool environment. Generic CLI
 without these worker declarations stays full. These are caller declarations,
 not host authentication or a new admission grant.
 It works with ordinary quota or the explicit TurnEnvelope view. The existing
-worker stages two product lifecycle hooks in the trial's private Codex home and
-queries native `hooks/list` without invoking a model. Only those exact native
-hashes receive per-process trust; workspace/plugin hooks are not trusted and no
-bypass flag or operator settings are used. Private native trace-v1 diagnostics
-are enabled only in this opted-in trial. Install and wake receipts record the
+worker stages the product's generated lifecycle hooks (currently SessionStart,
+PreCompact, PostCompact, PostToolUse and Interrupt) in the trial's private Codex
+home and queries native `hooks/list` without invoking a model. Discovery must
+match every generated handler's event, command, matcher, timeout, async setting
+and enabled state, with unique native trust keys. Matching counts alone are
+insufficient; discovery order may differ. Only those exact native hashes receive
+per-process trust; workspace/plugin hooks are not trusted and no bypass flag or
+operator settings are used. Discovery-only plugin overrides do not reach the
+solver. Context delivery does not enable native input tracing. Install and wake receipts record the
 selection; `context_transport.available` records setup, **not** warm eligibility
 or delivery/benefit. Unsupported native setup continues ordinary full output.
 
 The product heartbeat renderer carries `--codex-context-dir` and the original
-capture root into guard/reentry commands. The product observer proves intact
-baseline content in the current model input before warm reuse; uncertainty
-selects full. Startup/fork/compaction reset the epoch. Same-session resume clears
-the active call and keeps only an unconfirmed candidate; reuse requires the new
-call's complete actual input, never a saved session or file. Each worker wake
-uses a separate private trace directory, avoiding repeated scans of old wakes.
-The small recovery hook reads the original full capture after compaction, with
-no replacement admission or debit. Native worker and app-server code-mode tests
+capture root into guard/reentry commands. Normal complete reader delivery establishes
+an explicit native-hook continuity assumption, not proof of later model retention.
+Known loss, incomplete delivery, startup, resume and compaction invalidate the
+baseline. Ordinary tools and turn endings retain continuity. An independent new
+decision reads its current full capture when the baseline is unavailable; do not
+pre-read an older capture just to seed a delta. A dependent continuation after
+context loss must recover its exact original capture through the small recovery
+reference, with no replacement admission or debit. Native worker and app-server code-mode tests
 cover resumed warm reuse for both packet views. The opted-in worker also carries
 a compact native developer instruction that survives compaction independently
 of hook output. If context was lost while continuing a captured decision,
@@ -85,8 +89,8 @@ spends quota. Missing/foreign references refuse lookup. Native tests omit or
 kill all subsequent hooks and still recover every byte through this route.
 Installed App adoption remains separate; deterministic transport tests are not autonomous
 solver outcomes. Include this persistent instruction in subsequent cost comparisons;
-earlier input replays did not include it. Count complete input, recovery reads, native discovery and trace
-IO in treatment cost, not just the delta bytes.
+earlier input replays did not include it. Count complete input and replay, recovery
+reads, native discovery and hook IO in treatment cost, not just the delta bytes.
 
 Codex App setup uses the same product configuration renderer as the worker:
 `loopx --format json quota context-config --context-delivery on --codex-app --codex-context-root DIR --goal-id GOAL --agent-id AGENT`.

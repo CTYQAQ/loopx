@@ -5,6 +5,7 @@ These tests qualify the CLI and RPC, not native Host retention observation.
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -248,9 +249,104 @@ def test_native_context_cli_without_retention_stays_full_and_preserves_receipt(t
             "--agent-id", AGENT_ID, "--todo-id", TODO_ID, "--turn-instance-id", "native-full",
             "--decision-output-root", str(captures), "--context-delivery", "on", "--codex-context-dir", str(root), cwd=project)
         assert rc == 0 and wire["mode"] == "full", wire
-        assert json.loads(Path(wire["recovery"]["path"]).read_text()) == wire["context"]
+        assert "Native input observation independently verifies" not in wire["instruction"]
+        assert "Native input observation independently verifies" not in wire["recovery"]["instruction"]
+        # Consume the advertised first page and continuation, not another guard.
+        from loopx.cli import build_parser
+        from loopx.cli_commands.quota_capture import read_context_capture
+        import shlex
+        page, observed = wire, b""
+        while True:
+            assert page["offset"] == len(observed)
+            observed += page["content"].encode()
+            if page["eof"]:
+                break
+            args = build_parser().parse_args(shlex.split(page["next_command"])[1:])
+            page = read_context_capture(args)
+            assert page["ok"]
+        assert hashlib.sha256(observed).hexdigest() == wire["sha256"]
+        assert json.loads(observed) == json.loads(Path(wire["recovery"]["path"]).read_text())
+        assert json.loads(observed)["heartbeat_receipt"]["turn_instance_id"] == "native-full"
+        assert len(wire["content"].encode()) <= 3072 and "context" not in wire
     assert _heartbeat_receipt_count(runtime, "native-full") == 1
     assert _spend_run_count(runtime) == 0 and state.read_bytes() == original
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_native_fresh_work_turn_reads_current_full_without_old_recovery(tmp_path, monkeypatch, provider):
+    import shlex
+    from loopx.cli import build_parser
+    from loopx.cli_commands.quota_capture import read_context_capture
+    from loopx.control_plane.turn_driver import codex_context as context
+
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    monkeypatch.setenv("CODEX_THREAD_ID", "native-fresh-session")
+    project, runtime, registry = _write_fixture(tmp_path)
+    state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    todos = read_fixture_todos(state)
+    todos[0]["text"] = "Retain every original obligation. " * 500
+    initialize_canonical_authority(runtime, GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=todos, handoff_mode="soft_claim"),
+        state_path=state, provider=provider)
+    root, captures = tmp_path / "context", tmp_path / "captures"
+    root.mkdir(mode=0o700)
+    captures.mkdir()
+    event = dict(session_id="native-fresh-session", cwd=str(project),
+                 hook_event_name="SessionStart", source="startup")
+    context.codex_context_hook(str(root), event)
+
+    def guard(turn):
+        rc, view = _run_cli(registry, runtime, "quota", "should-run", "--codex-app",
+            "--goal-id", GOAL_ID, "--agent-id", AGENT_ID, "--todo-id", TODO_ID,
+            "--turn-instance-id", turn, "--decision-output-root", str(captures),
+            "--context-delivery", "on", "--codex-context-dir", str(root), cwd=project)
+        assert rc == 0, view
+        return view
+
+    def consume(view):
+        page, observed = view, b""
+        while True:
+            assert page["offset"] == len(observed)
+            observed += page["content"].encode()
+            context.codex_context_hook(str(root), {**event, "hook_event_name": "PostToolUse",
+                "tool_response": json.dumps(page)})
+            if page["eof"]:
+                break
+            page = read_context_capture(build_parser().parse_args(shlex.split(page["next_command"])[1:]))
+        assert hashlib.sha256(observed).hexdigest() == view["sha256"]
+        return json.loads(observed)
+
+    first = guard("native-work-first")
+    assert first["mode"] == "full"
+    consume(first)
+    # End the earlier work Turn through its real owner. Fresh admission below
+    # does not bypass an unfinished decision's original-context recovery.
+    rc, refreshed = _run_cli(registry, runtime, "refresh-state", "--goal-id", GOAL_ID,
+        "--agent-id", AGENT_ID, "--todo-id", TODO_ID, "--turn-instance-id", "native-work-first",
+        "--classification", "fixture_work_validated", "--delivery-batch-scale", "single_surface",
+        "--delivery-outcome", "outcome_progress", "--delivery-boundary", "in_flight_continuation",
+        "--progress-result-class", "advanced", "--progress-work-item-id", TODO_ID,
+        "--progress-evidence-id", "evidence:fixture-work", cwd=project)
+    assert rc == 0 and refreshed["ok"], refreshed
+    rc, spent = _run_cli(registry, runtime, "quota", "spend-slot", "--goal-id", GOAL_ID,
+        "--agent-id", AGENT_ID, "--todo-id", TODO_ID, "--turn-instance-id", "native-work-first",
+        "--source", "heartbeat", "--execute", cwd=project)
+    assert rc == 0 and spent["ok"], spent
+    original = Path(first["recovery"]["path"]).read_bytes()
+    context.codex_context_hook(str(root), {**event, "source": "resume"})
+    assert "candidate" not in context._state(root)
+
+    current = guard("native-work-next")
+    assert current["mode"] == "full" and "candidate" not in context._state(root)
+    body = consume(current)
+    assert body["heartbeat_receipt"]["turn_instance_id"] == "native-work-next"
+    assert context._state(root)["candidate"]["target"] == current["target"]
+    assert Path(first["recovery"]["path"]).read_bytes() == original
+    warm = guard("native-work-next")
+    assert warm["mode"] == "delta" and warm["target"] != current["target"]
+    assert _heartbeat_receipt_count(runtime, "native-work-first") == 1
+    assert _heartbeat_receipt_count(runtime, "native-work-next") == 1
+    assert _spend_run_count(runtime) == 1
 
 
 @pytest.mark.parametrize("native_failure", [None, "projection", "directory"])
@@ -294,7 +390,8 @@ def test_native_projection_never_layers_host_projection(tmp_path, monkeypatch, n
         assert printed[0]["heartbeat_receipt"] == original["heartbeat_receipt"]
         assert printed[0]["captured_decision"] == {"path": str(tmp_path / "decision.json")}
     else:
-        assert printed == [{"native_projection": original}]
+        assert len(printed) == 1 and printed[0]["eof"] is True
+        assert json.loads(printed[0]["content"]) == {"native_projection": original}
     assert json.loads((tmp_path / "decision.json").read_text()) == original
 
 
