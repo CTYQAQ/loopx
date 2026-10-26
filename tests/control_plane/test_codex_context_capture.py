@@ -87,7 +87,10 @@ def _last_page(request):
   + [(host, surface, False, True, False) for host in ("benchmark", "code_mode")
      for surface in ("quota_packet", "turn_envelope")]
   + [("code_mode", surface, False, True, True) for surface in ("quota_packet", "turn_envelope")])
-def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, host, surface, failed_primary, resumed, adaptive, hook_loss=None, shared_root=False, checkpoint_handoff=False, handoff_socket=None, native_pragma=False, native_read_batch=2, native_history_tokens=None, bounded_pages=False):
+def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, host, surface, failed_primary, resumed, adaptive, hook_loss=None, shared_root=False, checkpoint_handoff=False, handoff_socket=None, native_pragma=False, native_read_batch=2, native_history_tokens=None, bounded_pages=False, resume_loss=None):
+    # Real worker qualification follows returned cursors; output budgets can
+    # shrink a page, so precomputed fixed offsets are not its production path.
+    bounded_pages = bounded_pages or host == "benchmark"
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     binary, env, workspace, home = _native_fixture(tmp_path)
     env.pop("CODEX_ROLLOUT_TRACE_ROOT", None)
@@ -269,14 +272,22 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             name = "cold" if phase == "start" else "warm"
             stages["phase"] = name + "_ready"
             if phase == "resuming":
-                assert delivered(request, "cold") == read_paths["cold"].read_text().rstrip("\n")
-                assert "LoopX context baseline invalidated." in _input_text(request)
-                assert wires["cold"]["recovery"]["command"] in _input_text(request)
-                # Resume itself does not attest history retention. Read the
-                # same original through the real CLI before the next guard.
-                stages["phase"] = "resume_read"
-                stages["pages"] = pages("cold", read_paths["cold"])
-                cmd = stages["pages"].pop(0)
+                if not resume_loss:
+                    assert delivered(request, "cold") == read_paths["cold"].read_text().rstrip("\n")
+                if host == "benchmark":
+                    # Actual worker process exit/resume, qualified by the shared
+                    # native-selected replay checkpoint. No old full prefetch.
+                    assert ("LoopX context baseline invalidated." in _input_text(request)) == bool(resume_loss)
+                    stages["phase"] = "warm_ready"
+                    cmd = invoke("warm")
+                else:
+                    assert "LoopX context baseline invalidated." in _input_text(request)
+                    assert wires["cold"]["recovery"]["command"] in _input_text(request)
+                    # Unqualified native histories still recover the exact
+                    # original before continuing its dependent decision.
+                    stages["phase"] = "resume_read"
+                    stages["pages"] = pages("cold", read_paths["cold"])
+                    cmd = stages["pages"].pop(0)
             else:
                 cmd = invoke(name)
         elif phase == "resume_read":
@@ -291,13 +302,13 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             # Keep the independent full-wire oracle separate from its page view.
             wire_file = Path(descriptor["path"]).parent / "delivery.json"
             wires[name] = json.loads(wire_file.read_text())
-            assert descriptor["mode"] == wires[name]["mode"] == ("full" if name == "cold" else "delta")
+            assert descriptor["mode"] == wires[name]["mode"] == ("full" if name == "cold" or resume_loss else "delta")
             assert "Native input observation independently verifies" not in descriptor["instruction"]
-            if name == "warm":
+            if name == "warm" and not resume_loss:
                 assert json.dumps(wires[name]["instruction"]).encode() in descriptor["content"].encode()
             capture = Path(wires[name]["recovery"]["path"]).parent / "decision.json"
             snapshots.append((capture, capture.read_bytes()))
-            read_paths[name] = Path(wires[name]["recovery"]["path"]) if name == "cold" else wire_file
+            read_paths[name] = Path(wires[name]["recovery"]["path"]) if wires[name]["mode"] == "full" else wire_file
             stages["pages"] = pages(name, read_paths[name])
             stages["phase"] = name + "_read"
             cmd = stages["pages"].pop(0)
@@ -311,7 +322,8 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 return message
             cmd = invoke("warm")
         elif phase == "warm_read":
-            assert delivered(request, "cold") == read_paths["cold"].read_text().rstrip("\n")
+            if not resume_loss:
+                assert delivered(request, "cold") == read_paths["cold"].read_text().rstrip("\n")
             assert delivered(request, "warm") == read_paths["warm"].read_text().rstrip("\n")
             stages.update(phase="compact", compact_response=number)
             if hook_loss:
@@ -499,6 +511,20 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 rc, spent = _run_cli(registry, runtime, "quota", "spend-slot", *binding,
                     "--slots", "1", "--source", "heartbeat", "--execute", cwd=project)
                 assert rc == 0 and spent["appended"], spent
+                if resume_loss:
+                    journal = json.loads((home / "loopx-context/session.json").read_text())
+                    native_history = Path(journal["candidate"]["native_resume"]["path"])
+                    if resume_loss == "replace":
+                        replacement = native_history.with_suffix(".replacement")
+                        replacement.write_bytes(native_history.read_bytes())
+                        replacement.chmod(native_history.stat().st_mode & 0o777)
+                        replacement.replace(native_history)
+                    else:
+                        rows = [json.loads(line) for line in native_history.read_text().splitlines()]
+                        # The native provider accepts this source metadata, but
+                        # the LoopX replay profile must fail closed on it.
+                        rows[0]["payload"]["cli_version"] = "unqualified-fixture-host"
+                        native_history.write_text("".join(json.dumps(row) + "\n" for row in rows))
                 result = run_once(env)
                 assert result["ok"] and result["host_invoked"], result
                 assert result["context_transport"] == {"available": True}
@@ -524,7 +550,8 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
     assert len(captured) == 2
     # Compare complete presentation bytes, not two similarly sized first-page descriptors.
     # Whole CLI/model costs remain a separate benchmark measurement.
-    assert len(json.dumps(wires["warm"]).encode()) < len(json.dumps(wires["cold"]).encode())
+    if not resume_loss:
+        assert len(json.dumps(wires["warm"]).encode()) < len(json.dumps(wires["cold"]).encode())
     assert len(calls) == len(observed) and stages["baseline_confirmed"]
     if native_read_batch > 2:
         visible_batches = []
@@ -549,7 +576,18 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
     assert hashlib.sha256(projection.read_bytes()).hexdigest() == wires["warm"]["recovery"]["sha256"]
     current = prepare_context_delivery(json.loads(projection.read_bytes()), scope={k: wires["warm"]["target"][k] for k in ("goal_id", "agent_id", "session_id", "context_epoch")},
         capture_id=wires["warm"]["target"]["capture_id"], surface=surface)
-    assert restore_context_delivery(wires["warm"], baseline=wires["cold"], current=current)["context"] == current["context"]
+    baseline = wires["cold"]
+    if resumed and host != "benchmark":
+        # This path independently reread every original byte after a reset.
+        # Bind those verified bytes to the new native epoch, rather than letting
+        # automatic full fallback conceal an obsolete pre-loss baseline.
+        assert current["target"]["context_epoch"] != baseline["target"]["context_epoch"]
+        baseline = prepare_context_delivery(baseline["context"], scope={
+            k: current["target"][k] for k in ("goal_id", "agent_id", "session_id", "context_epoch")},
+            capture_id=baseline["target"]["capture_id"], surface=surface)
+        assert baseline["target"] == wires["warm"]["base"]
+    restored = restore_context_delivery(wires["warm"], baseline=baseline, current=current)
+    assert restored["context"] == current["context"] and restored["mode"] == wires["warm"]["mode"]
     for document in (wires["cold"]["context"], current["context"]):
         context = (document["work_context"] if surface == "turn_envelope" else
                    document["interaction_contract"]["agent_channel"]["work_context"])
@@ -565,7 +603,22 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             actions = json.loads(raw)["interaction_contract"]["cli_channel"]["next_cli_actions"]
             assert actions and all(shlex.split(action)[0] == expected_cli for action in actions)
     if host == "benchmark" and resumed:
-        assert _spend_run_count(runtime) == 1
+        # Both current heartbeat decisions settle exactly once. Compaction and
+        # recovery may not introduce a third guard or spend.
+        warm_turn = json.loads(snapshots[1][1])["heartbeat_receipt"]["turn_instance_id"]
+        assert warm_turn != cold_turn
+        artifact.write_text(hashlib.sha256(read_paths["warm"].read_bytes()).hexdigest())
+        binding = ("--goal-id", GOAL_ID, "--agent-id", AGENT_ID,
+                   "--todo-id", TODO_ID, "--turn-instance-id", warm_turn)
+        rc, written = _run_cli(registry, runtime, "refresh-state", *binding,
+            "--classification", "native_resume_readback_verified", "--delivery-batch-scale", "single_surface",
+            "--delivery-outcome", "outcome_progress", "--delivery-boundary", "in_flight_continuation",
+            "--no-global-sync", "--suppress-external-sinks", cwd=project)
+        assert rc == 0, written
+        rc, spent = _run_cli(registry, runtime, "quota", "spend-slot", *binding,
+            "--slots", "1", "--source", "heartbeat", "--execute", cwd=project)
+        assert rc == 0 and spent["appended"], spent
+        assert _spend_run_count(runtime) == 2
         from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
         retained = next(todo for todo in read_canonical_todos_if_promoted(
             runtime_root=runtime, goal_id=GOAL_ID)["todos"] if todo["todo_id"] == TODO_ID)
@@ -574,6 +627,13 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         assert state.read_bytes() == original_state and _spend_run_count(runtime) == 0
     if bounded_pages:
         assert bounded_sizes and max(bounded_sizes) > 3072
+
+
+@pytest.mark.parametrize("surface", ["quota_packet", "turn_envelope"])
+@pytest.mark.parametrize("loss", ["replace", "unqualified_profile"])
+def test_native_worker_resume_history_change_reads_current_full(tmp_path, monkeypatch, surface, loss):
+    test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
+        "benchmark", surface, False, True, False, resume_loss=loss)
 
 
 @pytest.mark.parametrize("host,surface,hook_loss", [
