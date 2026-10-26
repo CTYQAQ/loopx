@@ -1203,8 +1203,8 @@ button.personal-execution-chip:focus-visible { outline: 2px solid #0070f3; outli
 /* The overview is a board; conversations retain their narrower reading width. */
 .personal-channel:has(.personal-home-board) > .personal-channel-scroll { padding: 32px max(32px, calc((100% - 960px) / 2)); }
 .personal-channel:has(.personal-home-board) > .personal-composer-wrap { padding-inline: max(32px, calc((100% - 960px) / 2)); }
-.personal-read-only-notice { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 10px 16px; border: 1px solid var(--pw-line); border-radius: 12px; background: #f5f4f1; color: var(--pw-muted); font-size: var(--text-caption); line-height: var(--leading-caption); }
-.personal-read-only-notice strong { color: var(--pw-text); white-space: nowrap; }
+.personal-read-only-notice { display: flex; align-items: center; justify-content: center; gap: 4px; width: fit-content; min-height: 36px; margin-inline: auto; color: var(--pw-muted); font-size: var(--text-body); line-height: var(--leading-body); }
+.personal-read-only-notice strong { font-weight: 500; white-space: nowrap; }
 .personal-manager-conversation-tray { display: grid; width: 100%; gap: 9px; max-height: 320px; padding: 12px 14px; margin-bottom: 10px; overflow: hidden; border: 1px solid #bfcdf1; border-radius: 14px; background: rgb(255 255 255 / 97%); box-shadow: 0 5px 20px rgb(34 62 120 / 10%); color: inherit; font: inherit; text-align: left; animation: pw-tray-in 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
 @keyframes pw-tray-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .personal-manager-conversation-tray:hover { border-color: #8fa9ee; box-shadow: 0 7px 24px rgb(34 62 120 / 14%); }
@@ -2212,6 +2212,9 @@ button.personal-execution-chip:focus-visible { outline: 2px solid #0070f3; outli
 .personal-composer-runtime .personal-chat-model-menu > summary .personal-model-current { font-size: var(--text-caption); }
 .personal-composer-runtime .personal-chat-model-panel { top: auto; bottom: calc(100% + 12px); }
 .personal-composer-runtime .personal-chat-model-panel .personal-select-listbox { bottom: auto; }
+.personal-model-next-heading { display: flex; align-items: center; gap: 6px; }
+.personal-model-options { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.personal-model-options > .personal-agent-select { width: 100%; max-width: none; }
 .personal-composer-actions { position: relative; flex: none; margin: 0; }
 .personal-channel-composer .personal-composer-actions { position: static; }
 .personal-composer-actions > summary { display: grid; place-items: center; width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 6px; color: var(--pw-muted); cursor: pointer; list-style: none; }

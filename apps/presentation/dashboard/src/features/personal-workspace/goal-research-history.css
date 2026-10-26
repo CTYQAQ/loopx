@@ -223,6 +223,7 @@
 /* A selected question is a reading surface; the whole history stays reachable. */
 .research-history-layout.has-selection > .research-history-detail { border-top: 0; }
 .research-history-context { border-top: 1px solid var(--pw-line); min-width: 0; }
+.research-history-context.is-overview { border-top: 0; }
 .research-history-context > summary { min-height: 44px; padding: 12px 24px; font-size: var(--text-body); cursor: pointer; }
 .research-history-context > .research-progress { margin: 16px 24px; }
 .research-history .research-finding-navigation { display: flex; align-items: flex-end; gap: 16px; margin-top: 16px; min-width: 0; }

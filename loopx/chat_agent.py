@@ -1032,15 +1032,17 @@ class CodexChatAgentSession:
                     "Codex did not apply the requested conversation provider."
                 )
             if model and thread_result.get("model") not in {None, model}:
-                raise session._runtime_error(
-                    "Codex did not apply the requested conversation model."
+                raise CodexChatAgentError(
+                    "Codex did not apply the requested conversation model.",
+                    error_code="unsupported_configuration", gate=None,
                 )
             if reasoning_effort and thread_result.get("reasoningEffort") not in {
                 None,
                 reasoning_effort,
             }:
-                raise session._runtime_error(
-                    "Codex did not apply the requested conversation reasoning effort."
+                raise CodexChatAgentError(
+                    "Codex did not apply the requested conversation reasoning effort.",
+                    error_code="unsupported_configuration", gate=None,
                 )
             session.model = thread_result.get("model") or model
             session.resolved_model = thread_result.get("model")
