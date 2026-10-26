@@ -521,9 +521,15 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                         replacement.replace(native_history)
                     else:
                         rows = [json.loads(line) for line in native_history.read_text().splitlines()]
-                        # The native provider accepts this source metadata, but
-                        # the LoopX replay profile must fail closed on it.
-                        rows[0]["payload"]["cli_version"] = "unqualified-fixture-host"
+                        if resume_loss == "history_missing":
+                            # Keep the native conversation identity/index while
+                            # removing its prior context. Never create a fork.
+                            rows = [row for row in rows if row["type"] not in {
+                                "response_item", "world_state", "retained_context", "compacted"}]
+                        else:
+                            # The provider accepts this metadata; our replay
+                            # profile must still fall back conservatively.
+                            rows[0]["payload"]["cli_version"] = "unqualified-fixture-host"
                         native_history.write_text("".join(json.dumps(row) + "\n" for row in rows))
                 result = run_once(env)
                 assert result["ok"] and result["host_invoked"], result
@@ -630,7 +636,7 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
 
 
 @pytest.mark.parametrize("surface", ["quota_packet", "turn_envelope"])
-@pytest.mark.parametrize("loss", ["replace", "unqualified_profile"])
+@pytest.mark.parametrize("loss", ["replace", "history_missing", "unqualified_profile"])
 def test_native_worker_resume_history_change_reads_current_full(tmp_path, monkeypatch, surface, loss):
     test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
         "benchmark", surface, False, True, False, resume_loss=loss)
