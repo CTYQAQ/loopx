@@ -66,10 +66,15 @@ def _root_character_atoms(
         options = tuple((variant, True) for variant in variants) + tuple(
             (variant, True) for variant in encoded_variants
         )
+        # IGNORECASE already covers the one-character case variants. Keeping
+        # both as alternatives multiplies backtracking at each near-miss letter.
+        # Multi-character Unicode mappings still need their explicit spelling;
+        # encoded UTF-8 variants remain distinct byte sequences.
+        literal_variants = {char} | {variant for variant in variants if len(variant) > 1}
         pattern = (
             "(?i:"
             + "|".join(
-                re.escape(variant) for variant in sorted(variants | encoded_variants)
+                re.escape(variant) for variant in sorted(literal_variants | encoded_variants)
             )
             + ")"
         )

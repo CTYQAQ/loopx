@@ -1816,9 +1816,12 @@ function PersonalGoalHome({
         newSessionRequired.current.delete(sessionKey);
         if (!activeTurnId) return;
         // A source index can observe the Turn this very composer is already
-        // streaming. Keep its observer instead of creating a second reply.
-        if (targetContext.kind === "bound" && activeTurnIds.current.get(targetContextId) === activeTurnId
-          && streamControllers.current.has(targetContextId)) return;
+        // streaming. Exact contexts already key ownership by their Session;
+        // keep that live observer instead of replacing its controls and reply.
+        if ((targetContext.kind === "bound" || targetContext.kind === "managed")
+          && targetContext.sessionId === created.session_id
+          && activeTurnIds.current.get(targetContextId) === activeTurnId
+          && streamControllers.current.get(targetContextId)?.signal.aborted === false) return;
         const recoveryKey = `${created.session_id}:${activeTurnId}`;
         if (recoveringTurnKeys.current.has(recoveryKey)) return;
         const observer = new AbortController();
