@@ -36,7 +36,9 @@ class HostError(Exception):
 # LoopX chat surfaces keep a Codex app-server attached to the GPT home while
 # idle. They are product-owned clients of that home, so an unattended handoff
 # pauses them instead of treating them as an unrelated CLI hold.
-CHAT_AGENTS = ("com.loopx.personal-bots.chat",)
+# com.loopx.chat superseded the personal-bots label; keep both so an older
+# installation can still hand off while the migration is in flight.
+CHAT_AGENTS = ("com.loopx.chat", "com.loopx.personal-bots.chat")
 
 
 def process_identity(pid: int) -> tuple[int, str, int, int] | None:
