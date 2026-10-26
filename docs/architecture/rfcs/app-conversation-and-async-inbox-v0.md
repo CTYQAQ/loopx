@@ -45,8 +45,11 @@ existing group listeners. Replies recheck the original source under that App;
 they do not require group-member scopes for private messages.
 
 An existing group listener can also admit owner-private Chat through the same
-verified App profile. Settings → Lark → owner private Chat reuses that profile;
-aliases of the same App cannot start a competing listener. One consumer dispatches
+verified App. Settings → Lark → owner private Chat resolves a verified profile
+alias to the unique existing listener selector, including a legacy App ID,
+instead of starting a competing listener. Inventory discovery supports both
+profile names and App IDs; removal, retargeting and identity changes still reject.
+One consumer dispatches
 explicit group events to the existing group admission and private events to
 Core owner admission. Rejection never falls through to the other audience.
 Group grants and review callbacks remain separate, and disconnecting either
