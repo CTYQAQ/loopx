@@ -423,7 +423,7 @@ def run_once(env: dict[str, str]) -> dict:
         raise ValueError("LOOPX_TURN_ENVELOPE must be 0 or 1")
     execution = Execution(
         mode=env.get("LOOPX_EXECUTION_MODE", "heartbeat"),
-        context=env.get("LOOPX_ITERATION_CONTEXT", "fresh"),
+        context=env.get("LOOPX_ITERATION_CONTEXT"),
         sandbox=env.get("LOOPX_CODEX_SANDBOX", "danger-full-access"),
         timeout_seconds=(float(env["LOOPX_CODEX_TURN_TIMEOUT_SEC"])
                          if env.get("LOOPX_CODEX_TURN_TIMEOUT_SEC") else None),
