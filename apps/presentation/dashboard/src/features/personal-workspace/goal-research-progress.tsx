@@ -271,7 +271,7 @@ export function ResearchProgress({pack: p, packs, selectedId, zh, onSelect, onCi
     {p ? <>
       {p.native_outcomes ? <NativeResults native={p.native_outcomes} zh={zh} onCitation={onCitation}/> : null}
       {p.native_outcomes ? <RetainedImprovement native={p.native_outcomes} zh={zh} onCitation={onCitation}/> : null}
-      {result?.synthesis ? includeReport && !analysisOpen && <><ResearchSynthesis synthesis={result.synthesis} zh={zh} onCitation={onCitation}/>
+      {result?.synthesis ? !analysisOpen && <>{includeReport && <ResearchSynthesis synthesis={result.synthesis} zh={zh} onCitation={onCitation}/>}
         <details><summary>{zh ? "六项过程判读" : "Six process judgments"}</summary><ResearchMetrics key={`${p.pack_id}:${result.analysis_key}:${zh}`} pack={{...p, result}} zh={zh} onCitation={onCitation}/></details></>
         : result ? <ResearchMetrics key={`${p.pack_id}:${result.analysis_key}:${zh}`} pack={{...p, result}} zh={zh} onCitation={onCitation}/>
         : null}
