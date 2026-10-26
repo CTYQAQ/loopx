@@ -3,12 +3,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ChatModelMenu } from "../src/features/personal-workspace/chat-model-menu.tsx";
 import { ChannelHeader } from "../src/features/personal-workspace/channel-header.tsx";
+import { ComposerRuntimeControls } from "../src/features/personal-workspace/composer-controls.tsx";
 import { WorkspaceI18nProvider } from "../src/features/personal-workspace/i18n.tsx";
 
 // Presentation semantics only. Real width, focus, IME and native delivery still
 // belong to the packaged browser and production HTTP/provider checks.
 const originalWindow = globalThis.window;
-let assertions = 0;
 try {
   for (const locale of ["zh-CN", "en"]) {
     globalThis.window = { localStorage: { getItem: () => locale } };
@@ -51,7 +51,6 @@ try {
     assert.doesNotMatch(header("error"), /<button[^>]*disabled=""/, "A failed refresh can be retried");
     const stewardProps = {
       agents: [{ agentId: "codex", label: "Codex", available: true }], selectedAgentId: "codex",
-      selectedAgentModelReadback: { agent_model_id: "goal-only-model", agent_reasoning_effort: "high", agent_service_tier: "priority" },
       managerChannelBinding: { executor_endpoint: "codex", executor_kind: "individual", model: "gpt-6.1-sol", reasoning_effort: "xhigh", selection_policy: "preferred", allocation_reason: "product_default" },
       managerRuntime: { runtime_profile: "trusted_owner", sandbox: "danger-full-access", status: "ready" },
       onOpenManagerSettings() {},
@@ -63,15 +62,27 @@ try {
     assert.doesNotMatch(steward, /goal-only-model|Fast|personal-agent-select/, "The steward has one model owner, without Goal runtime/default controls");
     const restricted = header("idle", { ...stewardProps, managerRuntime: { runtime_profile: "restricted", sandbox: "read-only", status: "ready" } });
     assert.match(restricted, /只读|Read-only/);
-    const goal = header("idle", { ...stewardProps, selectedGoal: { goalId: "public-case", title: "Public Goal", agentLanes: [] } });
+    const goalHeader = header("idle", { ...stewardProps, selectedGoal: { goalId: "public-case", title: "Public Goal", agentLanes: [] } });
+    assert.doesNotMatch(goalHeader, /gpt-6\.1-sol|personal-chat-model-menu|personal-agent-select/, "Goal sending controls belong to the composer, and its header never inherits the steward binding");
+    const composer = (overrides = {}) => renderToStaticMarkup(createElement(WorkspaceI18nProvider, null,
+      createElement(ComposerRuntimeControls, { agents: stewardProps.agents, agentId: "codex", goalId: "public-case",
+        original: false, model: "next-model", effort: "low", onAgent() {}, onModel() {}, onEffort() {}, onDefaults() {},
+        readback: { agent_model_id: "goal-only-model", agent_reasoning_effort: "high", agent_service_tier: "priority" }, ...overrides })));
+    const goal = composer();
     assert.match(goal, /goal-only-model/);
     assert.match(goal, /Fast/);
-    assert.doesNotMatch(goal, /gpt-6\.1-sol/, "Goal readback does not inherit the steward model");
+    assert.match(goal, new RegExp(defaultsLabel), "Goal defaults stay discoverable beside the actual model readback");
+    const composerSummary = goal.slice(goal.indexOf("<summary"), goal.indexOf("</summary>"));
+    assert.doesNotMatch(composerSummary, /next-model|low/, "The shipped composer forwards actual Session readback separately from pending configuration");
+    const statusComposer = composer({ agentId: "status-only" });
+    assert.doesNotMatch(statusComposer, /goal-only-model|Fast|personal-chat-model-menu/, "Status-only has no model Session to report or configure");
+    const originalComposer = composer({ original: true });
+    assert.match(originalComposer, /goal-only-model/, "Original conversation controls still show their observed Session");
+    assert.doesNotMatch(originalComposer, new RegExp(`${defaultsLabel}|${locale === "zh-CN" ? "新对话配置" : "New conversation settings"}|personal-agent-select`), "Original conversation controls do not offer another executor or ordinary conversation defaults");
     const linked = header("idle", { readOnlySourceLabel: "Historical run", selectedGoal: { goalId: "source-case", title: "Historical run", agentLanes: [] } });
     const sourceBadge = linked.match(/class="personal-read-only-source"[^>]*>(.*?)<\/span>/)?.[1] ?? "";
     assert.match(sourceBadge, new RegExp(locale === "zh-CN" ? "只读" : "Read only"));
     assert.doesNotMatch(sourceBadge, /Historical run/, "The source badge does not repeat the visible Goal title");
-    assertions += 32;
   }
-  console.log(`Chat model/header: ${assertions} bilingual model, defaults and accessible refresh assertions passed (SSR only)`);
+  console.log("Chat model/header/composer: bilingual model, defaults and accessible refresh assertions passed (SSR only)");
 } finally { globalThis.window = originalWindow; }
