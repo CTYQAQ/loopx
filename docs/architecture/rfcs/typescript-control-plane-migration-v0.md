@@ -15,6 +15,20 @@
 
 ---
 
+### Todo summary-display projection has one TypeScript owner (2026-10-26)
+
+The existing `todo.context.page` now owns standalone summary/planning source
+selection, display normalization and handoff composition. Quota planning
+composes display in process; Python retains JSON/Python-value compatibility,
+bounded transport, mutable-row attachment and the text-revision codec.
+No persisted format or authority boundary changes. Python production shrinks
+273 lines; total production shrinks 116. Real CLI stdout lengths are unchanged
+for N=1/N=3; crossings are 1/3/3/74, versus baseline 1/3/3/75. The estimated
+73-crossing target remains unmet because the empty User planning call had no
+preceding display RPC. Both planning decisions remain. Existing legacy-path
+test failures, installed/CI and matched latency qualification remain explicit
+limits. [Retired symbols, evidence and facade exits](ledger/typescript-control-plane-migration-v0/2026-10-26-todo-summary-display-projection.md).
+
 ### Goal agent-context delegation projection converges in TypeScript (2026-10-25)
 
 `capability_hook.agent_context.project`

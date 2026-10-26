@@ -15,6 +15,17 @@
 ---
 
 
+### Todo 摘要展示投影收敛至唯一 TypeScript owner（2026-10-26）
+
+既有 `todo.context.page` 统一负责独立摘要／规划来源选择、展示规范化及 handoff
+组合。Quota planning 在进程内组合展示；Python 保留 JSON／Python 值兼容、
+有界传输、可变行 attachment 及文本 revision codec。不改变持久化格式或 authority
+边界。Python 生产代码净减 273 行，生产代码总计净减 116 行。N=1／N=3 的真实
+CLI stdout 长度不变；跨运行时调用为 1/3/3/74，基线为 1/3/3/75。预估的
+73 次目标尚未达到，因为空 User 规划原本没有前置展示 RPC。两次规划决策保留。
+既有 legacy 路径测试失败、installed／CI 及同条件延迟资格仍为明确限制。
+[删除符号、证据与 facade 退出条件](ledger/typescript-control-plane-migration-v0/2026-10-26-todo-summary-display-projection.zh-CN.md)。
+
 ### Goal agent-context 委派投影收敛至 TypeScript（2026-10-25）
 
 `capability_hook.agent_context.project`
