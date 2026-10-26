@@ -1315,9 +1315,13 @@ state or grant. Response row count is bounded; server-side journal reads and
 prefix hashing still scale with full history and no latency improvement is
 claimed. HTTP/store and source/packaged browser checks qualify this bounded
 history path; installed native input, reply threading and live App/Lark media
-remain separate acceptance. The scoped packaged `--pagination-only` journey
-does not certify the default return scenario's background-read wait, which also
-times out with the unchanged baseline production code; that gap remains open.
+remain separate acceptance. Earlier baseline and `--pagination-only` runs did
+not qualify the default return scenario's background wait. That historical
+timeout is retained; the default return journey now reads background revisions
+across steward/Goal navigation. The App entry keeps one workspace and its
+readers mounted, sharing its source readback. Pending or failed discovery still
+gates the ordinary queue. Disposable HTTP/store checks qualify this continuation
+path, not installed native or live-provider acceptance.
 
 Following the newest reply also survives a resized viewport or timeline, including
 image layout and expanded replies, without waiting for another message. Scrolling

@@ -284,11 +284,14 @@ export function ResearchProgress({pack: p, packs, selectedId, zh, onSelect, onCi
             {measured?.applicability === "historical" ? <p>{zh ? "历史捕获：用量来源已变化或不可读，当前用量未核验。" : "Historical capture: the usage source changed or is unavailable; current usage is unverified."}</p> : null}
             {!usage ? <p>{zh ? "尚无用量捕获；未测，不记零。" : "No usage capture; unmeasured, not zero."}</p> : null}
             {usage ? <p>{usage.method === "codex_observed_session_counters_v1" ? (zh ? "仅已观测计数；未记录的请求、后续用量、继承前缀、设置、评测和操作者成本未知。" : "Observed counters only. Unrecorded requests, later usage, inherited prefixes, setup, evaluation and operator costs remain unknown.") : (zh ? "仅本次完整捕获；继承前缀、设置、原生评测、操作者及后续未完成轮不包含。" : "This complete capture only; inherited prefixes, setup, native evaluation, operator work and later incomplete Turns are excluded.")}</p> : null}
+            <p>{zh ? "会话输入包含缓存与未缓存输入；下方全部请求使用独立核对口径，是结构输入占比的分母，不能与会话计数相加。" : "Session input includes cached and uncached input. All-request input below uses the separately reconciled basis and is the input-share denominator; do not add it to session counters."}</p>
           </ContextHelp></div>
           <dl className="research-progress-values">
-            <div><dt>{zh ? "捕获窗口跨度" : "Captured elapsed time"}</dt><dd>{usage ? duration(usage.elapsed_seconds) : "—"}</dd></div>
-            <div><dt>{zh ? "未缓存输入" : "Uncached input"}</dt><dd>{usage ? number(usage.uncached_input_tokens) : "—"}<span> tokens</span></dd></div>
+            <div className="research-input-reading"><dt>{zh ? "会话输入" : "Session input"}</dt><dd>{usage ? number(usage.input_tokens) : "—"}<span> tokens</span>
+              {usage ? <span className="research-input-breakdown"><span>{zh ? "缓存" : "Cached"} {number(usage.cached_input_tokens)}</span><span>{zh ? "未缓存" : "Uncached"} {number(usage.uncached_input_tokens)}</span></span> : null}
+            </dd></div>
             <div><dt>{zh ? "输出（含推理）" : "Output (includes reasoning)"}</dt><dd>{usage ? number(usage.output_tokens) : "—"}<span> tokens</span></dd></div>
+            <div><dt>{zh ? "捕获窗口跨度" : "Captured elapsed time"}</dt><dd>{usage ? duration(usage.elapsed_seconds) : "—"}</dd></div>
           </dl>
           {incomplete ? <div className="research-usage-tail">
             <div className="research-usage-heading"><strong>{zh ? "末轮未完成" : "Final Turn incomplete"}</strong><ContextHelp icon={incomplete.usage ? undefined : CircleHelp} label={zh ? "末轮用量说明" : "About unfinished Turn usage"}>
@@ -314,7 +317,9 @@ export function ResearchProgress({pack: p, packs, selectedId, zh, onSelect, onCi
             {coverage?.status === "verified" ? <>
               <p>{number(coverage.unique_requests)} {zh ? "次请求" : "requests"} · {number(coverage.compaction_requests)} {zh ? "次上下文压缩" : "context compactions"}</p>
               <dl className="research-request-values">
-                <div><dt>{zh ? "全部请求 · 未缓存输入" : "All requests · uncached input"}</dt><dd>{number(coverage.all_requests.input_tokens - coverage.all_requests.cached_input_tokens)} <span>tokens</span></dd></div>
+                <div><dt>{zh ? "全部请求 · 输入" : "All requests · input"}</dt><dd>{number(coverage.all_requests.input_tokens)} <span>tokens</span>
+                  <span className="research-input-breakdown"><span>{zh ? "缓存" : "Cached"} {number(coverage.all_requests.cached_input_tokens)}</span><span>{zh ? "未缓存" : "Uncached"} {number(coverage.all_requests.input_tokens - coverage.all_requests.cached_input_tokens)}</span></span>
+                </dd></div>
                 <div><dt>{zh ? "全部请求 · 输出" : "All requests · output"}</dt><dd>{number(coverage.all_requests.output_tokens)} <span>tokens</span></dd></div>
                 <div><dt>{zh ? "其中压缩 · 未缓存输入" : "Of which compaction · uncached input"}</dt><dd>{number(coverage.compaction.input_tokens - coverage.compaction.cached_input_tokens)} <span>tokens</span></dd></div>
                 <div><dt>{zh ? "其中压缩 · 输出" : "Of which compaction · output"}</dt><dd>{number(coverage.compaction.output_tokens)} <span>tokens</span></dd></div>

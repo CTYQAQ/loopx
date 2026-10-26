@@ -112,6 +112,8 @@ try {
   assert.ok((await (await recoveredRead).text()).includes("Revised checked result"), "A non-current conversation recovers before navigation back");
   await page.locator(".personal-manager-link").click();
   await chat();
+  assert.equal(await composer.inputValue(), "Keep this draft while original history recovers.",
+    "Goal navigation and background recovery must preserve the steward draft");
   await page.getByText("Revised checked result", { exact: true }).waitFor({ state: "visible" });
   assert.equal(await page.getByText("First checked result", { exact: true }).count(), 1);
   assert.equal(await page.getByText("Revised checked result", { exact: true }).count(), 1);

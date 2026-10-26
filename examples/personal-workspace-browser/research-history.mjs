@@ -1219,7 +1219,9 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       await analysisClosed();
       await page.setViewportSize({width: 1280, height: 900});
       await progress.locator('.research-progress-basis > summary').click();
-      assert.equal(await progress.locator(".research-progress-values dd").filter({hasText: /^100 tokens$/}).count(), 1, "Uncached input is shown without charging cache twice");
+      const inputReading = progress.locator('.research-input-reading');
+      assert.match(await inputReading.innerText(), /1,?100.*1,?000.*100/s,
+        'Session input includes cache, with cached and uncached subsets kept distinct');
       // Actual observations precede provenance; details and help remain operable.
       assert.equal(await progress.locator('.research-usage-detail').evaluate(e => e.open), false);
       assert.doesNotMatch(await progress.innerText(), /codex_complete_session_counters_v1/);
