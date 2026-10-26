@@ -73,7 +73,7 @@ try {
     const restricted = header("idle", { ...stewardProps, managerRuntime: { runtime_profile: "restricted", sandbox: "read-only", status: "ready" } });
     assert.match(restricted, /只读|Read-only/);
     const goalHeader = header("idle", { ...stewardProps, selectedGoal: { goalId: "public-case", title: "Public Goal", agentLanes: [] } });
-    assert.doesNotMatch(goalHeader, /gpt-6\.1-sol|personal-chat-model-menu|personal-agent-select/, "Goal sending controls belong to the composer, and its header never inherits the steward binding");
+    assert.doesNotMatch(goalHeader, /goal-only-model|Fast|gpt-6\.1-sol|personal-chat-model-menu|personal-agent-select/, "Goal sending controls belong to the composer, and its header never inherits the steward binding");
     const composer = (overrides = {}) => renderToStaticMarkup(createElement(WorkspaceI18nProvider, null,
       createElement(ComposerRuntimeControls, { agents: stewardProps.agents, agentId: "codex", goalId: "public-case",
         original: false, model: "next-model", effort: "low", onAgent() {}, onModel() {}, onEffort() {}, onDefaults() {},
