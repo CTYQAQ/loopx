@@ -233,8 +233,14 @@ When an explicit analysis supplies a whole-history translation, use it throughou
 the matching research snapshot, including routes, decisions and expanded history.
 Offer one in-place original/translation switch; keep coverage and source/version
 detail in contextual help, with incomplete or inapplicable coverage visible.
+Version comparison uses that same qualified field projection for both records,
+while lineage and change counts still compare original records. Keep both
+originals readable in place; a translation must not create a source change.
 Keep original evidence directly readable. A language switch only reads; missing
 or failed translations retain original text and never silently launch a model.
+
+版本比较复用两条记录已核对的同一快照译文；版本关系与差异数仍按原始记录计算，
+两侧原文可原位展开，不把译文变化算作来源变化。
 
 刷新和前进后退保留视图、时间分组与证据焦点；标签之间保留阅读位置。选择状态按
 Goal 和来源隔离。研究中从侧栏切换 Goal 仍停留在研究页，读取新 Goal 自身证据；
