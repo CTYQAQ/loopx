@@ -1830,7 +1830,13 @@ def serve_chat(
     server = ChatHTTPServer((host, port), ChatRequestHandler)
     server.registry_path = resolved_registry_path
     server.runtime_root = runtime_root
-    server.codex_account_service = CodexAccountService(runtime_root)
+    # Account policy follows the registry's native owner. A separate Chat
+    # history directory must not silently create another account policy.
+    account_runtime_root = (
+        resolve_runtime_root(registry, registry_path=resolved_registry_path)
+        if registry.get("common_runtime_root") else runtime_root
+    )
+    server.codex_account_service = CodexAccountService(account_runtime_root)
     server.runtime_root_override = resolved_runtime_root_override
     server.scan_roots = resolved_scan_roots
     server.limit = limit
