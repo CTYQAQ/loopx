@@ -87,10 +87,14 @@ def _last_page(request):
   + [(host, surface, False, True, False) for host in ("benchmark", "code_mode")
      for surface in ("quota_packet", "turn_envelope")]
   + [("code_mode", surface, False, True, True) for surface in ("quota_packet", "turn_envelope")])
-def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, host, surface, failed_primary, resumed, adaptive, hook_loss=None, shared_root=False, checkpoint_handoff=False, handoff_socket=None, native_pragma=False, native_read_batch=2, native_history_tokens=None, bounded_pages=False, resume_loss=None):
+def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, host, surface, failed_primary, resumed, adaptive, hook_loss=None, shared_root=False, checkpoint_handoff=False, handoff_socket=None, native_pragma=False, native_read_batch=2, native_history_tokens=None, bounded_pages=False, resume_loss=None, ssh_goal=False):
     # Real worker qualification follows returned cursors; output budgets can
     # shrink a page, so precomputed fixed offsets are not its production path.
     bounded_pages = bounded_pages or host == "benchmark"
+    # These shapes retain complete, independently checked reader pages in the
+    # native-selected replay. Other shapes below deliberately exercise reset
+    # and exact-original recovery instead of claiming qualified reuse.
+    qualified_resume = host in {"benchmark", "code_mode"}
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     binary, env, workspace, home = _native_fixture(tmp_path)
     env.pop("CODEX_ROLLOUT_TRACE_ROOT", None)
@@ -117,16 +121,17 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
     installed_cli = os.environ.get("LOOPX_NATIVE_CONTEXT_CLI")
     if installed_cli:
         cli = [installed_cli, "--cli-bin", installed_cli]
+    host_args = ["--runtime-profile", "codex_app_ssh_goal"] if ssh_goal else ["--codex-app"]
     context_option = "--codex-context-root" if shared_root else "--codex-context-dir"
     native_configuration = None
     if shared_root:
         prepared = subprocess.run(cli + ["--format", "json", "quota", "context-config",
-            "--context-delivery", "on", "--codex-app", context_option, str(lifecycle), "--goal-id", GOAL_ID, "--agent-id", AGENT_ID],
+            "--context-delivery", "on", *host_args, context_option, str(lifecycle), "--goal-id", GOAL_ID, "--agent-id", AGENT_ID],
             capture_output=True, text=True, timeout=15)
         assert prepared.returncode == 0, prepared.stderr
         native_configuration = json.loads(prepared.stdout)["native_config"]
     hook_command = (native_configuration["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-        if native_configuration else shlex.join(cli + ["quota", "context-hook", "--context-delivery", "on", "--codex-app", context_option, str(lifecycle)]))
+        if native_configuration else shlex.join(cli + ["quota", "context-hook", "--context-delivery", "on", *host_args, context_option, str(lifecycle)]))
     if failed_primary:
         # Fault only the primary journal update. Production code must still
         # return the original full-read reference; no test recovery handler.
@@ -154,21 +159,26 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                f"os.environ['PYTHONPATH']={str(Path(__file__).resolve().parents[2])!r}\n"
                + f"os.execv({sys.executable!r}, [{sys.executable!r}, '-m', 'loopx.entrypoint', *sys.argv[1:]])\n"))
         wrapper.chmod(0o700)
-        hook_command = shlex.join([str(wrapper), "quota", "context-hook", "--context-delivery", "on", "--codex-app", context_option, str(lifecycle)])
+        hook_command = shlex.join([str(wrapper), "quota", "context-hook", "--context-delivery", "on", *host_args, context_option, str(lifecycle)])
     handler = {"type": "command", "command": hook_command, "timeout": 10}
     if host != "benchmark":
         from loopx.control_plane.turn_driver.codex_context import CONTEXT_LIFECYCLE_HOOKS
 
-        (home / "hooks.json").write_text(json.dumps({"hooks": {
+        hooks = (json.loads(json.dumps(native_configuration["hooks"])) if native_configuration else {
             event: [{**({"matcher": "^Bash$"} if event == "PostToolUse" else {}),
-                     "hooks": [handler]}] for event in CONTEXT_LIFECYCLE_HOOKS}}))
+                     "hooks": [dict(handler)]}] for event in CONTEXT_LIFECYCLE_HOOKS})
+        for groups in hooks.values():
+            for group in groups:
+                for configured in group["hooks"]:
+                    configured["command"] = hook_command
+        (home / "hooks.json").write_text(json.dumps({"hooks": hooks}))
     errors, snapshots = [], []
     stages = {"phase": "start", "pages": [], "baseline_confirmed": False, "compact_response": None}
     wires, page_digests, read_paths = {}, {}, {}
     command = [*cli, "--registry", str(registry), "--runtime-root", str(runtime),
         "--format", "json", "quota", "should-run", "--goal-id", GOAL_ID, "--agent-id", AGENT_ID,
-        "--todo-id", TODO_ID, "--turn-instance-id", "native-capture-turn", "--codex-app",
-        "--decision-output-root", str(root), "--context-delivery", "on", "--codex-app", context_option, str(lifecycle)]
+        "--todo-id", TODO_ID, "--turn-instance-id", "native-capture-turn",
+        "--decision-output-root", str(root), "--context-delivery", "on", *host_args, context_option, str(lifecycle)]
     if handoff_socket:
         command += ["--decision-handoff-socket", handoff_socket]
     if surface == "turn_envelope":
@@ -176,16 +186,22 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
     generated_guard = None
     if shared_root:
         generated = subprocess.run([*cli, "--registry", str(registry), "--runtime-root", str(runtime),
-            "--format", "json", "heartbeat-prompt", "--thin", "--codex-app",
+            "--format", "json", "heartbeat-prompt", "--thin",
             "--goal-id", GOAL_ID, "--agent-id", AGENT_ID, "--decision-output-root", str(root),
-            "--context-delivery", "on", "--codex-app", context_option, str(lifecycle), *(["--turn-envelope"] if surface == "turn_envelope" else [])],
+            "--context-delivery", "on", *host_args, context_option, str(lifecycle), *(["--turn-envelope"] if surface == "turn_envelope" else [])],
             capture_output=True, text=True, timeout=15)
-        assert generated.returncode == 0, generated.stderr
+        assert generated.returncode == 0, generated.stderr or generated.stdout
         prompt = json.loads(generated.stdout)
         assert prompt["ok"], prompt
-        generated_guard = next(line for line in prompt["task_body"].splitlines() if "quota should-run" in line)
-        assert '${LOOPX_TURN:?}' in generated_guard and context_option in generated_guard
-        generated_guard += " --todo-id " + shlex.quote(TODO_ID)
+        generated_guard = next(line for line in prompt["task_body"].splitlines() if "quota should-run" in line).strip("`")
+        assert context_option in generated_guard
+        if ssh_goal:
+            assert "--runtime-profile codex_app_ssh_goal" in generated_guard
+            assert "--heartbeat-turn-receipt" not in generated_guard
+        else:
+            assert '${LOOPX_TURN:?}' in generated_guard
+        if not ssh_goal:
+            generated_guard += " --todo-id " + shlex.quote(TODO_ID)
         env["LOOPX_TURN"] = "native-capture-turn"
 
     checkpoint_wakes, held_captures = [], []
@@ -195,7 +211,17 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         argv = list(command)
         if checkpoint_handoff:
             assert argv[argv.index("--decision-handoff-socket") + 1] == checkpoint_wakes[-1].socket_path
-        return (generated_guard or shlex.join(argv)) + " > " + shlex.quote(str(wire_paths[name])) + " && printf WIRE_READY"
+        rendered = generated_guard or shlex.join(argv)
+        if ssh_goal and name == "warm":
+            # Continue the captured native Turn; a new begin-turn before
+            # settlement must correctly enter prior-Turn recovery instead.
+            original = json.loads(snapshots[0][1])
+            continued = shlex.split(rendered)
+            continued.remove("--begin-turn")
+            continued += ["--turn-instance-id", original["heartbeat_receipt"]["turn_instance_id"],
+                          "--todo-id", TODO_ID]
+            rendered = shlex.join(continued)
+        return rendered + " > " + shlex.quote(str(wire_paths[name])) + " && cat " + shlex.quote(str(wire_paths[name]))
 
     def pages(name, path):
         raw = path.read_bytes()
@@ -274,7 +300,7 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             if phase == "resuming":
                 if not resume_loss:
                     assert delivered(request, "cold") == read_paths["cold"].read_text().rstrip("\n")
-                if host == "benchmark":
+                if qualified_resume:
                     # Actual worker process exit/resume, qualified by the shared
                     # native-selected replay checkpoint. No old full prefetch.
                     assert ("LoopX context baseline invalidated." in _input_text(request)) == bool(resume_loss)
@@ -296,7 +322,13 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             cmd = invoke("warm")
         elif phase in {"cold_ready", "warm_ready"}:
             name = phase.split("_")[0]
-            descriptor = json.loads(wire_paths[name].read_text())
+            # The native consumer must discover the next command from its
+            # actual retained input. Disk reads below are independent expected
+            # byte/state oracles, never a substitute for a truncated guard.
+            descriptor = _last_page(request)
+            assert descriptor and descriptor["ok"], "native guard is not complete model-visible JSON"
+            assert descriptor == json.loads(wire_paths[name].read_bytes())
+            assert len(json.dumps(descriptor, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 7900
             read_commands[name] = descriptor["command"]
             # The public native CLI now shares context-project's paged reader.
             # Keep the independent full-wire oracle separate from its page view.
@@ -309,8 +341,11 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             capture = Path(wires[name]["recovery"]["path"]).parent / "decision.json"
             snapshots.append((capture, capture.read_bytes()))
             read_paths[name] = Path(wires[name]["recovery"]["path"]) if wires[name]["mode"] == "full" else wire_file
-            stages["pages"] = pages(name, read_paths[name])
+            stages["pages"] = ([descriptor["next_command"]] if not descriptor["eof"] else []) if bounded_pages else pages(name, read_paths[name])
+            page_digests[name] = descriptor["sha256"]
             stages["phase"] = name + "_read"
+            if not stages["pages"]:
+                return response(request, number, message)
             cmd = stages["pages"].pop(0)
         elif phase == "cold_read":
             assert delivered(request, "cold") == read_paths["cold"].read_text().rstrip("\n")
@@ -383,7 +418,7 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 commands.append(stages["pages"].pop(0))
             if adaptive:
                 code = "".join("{const r=await tools.exec_command(" + json.dumps({
-                    "cmd": command, "max_output_tokens": 2000 if bounded_pages else 2400})
+                    "cmd": command, "login": False, "max_output_tokens": 2000 if bounded_pages else 2400})
                     + ");text(r.exit_code === 0 ? r.output : r);}" for command in commands)
                 return {"type": "custom_tool_call", "id": f"ctc_{number}", "call_id": f"call_{number}",
                     "name": "exec", "input": pragma + code}
@@ -485,6 +520,7 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                     "components": [{"id": "task", "source_path": str(state)}], "point_metadata": {}}))
                 env["LOOPX_CHECKPOINT_REQUEST"] = str(declaration)
             result = run_once(env)
+            assert not errors, errors
             assert result["ok"] and result["host_invoked"], result
             assert result["context_transport"] == {"available": True}
             assert result["session"]["session_id"]
@@ -543,9 +579,12 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         else:
             # This large semantic fixture reads full, delta and recovery pages.
             # Allow their native hook/CLI IO; this is not a latency qualification.
-            session_id = _app_server(binary, env, workspace, home, True, sandbox="workspace-write", turn_timeout_sec=60)
+            # The SSH operator is unrestricted. A per-command network sandbox
+            # cannot share the host-local Effect service across native resumes.
+            sandbox = "danger-full-access" if ssh_goal else "workspace-write"
+            session_id = _app_server(binary, env, workspace, home, True, sandbox=sandbox, turn_timeout_sec=60)
             if resumed:
-                assert _app_server(binary, env, workspace, home, True, sandbox="workspace-write",
+                assert _app_server(binary, env, workspace, home, True, sandbox=sandbox,
                                    resume=session_id, turn_timeout_sec=60) == session_id
     assert not errors, errors
 
@@ -583,7 +622,10 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
     current = prepare_context_delivery(json.loads(projection.read_bytes()), scope={k: wires["warm"]["target"][k] for k in ("goal_id", "agent_id", "session_id", "context_epoch")},
         capture_id=wires["warm"]["target"]["capture_id"], surface=surface)
     baseline = wires["cold"]
-    if resumed and host != "benchmark":
+    if resumed and qualified_resume and not resume_loss:
+        assert wires["warm"]["base"] == baseline["target"]
+        assert current["target"]["context_epoch"] == baseline["target"]["context_epoch"]
+    elif resumed and not qualified_resume:
         # This path independently reread every original byte after a reset.
         # Bind those verified bytes to the new native epoch, rather than letting
         # automatic full fallback conceal an obsolete pre-loss baseline.
@@ -693,3 +735,10 @@ def test_native_benchmark_context_keeps_checkpoint_handoff(tmp_path, monkeypatch
 def test_native_capture_release_preserves_delta_and_recovery(tmp_path, monkeypatch, private_handoff, surface):  # noqa: F811 -- fixture injection
     test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
         "code_mode", surface, False, True, True, handoff_socket=private_handoff)
+
+
+@pytest.mark.parametrize("surface", ["quota_packet", "turn_envelope"])
+def test_native_ssh_goal_keeps_identity_delta_and_full_recovery(tmp_path, monkeypatch, surface):
+    test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
+        "code_mode", surface, False, True, True, "missing", shared_root=True,
+        native_read_batch=1, bounded_pages=True, ssh_goal=True)

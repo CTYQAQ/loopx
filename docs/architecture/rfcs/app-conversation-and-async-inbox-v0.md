@@ -1298,6 +1298,27 @@ already timed-out fetch. [Synthetic source-order captures](../../assets/personal
 qualify this read/display boundary, not full history pagination, reply threading
 or installed App/Lark bidirectional delivery.
 
+The same Session snapshot endpoint now supports opt-in `message_limit` (1–200)
+and `message_cursor`. Its additive `loopx_chat_message_page_v1` read metadata
+binds an offset to the original Session, frozen row count and raw-prefix digest.
+Appending during a read cannot move that boundary; rewriting/truncating it or
+an unreadable journal refuses the page. Complete bodies and attachments are not
+trimmed. Collaboration projections choose the carrier from the whole frozen
+context, then project the selected page and its related return labels; crossing
+a page does not create another carrier or reload every off-page Turn. The TS
+history owner drains and validates every page before publishing a complete
+snapshot, then rechecks an exact connection/Goal source. Interrupted, repeated,
+mis-scoped or inconsistent cursors remain unreadable and retry through the
+existing recovery path, without model replay. Unpaged v1 callers remain
+compatible. This is a stateless read hint, not a new store, consumer, execution
+state or grant. Response row count is bounded; server-side journal reads and
+prefix hashing still scale with full history and no latency improvement is
+claimed. HTTP/store and source/packaged browser checks qualify this bounded
+history path; installed native input, reply threading and live App/Lark media
+remain separate acceptance. The scoped packaged `--pagination-only` journey
+does not certify the default return scenario's background-read wait, which also
+times out with the unchanged baseline production code; that gap remains open.
+
 Following the newest reply also survives a resized viewport or timeline, including
 image layout and expanded replies, without waiting for another message. Scrolling
 up keeps the reader in history across layout changes; the existing latest-message

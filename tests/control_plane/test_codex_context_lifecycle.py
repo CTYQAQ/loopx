@@ -1,6 +1,7 @@
 """Native delivery assumptions, invalidation, recovery and scope isolation."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -199,6 +200,22 @@ def test_native_page_zero_exposes_current_continuity_and_preserves_full_recovery
     pages = capture_pages(second["recovery"]["path"], page["sha256"])
     assert json.loads("".join(p["content"] for p in pages)) == payload
     assert (tmp_path / "session.json").read_bytes() == before
+
+
+def test_native_page_zero_without_metadata_room_retains_original_recovery(tmp_path, monkeypatch):
+    from loopx.cli_commands import quota_capture
+    from loopx.control_plane.quota.error_codes import QuotaDecisionTransportError
+
+    setup(tmp_path, monkeypatch)
+    _, wire = project(tmp_path, payload={"ok": True, "requirements": "完整要求🙂" * 1000})
+    before = context._state(tmp_path)
+    monkeypatch.setattr(quota_capture, "NATIVE_CONTEXT_PAGE_OUTPUT_BYTES", 1)
+    with pytest.raises(QuotaDecisionTransportError, match="saved original decision"):
+        quota_capture.native_context_capture_view(wire, Path(wire["recovery"]["path"]).parent,
+            context_directory=str(tmp_path))
+    assert context._state(tmp_path) == before
+    raw = Path(wire["recovery"]["path"]).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == wire["recovery"]["sha256"]
 
 
 @pytest.mark.parametrize("mode", ["full", "delta"])
@@ -853,6 +870,9 @@ def test_lost_hook_reference_is_scoped_read_only_and_pins_later_pages(tmp_path, 
     ([], None),
     (["--codex-app"], "codex_app_heartbeat"),
     (["--runtime-profile", "codex_app_heartbeat"], "codex_app_heartbeat"),
+    (["--runtime-profile", "codex_app_ssh_goal"], "codex_app_ssh_goal"),
+    (["--host-surface", "codex_app_ssh", "--scheduler-owner", "agent_cli_loop", "--execution-mode", "interactive"], "codex_app_ssh_goal"),
+    (["--host-surface", "codex_app_ssh", "--scheduler-owner", "host_automation", "--execution-mode", "hosted_automation"], None),
     (["--host-surface", "codex_app", "--scheduler-owner", "host_automation", "--execution-mode", "hosted_automation"], "codex_app_heartbeat"),
     (["--host-surface", "codex_cli", "--scheduler-owner", "outer_controller", "--execution-mode", "isolated_headless"], None),
     (["--runtime-profile", "generic_cli"], None),
@@ -891,7 +911,7 @@ def test_activation_reuses_declared_host_mode_and_off_is_inert(tmp_path, monkeyp
     expected = expected if setting == "on" else None
     assert activation["requested"] == (setting or "off")
     assert activation["enabled"] is (expected is not None) and activation["scenario"] == expected
-    assert activation["supported_scenarios"] == ["codex_benchmark_heartbeat", "codex_app_heartbeat"]
+    assert activation["supported_scenarios"] == ["codex_benchmark_heartbeat", "codex_app_heartbeat", "codex_app_ssh_goal"]
     if expected is None:
         assert "native_config" not in result
     else:
