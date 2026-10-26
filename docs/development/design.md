@@ -202,7 +202,7 @@ shift the controls. Reflow the composition on narrow screens without hiding
 action consequences or relying on fixed alignment offsets.
 
 选中问题后聚焦阅读一条结论，完整正文与记录状态保留；全部结论可直接切换，反驳和
-待检查计数仍可见。刷新与返回保留所选结论，全景可原位展开或通过原入口返回，
+暂定结论计数仍可见。刷新与返回保留所选结论，全景可原位展开或通过原入口返回，
 不再把整张图和全部折叠标题堆在所选正文之前。
 路线标题区分起点与末端并自然换行；列表收起长标题时，一次操作进入现有阅读器查看
 完整原文，键盘返回准确入口。视图、分析、帮助和刷新共用主控件行，模型、用量与

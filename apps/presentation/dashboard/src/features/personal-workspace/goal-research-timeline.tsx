@@ -1,3 +1,4 @@
+import {exploreFindingCopy} from "./explore-finding-copy";
 import {CircleHelp} from "lucide-react";
 import {useLayoutEffect, useRef, useState, type CSSProperties} from "react";
 import type {ExploreTimeline, TimelineFinding, TimelineNode, TimelinePhase} from "../../../../../../loopx/control_plane/presentation/explore_timeline.js";
@@ -32,6 +33,7 @@ export function GoalResearchTimeline({timeline, zh, selectedIds, selectedDay, da
     observer.observe(element);
     return () => observer.disconnect();
   }, [timeline.start, timeline.end]);
+  const findingCopy = exploreFindingCopy(zh);
   const copy: Copy = zh ? {
     early: "前段", middle: "中段", late: "后段", items: "研究项", findings: "结论",
     decisions: "显式决策", none: "未记录显式决策", changed: "变化", stopped: "停止", retained: "保留",
@@ -40,7 +42,7 @@ export function GoalResearchTimeline({timeline, zh, selectedIds, selectedDay, da
     routes: "研究路线", routeHint: "仅由显式关联或父子分组相连", singles: "未关联研究项",
     trail: "决策轨迹", more: "显示更多决策", all: "全部时段",
     span: "记录跨度", start: "起点", end: "末端", replan: "转向", continue: "继续", stop: "停止", wait: "等待", no_change: "无变化", ask_human: "请人决定",
-    confirmed: "来源记为确认", refuted: "已反驳", tentative: "待检查", unlabeled: "无结论", phaseNote: "按记录时间三等分，仅为阅读分组，不是预声明的评估窗口。",
+    ...findingCopy.labels, unlabeled: "无结论", phaseNote: "按记录时间三等分，仅为阅读分组，不是预声明的评估窗口。",
     noTime: "没有可用的记录时间，无法放上时间轴；下方记录仍可完整阅读。",
   } : {
     early: "Early", middle: "Middle", late: "Late", items: "Research items", findings: "Findings",
@@ -50,7 +52,7 @@ export function GoalResearchTimeline({timeline, zh, selectedIds, selectedDay, da
     routes: "Research routes", routeHint: "Connected only by recorded relationships or parent grouping", singles: "Unlinked research items",
     trail: "Decision history", more: "Show more decisions", all: "Whole history",
     span: "Recorded span", start: "Start", end: "End", replan: "Replan", continue: "Continue", stop: "Stop", wait: "Wait", no_change: "No change", ask_human: "Ask human",
-    confirmed: "Recorded confirmation", refuted: "Refuted", tentative: "Tentative", unlabeled: "No finding", phaseNote: "Equal thirds of record time, for reading only; not a pre-declared evaluation window.",
+    ...findingCopy.labels, unlabeled: "No finding", phaseNote: "Equal thirds of record time, for reading only; not a pre-declared evaluation window.",
     noTime: "No usable record time; the history cannot be placed on a time axis. All records remain readable below.",
   };
   const {start, end} = timeline;
@@ -115,7 +117,7 @@ export function GoalResearchTimeline({timeline, zh, selectedIds, selectedDay, da
       <p>{zh ? "未关联问题按首次记录 UTC 日期收纳，不推断路线或因果。决策轨迹保留各轮显式决策，最新记录在前。" : "Unlinked questions group by first-record UTC date, without inferring a route or cause. Decision history retains each explicit decision, newest record first."}</p>
       <dl className="research-phase-details">{timeline.phases.map(item => <div key={item.index}><dt>{phaseName(item)}</dt><dd>{phaseDescription(item)}</dd></div>)}</dl>
     </ContextHelp>{phase !== null ? <button type="button" className="research-link" onClick={() => onPhase(null)}>{copy.all}</button> : null}</div>
-      <span className="research-phase-legend">{LABELS.map(key => <span key={key}><i className={tone(key)} aria-hidden="true"/>{label(key)}</span>)}</span>
+      <div className="research-phase-legend">{LABELS.map(key => <span key={key}><i className={tone(key)} aria-hidden="true"/>{label(key)}</span>)}<ContextHelp label={findingCopy.help}><p>{findingCopy.meaning}</p></ContextHelp></div>
     <div className="research-phases" role="group" aria-label={copy.phaseNote}>{timeline.phases.map(phaseCard)}</div>
     <div className="research-timeline-grid">
       <div className="research-row-label"><strong>{copy.density}</strong><small>
