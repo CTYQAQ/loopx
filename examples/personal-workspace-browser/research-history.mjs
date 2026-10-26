@@ -225,7 +225,7 @@ export const researchHistoryScenario = {
     // Its fixture is synthetic: these checks qualify reading and provenance,
     // not the scientific usefulness of a real model's interpretation.
     const synthesisOwner = await startHistoryOwner(resolve(repoRoot, "apps/presentation/dashboard/src/data/fixtures/research-synthesis-readback.json"));
-    const synthesisPage = await browser.newPage({viewport: {width: 1280, height: 900}});
+    const synthesisPage = await browser.newPage({viewport: {width: 1280, height: 900}, hasTouch: true});
     try {
       await synthesisPage.addInitScript(() => {if (!localStorage.getItem('loopx-pw-locale')) localStorage.setItem('loopx-pw-locale', 'zh-CN');});
       const query = new URLSearchParams({goalId: 'synthetic-research-readback', view: 'research', statusUrl: '/status.json?goal_id=synthetic-research-readback'});
@@ -236,6 +236,13 @@ export const researchHistoryScenario = {
       assert.equal(await synthesis.locator('.research-synthesis-finding').count(), 2);
       assert(await synthesis.locator('.research-synthesis-summary').evaluate(e => parseFloat(getComputedStyle(e).fontSize) >= 16), 'Main research account must be readable body text');
       assert.equal(await synthesis.locator('details[open]').count(), 0, 'Ordinary reading starts with observations; reasoning is optional detail');
+      const authorship = synthesis.getByRole('button', {name: 'Agent 分析 · 未校准', exact: true});
+      await authorship.focus();
+      await synthesisPage.getByRole('tooltip').getByText(/引用可读不等于解释已被独立核验/).waitFor();
+      await synthesisPage.keyboard.press('Escape');
+      assert(await authorship.evaluate(e => e === document.activeElement), 'Dismissing provenance keeps the ordinary report in focus');
+      await authorship.evaluate(e => e.blur());
+      await synthesisPage.mouse.move(1, 1);
       assert.equal(await synthesisPage.locator('.research-effect-metrics:visible').count(), 0, 'Metric counts do not replace the research account');
       const processJudgments = synthesisPage.locator('.research-progress > details').filter({hasText: '六项过程判读'});
       assert.equal(await processJudgments.count(), 1, 'Ordinary reading retains process judgments when the report has its own reading layer');
@@ -289,6 +296,8 @@ export const researchHistoryScenario = {
       assert(await synthesisPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-ordinary-mobile.png'), animations: 'disabled'});
       await reading.getByRole('button', {name: '汇报', exact: true}).click();
+      await synthesisPage.mouse.move(1, 1);
+      if (await synthesisPage.locator('.context-help-popover:popover-open').count()) await synthesisPage.keyboard.press('Escape');
       await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-report-mobile.png'), animations: 'disabled'});
       await synthesisPage.getByRole('button', {name: '深入解读', exact: true}).click();
       const analysis = synthesisPage.getByRole('region', {name: '轨迹深度分析', exact: true});
@@ -306,6 +315,31 @@ export const researchHistoryScenario = {
         await synthesisPage.setViewportSize(viewport);
         await synthesisPage.reload({waitUntil: 'domcontentloaded'});
         await analysis.locator('.research-synthesis-summary').waitFor();
+        assert.match(await analysis.locator('.analysis-report-meta').innerText(), /固定窗口.*3 个研究片段.*定向抽样/s,
+          'The selected report identity, episode count and partial sampling remain visible');
+        const scopeHelp = analysis.getByRole('button', {name: '分析范围', exact: true});
+        await scopeHelp.hover();
+        await synthesisPage.getByRole('tooltip').waitFor({state: 'visible'});
+        await synthesisPage.getByRole('tooltip').hover();
+        await synthesisPage.keyboard.press('Escape');
+        await scopeHelp.focus();
+        const scopeInfo = synthesisPage.getByRole('tooltip');
+        await scopeInfo.getByText('Agent 分析 · 未校准', {exact: true}).waitFor();
+        assert.match(await scopeInfo.innerText(), /不代表全程.*引用存在不代表模型解释已被独立核验/s);
+        await synthesisPage.keyboard.press('Escape');
+        assert(await scopeHelp.evaluate(e => e === document.activeElement));
+        assert(await analysis.isVisible(), 'Closing scope help does not close the report');
+        if (viewport.width === 390) {
+          await scopeHelp.tap();
+          await scopeInfo.waitFor({state: 'visible'});
+          assert(await scopeInfo.evaluate(e => e.scrollWidth <= e.clientWidth + 1), 'The same full scope explanation is readable by touch');
+          await synthesisPage.keyboard.press('Escape');
+        }
+        await analysis.evaluate(e => e.scrollIntoView({block: 'start'}));
+        assert(await analysis.locator('.research-report-account').first().locator(':scope > div').nth(1).locator('p').evaluate(e => {
+          const body = e.closest('.personal-channel-scroll').getBoundingClientRect(), paragraph = e.getBoundingClientRect();
+          return paragraph.top >= body.top && paragraph.bottom <= body.bottom;
+        }), 'The first short finding exposes both its observation and interpretation without scrolling past repeated metadata');
         await synthesisPage.screenshot({path: resolve(outputDir, `research-deep-link-${viewport.width}.png`), animations: 'disabled'});
         assert(await analysis.locator('.research-synthesis-summary').evaluate(e => {
           const box = e.getBoundingClientRect();
@@ -415,6 +449,11 @@ export const researchHistoryScenario = {
       await synthesisPage.setViewportSize({width: 390, height: 844});
       await synthesisPage.getByRole('button', {name: 'Read deeper', exact: true}).click();
       const english = synthesisPage.locator('.research-analysis');
+      assert.match(await english.locator('.analysis-report-meta').innerText(), /3 research episodes.*Purposive sample/);
+      await english.getByRole('button', {name: 'Analysis scope', exact: true}).focus();
+      await synthesisPage.getByRole('tooltip').getByText('Agent analysis · uncalibrated', {exact: true}).waitFor();
+      await synthesisPage.keyboard.press('Escape');
+      assert(await english.getByRole('button', {name: 'Goal research history', exact: true}).isVisible());
       const englishAccount = english.locator('.research-report-account').first();
       assert(await englishAccount.getByRole('heading', {name: 'Observation and evidence', exact: true}).isVisible());
       assert(await englishAccount.getByRole('heading', {name: 'Interpretation', exact: true}).isVisible());

@@ -266,7 +266,7 @@
 .research-reading-order button { min-height: 44px; padding: 6px 0; background: none; border: 0; color: var(--pw-text); font: inherit; font-size: var(--text-body); cursor: pointer; }
 .research-reading-order > span { color: var(--pw-muted); }
 .research-reading-layer { min-width: 0; scroll-margin-block-start: 16px; }
-.research-reading-layer .research-synthesis { margin-block: 24px 32px; }
+.research-reading-layer .research-synthesis:not(.research-synthesis-detail) { margin-block: 24px 32px; }
 .research-reading-layer:focus, .research-history-heading:focus { outline: none; }
 
 @media (max-width: 640px) {
