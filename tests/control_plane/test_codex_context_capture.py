@@ -223,7 +223,9 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             continued += ["--turn-instance-id", original["heartbeat_receipt"]["turn_instance_id"],
                           "--todo-id", TODO_ID]
             rendered = shlex.join(continued)
-        return rendered + " > " + shlex.quote(str(wire_paths[name])) + " && cat " + shlex.quote(str(wire_paths[name]))
+        # Observe the producer's stdout and retain an independent exact copy;
+        # a later cat is not the native guard's own output path.
+        return "set -o pipefail\n" + rendered + " | tee " + shlex.quote(str(wire_paths[name]))
 
     def pages(name, path):
         raw = path.read_bytes()
@@ -446,7 +448,7 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 commands.append(stages["pages"].pop(0))
             if adaptive:
                 code = "".join("{const r=await tools.exec_command(" + json.dumps({
-                    "cmd": command, "login": False, "max_output_tokens": 22000 if automatic_output_budget else 11000 if reader_output_bytes else 2000 if bounded_pages else 2400})
+                    "cmd": command, "login": False, "max_output_tokens": 22000 if automatic_output_budget and "context-read" in shlex.split(command) else 11000 if reader_output_bytes else 2000 if bounded_pages else 2400})
                     + ");text(r.exit_code === 0 ? r.output : r);}" for command in commands)
                 return {"type": "custom_tool_call", "id": f"ctc_{number}", "call_id": f"call_{number}",
                     "name": "exec", "input": pragma + code}
@@ -454,7 +456,8 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 "name": "exec", "input": pragma + "".join("text(await tools.exec_command(" + json.dumps({
                     "cmd": command, "max_output_tokens": 2000}) + "));" for command in commands)}
         return {"type": "function_call", "id": f"fc_{number}", "call_id": f"call_{number}",
-            "name": "exec_command", "arguments": json.dumps({"cmd": cmd, "max_output_tokens": 22000 if automatic_output_budget else 2000})}
+            "name": "exec_command", "arguments": json.dumps({"cmd": cmd,
+                "max_output_tokens": 22000 if automatic_output_budget and "context-read" in shlex.split(cmd) else 2000})}
 
     def usage(request, number):
         count = (2000000 if host == "benchmark" else 30000) if number == stages["compact_response"] else 1
