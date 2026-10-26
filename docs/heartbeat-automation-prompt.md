@@ -466,12 +466,22 @@ loopx --format json quota context-config --context-delivery on --codex-app \
   --goal-id <goal> --agent-id <agent>
 ```
 
-The result contains `native_config.hooks` and
+The result contains `native_config.config_overrides`, `native_config.hooks` and
 `native_config.developer_instructions`. Merge the hooks into the host's existing
 `hooks.json` or inline hook configuration, and append the recovery instruction to
-its existing developer instructions. Preserve other configuration. Review and
+its existing developer instructions. Apply each flat key/value in `config_overrides`
+to the native host configuration (or as a `-c key=value` override). This selects
+64000-byte context continuations, a 20000-token history limit, and a shell-scoped
+reader budget declaration. The initial guard stays small. Its instruction requests
+22000 tokens per reader result and 24000 for code-mode emission, with one directly
+forwarded stdout per call. Unconfigured hosts retain the small-page default;
+the isolated benchmark worker applies this profile automatically when opted in.
+Preserve other configuration. Review and
 trust only these exact hooks through Codex's native hook trust surface; the CLI
 does not install files, approve hashes, enable diagnostics or run a guard.
+Rollback removes these generated output overrides along with the context hooks
+and recovery instruction; restore any previous host values. The profile does not
+establish model retention, task gains or net fee savings.
 Use one configuration for the declared Goal/Agent. A shared private root keeps
 different native sessions in separate journals, including interleaved sessions.
 For an interactive SSH Goal, use `--runtime-profile codex_app_ssh_goal` in place

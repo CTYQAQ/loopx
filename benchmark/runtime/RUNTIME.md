@@ -96,8 +96,16 @@ reads, native discovery and hook IO in treatment cost, not just the delta bytes.
 
 Codex App setup uses the same product configuration renderer as the worker:
 `loopx --format json quota context-config --context-delivery on --codex-app --codex-context-root DIR --goal-id GOAL --agent-id AGENT`.
-It returns native hooks and persistent recovery instructions, without installing
-files or changing trust. A shared root isolates journals by native session;
+It returns native hooks, persistent recovery instructions and native output
+`config_overrides`, without installing files or changing trust. The opted-in
+worker applies those same overrides automatically: 64000-byte continuation
+outputs, a 20000-token history limit and a shell-scoped reader declaration. Page
+zero remains within the ordinary 7900-byte guard limit. Persistent instructions
+request 22000 tokens per reader result and 24000 for code-mode emission, one
+directly forwarded stdout at a time. Unknown budgets retain small pages. These
+limits do not prove model retention or net cost savings. Fresh off trials install
+none of this configuration; rollback also removes generated output overrides.
+A shared root isolates journals by native session;
 the trial-local single-session `--codex-context-dir` remains supported.
 See [heartbeat setup](../../docs/heartbeat-automation-prompt.md#opt-in-native-context-delivery)
 for activation, readback and rollback. Generated setup and a native
