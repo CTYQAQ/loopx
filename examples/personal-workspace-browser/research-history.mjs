@@ -136,7 +136,9 @@ export const researchHistoryScenario = {
     const nativeOwner = await startHistoryOwner(resolve(repoRoot, "apps/presentation/dashboard/src/data/fixtures/research-native-readback.json"));
     const nativePage = await browser.newPage({viewport: {width: 1280, height: 900}});
     try {
-      await nativePage.addInitScript(() => localStorage.setItem('loopx-pw-locale', 'zh-CN'));
+      await nativePage.addInitScript(() => {
+        if (!localStorage.getItem('loopx-pw-locale')) localStorage.setItem('loopx-pw-locale', 'zh-CN');
+      });
       // A captured research reader has no execution services. Its home must
       // identify the read-only source, rather than diagnose the owner's machine.
       await nativePage.goto(`${nativeOwner.base}/chat/?view=overview&statusUrl=%2Fstatus.json`, {waitUntil: 'domcontentloaded'});
@@ -150,6 +152,17 @@ export const researchHistoryScenario = {
       assert(await nativePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
       await nativePage.screenshot({path: resolve(outputDir, 'research-readonly-home-mobile.png'), animations: 'disabled'});
       await nativePage.setViewportSize({width: 1280, height: 900});
+      await nativePage.getByRole('button', {name: '对话', exact: true}).click();
+      const emptyConversation = nativePage.locator('.personal-timeline-empty');
+      await emptyConversation.waitFor();
+      assert.match(await emptyConversation.innerText(), /对话记录/);
+      assert.equal(await emptyConversation.locator('p, button, a').count(), 0, 'A read-only empty conversation must not invite an unavailable execution action');
+      assert.equal(await nativePage.locator('.personal-channel-composer').count(), 0);
+      await nativePage.evaluate(() => localStorage.setItem('loopx-pw-locale', 'en'));
+      await nativePage.reload({waitUntil: 'domcontentloaded'});
+      await nativePage.getByText('No conversation records', {exact: true}).waitFor();
+      assert.equal(await emptyConversation.locator('p, button, a').count(), 0);
+      await nativePage.evaluate(() => localStorage.setItem('loopx-pw-locale', 'zh-CN'));
       const query = new URLSearchParams({goalId: 'synthetic-research-readback', view: 'research', statusUrl: '/status.json?goal_id=synthetic-research-readback'});
       await nativePage.goto(`${nativeOwner.base}/chat/?${query}`, {waitUntil: 'domcontentloaded'});
       const native = nativePage.getByRole('region', {name: '原生测量', exact: true});
