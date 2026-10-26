@@ -7,6 +7,7 @@
 - **Created:** 2026-10-26
 - **Last normative revision:** 2026-10-26
 - **Implementation baseline:** LoopX `15803cd7dcc2fc517049809bbe58998f04f5acac`；LayerFS 源码 `ad78914e36b258b360daf13aec164b5655814689`。
+- **Tracking:** [LoopX #7406](https://github.com/loopx-project/loopx/issues/7406) · [LayerFS #461](https://github.com/Ephemeral-AI-Lab/layerfs/issues/461)。
 - **Language mirror:** [English](layerfs-engineering-exploration-evaluation-v0.md)
 - **Related contracts:** [Explore](research-exploration-control-plane-v0.zh-CN.md)、[研究状态分叉](hierarchical-agent-stride-control-v0.zh-CN.md)、[度量契约](long-horizon-harness-benchmark-research-program-v0.zh-CN.md)、[整体路线](loopx-overall-roadmap-v0.zh-CN.md)。
 
