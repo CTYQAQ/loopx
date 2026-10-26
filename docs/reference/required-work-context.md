@@ -192,6 +192,13 @@ patch or an incompatible reader automatically recovers the same original full
 capture. Recovery never reruns the guard, asks the owner, spends quota or grants
 execution. Wire reduction alone does not establish actual model costs or outcomes.
 
+After reading a native delta completely, the Agent uses its changes with the
+retained model context. A resumed tool process may have no earlier Code Mode
+variables; that alone does not mean the model lost the baseline. Materializing a
+JavaScript object does not require another full read. If required baseline content
+is unavailable or continuity is uncertain, recover the same capture in full before
+dependent work. Compaction still invalidates the baseline and requires recovery.
+
 ### Machine default
 
 **Settings → This machine → Capabilities → Differential context → Codex** uses the
@@ -411,6 +418,11 @@ TurnEnvelope。在基线连续性成立的口径内，两入口仍逐轮发送 `
 这些只改变既有选项内的展示，不新增配置或准入。缺少可用连续性依据、epoch 改变、patch 损坏
 或读者不兼容时，自动恢复同一原始 full capture，不重跑 guard、不问询、不扣额，
 也不授予执行权限。传输减少本身不证明实际模型费用或结果改善。
+
+完整读完原生差分后，Agent 将变化与模型仍保留的上下文一起使用。恢复后的工具进程可能
+没有此前的 Code Mode 变量；仅此并不表示模型丢失了基线。不必为了组装 JavaScript
+对象再读一次全量。若当前工作所需的基线内容不可用或连续性不确定，仍须先完整恢复
+同一捕获，再做依赖它的工作。压缩仍会使基线失效，并要求恢复。
 
 ### 机器级默认
 

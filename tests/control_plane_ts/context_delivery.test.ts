@@ -477,6 +477,27 @@ test("whole packet reuses complete projections; live controls and unknown fields
   assert.equal(restoreContextDelivery({delivery: broken, baseline, current: packetFull(current, "capture-b")}).mode, "full");
 });
 
+test("native delta controls are usable without an executable copy of the baseline", () => {
+  const current = packet(), baseline = packetFull(current);
+  const cli = (current.interaction_contract as JsonObject).cli_channel as JsonObject;
+  cli.selection_command = {command_args_template: "select-current-task"};
+  const delta = prepareContextDelivery({context: current, scope, capture_id: "capture-b", surface: "quota_packet",
+    baseline, continuity: {basis: "native_hook_assumption", capture_bytes_verified: true, target: baseline.target}});
+  // This reader has only the serialized new input, as after a tool-process
+  // restart. Retained requirement text belongs to model context, not this reader.
+  const input = JSON.parse(JSON.stringify(delta)) as JsonObject;
+  assert.equal(input.mode, "delta");
+  assert.equal(inline(input, ["interaction_contract", "cli_channel", "selection_command", "command_args_template"]),
+    "select-current-task");
+  assert.equal(inline(input, ["interaction_contract", "cli_channel", "settlement_plan", "ordered_steps", 1, "command_template"]),
+    "writeback-a");
+  assert.equal(inline(input, ["goal_boundary", "approval"]), "pending");
+  // Actual baseline loss still requires the immutable current full capture.
+  const recovered = restoreContextDelivery({delivery: input, current: packetFull(current, "capture-b")});
+  assert.equal(recovered.mode, "full");
+  assert.deepEqual(recovered.context, current);
+});
+
 test("array edits preserve append, removal, reorder, duplicate entries and exact scalar types", () => {
   const before = packet(), baseline = packetFull(before);
   const old = (before.planning_horizon as JsonObject).work_items as JsonObject[];

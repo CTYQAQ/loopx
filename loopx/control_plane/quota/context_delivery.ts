@@ -446,7 +446,12 @@ export function prepareContextDelivery(request: JsonObject, legacyQuotaFields: r
     ...(assumed ? {continuity_basis: "native_hook_assumption"} : {}),
     instruction: "Current controls are inline even when unchanged. Other fields inherit the "
       + (assumed ? "exact baseline under the native-hook continuity assumption" : "confirmed baseline")
-      + "; all requirements remain binding. A value replaces its subtree; from copies the exact string at that path in the base capture, never in current changes. Values assigns complete fields (exact indices with items); changed/items recurse, removed deletes object keys, length sets array length. Lost context triggers automatic full recovery from this capture, never an owner question."};
+      + "; all requirements remain binding. "
+      + (assumed ? "After reading this delta completely, use it with the retained model context. "
+        + "Do not also fetch the full projection just to materialize JSON or replace missing Code Mode variables; "
+        + "tool-process memory is separate from retained model context. If required baseline content is unavailable "
+        + "or continuity is uncertain, recover this capture in full before dependent work. " : "")
+      + "A value replaces its subtree; from copies the exact string at that path in the base capture, never in current changes. Values assigns complete fields (exact indices with items); changed/items recurse, removed deletes object keys, length sets array length. Lost context triggers automatic full recovery from this capture, never an owner question."};
   if (bytes(delta) >= bytes(full("delta_not_smaller"))) return full("delta_not_smaller");
   if (!equal(applyTree(prior, changes), context)) return full("reconstruction_failed");
   // Native consumers page the wire before they can use its baseline. Deliver
