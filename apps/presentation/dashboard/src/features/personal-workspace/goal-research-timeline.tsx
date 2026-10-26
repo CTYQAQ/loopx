@@ -12,7 +12,7 @@ type Copy = Record<string, string>;
 type Props = {
   timeline: ExploreTimeline; zh: boolean; selectedIds: readonly string[]; phase: number | null;
   selectedDay: string | null; dayGroups: ReturnType<typeof groupUnlinkedHistoryQuestions>["groups"]; onGroupSelect: (day: string) => void;
-  onSelect: (id: string) => void; onSelectMany: (ids: string[]) => void; onPhase: (index: number | null) => void;
+  onSelect: (id: string, finding?: string) => void; onSelectMany: (ids: string[]) => void; onPhase: (index: number | null) => void;
   timeLabel: (value: number) => string; dayLabel: (value: number) => string;
 };
 
@@ -198,13 +198,13 @@ export function GoalResearchTimeline({timeline, zh, selectedIds, selectedDay, da
   </div>;
 }
 
-function TrailList({items, copy, label, timeLabel, selectedIds, onSelect}: {items: TimelineFinding[]; copy: Copy; label: (key: string) => string; timeLabel: (value: number) => string; selectedIds: readonly string[]; onSelect: (id: string) => void}) {
+function TrailList({items, copy, label, timeLabel, selectedIds, onSelect}: {items: TimelineFinding[]; copy: Copy; label: (key: string) => string; timeLabel: (value: number) => string; selectedIds: readonly string[]; onSelect: (id: string, finding?: string) => void}) {
   const [limit, setLimit] = useState(3);
   return <>
     <ol className="research-trail-list">{items.slice(0, limit).map(item => {
       const decision = item.sections!.decision!;
       return <li key={item.event.event_id}>
-        <button type="button" aria-pressed={selectedIds.includes(item.event.node_id)} className={selectedIds.includes(item.event.node_id) ? "is-selected" : ""} onClick={() => onSelect(item.event.node_id)}>
+        <button type="button" aria-pressed={selectedIds.includes(item.event.node_id)} className={selectedIds.includes(item.event.node_id) ? "is-selected" : ""} onClick={() => onSelect(item.event.node_id, item.event.result_id)}>
           <span className="research-trail-meta"><b className={`research-outcome is-${decision.outcome}`}>{label(decision.outcome)}</b><time>{item.at !== null ? timeLabel(item.at) : ""}</time><span>{label(item.event.status)}</span></span>
           <strong>{item.event.title}</strong>
           <span><em>{copy.changed}</em>{decision.changed.join("；") || "—"}</span>

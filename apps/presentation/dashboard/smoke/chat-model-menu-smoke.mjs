@@ -22,8 +22,18 @@ try {
     assert.match(summary, /high/);
     assert.match(summary, /Fast/);
     assert.doesNotMatch(summary, /next-model|low/, "Pending new settings never masquerade as the current Session");
-    assert.match(actual, new RegExp(locale === "zh-CN" ? "新对话配置" : "New conversation settings"));
-    assert.match(actual, new RegExp(locale === "zh-CN" ? "保留原历史和活动回合" : "existing history and active work are preserved"));
+    assert.match(actual, new RegExp(locale === "zh-CN" ? "后续消息" : "Subsequent messages"));
+    assert.match(actual, new RegExp(locale === "zh-CN" ? "当前回合和原历史不变" : "active work and history stay unchanged"));
+    const saved = render({readback: {agent_model_id: "actual-model", agent_reasoning_effort: "high",
+      requested_agent_model_id: "saved-model", requested_agent_reasoning_effort: "low", model_settings_supported: true}});
+    const savedSummary = saved.slice(saved.indexOf("<summary"), saved.indexOf("</summary>"));
+    assert.match(savedSummary, /saved-model/);
+    assert.doesNotMatch(savedSummary, /actual-model|next-model/);
+    assert.match(saved, /actual-model/, "The prior actual configuration remains visible inside the menu");
+    assert.match(savedSummary, new RegExp(locale === "zh-CN" ? "已保存，后续消息使用" : "Saved for subsequent messages"));
+    const owned = render({readback: {agent_model_id: "host-model", model_settings_supported: false}});
+    assert.match(owned, new RegExp(locale === "zh-CN" ? "原宿主或专属设置" : "owning host or dedicated settings"));
+    assert.doesNotMatch(owned, /<fieldset/, "Host-owned and legacy Sessions expose readback without a misleading save operation");
     const unknown = render({});
     const unknownSummary = unknown.slice(unknown.indexOf("<summary"), unknown.indexOf("</summary>"));
     assert.match(unknownSummary, new RegExp(locale === "zh-CN" ? "模型设置" : "Model settings"));
@@ -32,7 +42,7 @@ try {
     assert.doesNotMatch(unknownSummary, /next-model|low|Fast/, "Neither defaults nor a pending choice fill an unknown observation");
     const partial = render({ readback: { agent_reasoning_effort: "high", agent_service_tier: "priority" } });
     assert.doesNotMatch(partial.slice(partial.indexOf("<summary"), partial.indexOf("</summary>")), /high|Fast/, "Partial settings do not decorate a missing model as a complete current binding");
-    assert.doesNotMatch(render({ ordinary: false }), new RegExp(locale === "zh-CN" ? "新对话配置" : "New conversation settings"), "Steward settings keep their existing owner");
+    assert.doesNotMatch(render({ ordinary: false }), new RegExp(locale === "zh-CN" ? "后续消息" : "Subsequent messages"), "Steward settings keep their existing owner");
     const defaultsLabel = locale === "zh-CN" ? "默认对话配置" : "Conversation defaults";
     assert.match(render({ onOpenDefaults() {} }), new RegExp(defaultsLabel), "Defaults remain discoverable inside the relevant settings disclosure");
     assert.doesNotMatch(render({ ordinary: false, onOpenDefaults() {} }), new RegExp(defaultsLabel), "Ordinary defaults are not offered for the steward binding");

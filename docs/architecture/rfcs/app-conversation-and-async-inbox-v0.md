@@ -130,6 +130,25 @@ messages are excluded. Listening is neither a delivery receipt nor task
 acceptance. Native binding/composition/HTTP regressions qualify the source read
 model, while each provider's installed liveness and result return remain separate.
 
+### Model choices in the current ordinary conversation
+
+The ordinary Codex composer saves an offered model and supported reasoning effort
+on its exact existing Session. Choosing performs no Turn, thread creation, history
+replay or interruption. The active Turn retains its actual configuration; the
+saved subsequent choice and native runtime readback stay distinct in the menu.
+Between Turns, the existing resume owner must confirm that choice on the same
+native thread before dispatch. Rejection before a new message's admission keeps
+its draft; a queued request keeps the existing queue's failure/recovery owner.
+Reloading retains the Session and its saved choice; other Sessions and machine
+defaults are unaffected. Save failure offers retry without claiming success.
+
+Host-owned, steward, registered-Agent, bound-audience, native Goal and legacy
+migration Sessions retain their existing settings owner. Unsupported providers
+cannot silently start a replacement conversation. Availability and admission use
+one shared read model. Production HTTP/store and synthetic native-protocol tests
+qualify settings, history, busy/queued adoption and refusal. They do not certify
+live model quality, installed native input or cross-channel synchronization.
+
 ### Continue an original private conversation on the local App
 
 Settings → Lark offers **Continue original conversation** on an existing
@@ -262,12 +281,22 @@ connection to revoke it; rollback must preserve its private delivery journals.
 
 Use **Continue original conversation** or the explicitly selected App steward
 entry above to reach this path. Old ordinary history is retained separately.
-This checkpoint covers text projection, not reply/thread relation mirroring,
-attachment transfer, retroactive insertion into Lark chronology or all-channel
-broadcast. An App attachment produces an explicit unsynchronized notice and a
-partial outbox, never a full-delivery claim. Synthetic real-HTTP/Core journeys
-cover repeated inputs, long text, restart, missing/unknown receipts, revocation
-and provider replacement. Installed provider readback remains a separate gate.
+This checkpoint covers text and bounded App image projection, not reply/thread
+relation mirroring, retroactive insertion into Lark chronology or all-channel
+broadcast. Canonical App images reuse the existing resource uploader and post
+sender, retaining caption and ordered inline images in the original private
+chat. Long captions keep images on the final concrete post only. Every upload
+and send rechecks the original source and current Core message/grant. Sends and
+edits check again after provider preview, before recording the write intent;
+each continued or resumed rich part uses that same boundary. Completion
+also requires independent image-byte readback. Failed verification recovers the
+same message receipt without another upload or send. An upload whose provider
+acknowledgement is unknown, or a started send without a message locator, stays
+unconfirmed after restart. Earlier delivered attachment placeholders retain
+their frozen receipts and partial status; upgrades do not silently replay them.
+Synthetic real-HTTP/Core journeys cover repeated inputs, complete images and
+long captions, restart, missing/unknown receipts, byte mismatch, revocation and
+provider replacement. Installed provider readback remains a separate gate.
 
 The implementation decision follows primary-source comparisons, not a claim
 that shared context already guarantees two-way delivery:

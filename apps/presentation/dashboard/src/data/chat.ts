@@ -792,6 +792,11 @@ export async function createChatSession(
 }
 
 export type AgentModelOption = { value: string; label: string; reasoning_efforts?: string[] };
+export function configureChatSessionModel(sessionId: string, model: string, effort?: string) {
+  return requestJson<{ok: true; session: ChatSessionSummary}>(`/api/chat/sessions/${encodeURIComponent(sessionId)}/model-settings`, {
+    method: "POST", body: JSON.stringify({agent_model_id: model, ...(effort ? {agent_reasoning_effort: effort} : {})}),
+  });
+}
 export type AgentModelDiscovery = {
   ok: true;
   schema_version: "loopx_chat_agent_model_options_v1";
@@ -825,6 +830,9 @@ export type ChatSessionSummary = {
   agent_model_id?: string | null;
   agent_reasoning_effort?: string | null;
   agent_service_tier?: string | null;
+  requested_agent_model_id?: string | null;
+  requested_agent_reasoning_effort?: string | null;
+  model_settings_supported?: boolean;
   adapter_kind: string;
   channel_id?: string;
   status: string;
