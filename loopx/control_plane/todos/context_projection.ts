@@ -10,6 +10,7 @@ import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
 import { requireBoolean, requireInteger, requireJsonObject } from "../runtime_decode.ts";
 import { canonicalAuthorityJson } from "../coordination/authority_store_codec.ts";
 import {compactThinTodoRead, compactTodoReadSummary, compactThinTodoReadSummary} from "./read_presentation.ts";
+import {TODO_DECISION_SCOPE_OUTCOME_SCHEMA_VERSION} from "./user_completion_types.ts";
 
 // A read lens over canonical records, shared by global and Goal conversations.
 // These are existing Todo facts, not dependency evaluation or execution grants.
@@ -211,7 +212,7 @@ function compactSummaryRecord(item: JsonObject, body: unknown): JsonObject {
     const source = object(value), decision = outcome(source.outcome ?? parts[0]);
     const scope = readScope(source.decision_scope || source.scope || parts[1]), todo = id(source.source_todo_id ?? parts[2]);
     if (!decision || !scope || !todo) continue;
-    const record = {schema_version: "decision_scope_outcome_v0", outcome: decision, decision_scope: scope, source_todo_id: todo};
+    const record = {schema_version: TODO_DECISION_SCOPE_OUTCOME_SCHEMA_VERSION, outcome: decision, decision_scope: scope, source_todo_id: todo};
     const position = outcomes.findIndex(row => {const prior = object(row.decision_scope); return prior.kind === scope.kind && prior.granularity === scope.granularity && prior.scope_key === scope.scope_key;});
     if (position < 0) outcomes.push(record); else outcomes[position] = record;
   }

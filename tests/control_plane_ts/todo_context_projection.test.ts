@@ -175,6 +175,18 @@ const display = (item: JsonObject) => projectTodoSummaryDisplay({items: [{record
 const handoff = (item: JsonObject, extras: JsonObject = {}) =>
   (projectTodoContextPage({handoff_sources: [{record: item, ...extras}]}).handoff_context as JsonObject[])[0]!;
 
+test("summary display keeps the canonical scoped-decision receipt version verbatim", () => {
+  const receipt = {schema_version: "todo_decision_scope_outcome_v0", outcome: "reject",
+    decision_scope: {schema_version: "decision_scope_v0", kind: "direction",
+      granularity: "action", scope_key: "publish_release"}, source_todo_id: "todo_gate"};
+  const compacted = display({todo_id: "todo_work", text: "Review the next action",
+    decision_scope_outcomes: [receipt]});
+  const projected = (compacted.decision_scope_outcomes as JsonObject[])[0]!;
+  assert.equal(projected.schema_version, receipt.schema_version);
+  assert.notEqual(projected.schema_version, "decision_scope_outcome_v0");
+  assert.deepEqual(projected, receipt);
+});
+
 test("summary display matches pre-cutover synthetic CLI characterization", () => {
   for (const scenario of displayFixture.scenarios) {
     assert.deepEqual(projectTodoSummaryDisplay({items: scenario.items.map(record => ({record})), strip_text: true}), scenario.expected);

@@ -48,3 +48,5 @@ File／SQLite CLI 恢复、可变行 identity、大／超大传输及 fail-close
 配置文件列表不覆盖本次修改的 Python 模块。真实 installed-wheel、最低 Node
 版本及隔离 PostgreSQL CI 尚未验证；未修改 PostgreSQL 代码。本源码检查点不
 认证完整 CI、已安装交付或延迟收益。
+
+审查修正：摘要展示复用 completion writer 的共享常量，将 `decision_scope_outcomes[*].schema_version` 保持为 canonical 记录中的 `todo_decision_scope_outcome_v0`，替换未注册的 `decision_scope_outcome_v0`；新增 TS 回归测试及 File／SQLite `quota should-run` 覆盖。

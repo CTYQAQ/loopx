@@ -55,3 +55,5 @@ failures, not passing skips. The configured mypy list does not cover the changed
 Python modules. Real installed-wheel qualification, the minimum Node lane and
 isolated PostgreSQL CI are unverified here; no PostgreSQL code is changed. This
 source checkpoint does not certify full CI, installed delivery or a latency gain.
+
+Review correction: summary display now preserves the canonical `decision_scope_outcomes[*].schema_version` as `todo_decision_scope_outcome_v0` by reusing the completion writer’s shared constant, replacing the unregistered `decision_scope_outcome_v0`; TS regression and File/SQLite `quota should-run` coverage were added.
