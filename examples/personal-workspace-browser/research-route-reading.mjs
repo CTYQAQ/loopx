@@ -103,7 +103,7 @@ export const researchRouteReadingScenario = {
         const titleLayout = await caption.first().locator("strong").first().evaluate(element => ({height: element.clientHeight, lineHeight: parseFloat(getComputedStyle(element).lineHeight), fontSize: parseFloat(getComputedStyle(element).fontSize)}));
         assert(titleLayout.height >= titleLayout.lineHeight * 1.9 && titleLayout.fontSize >= 16, "Long captions wrap into readable list entries");
         if (language === "zh-CN" && width !== 768) {
-          await page.getByRole("button", {name: "开启研究模式", exact: true}).waitFor();
+          assert.equal(await page.getByRole("button", {name: "开启研究模式", exact: true}).count(), 0, "A read-only source does not expose research activation");
           await page.locator(".personal-channel-scroll").evaluate(element => element.scrollTop = 0);
           await page.screenshot({path: resolve(outputDir, `research-route-reading-first-${width}.png`), animations: "disabled"});
         }

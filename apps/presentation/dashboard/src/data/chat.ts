@@ -792,6 +792,11 @@ export async function createChatSession(
 }
 
 export type AgentModelOption = { value: string; label: string; reasoning_efforts?: string[] };
+export function configureChatSessionModel(sessionId: string, model: string, effort?: string) {
+  return requestJson<{ok: true; session: ChatSessionSummary}>(`/api/chat/sessions/${encodeURIComponent(sessionId)}/model-settings`, {
+    method: "POST", body: JSON.stringify({agent_model_id: model, ...(effort ? {agent_reasoning_effort: effort} : {})}),
+  });
+}
 export type AgentModelDiscovery = {
   ok: true;
   schema_version: "loopx_chat_agent_model_options_v1";
@@ -825,6 +830,9 @@ export type ChatSessionSummary = {
   agent_model_id?: string | null;
   agent_reasoning_effort?: string | null;
   agent_service_tier?: string | null;
+  requested_agent_model_id?: string | null;
+  requested_agent_reasoning_effort?: string | null;
+  model_settings_supported?: boolean;
   adapter_kind: string;
   channel_id?: string;
   status: string;
@@ -981,6 +989,7 @@ export async function fetchChatSessions(options: {
     ok: true;
     schema_version: "loopx_chat_session_list_v1";
     conversation_binding_id?: string;
+    conversation_source?: unknown;
     sessions: ChatSessionSummary[];
   }>(`/api/chat/sessions?${query.toString()}`, { signal: options.signal });
   if (!options.bound) return listed;
@@ -2694,6 +2703,25 @@ const privateConversationsSchema = z.object({ok: z.literal(true), revision: z.nu
   app_steward_binding_id: z.string().regex(/^[a-f0-9]{24}$/).nullable().default(null),
   connections: z.array(privateConversationSchema), stop_recoveries: z.array(privateConversationStopRecoverySchema).default([])});
 export type PrivateConversation = z.infer<typeof privateConversationSchema>;
+const boundConversationSourceSchema = privateConversationSchema.pick({
+  binding_id: true, app_ref: true, context_kind: true, project_title: true, executor_endpoint_id: true,
+}).extend({audience: z.literal("owner"), context_available: z.literal(true)});
+export type BoundConversationSource = z.infer<typeof boundConversationSourceSchema>;
+
+/** Session and display source come from one fresh Core-verified read. */
+export async function resolveBoundConversation(target: BoundConversationTarget, signal?: AbortSignal) {
+  const listed = await fetchChatSessions({bound: target, signal});
+  const parsed = boundConversationSourceSchema.safeParse(listed.conversation_source);
+  if (!parsed.success || parsed.data.binding_id !== target.bindingId) {
+    throw new Error("This service cannot verify the original conversation. Update LoopX and retry.");
+  }
+  const session = listed.sessions[0], source = parsed.data;
+  if (source.executor_endpoint_id !== session.agent_id) {
+    throw new Error("The original conversation's executor no longer matches its connection.");
+  }
+  return {session, source};
+}
+
 export async function fetchPrivateConversations(signal?: AbortSignal) {
   return privateConversationsSchema.parse(await requestJson<unknown>("/api/chat/lark/private-conversations", { signal }));
 }

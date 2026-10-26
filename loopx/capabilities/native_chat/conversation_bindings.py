@@ -301,6 +301,9 @@ class ChatConversationBindings:
             "session_mode", "status", "project_context", "steward_context")}
 
     def local_sessions(self, binding_id: str, *, app_steward_entry: bool = False) -> list[dict[str, Any]]:
+        return self.local_session_snapshot(binding_id, app_steward_entry=app_steward_entry)["sessions"]
+
+    def local_session_snapshot(self, binding_id: str, *, app_steward_entry: bool = False) -> dict[str, Any]:
         """Read original targets; metadata hints never replace Core's grant.
 
         Provider IO and store inventory stay outside the publication fence.
@@ -326,9 +329,10 @@ class ChatConversationBindings:
             current = self.read()
             if next((item for item in current["bindings"] if item["binding_id"] == binding_id), None) != row:
                 raise ValueError("conversation binding changed during identity verification")
+            projects = self.projects.available()
             result = self._core("collaboration.conversation.local_sessions", {
                 "current": current, "binding_id": binding_id, "observation": observation,
-                "available_projects": self.projects.available(),
+                "available_projects": projects,
                 "sessions": [self._session_observation(session) for session in sessions],
                 **({"app_steward_entry": True} if app_steward_entry else {}),
                 **({"available_goal_ids": self.goal_scope_ids(row)} if row.get("goal_scope") == "all_registered" else {}),
@@ -336,7 +340,15 @@ class ChatConversationBindings:
             # Build the lookup only after Core has rejected duplicate identity;
             # an IO dictionary must not silently turn ambiguity into one target.
             by_id = {session["session_id"]: session for session in sessions}
-            return [store.public_session(by_id[sid]) for sid in result["session_ids"]]
+            project = next(project for project in projects if project["project_ref"] == row["project_ref"])
+            # Project this exact Core-verified source under the same fence.
+            # Opening a conversation must not enumerate settings, unrelated
+            # Agent candidates, listener health or stop-recovery inventories.
+            return {"sessions": [store.public_session(by_id[sid]) for sid in result["session_ids"]],
+                    "conversation_source": {"binding_id": binding_id, "app_ref": row["transport_ref"],
+                        "context_kind": row["context_kind"], "audience": row.get("audience", "owner"),
+                        "project_title": Path(project["workspace_path"]).name, "context_available": True,
+                        "executor_endpoint_id": row["executor_endpoint_id"]}}
 
     def goal_scope_ids(self, binding: dict[str, Any]) -> list[str]:
         if binding.get("goal_scope") != "all_registered":

@@ -1,7 +1,7 @@
 import type { GoalDraft } from "../../../../../../loopx/control_plane/collaboration/goal_draft.js";
 import type { TurnStep } from "../../data/turn-steps";
 import type { ChatProject, CollaborationReadback, LoopXModeSettings } from "../../data/chat-model";
-import type { BoundConversationTarget, ChatSessionSummary, PrivateConversation } from "../../data/chat";
+import type { BoundConversationTarget, ChatSessionSummary, BoundConversationSource } from "../../data/chat";
 import type { TeamPlanAppliedOutcome } from "./team-plan-preview";
 import type { ActionReviewPlan } from "../../../../../../loopx/control_plane/presentation/action_review_plan.js";
 import type { GoalAcceptanceObservation } from "../../data/goal-acceptance-observation";
@@ -116,7 +116,7 @@ export type WorkspaceConversationDirectory = {
   onOpenOriginal?: (target: BoundConversationTarget) => void;
   /** Local manager entry discovery blocks sending, never Goal navigation. */
   entryGate?: {unavailable: boolean; retry: () => void};
-  bound?: { target: BoundConversationTarget; session?: ChatSessionSummary; source?: PrivateConversation;
+  bound?: { target: BoundConversationTarget; session?: ChatSessionSummary; source?: BoundConversationSource;
     error?: string; retry: () => void };
   managed?: {target: import("../../data/chat").ManagedConversationTarget; session?: import("../../data/chat").ChatSessionSummary; error?: string; retry: () => void};
 };
@@ -621,8 +621,8 @@ export type PersonalWorkspaceCallbacks = {
   onStartLoopX?: (operation: "start" | "resume", agentId: string, goalId: string,
     settings?: LoopXModeSettings) => void;
   onSelectAgent?: (agentId: string) => void;
-  onSelectAgentModel?: (agentId: string, modelId: string) => void;
-  onSelectAgentReasoningEffort?: (agentId: string, effort: string) => void;
+  onSelectAgentModel?: (agentId: string, modelId: string) => void | Promise<void>;
+  onSelectAgentReasoningEffort?: (agentId: string, effort: string) => void | Promise<void>;
   onSelectChannel?: (channel: WorkspaceChannel) => void;
   onSelectGoal?: (goalId: string | null, view: WorkspaceGoalTab) => void;
   onSelectTodo?: (todoId: string | null) => void;

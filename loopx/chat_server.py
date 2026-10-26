@@ -41,11 +41,13 @@ from .chat_goal_subagent_api import (
     add_goal_subagent_capability,
     add_goal_subagent_routes,
 )
+from .capabilities.native_chat.model_settings_api import ChatModelSettingsRequestMixin
 from .chat_status_api import ChatStatusRequestMixin
 from .chat_runtime import (
     STEERING_NOT_DELIVERED_CODES,
     ChatRuntimeController,
     ChatTurnAcceptanceUnavailableError,
+    ChatSessionConfigurationRejectedError,
 )
 from .chat_manager import (
     MANAGER_AGENT_GOAL_ID, MANAGER_AGENT_OBJECTIVE, is_manager_channel,
@@ -496,6 +498,7 @@ class ChatHTTPServer(ThreadingHTTPServer):
 
 
 class ChatRequestHandler(
+    ChatModelSettingsRequestMixin,
     GoalSourceRequestMixin,
     GoalAcceptanceRequestMixin,
     ZCodeGoalRequestMixin,
@@ -723,32 +726,6 @@ class ChatRequestHandler(
             status=200 if resumed else 201,
         )
 
-    def _agent_model_options(self) -> None:
-        try:
-            body = self._read_json()
-            if "agent_id" not in body or set(body) - {"agent_id", "goal_id", "agent_model_id"}:
-                raise ValueError("agent_id is required")
-            agent_id = _compact_text(body.get("agent_id"), limit=80)
-            if not agent_id:
-                raise ValueError("agent_id is required")
-            goal_id = _compact_text(body.get("goal_id"), limit=160) or None
-            if goal_id:
-                self._registry_and_goal(goal_id)
-            requested_model = normalize_agent_model_id(body["agent_model_id"]) if body.get("agent_model_id") is not None else None
-            # Discovery is deliberately bounded to a selected, known endpoint.
-            # It opens no persisted LoopX Chat session and exposes no command or
-            # local workspace data to the browser.
-            result = self.server.runtime_controller.inspect_agent_model_options(
-                agent_id, work_dir=Path.cwd(), **({"goal_id": goal_id} if goal_id else {}),
-                **({"agent_model_id": requested_model} if requested_model else {}),
-            )
-        except CodexChatAgentError as exc:
-            self._send_error(str(exc), status=424, gate=exc.gate, error_code=exc.error_code)
-            return
-        except Exception as exc:  # noqa: BLE001 - compact local validation error.
-            self._send_error(str(exc))
-            return
-        self._send_json({"ok": True, "schema_version": "loopx_chat_agent_model_options_v1", **result})
 
     def _record_projection_exchange(self) -> None:
         """Persist a status-only exchange in the same owner-local message store."""
@@ -889,6 +866,11 @@ class ChatRequestHandler(
                 )
                 return
             response = completed.get("response")
+        except ChatSessionConfigurationRejectedError as exc:
+            self._send_error(str(exc), status=424,
+                             error_code="runtime_error" if exc.error_code == "resume_failed" else exc.error_code,
+                             delivery_state="not_delivered", turn_replay_safe=True)
+            return
         except ChatTurnAcceptanceUnavailableError:
             self._send_error(
                 "Chat turn acceptance is temporarily unavailable.",
@@ -1008,7 +990,7 @@ class ChatRequestHandler(
             try:
                 if bindings is None:
                     raise ValueError("conversation bindings unavailable")
-                sessions = bindings.local_sessions(query["conversation_binding_id"][0])
+                snapshot = bindings.local_session_snapshot(query["conversation_binding_id"][0])
             except (ValueError, OSError, KeyError):
                 # A failed provider/store read may contain private diagnostics.
                 # Refuse this selector; never fall back to an unfiltered list.
@@ -1016,7 +998,7 @@ class ChatRequestHandler(
             # Older services ignore this new query. A matching selector in the
             # response lets callers reject their ordinary, unfiltered result.
             return self._send_json({"ok": True, "schema_version": "loopx_chat_session_list_v1",
-                                    "conversation_binding_id": query["conversation_binding_id"][0], "sessions": sessions})
+                                    "conversation_binding_id": query["conversation_binding_id"][0], **snapshot})
         goal_id = _compact_text((query.get("goal_id") or [""])[0], limit=160) or None
         agent_id = _compact_text((query.get("agent_id") or [""])[0], limit=80) or None
         channel_id = _compact_text((query.get("channel_id") or [""])[0], limit=160) or None
@@ -1142,6 +1124,7 @@ class ChatRequestHandler(
                 "status": turn["status"],
             }
         )
+
 
     def _resume_session(self, session_id: str) -> None:
         try:
@@ -1747,6 +1730,8 @@ class ChatRequestHandler(
             return handle_loopx_request(self, session_action_parts[3], apply=True)
         if len(session_action_parts) == 5 and session_action_parts[:3] == ["api", "chat", "sessions"] and session_action_parts[4] == "resume":
             return self._resume_session(session_action_parts[3])
+        if len(session_action_parts) == 5 and session_action_parts[:3] == ["api", "chat", "sessions"] and session_action_parts[4] == "model-settings":
+            return self._configure_session_model(session_action_parts[3])
         action_parts = path.strip("/").split("/")
         if len(action_parts) == 4 and action_parts[:2] == ["api", "actions"] and action_parts[3] in {"apply", "cancel", "regenerate", "reject", "defer"}:
             if action_parts[3] == "apply":
@@ -1845,7 +1830,13 @@ def serve_chat(
     server = ChatHTTPServer((host, port), ChatRequestHandler)
     server.registry_path = resolved_registry_path
     server.runtime_root = runtime_root
-    server.codex_account_service = CodexAccountService(runtime_root)
+    # Account policy follows the registry's native owner. A separate Chat
+    # history directory must not silently create another account policy.
+    account_runtime_root = (
+        resolve_runtime_root(registry, registry_path=resolved_registry_path)
+        if registry.get("common_runtime_root") else runtime_root
+    )
+    server.codex_account_service = CodexAccountService(account_runtime_root)
     server.runtime_root_override = resolved_runtime_root_override
     server.scan_roots = resolved_scan_roots
     server.limit = limit

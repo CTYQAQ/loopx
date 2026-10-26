@@ -49,7 +49,7 @@ export const researchFindingReaderScenario = {
       const article = reader.locator(".research-recorded-finding");
       const picker = reader.getByRole("combobox", {name: "选择问题结论", exact: true});
       await picker.waitFor();
-      await page.getByText("开启研究模式", {exact: true}).waitFor();
+      assert.equal(await page.getByText("开启研究模式", {exact: true}).count(), 0, "The read-only capture does not expose a configuration action");
       assert.equal(await picker.locator("option").count(), 20, "Every finding remains directly selectable");
       assert.equal(await article.count(), 1, "A dense question presents one full document, not twenty stacked documents");
       assert.equal(await picker.inputValue(), "finding-19");
@@ -101,6 +101,46 @@ export const researchFindingReaderScenario = {
       await reader.getByRole("button", {name: "回到全图", exact: true}).click();
       assert.equal(await reader.count(), 0, "Returning restores the original full history");
       assert.equal(new URL(page.url()).searchParams.has("research_finding"), false);
+
+      // A decision is an exact historical finding, even when twenty decisions
+      // belong to one question. Opening it must not substitute the latest one.
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({width, height: 900});
+        const decisions = history.locator(".research-trail-list button");
+        const older = decisions.nth(1);
+        assert.match(await older.innerText(), /比较 19：/);
+        await older.focus();
+        await page.keyboard.press("Enter");
+        await picker.waitFor();
+        assert.equal(await picker.inputValue(), "finding-18", "An older decision opens its own finding, not the question's latest one");
+        assert.match(await article.innerText(), /观测 19：/);
+        const heading = await article.getByRole("heading").boundingBox();
+        const viewport = await page.locator(".personal-channel-scroll").boundingBox();
+        assert(heading && viewport && heading.y >= viewport.y && heading.y + heading.height <= 900,
+          `Opening a long finding starts with its heading visible at ${width}px`);
+        await page.screenshot({path: resolve(outputDir, `research-decision-reader-${width}.png`), animations: "disabled"});
+        await page.reload({waitUntil: "domcontentloaded"});
+        await picker.waitFor();
+        assert.equal(await picker.inputValue(), "finding-18", "Reload retains the decision's exact finding");
+        await reader.press("Escape");
+
+        await history.getByRole("button", {name: /显示更多决策/}).click();
+        const expandedCount = await decisions.count();
+        const earlier = decisions.nth(7);
+        assert.match(await earlier.innerText(), /比较 13：/);
+        await earlier.tap();
+        await picker.waitFor();
+        assert.equal(await picker.inputValue(), "finding-12");
+        assert.match(await article.innerText(), /观测 13：/);
+        await reader.press("Escape");
+        await reader.waitFor({state: "detached"});
+        assert.equal(await decisions.count(), expandedCount, "Returning keeps the expanded decision collection");
+        assert(await earlier.evaluate(element => element === document.activeElement), "Escape returns keyboard focus to the exact decision");
+        await page.goBack();
+        await picker.waitFor();
+        assert.equal(await picker.inputValue(), "finding-12", "Back restores the chosen historical decision");
+        await reader.press("Escape");
+      }
 
       await page.goto(url.replace("research_node=question", "research_node=blocked"));
       await reader.waitFor();

@@ -68,6 +68,7 @@ class SyntheticPrivateSource:
         server.chat_store.append_message(other["session_id"], role="agent", text="Unrelated desktop conversation — must remain separate.")
         print(json.dumps({"origin": f"http://127.0.0.1:{server.server_port}",
             "bindingId": binding["binding_id"], "sessionId": sid, "ordinarySessionId": other["session_id"]}), flush=True)
+        settings_handler = server.RequestHandlerClass._private_conversations
 
         def control():
             for line in sys.stdin:
@@ -92,6 +93,12 @@ class SyntheticPrivateSource:
                 elif command == "revoke":
                     bindings.disconnect(binding["binding_id"], expected_revision=bindings.read()["revision"])
                     result = {"revoked": binding["binding_id"]}
+                elif command in {"settings-unavailable", "settings-recover"}:
+                    def unavailable(handler):
+                        return handler._send_error("Synthetic connection settings are unavailable", status=503)
+                    server.RequestHandlerClass._private_conversations = (
+                        unavailable if command == "settings-unavailable" else settings_handler)
+                    result = {"settings_available": command == "settings-recover"}
                 elif command == "populate":
                     for index in range(6):
                         server.chat_store.append_message(sid, role="user", text=f"Synthetic source request {index + 1}: 保留原任务与尚未确认的结果。")

@@ -345,6 +345,13 @@ single-Goal report consumer cannot consume this private portfolio preset.
 This preset requires a calendar; its switch cannot select the generic
 stage-boundary reporting mode. Pause or cancel through the report actions.
 
+After `/new` and first preparation in the new Session, route discovery selects
+a verified source belonging to that exact managed actor's Session and private
+source. An older Session in the same chat cannot mask an eligible route, and
+a retained report route cannot fall back to another Session or audience.
+Provider, owner and original-message verification still apply. Owner Todo
+notifications retain their existing private-chat route selection.
+
 Portfolio evidence collection finishes before the governed driver captures its
 launch authority. A long read can then observe legitimate registry rewrites
 without immediately invalidating an earlier launch witness. The original

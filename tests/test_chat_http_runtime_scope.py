@@ -10,6 +10,43 @@ from test_lark_private_conversations import connect
 from loopx.control_plane import effect_runtime
 
 
+@pytest.mark.parametrize("failure", ["owner", "workspace", "revoked"])
+def test_bound_index_carries_only_its_verified_display_source(ordinary, monkeypatch, failure):  # noqa: F811
+    store, runtime, provider, transport = connect(ordinary)
+    _, _, contexts, request, capture, _, workspace = ordinary
+    binding = transport._binding("notes-app")
+    session, _ = runtime.open_session(goal_id=None, agent_id="codex", work_dir=workspace,
+        objective="", mode="resume_latest", conversation_binding_id=binding["binding_id"],
+        source_context={"source_ref": "a" * 24, "sender_ref": binding["operator_ref"],
+                        "private_human_message": True})
+    bindings = contexts.conversation_bindings
+    monkeypatch.setattr(bindings, "agent_candidates", lambda *_: pytest.fail("conversation reads must not enumerate settings"))
+    path = "/api/chat/sessions?conversation_binding_id=" + binding["binding_id"]
+    before = store.list_sessions()
+    try:
+        code, packet = request(path)
+        assert code == 200, packet
+        assert packet["conversation_source"] == {
+            "binding_id": binding["binding_id"], "app_ref": "notes-app", "context_kind": "project",
+            "project_title": "notes", "context_available": True, "audience": "owner",
+            "executor_endpoint_id": "codex"}
+        assert [row["session_id"] for row in packet["sessions"]] == [session["session_id"]]
+        assert "conversation_source" not in request("/api/chat/sessions")[1]
+        if failure == "owner":
+            provider.owner_ready = False
+        elif failure == "workspace":
+            contexts.roots = []
+        else:
+            bindings.disconnect(binding["binding_id"], expected_revision=bindings.read()["revision"])
+        code, denied = request(path)
+        assert code == 409 and "conversation_source" not in denied and "sessions" not in denied
+        assert store.list_sessions() == before
+        assert '"method": "turn/start"' not in capture.read_text()
+        assert not provider.writes
+    finally:
+        runtime.close()
+
+
 @pytest.mark.parametrize("method", ["GET", "POST"])
 def test_http_reuses_code_scan_but_rereads_revoked_grants(ordinary, monkeypatch, method):  # noqa: F811
     store, runtime, provider, transport = connect(ordinary)
