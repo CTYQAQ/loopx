@@ -31,12 +31,16 @@ for index in range(75):
     events.append(build_explore_finding_event(goal_id=goal,node_id='question',finding_id=f'finding-{index}',
         title=f'Candidate {index}',summary='Original observation; complete costs remain unknown.',
         status='tentative',recorded_at='2026-01-01T01:00:00Z'))
+measurement=dict(metric='Synthetic score', unit='points', higher_is_better=True, comparison_scope='synthetic:fixed', input_revision='input:v1', evaluation_ref='method:v1', candidate_ref='candidate:amber', evidence_ref='result:amber')
 events.append(build_explore_finding_event(goal_id=goal,node_id='question',finding_id='retained-finding',
     title='Earlier negative observation',summary='质量下降 — original negative evidence for candidate amber.',
-    status='refuted',evidence_refs=['candidate:amber-v1'],run_id='run:old',recorded_at='2026-01-02T00:00:00Z'))
+    measurements=[dict(measurement,value=None,evidence_ref='candidate:amber-v1')],status='refuted',evidence_refs=['candidate:amber-v1'],run_id='run:old',recorded_at='2026-01-02T00:00:00Z'))
 events.append(build_explore_finding_event(goal_id=goal,node_id='question',finding_id='retained-finding',
     title='Later observation',summary='A later scope does not rewrite the earlier result.',
-    status='confirmed',evidence_refs=['candidate:amber-v2'],run_id='run:new',recorded_at='2026-01-03T00:00:00Z'))
+    measurements=[dict(measurement,value=0,evidence_ref='candidate:amber-v2')],status='confirmed',evidence_refs=['candidate:amber-v2'],run_id='run:new',recorded_at='2026-01-03T00:00:00Z'))
+events.append(build_explore_finding_event(goal_id=goal,node_id='question',finding_id='retained-finding',
+    title='Unmeasured follow-up',summary='A new question remains open; earlier evidence is retained.',
+    status='tentative',evidence_refs=['candidate:amber-v3'],run_id='run:follow-up',recorded_at='2026-01-04T00:00:00Z'))
 Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Synthetic evidence search','events':events},ensure_ascii=False))
 other='synthetic-other-research'
 Path(sys.argv[2]).write_text(json.dumps({'goal_id':other,'display_name':'Other synthetic research','events':[
@@ -66,12 +70,12 @@ Path(sys.argv[2]).write_text(json.dumps({'goal_id':other,'display_name':'Other s
       assert.equal(await results.locator("li").count(), 50);
       const all = await download();
       assert.equal(all.goal_id, "synthetic-record-search");
-      assert.equal(all.records.length, 78, "Download includes matches beyond both HTTP and display paging");
-      assert.deepEqual(all.coverage, {loaded_records: 78, exported_records: 78, history_complete: true, refresh_failed: false});
+      assert.equal(all.records.length, 79, "Download includes matches beyond both HTTP and display paging");
+      assert.deepEqual(all.coverage, {loaded_records: 79, exported_records: 79, history_complete: true, refresh_failed: false});
       await search.fill("AMBER-V1 run:old");
-      await results.getByText("1 matches in 78 loaded records", {exact: true}).waitFor();
+      await results.getByText("1 matches in 79 loaded records", {exact: true}).waitFor();
       assert.equal(await results.locator("li").count(), 1, "Search reaches beyond both the display limit and HTTP page boundary");
-      await results.locator("li summary").click();
+      await results.locator(".research-history-records > li > details > summary").click();
       assert.match(await results.locator("li").innerText(), /质量下降.*original negative evidence/);
       assert.match(await results.locator("li").innerText(), /candidate:amber-v1/);
       assert.doesNotMatch(await results.locator("li").innerText(), /amber-v2|Later observation/);
@@ -80,14 +84,48 @@ Path(sys.argv[2]).write_text(json.dumps({'goal_id':other,'display_name':'Other s
       await readEmptyScope(page, results, "No matching records. Try another term or clear the filters.");
       assert.equal(await downloadButton.isDisabled(), true);
       await status.selectOption("refuted");
-      await results.getByText("1 matches in 78 loaded records", {exact: true}).waitFor();
-      await results.locator("li summary").click();
+      await results.getByText("1 matches in 79 loaded records", {exact: true}).waitFor();
+      await results.locator(".research-history-records > li > details > summary").click();
       const selected = await download();
       assert.deepEqual(selected.filters, {query: "AMBER-V1 run:old", status: "refuted"});
       assert.equal(selected.records.length, 1);
       assert.equal(selected.records[0].summary, "质量下降 — original negative evidence for candidate amber.");
       assert.deepEqual(selected.records[0].evidence_refs, ["candidate:amber-v1"]);
       assert.equal(selected.records[0].run_id, "run:old");
+      // Compare the original negative record with a revision excluded by both filters.
+      const comparison = results.locator(".research-record-comparison");
+      const comparisonSummary = comparison.locator(":scope > summary");
+      await comparisonSummary.focus();
+      await page.keyboard.press("Enter");
+      await comparison.getByRole("combobox", {name: "Compare with"}).waitFor();
+      assert.match(await comparison.innerText(), /Later observation/);
+      assert.match(await comparison.innerText(), /质量下降/);
+      assert.match(await comparison.innerText(), /candidate:amber-v1/);
+      assert.match(await comparison.innerText(), /candidate:amber-v2/);
+      assert.deepEqual(await comparison.locator(".explore-measurement-reading strong").allTextContents(), ["Not measured", "0"]);
+      const versionSelect = comparison.getByRole("combobox", {name: "Compare with"});
+      await versionSelect.selectOption({index: 1});
+      await comparison.getByText("Unmeasured follow-up", {exact: true}).waitFor();
+      assert.match(await comparison.innerText(), /candidate:amber-v3/);
+      assert.doesNotMatch(await comparison.innerText(), /candidate:amber-v2/);
+      await versionSelect.selectOption({index: 0});
+      await comparison.getByText("Later observation", {exact: true}).waitFor();
+      const includeUnchanged = comparison.getByRole("checkbox", {name: "Include unchanged fields"});
+      await includeUnchanged.check();
+      await comparison.getByRole("heading", {name: "Node ID", exact: true}).waitFor();
+      await includeUnchanged.uncheck();
+      assert.equal(await comparison.getByRole("heading", {name: "Node ID", exact: true}).count(), 0);
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({width, height: 900});
+        await comparison.scrollIntoViewIfNeeded();
+        assert(await comparison.evaluate(element => element.scrollWidth <= element.clientWidth + 1), "Comparison fits without horizontal overflow");
+        await page.screenshot({path: resolve(outputDir, `research-record-comparison-${width}.png`), animations: "disabled"});
+      }
+      await comparisonSummary.click();
+      await comparisonSummary.click();
+      await comparison.getByRole("combobox", {name: "Compare with"}).waitFor();
+      assert.match(await comparison.innerText(), /candidate:amber-v2/, "Repeated opening preserves the original pair");
+      await comparisonSummary.click();
       // A browser download interruption is recoverable without rereading or mutation.
       await page.evaluate(() => {
         const original = URL.createObjectURL;
@@ -113,16 +151,20 @@ Path(sys.argv[2]).write_text(json.dumps({'goal_id':other,'display_name':'Other s
       assert.equal(await results.locator("li").count(), 1);
       const stale = await download();
       assert.equal(stale.coverage.refresh_failed, true);
+      await comparisonSummary.click();
+      await comparison.getByRole("combobox", {name: "Compare with"}).waitFor();
+      assert.match(await comparison.innerText(), /candidate:amber-v2/);
+      await comparisonSummary.click();
       assert.deepEqual(stale.records, selected.records);
       await results.scrollIntoViewIfNeeded();
       await page.screenshot({path: resolve(outputDir, "research-record-export-stale.png")});
       await page.unroute("**/api/chat/explore-results?*");
       await history.getByRole("button", {name: "Refresh history", exact: true}).click();
-      await results.getByText("1 matches in 78 loaded records", {exact: true}).waitFor();
+      await results.getByText("1 matches in 79 loaded records", {exact: true}).waitFor();
       assert.equal((await download()).coverage.refresh_failed, false);
       await results.getByRole("button", {name: "Clear filters"}).click();
       await results.getByRole("button", {name: /Show more records/}).click();
-      assert.equal(await results.locator("li").count(), 78);
+      assert.equal(await results.locator("li").count(), 79);
       await search.fill("no such evidence");
       await readEmptyScope(page, results, "No matching records. Try another term or clear the filters.");
       await results.getByRole("button", {name: "Clear filters"}).click();
@@ -140,11 +182,11 @@ Path(sys.argv[2]).write_text(json.dumps({'goal_id':other,'display_name':'Other s
       assert.equal(partial.coverage.history_complete, false);
       assert.equal(partial.coverage.refresh_failed, true);
       assert.equal(partial.records.length, partial.coverage.loaded_records);
-      assert(partial.records.length > 0 && partial.records.length < 78);
+      assert(partial.records.length > 0 && partial.records.length < 79);
       await search.fill("amber-v1");
       await page.unroute("**/api/chat/explore-results?*");
       await history.getByRole("button", {name: "Refresh history", exact: true}).click();
-      await results.getByText("1 matches in 78 loaded records", {exact: true}).waitFor();
+      await results.getByText("1 matches in 79 loaded records", {exact: true}).waitFor();
       await page.goto(url.replace("synthetic-record-search", "synthetic-other-research"));
       await history.getByRole("button", {name: "Search research records", exact: true}).click();
       await results.getByText("1 matches in 1 loaded records", {exact: true}).waitFor();
@@ -153,13 +195,14 @@ Path(sys.argv[2]).write_text(json.dumps({'goal_id':other,'display_name':'Other s
       const other = await download();
       assert.equal(other.goal_id, "synthetic-other-research");
       assert.equal(other.records.length, 1);
+      assert.equal(await comparison.count(), 0, "A single-version Goal offers no inferred comparison");
       assert(other.records.every(record => record.goal_id === other.goal_id));
       await search.fill("amber-v1");
       await readEmptyScope(page, results, "No matching records. Try another term or clear the filters.");
       await page.goto(url);
       await history.getByRole("button", {name: "Search research records", exact: true}).click();
       await search.fill("amber-v1");
-      await results.getByText("1 matches in 78 loaded records", {exact: true}).waitFor();
+      await results.getByText("1 matches in 79 loaded records", {exact: true}).waitFor();
       // A pending refresh cannot export an intermediate mixture of pages.
       let release, observed;
       const hold = new Promise(resolve => {release = resolve;});
@@ -167,6 +210,7 @@ Path(sys.argv[2]).write_text(json.dumps({'goal_id':other,'display_name':'Other s
       await page.route("**/api/chat/explore-results?*", async route => {observed(); await hold; await route.continue();});
       await history.getByRole("button", {name: "Refresh history", exact: true}).click();
       await seen;
+      await page.waitForFunction(() => [...document.querySelectorAll(".research-record-filters button")].some(button => button.textContent.includes("Download matches") && button.disabled));
       assert.equal(await downloadButton.isDisabled(), true);
       release();
       await page.waitForFunction(() => document.querySelector('.research-history')?.getAttribute('aria-busy') === 'false');
@@ -177,12 +221,18 @@ Path(sys.argv[2]).write_text(json.dumps({'goal_id':other,'display_name':'Other s
       await page.evaluate(() => localStorage.setItem("loopx-pw-locale", "zh-CN"));
       await page.reload();
       await history.getByRole("button", {name: "搜索研究记录", exact: true}).click();
+      await history.getByRole("searchbox", {name: "搜索研究记录"}).fill("amber-v1");
+      await results.locator("li > details > summary").click();
+      await results.getByText(/比较记录版本/).click();
+      await results.getByRole("combobox", {name: "比较对象"}).waitFor();
+      assert.match(await comparison.innerText(), /未测量/);
+      await results.getByRole("button", {name: "清除筛选"}).click();
       const chineseDownload = results.getByRole("button", {name: "下载匹配记录（JSON）", exact: true});
       const received = page.waitForEvent("download");
       await chineseDownload.focus();
       await page.keyboard.press("Enter");
-      assert.equal(JSON.parse(await readFile(await (await received).path(), "utf8")).records.length, 78);
-      return {coverageEntries: collectCoverage ? await page.coverage.stopJSCoverage() : [], note: "packaged evidence search/export through native paged history; full and filtered downloads, original revisions, coverage/staleness, download/read recovery, Goal isolation and narrow viewport"};
+      assert.equal(JSON.parse(await readFile(await (await received).path(), "utf8")).records.length, 79);
+      return {coverageEntries: collectCoverage ? await page.coverage.stopJSCoverage() : [], note: "packaged evidence search/export through native paged history; full and filtered downloads, original revisions, coverage/staleness, original revision comparison, download/read recovery, Goal isolation and narrow viewport"};
     } catch (error) {
       if (page && !page.isClosed()) await page.screenshot({path: resolve(outputDir, "research-record-search-failed.png")});
       throw error;

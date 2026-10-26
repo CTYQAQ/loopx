@@ -1,3 +1,4 @@
+import {ResearchRecordComparison} from "./research-record-comparison";
 import {CircleHelp} from "lucide-react";
 import {ContextHelp} from "./context-help";
 import {useMemo, useState, type ReactNode} from "react";
@@ -66,6 +67,7 @@ export function ResearchRecordSearch({goalId, events, displayEvents, renderBody,
           {event.from_node || event.to_node ? <><dt>{zh ? "显式关联" : "Recorded link"}</dt><dd><code>{event.from_node} → {event.to_node}</code></dd></> : null}
           {event.agent_id ? <><dt>Agent ID</dt><dd><code>{event.agent_id}</code></dd></> : null}
         </dl>
+        <ResearchRecordComparison events={events} selected={event} zh={zh} stateLabel={stateLabel} timeLabel={timeLabel}/>
         {event.evidence_refs.map(ref => <code key={ref}>{ref}</code>)}
       </details>
     </li>;})}</ol>
