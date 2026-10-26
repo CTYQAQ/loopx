@@ -19,7 +19,8 @@ from loopx.control_plane.todos.contract import (
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_ninth_link_readback_pagination_scope_failure_and_recovery(tmp_path, monkeypatch, provider):
+@pytest.mark.parametrize("separate_chat_store", [False, True])
+def test_ninth_link_readback_pagination_scope_failure_and_recovery(tmp_path, monkeypatch, provider, separate_chat_store):
     registry = tmp_path / "registry.json"
     runtime = tmp_path / "runtime"
     (tmp_path / "active.md").write_text("# Synthetic Goal\n")
@@ -88,7 +89,8 @@ def test_ninth_link_readback_pagination_scope_failure_and_recovery(tmp_path, mon
     state_before = state.read_bytes()
     server = ChatHTTPServer(("127.0.0.1", 0), ChatRequestHandler)
     server.registry_path = registry
-    server.runtime_root_override = None
+    server.runtime_root_override = str(tmp_path / "private-chat") if separate_chat_store else None
+    server.runtime_root = tmp_path / "private-chat" if separate_chat_store else runtime
     server.verbose = False
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
@@ -99,6 +101,8 @@ def test_ninth_link_readback_pagination_scope_failure_and_recovery(tmp_path, mon
     try:
         page = read(base + "evidence-goal")
         assert page["total"] == 41 and len(page["items"]) == 40
+        history = read(base + "evidence-goal&view=history")
+        assert history["total"] == 42 and len(history["items"]) == 40
         item = page["items"][0]
         assert item["scope"] == "Inputs with a finite prefix"
         assert item["status"] == "refuted"

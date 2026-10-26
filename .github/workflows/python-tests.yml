@@ -853,6 +853,11 @@ jobs:
       - name: Verify native Windows test Python discovery
         run: node --no-warnings --experimental-strip-types --test tests/control_plane_ts/test_python_runtime.test.ts
 
+      - name: Qualify captured research fixture integrity on Windows
+        env:
+          PYTHONUTF8: "0"
+        run: python -m pytest -q tests/presentation/test_research_history_fixture.py
+
       - name: Qualify live pytest worker diagnostics on Windows
         run: >-
           python -m pytest -q tests/test_ci_pytest_timing.py

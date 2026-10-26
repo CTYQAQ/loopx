@@ -25,9 +25,27 @@ CONTEXT_DELIVERY_SETTINGS = ("off", "on")
 CONTEXT_DELIVERY_SCENARIOS = ("codex_benchmark_heartbeat", "codex_app_heartbeat")
 
 
+def context_delivery_for_arguments(args: Any, *, codex_machine_preference: bool = False) -> dict[str, Any]:
+    """One declaration adapter for explicit CLI and inherited machine opt-ins."""
+    fields = {key: getattr(args, key, None) for key in ("host_surface", "scheduler_owner", "execution_mode")}
+    profiles = [value for value in (getattr(args, "runtime_profile", None),
+        "codex_app_heartbeat" if getattr(args, "codex_app", False) else None,
+        "trae_app" if getattr(args, "trae_app", False) else None) if value is not None]
+    setting = getattr(args, "context_delivery", None)
+    setting = "off" if setting is None else setting
+    if len(profiles) > 1:
+        return context_delivery_activation(setting)
+    return context_delivery_activation(setting, runtime_profile=profiles[0] if profiles else None,
+        scheduler_execution_context=fields if any(fields.values()) else None,
+        benchmark_mode=os.environ.get("LOOPX_EXECUTION_MODE")
+            if os.environ.get("LOOPX_CONTEXT_DELIVERY") == "on" else None,
+        codex_machine_preference=codex_machine_preference)
+
+
 def context_delivery_activation(setting: str, *, runtime_profile: str | None = None,
                                 scheduler_execution_context: dict[str, Any] | None = None,
-                                benchmark_mode: str | None = None) -> dict[str, Any]:
+                                benchmark_mode: str | None = None,
+                                codex_machine_preference: bool = False) -> dict[str, Any]:
     from ..scheduler.execution_context import (
         ExecutionMode, HostSurface, SchedulerOwner, resolve_scheduler_execution_context,
         scheduler_execution_context_for_runtime_profile,
@@ -47,6 +65,15 @@ def context_delivery_activation(setting: str, *, runtime_profile: str | None = N
             resolution = resolve_scheduler_execution_context(scheduler_execution_context)
         context = resolution.context if resolution.ok else None
         if context is not None:
+            # The machine's application row selects Codex. Other explicitly
+            # resolved hosts keep full delivery; an explicit CLI on still
+            # rejects them. Unknown/conflicting declarations never bypass this
+            # adapter, and generic_cli still needs the benchmark declaration.
+            if codex_machine_preference and context.host_surface in {
+                HostSurface.ARK_MANAGED_AGENT, HostSurface.TRAE_APP, HostSurface.CLAUDE_CODE,
+                HostSurface.KUNLUNCODE, HostSurface.KIRO_CLI, HostSurface.LOCAL_SCHEDULER,
+            }:
+                return context_delivery_activation("off")
             if (context.host_surface is HostSurface.CODEX_APP
                     and context.scheduler_owner is SchedulerOwner.HOST_AUTOMATION
                     and context.execution_mode is ExecutionMode.HOSTED_AUTOMATION):
@@ -192,7 +219,8 @@ def codex_context_recovery_instructions(directory: str, *, goal_id: str, agent_i
 
 
 def codex_context_configuration(directory: str, *, goal_id: str, agent_id: str,
-                                 cli_argv: list[str], scenario: str, session_root: bool = False) -> dict[str, Any]:
+                                 cli_argv: list[str], scenario: str, session_root: bool = False,
+                                 inherit_machine: bool = False) -> dict[str, Any]:
     """Native configuration data shared by the worker and CLI setup journey.
 
     This renders no trust hashes and writes no host configuration. The native
@@ -207,7 +235,8 @@ def codex_context_configuration(directory: str, *, goal_id: str, agent_id: str,
     directory = str(_private_root(directory))
     option = "--codex-context-root" if session_root else "--codex-context-dir"
     handler = {"type": "command", "command": shlex.join([
-        *cli_argv, "--format", "json", "quota", "context-hook", "--context-delivery", "on",
+        *cli_argv, "--format", "json", "quota", "context-hook",
+        *([] if inherit_machine else ["--context-delivery", "on"]),
         *(["--codex-app"] if scenario == "codex_app_heartbeat" else
           ["--runtime-profile", "generic_cli"]),
         option, directory]), "timeout": 10}

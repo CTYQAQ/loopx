@@ -420,6 +420,16 @@ function normalizeAdvancementPolicy(value: unknown): string {
 
 // Reuse the same authoring rule when an optional capability references this
 // explicit packet; callers never recreate its validation or state vocabulary.
+export function normalizeGoalPathDeltaOutcome(value: unknown): string {
+  const outcome = compactText(value).toLowerCase().replaceAll("-", "_");
+  if (!(GOAL_PATH_DELTA_OUTCOMES as readonly string[]).includes(outcome)) {
+    throw new EffectRuntimeRequestError(
+      `agent_vision.path_delta.outcome must be one of: ${GOAL_PATH_DELTA_OUTCOMES.join(", ")}`,
+    );
+  }
+  return outcome;
+}
+
 export function normalizeGoalPathDelta(
   value: unknown,
 ): [JsonObject | null, Record<string, number>] {
@@ -430,12 +440,7 @@ export function normalizeGoalPathDelta(
       `agent_vision.path_delta.schema_version must be ${GOAL_PATH_DELTA_SCHEMA_VERSION}`,
     );
   }
-  const outcome = compactText(source.outcome).toLowerCase().replaceAll("-", "_");
-  if (!(GOAL_PATH_DELTA_OUTCOMES as readonly string[]).includes(outcome)) {
-    throw new EffectRuntimeRequestError(
-      `agent_vision.path_delta.outcome must be one of: ${GOAL_PATH_DELTA_OUTCOMES.join(", ")}`,
-    );
-  }
+  const outcome = normalizeGoalPathDeltaOutcome(source.outcome);
 
   const normalized: JsonObject = {
     schema_version: GOAL_PATH_DELTA_SCHEMA_VERSION,

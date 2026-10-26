@@ -13,6 +13,26 @@ export const EXPLORE_PATH_DELTA_ATTACHMENT_SCHEMA = "explore_result_from_path_de
 // The complete scoped finding fits the result-log owner: 160 revision + 200
 // applicability + 320 observation + 1200 interpretation + four labels < 2000.
 export const EXPLORE_WRITEBACK_SUMMARY_LIMIT = 2000;
+// These clauses constrain evidence collection, route selection or lease lifetime
+// before authoring. Keep them in the entry even when attachment syntax is read
+// later. The full standalone guidance retains its original order and bytes.
+const EXPLORE_BEFORE_WORK = {
+  openLease: "For an open Todo under hard_lease, keep the active task lease through refresh-state and Explore graph/Todo-link delivery; release only after explore_result_delivery.ok=true.",
+  leaseRecovery: "If already released, re-enter the normal guard/claim/lease path before retrying.",
+  completedLease: "A completed Todo under hard_lease permits only its existing additive evidence-link exception with the owner's retained released lease key and current version; this grants no new execution authority.",
+  deliveryReplay: "An exact replay of already-successful delivery is readback-only and needs no new lease; unfinished delivery still requires the applicable claim/lease proof.",
+  optionalFinding: "Routine work needs no attachment; do not invent findings.",
+  optionalCapture: "Capture is optional, not a settlement obligation.",
+  negativeEvidence: "A stopped route does not imply refuted status, and a score alone does not prove refutation.",
+  rawEvidence: "Keep raw logs local.",
+  measurementConditions: "Attach measurements when an evaluation returns quantitative evidence: include its metric, unit, explicit direction, candidate and result reference. Use the same comparison_scope only for the same task, evaluator, model/resource budget and evaluation conditions; separate local proxies from native results.",
+  measurementProvenance: "input_revision identifies the evaluated task/data revision; evaluation_ref identifies the evaluator/scoring protocol version. Keep both stable across candidates only when those conditions are verified unchanged. Put candidate code/artifact revisions in candidate_ref and individual evaluation/submission receipts in evidence_ref, not in the comparison keys. The measurement input revision and evidence reference must match this finding. If comparability is unknown, keep results separate and explain the uncertainty; never invent a shared version to obtain a delta.",
+  feedbackBeforeWork: "Use null for an unmeasured value. Read measurement_feedback before repeating a measured route: compare the latest recorded candidate with its same-scope best, investigate regressions and retain useful alternatives; a score does not itself close or authorize work.",
+  executionEvidence: "When an experiment has execution evidence, attach execution_observation: preserve its exact candidate and input version, planned versus executed method, change reason and measured resources. Missing measurements are null, not zero. A finding source digest is not an executable digest. Result evidence must name the candidate it actually evaluated, including delayed or regressing results; it does not certify current workspace quality or Goal completion.",
+};
+export function exploreBeforeWorkGuidance(): string {
+  return Object.values(EXPLORE_BEFORE_WORK).join(" ");
+}
 /** Shared point-of-use guidance; optional metadata never changes settlement. */
 export function exploreResultWritebackAffordance(): JsonObject {
   return {
@@ -42,10 +62,10 @@ export function exploreResultWritebackAffordance(): JsonObject {
       candidate_ref: "candidate:revision-2", evidence_ref: "result:validation-2"}]},
     guidance: [
       "After validating reusable evidence, put explore_result in the vision JSON already submitted with --agent-vision-json.",
-      "For an open Todo under hard_lease, keep the active task lease through refresh-state and Explore graph/Todo-link delivery; release only after explore_result_delivery.ok=true.",
-      "If already released, re-enter the normal guard/claim/lease path before retrying.",
-      "A completed Todo under hard_lease permits only its existing additive evidence-link exception with the owner's retained released lease key and current version; this grants no new execution authority.",
-      "An exact replay of already-successful delivery is readback-only and needs no new lease; unfinished delivery still requires the applicable claim/lease proof.",
+      EXPLORE_BEFORE_WORK.openLease,
+      EXPLORE_BEFORE_WORK.leaseRecovery,
+      EXPLORE_BEFORE_WORK.completedLease,
+      EXPLORE_BEFORE_WORK.deliveryReplay,
       "Prefer path_delta_attachment_template when this same packet contains an evidence-linked path_delta: supply the question, applicability, tested input revision and explicit finding status.",
       "For a new question, omit node_id: the hook derives its identity from the exact question and applicability, creates it and links this Todo; no explore node call is needed.",
       "To add to a known question, reuse its returned node_id and canonical scope.",
@@ -61,15 +81,15 @@ export function exploreResultWritebackAffordance(): JsonObject {
       "Without a selection, all refs must be opaque identifiers.",
       "Otherwise fill attachment_template, inline or via --explore-result-json.",
       "Matching sources coalesce; conflicts reject.",
-      "Routine work needs no attachment; do not invent findings.",
-      "Capture is optional, not a settlement obligation.",
-      "A stopped route does not imply refuted status, and a score alone does not prove refutation.",
-      "Keep raw logs local.",
-      "Attach measurements when an evaluation returns quantitative evidence: include its metric, unit, explicit direction, candidate and result reference. Use the same comparison_scope only for the same task, evaluator, model/resource budget and evaluation conditions; separate local proxies from native results.",
-      "input_revision identifies the evaluated task/data revision; evaluation_ref identifies the evaluator/scoring protocol version. Keep both stable across candidates only when those conditions are verified unchanged. Put candidate code/artifact revisions in candidate_ref and individual evaluation/submission receipts in evidence_ref, not in the comparison keys. The measurement input revision and evidence reference must match this finding. If comparability is unknown, keep results separate and explain the uncertainty; never invent a shared version to obtain a delta.",
+      EXPLORE_BEFORE_WORK.optionalFinding,
+      EXPLORE_BEFORE_WORK.optionalCapture,
+      EXPLORE_BEFORE_WORK.negativeEvidence,
+      EXPLORE_BEFORE_WORK.rawEvidence,
+      EXPLORE_BEFORE_WORK.measurementConditions,
+      EXPLORE_BEFORE_WORK.measurementProvenance,
       "To reuse explicitly verified conditions, optional measurement_context supplies comparison_scope, input_revision and evaluation_ref for observations that omit those fields; conflicting fields reject. CLI finding accepts the same context via --measurement-context-json. This copies declared conditions, not proof of comparability.",
-      "Use null for an unmeasured value. Read measurement_feedback before repeating a measured route: compare the latest recorded candidate with its same-scope best, investigate regressions and retain useful alternatives; a score does not itself close or authorize work.",
-      "When an experiment has execution evidence, attach execution_observation: preserve its exact candidate and input version, planned versus executed method, change reason and measured resources. Missing measurements are null, not zero. A finding source digest is not an executable digest. Result evidence must name the candidate it actually evaluated, including delayed or regressing results; it does not certify current workspace quality or Goal completion.",
+      EXPLORE_BEFORE_WORK.feedbackBeforeWork,
+      EXPLORE_BEFORE_WORK.executionEvidence,
       "Observations allow 320 characters, interpretations 1200; the complete scoped summary is preserved within 2000 characters.",
     ].join(" "),
     // Blank evidence fields deliberately fail validation until the caller

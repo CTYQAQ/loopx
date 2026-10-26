@@ -981,6 +981,7 @@ export async function fetchChatSessions(options: {
     ok: true;
     schema_version: "loopx_chat_session_list_v1";
     conversation_binding_id?: string;
+    conversation_source?: unknown;
     sessions: ChatSessionSummary[];
   }>(`/api/chat/sessions?${query.toString()}`, { signal: options.signal });
   if (!options.bound) return listed;
@@ -2691,10 +2692,46 @@ const privateConversationStopRecoverySchema = z.object({binding_id: z.string(), 
   project_title: z.string(), pending_count: z.number().int().positive()});
 export type PrivateConversationStopRecovery = z.infer<typeof privateConversationStopRecoverySchema>;
 const privateConversationsSchema = z.object({ok: z.literal(true), revision: z.number().int(),
+  app_steward_binding_id: z.string().regex(/^[a-f0-9]{24}$/).nullable().default(null),
   connections: z.array(privateConversationSchema), stop_recoveries: z.array(privateConversationStopRecoverySchema).default([])});
 export type PrivateConversation = z.infer<typeof privateConversationSchema>;
+const boundConversationSourceSchema = privateConversationSchema.pick({
+  binding_id: true, app_ref: true, context_kind: true, project_title: true, executor_endpoint_id: true,
+}).extend({audience: z.literal("owner"), context_available: z.literal(true)});
+export type BoundConversationSource = z.infer<typeof boundConversationSourceSchema>;
+
+/** Session and display source come from one fresh Core-verified read. */
+export async function resolveBoundConversation(target: BoundConversationTarget, signal?: AbortSignal) {
+  const listed = await fetchChatSessions({bound: target, signal});
+  const parsed = boundConversationSourceSchema.safeParse(listed.conversation_source);
+  if (!parsed.success || parsed.data.binding_id !== target.bindingId) {
+    throw new Error("This service cannot verify the original conversation. Update LoopX and retry.");
+  }
+  const session = listed.sessions[0], source = parsed.data;
+  if (source.executor_endpoint_id !== session.agent_id) {
+    throw new Error("The original conversation's executor no longer matches its connection.");
+  }
+  return {session, source};
+}
+
 export async function fetchPrivateConversations(signal?: AbortSignal) {
   return privateConversationsSchema.parse(await requestJson<unknown>("/api/chat/lark/private-conversations", { signal }));
+}
+const appStewardTargetSchema = z.union([
+  z.object({ok: z.literal(true), binding_id: z.null(), session_id: z.null()}),
+  z.object({ok: z.literal(true), binding_id: z.string().regex(/^[a-f0-9]{24}$/),
+    session_id: z.string().regex(/^[A-Za-z0-9._-]{1,160}$/)}),
+]);
+export async function fetchAppStewardTarget(signal?: AbortSignal): Promise<BoundConversationTarget | null> {
+  const target = appStewardTargetSchema.parse(await requestJson<unknown>("/api/chat/app-steward", {signal}));
+  return target.binding_id === null ? null : {bindingId: target.binding_id, sessionId: target.session_id};
+}
+export async function selectAppSteward(bindingId: string | null, revision: number) {
+  const result = privateConversationsSchema.parse(await requestJson<unknown>("/api/chat/app-steward", {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({binding_id: bindingId, revision}),
+  }));
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("loopx:app-steward-changed"));
+  return result;
 }
 export async function connectPrivateConversation(appRef: string, projectRef: string, executor: string, contextKind: "project" | "steward" = "project", projectGrant: "workspace_read" | "workspace_write" = "workspace_write", groupIds?: string[]) {
   return privateConversationsSchema.parse(await requestJson<unknown>("/api/chat/lark/private-conversations", {

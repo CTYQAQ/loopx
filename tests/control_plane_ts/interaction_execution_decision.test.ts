@@ -126,6 +126,30 @@ test("canonical null and false stop compatibility fallback", () => {
   }
 });
 
+test("the canonical replan attempt leaves ordinary delivery closed", () => {
+  const current = executionFacts({effective_action: "autonomous_replan_required",
+    replan_required: true, canonical_execution: {must_attempt_work: true}});
+  const admitted = projectInteractionExecution(current);
+  assert.equal(admitted.mode, "autonomous_replan");
+  assert.equal(admitted.must_attempt, true);
+  assert.equal(admitted.delivery_allowed, false);
+  assert.equal(admitted.delivery_basis, "none");
+  for (const denial of [false, null]) {
+    const refused = projectInteractionExecution({...current,
+      canonical_execution: {must_attempt_work: true, delivery_allowed: denial}});
+    assert.equal(refused.delivery_allowed, false);
+  }
+  for (const patch of [
+    {canonical_execution: {must_attempt_work: false}},
+    {canonical_execution: {}},
+    {effective_action: "normal_run"},
+    {effective_action: "monitor_quiet_skip"},
+    {replan_required: false},
+  ]) {
+    assert.equal(projectInteractionExecution({...current, ...patch}).delivery_allowed, false);
+  }
+});
+
 test("missing canonical delivery retains compatibility precedence without should_run", () => {
   const normal = projectInteractionExecution(executionFacts({
     should_run: false,

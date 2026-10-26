@@ -84,10 +84,22 @@ export const goalMastheadScenario = {
     const actionRequests = [];
     page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/api/actions/")) actionRequests.push(request.url()); });
     try {
+      const pausedClock = await page.addStyleTag({content: "*, *::before, *::after {animation-play-state: paused !important;}"});
       await openGoal(page, title);
       assert.equal(await page.locator(".personal-channel-title h1").innerText(), title);
       assert.match(await page.locator(".goal-masthead-breadcrumb").innerText(), /工作台\s*Goals\s*Quarterly cash-flow study/);
       assert.equal(await page.getByTestId("goal-vitals").locator(".goal-vital").count(), 6, "At most six vitals");
+
+      // A native WebView may suspend its animation clock while an accessible
+      // navigation commits. The first frame must still contain the real values.
+      const firstFrame = await page.locator(".goal-vital-value").evaluateAll(values => values.map(value => {
+        let opacity = 1;
+        for (let node = value; node; node = node.parentElement) opacity *= Number(getComputedStyle(node).opacity);
+        return opacity;
+      }));
+      await page.screenshot({path: resolve(outputDir, "goal-masthead-paused-first-frame.png"), animations: "allow"});
+      assert(firstFrame.every(opacity => opacity === 1), "Authoritative Goal readings remain visible before the animation clock advances");
+      await pausedClock.evaluate(element => element.remove());
 
       const state = await vital(page, "状态");
       assert.equal(state.value, "等你", "A waiting decision leads the state, as in the Goal list");
@@ -144,10 +156,14 @@ export const goalMastheadScenario = {
       await page.locator(".personal-goal-tabs button", { hasText: "概览" }).click();
       await page.getByTestId("goal-vitals").waitFor({ state: "visible" });
       const stop = page.locator(".goal-lifecycle-trigger");
+      const pausedConfirmationClock = await page.addStyleTag({content: "*, *::before, *::after {animation-play-state: paused !important;}"});
       await stop.click();
       const dialog = page.getByRole("dialog", { name: "停止这个 Goal？" });
       await dialog.waitFor();
       assert.match(await dialog.innerText(), /已在运行的工具调用会执行完[\s\S]*只有恢复才能重新获得调度资格/);
+      assert.equal(await dialog.evaluate(element => Number(getComputedStyle(element).opacity)), 1,
+        "Permission and execution consequences remain readable with a suspended entrance clock");
+      await pausedConfirmationClock.evaluate(element => element.remove());
       await page.screenshot({ path: resolve(outputDir, "goal-masthead-stop-confirm.png"), animations: "disabled" });
       await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "detached" });

@@ -15,7 +15,10 @@ def goal_source_catalog(server):
     catalog = getattr(server, "goal_source_catalog", None)
     if catalog is None:
         from ..capabilities.explore.result_log import explore_history_rows
-        catalog = GoalSourceCatalog(server.registry_path, server.runtime_root, history_projector=explore_history_rows)
+        from ..capabilities.native_chat.project_context import coordination_runtime_root
+        catalog = GoalSourceCatalog(server.registry_path,
+            coordination_runtime_root(server.registry_path, server.runtime_root),
+            history_projector=explore_history_rows)
         server.goal_source_catalog = catalog
     return catalog
 

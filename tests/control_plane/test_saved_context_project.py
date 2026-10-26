@@ -113,6 +113,10 @@ def test_saved_projection_manages_private_cache_without_authority_io(tmp_path, m
     assert code == 0 and result["ok"] and result["mode"] == "full", result
     assert path.read_bytes() == raw and not registry.exists() and not runtime.exists()
     if enabled:
+        assert result["schema_version"] == "context_capture_page_v1"
+        assert result["offset"] == 0 and result["eof"]
+        assert result["content"].encode() == Path(result["path"]).read_bytes()
+        assert json.loads(result["content"]) == original
         actual_root = context if cache_location == "default" else root
         assert actual_root.stat().st_mode & 0o077 == 0
         assert list(actual_root.glob("context-*"))
@@ -122,6 +126,7 @@ def test_saved_projection_manages_private_cache_without_authority_io(tmp_path, m
         assert hashlib.sha256(recovered).hexdigest() == recovered_digest
         assert json.loads(recovered) == original
     else:
+        assert "content" not in result and "schema_version" not in result
         assert not list(context.iterdir())
         assert root.exists() == (cache_location == "existing")
     command = shlex.split(result["command"])
@@ -129,7 +134,50 @@ def test_saved_projection_manages_private_cache_without_authority_io(tmp_path, m
     assert code == 0 and json.loads(page["content"]) == original
 
 
-def test_saved_projection_wire_failure_keeps_committed_current_recovery(tmp_path, monkeypatch):
+@pytest.mark.parametrize("body", ["Exact requirement.\n" * 700, "完整要求与来源🙂\n" * 700], ids=["ascii", "utf8"])
+def test_saved_projection_first_page_continues_exact_bytes_and_keeps_restart(tmp_path, monkeypatch, body):
+    from loopx.control_plane.turn_driver.codex_context import codex_context_hook
+    from loopx.control_plane.turn_driver.codex_input_trace import _capture_page_range
+
+    context = tmp_path / "native"
+    context.mkdir(mode=0o700)
+    monkeypatch.setenv("CODEX_THREAD_ID", "native-session")
+    monkeypatch.chdir(tmp_path)
+    codex_context_hook(str(context), {"hook_event_name": "SessionStart", "source": "startup",
+        "session_id": "native-session", "cwd": str(tmp_path)})
+    source = tmp_path / "original.json"
+    raw = json.dumps({"ok": True, "goal_id": "goal", "agent_identity": {"agent_id": "agent"},
+        "heartbeat_receipt": {"turn_instance_id": "turn"}, "requirement": body}, ensure_ascii=False).encode()
+    source.write_bytes(raw)
+    digest = hashlib.sha256(raw).hexdigest()
+    registry, runtime = tmp_path / "absent.json", tmp_path / "absent-runtime"
+    code, result = _run_cli(registry, runtime, "quota", "context-project", "--capture-file", str(source),
+        "--capture-sha256", digest, "--goal-id", "goal", "--agent-id", "agent", "--turn-instance-id", "turn",
+        "--context-delivery", "on", "--codex-app", "--codex-context-dir", str(context), cwd=tmp_path)
+    assert code == 0 and result["mode"] == "full", result
+    delivered = Path(result["path"]).read_bytes()
+    delivered_digest = hashlib.sha256(delivered).hexdigest()
+    assert result["sha256"] == delivered_digest and json.loads(delivered) == json.loads(raw)
+    assert _capture_page_range(result, raw=delivered, digest=delivered_digest) == (0, result["next_offset"])
+    assert _capture_page_range({**result, "content": result["content"][:-1]}, raw=delivered, digest=delivered_digest) is None
+    combined = result["content"].encode()
+    page = result
+    while not page["eof"]:
+        argv = shlex.split(page["next_command"])
+        code, page = _run_cli(registry, runtime, *argv[argv.index("quota"):], cwd=tmp_path)
+        assert code == 0 and page["offset"] == len(combined)
+        combined += page["content"].encode()
+    assert combined == delivered and hashlib.sha256(combined).hexdigest() == delivered_digest
+    argv = shlex.split(result["command"])
+    code, restarted = _run_cli(registry, runtime, *argv[argv.index("quota"):], cwd=tmp_path)
+    assert code == 0 and restarted["offset"] == 0
+    assert restarted["content"].startswith(result["content"])
+    assert restarted["content"].encode() == delivered[:restarted["next_offset"]]
+    assert source.read_bytes() == raw and not registry.exists() and not runtime.exists()
+
+
+@pytest.mark.parametrize("failure", ["wire", "inline_read"])
+def test_saved_projection_wire_failure_keeps_committed_current_recovery(tmp_path, monkeypatch, failure):
     from loopx.cli import build_parser
     from loopx.cli_commands.quota_capture import project_saved_context_capture
     from loopx.control_plane.turn_driver import codex_context, decision_capture
@@ -148,11 +196,14 @@ def test_saved_projection_wire_failure_keeps_committed_current_recovery(tmp_path
     write_capture = decision_capture.write_decision_capture
 
     def fail_optional_wire(path, payload, **kwargs):
-        if path.name == "delivery.json":
+        if failure == "wire" and path.name == "delivery.json":
             raise OSError("optional wire unavailable")
         return write_capture(path, payload, **kwargs)
 
     monkeypatch.setattr(decision_capture, "write_decision_capture", fail_optional_wire)
+    if failure == "inline_read":
+        from loopx.cli_commands import quota_capture
+        monkeypatch.setattr(quota_capture, "read_context_capture", lambda args: {"ok": False})
     digest = hashlib.sha256(raw).hexdigest()
     args = build_parser().parse_args(["--format", "json", "quota", "context-project",
         "--capture-file", str(path), "--capture-sha256", digest, "--goal-id", "saved-goal",
@@ -160,7 +211,14 @@ def test_saved_projection_wire_failure_keeps_committed_current_recovery(tmp_path
         "--codex-app", "--codex-context-dir", str(context), "--decision-output-root", str(root)])
     result = project_saved_context_capture(args)
     assert result["ok"] and result["mode"] == "full"
-    assert result["path"] == str(path) and result["sha256"] == digest
+    if failure == "wire":
+        assert result["path"] == str(path) and result["sha256"] == digest
+    else:
+        assert "content" not in result and result["recovery"]["sha256"] == digest
+        argv = shlex.split(result["command"])
+        code, page = _run_cli(tmp_path / "absent.json", tmp_path / "absent-runtime",
+            *argv[argv.index("quota"):], cwd=tmp_path)
+        assert code == 0 and page["offset"] == 0 and json.loads(page["content"]) == original
     recovered_path, recovered_digest = codex_context.read_codex_context_reference(str(context),
         goal_id="saved-goal", agent_id="saved-agent")
     recovered = Path(recovered_path).read_bytes()
@@ -238,7 +296,7 @@ def test_preflight_instruction_pins_both_projection_and_full_fallback(tmp_path):
 
 
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN"), reason="Explicit native Codex; loopback inference only")
-@pytest.mark.parametrize("host", ["app_server", "benchmark"])
+@pytest.mark.parametrize("host", ["app_server", "benchmark", "app_machine", "app_code_mode"])
 def test_native_saved_preflight_uses_current_input_without_guard_replay(tmp_path, monkeypatch, host):
     from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime, read_fixture_todos
     from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
@@ -259,7 +317,7 @@ def test_native_saved_preflight_uses_current_input_without_guard_replay(tmp_path
         build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=todos, handoff_mode="soft_claim"),
         state_path=state, provider="sqlite")
     sources = []
-    for name in (("cold", "warm") if host == "app_server" else ()):
+    for name in (("cold", "warm") if host != "benchmark" else ()):
         code, decision = _run_cli(registry, runtime, "quota", "should-run", "--goal-id", GOAL_ID,
             "--agent-id", AGENT_ID, "--todo-id", TODO_ID, "--turn-instance-id", "saved-native-turn", "--codex-app", cwd=project)
         assert code == 0, decision
@@ -274,7 +332,15 @@ def test_native_saved_preflight_uses_current_input_without_guard_replay(tmp_path
     cli = [program, "--cli-bin", program]
     from loopx.control_plane.turn_driver.codex_context import codex_context_configuration
     configuration = codex_context_configuration(str(context), goal_id=GOAL_ID, agent_id=AGENT_ID, cli_argv=cli, scenario="codex_app_heartbeat")
-    if host == "app_server":
+    if host == "app_machine":
+        from tests.control_plane.test_context_machine_configuration import configure
+        assert configure(registry, runtime, workspace, "on")[0] == 0
+        code, setup = _run_cli(registry, runtime, "quota", "context-config", "--codex-app",
+            "--goal-id", GOAL_ID, "--agent-id", AGENT_ID, cwd=project)
+        assert code == 0, setup
+        configuration = setup["native_config"]
+        cli += ["--runtime-root", str(runtime)]
+    if host != "benchmark":
         (home / "hooks.json").write_text(json.dumps({"hooks": configuration["hooks"]}))
     phase, queue, observed, errors = "cold", [], {}, []
     actual_turn = None
@@ -298,18 +364,25 @@ def test_native_saved_preflight_uses_current_input_without_guard_replay(tmp_path
                     command = shlex.join([*cli, "--format", "json", "quota", "context-project",
                         "--capture-file", str(source), "--capture-sha256", hashlib.sha256(raw).hexdigest(),
                         "--goal-id", GOAL_ID, "--agent-id", AGENT_ID, "--turn-instance-id", "saved-native-turn",
-                        "--context-delivery", "on", "--codex-app", "--codex-context-dir", str(context), "--decision-output-root", str(cache)])
+                        "--codex-app", *([] if host == "app_machine" else [
+                            "--context-delivery", "on", "--codex-context-dir", str(context), "--decision-output-root", str(cache)])])
                 phase += "_ready"
             elif phase.endswith("_ready"):
                 name = phase.split("_")[0]
-                output = [item["output"] for item in request["input"] if item.get("type") == "function_call_output"][-1]
+                output = [item["output"] for item in request["input"]
+                    if item.get("type") in ("function_call_output", "custom_tool_call_output")][-1]
+                if isinstance(output, list):
+                    output = [part["text"] for part in output if part.get("type") == "input_text"][-1]
                 descriptor = json.loads(output.split("\nOutput:\n", 1)[-1])
                 assert descriptor["ok"] and descriptor["mode"] == ("full" if name == "cold" else "delta")
                 wire = json.loads((Path(descriptor["path"]).parent / "presentation.json").read_text()) if name == "cold" else json.loads(Path(descriptor["path"]).read_text())
                 assert descriptor["target"] == wire["target"]
                 observed[name] = (wire, descriptor)
                 data = Path(descriptor["path"]).read_bytes()
-                for offset in range(0, len(data), 4096):
+                # The existing page protocol also admits the projector's first
+                # page. Old installed projectors still start with command.
+                offset = descriptor["next_offset"] if "content" in descriptor else 0
+                for offset in range(len(data) if offset is None else offset, len(data), 4096):
                     # Synthetic captures are ASCII JSON; public reader owns every byte.
                     queue.append(shlex.join([*cli, "--format", "json", "quota", "context-read",
                         "--capture-file", descriptor["path"], "--capture-sha256", descriptor["sha256"],
@@ -328,6 +401,10 @@ def test_native_saved_preflight_uses_current_input_without_guard_replay(tmp_path
                 if host == "benchmark":
                     return message  # A new worker wake owns its own original guard.
                 return response(request, number, message)
+            if host == "app_code_mode":
+                return {"type": "custom_tool_call", "id": f"fc_{number}", "call_id": f"call_{number}",
+                    "name": "exec", "input": 'text((await tools.exec_command('
+                        + json.dumps({"cmd": command, "max_output_tokens": 2000}) + ')).output);'}
             return {"type": "function_call", "id": f"fc_{number}", "call_id": f"call_{number}",
                 "name": "exec_command", "arguments": json.dumps({"cmd": command, "max_output_tokens": 3000})}
         except Exception as error:
@@ -373,6 +450,9 @@ def test_native_saved_preflight_uses_current_input_without_guard_replay(tmp_path
             _configure_provider(home, url)
             with (home / "config.toml").open("a") as config:
                 config.write("[sandbox_workspace_write]\nnetwork_access=true\n")
+            if host == "app_code_mode":
+                config = home / "config.toml"
+                config.write_text(config.read_text().replace("[features]\n", "[features]\ncode_mode=true\n"))
             _app_server(binary, env, workspace, home, True, sandbox="workspace-write")
     assert not errors and phase == "done", errors
     if host == "benchmark":

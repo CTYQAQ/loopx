@@ -207,17 +207,16 @@ impl ServiceSet {
         }
     }
 
-    /// Recover only this window's exited private children. Keep its qualified
+    /// Recover only this window's exited owned children. Keep its qualified
     /// artifact, ports and healthy peer; never infer ownership from a listener.
     pub(crate) fn recover_exited(
         &mut self,
         endpoints: &ServiceEndpoints,
         now: Instant,
     ) -> Result<bool, ServiceError> {
-        if !endpoints.isolated
-            || self
-                .last_recovery_attempt
-                .is_some_and(|at| now.duration_since(at) < Duration::from_secs(2))
+        if self
+            .last_recovery_attempt
+            .is_some_and(|at| now.duration_since(at) < Duration::from_secs(2))
         {
             return Ok(false);
         }
@@ -353,7 +352,7 @@ fn connect(
     }
 }
 
-// Release windows never borrow a listener or restart a LaunchAgent. A matching
+// Explicit private endpoints never borrow a listener or restart a LaunchAgent. A matching
 // revision alone cannot establish the listener's registry/process ownership.
 fn connect_owned_service(
     kind: ServiceKind,
@@ -508,6 +507,16 @@ fn connect_service(
         )));
     }
 
+    // A declared machine service owns its registry and Chat store even while
+    // launchd has it unloaded. Do not replace that source with an empty default.
+    #[cfg(target_os = "macos")]
+    if platform_managed_service_declared(env::var_os("HOME").as_deref(), kind) {
+        return Err(ServiceError(format!(
+            "system-managed LoopX {} is configured but not loaded; restore its service and retry",
+            kind.label()
+        )));
+    }
+
     let mut command = Command::new(executable);
     configure_runtime_environment(&mut command);
     if matches!(kind, ServiceKind::Chat) {
@@ -588,6 +597,20 @@ fn request_platform_managed_start(kind: ServiceKind) -> bool {
         .stderr(Stdio::null())
         .status();
     true
+}
+
+#[cfg(target_os = "macos")]
+fn platform_managed_service_declared(home: Option<&OsStr>, kind: ServiceKind) -> bool {
+    let Some(home) = home else {
+        return false;
+    };
+    let path = PathBuf::from(home)
+        .join("Library/LaunchAgents")
+        .join(format!("{}.plist", platform_managed_service_label(kind)));
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+    }
 }
 
 fn platform_managed_service_label(kind: ServiceKind) -> &'static str {

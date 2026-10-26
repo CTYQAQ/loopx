@@ -12,6 +12,7 @@ type FieldCopy = Record<string, Readonly<{ description?: string; label: string; 
 
 const capabilityCopy: Record<WorkspaceLocale, Record<string, LocalizedCopy>> = {
   en: {
+    context_delivery: {displayName: "Differential context", description: "Reuse unchanged context across supported Agent turns. A missing retained baseline keeps the full context."},
     codex_chat: {displayName: "Codex Goal conversation defaults", description: "Choose the native Codex profile, model, speed tier and reasoning effort for new Goal conversations. Existing conversations keep their original history. This does not start or reconfigure an active Agent Loop, worker or steward."},
     decision_context: {displayName: "Find evidence", description: "Find advisory evidence with a temporary private profile. OpenViking and BM25 are retrieval implementations; this page does not save a binding or enable automatic memory."},
     content_ops: {displayName: "Content production", description: "Prepare source-backed outlines, compose local videos or generate cloud images and footage with the optional media provider. Review the result before sharing."},
@@ -81,6 +82,7 @@ const capabilityCopy: Record<WorkspaceLocale, Record<string, LocalizedCopy>> = {
     },
   },
   "zh-CN": {
+    context_delivery: {displayName: "差分上下文", description: "在支持的 Agent 轮次间复用未变化的上下文；无法确认基线保留时使用完整上下文。"},
     codex_chat: {displayName: "Codex Goal 对话默认值", description: "分别选择 Codex 配置来源、模型、速度档和推理强度，作用于本机的新 Goal 对话。已有对话保留原历史；不会启动或重配正在运行的 Agent Loop、工作 Agent 或管家。"},
     decision_context: {displayName: "资料召回", description: "通过临时私有配置查找参考证据。OpenViking、BM25 是检索实现；本页不保存绑定，也不启用自动记忆。"},
     content_ops: {displayName: "内容制作", description: "准备有来源的提纲，使用可选媒体扩展制作本机视频、生成云端图像与镜头，检查作品后再分享。"},
@@ -244,6 +246,11 @@ export function localizeCapability(
 }
 
 export function localizedCapabilityFieldCopy(locale: WorkspaceLocale, capabilityId?: string): FieldCopy {
+  if (capabilityId === "context_delivery") return {...fieldCopy[locale], mode: locale === "zh-CN" ? {
+    label: "Codex", description: "仅作用于支持的 Codex 心跳；显式关闭的实验保持关闭。", options: {off: "关闭", on: "开启"},
+  } : {
+    label: "Codex", description: "Applies only to supported Codex heartbeats; explicitly disabled runs stay disabled.", options: {off: "Off", on: "On"},
+  }};
   if (capabilityId === "codex_chat") return {...fieldCopy[locale], ...(locale === "zh-CN" ? {
     codex_profile: {label: "Codex 配置来源", description: "选择已有本机配置，例如 codex-gpt。账户和凭据留在原目录，不复制；留空继承服务配置。"},
     model: {label: "对话模型", description: "例如 gpt-6.1-sol；留空继承所选 Codex 配置的模型。"},

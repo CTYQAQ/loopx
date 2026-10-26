@@ -147,6 +147,41 @@ class ChatConversationBindings:
         self._stop_revoked_binding(binding_id)
         return dict(result["state"])
 
+    def select_app_steward(self, binding_id: str | None, *, expected_revision: int) -> dict[str, Any]:
+        """Select one existing source for the App entry without changing grants."""
+        row = next((item for item in self.read()["bindings"] if item["binding_id"] == binding_id), None)
+        observation = self.observe(row["transport_ref"]) if row is not None else None
+        with exclusive_file_lock(self.path, operation="select_app_steward"):
+            result = self._core("collaboration.conversation.binding", {
+                "current": self.read(), "expected_revision": expected_revision,
+                "operation": "select_app_steward", "binding_id": binding_id,
+                "observation": observation, "available_projects": self.projects.available() if binding_id is not None else [],
+            })
+            if result["changed"]:
+                _atomic_write_json(self.path, result["state"])
+            if self.read() != result["state"]:
+                raise OSError("App steward selection did not verify")
+            return dict(result["state"])
+
+    def app_steward_target(self) -> dict[str, Any]:
+        """Discover within the selected source; opening creates no execution."""
+        current = self.read()
+        selected = current.get("app_steward_binding_id")
+        if selected is None:
+            # Validate legacy state through the same pure owner plan. An
+            # unreadable grant must not masquerade as an unselected entry.
+            self._core("collaboration.conversation.binding", {"current": current,
+                "expected_revision": current.get("revision"), "operation": "select_app_steward", "binding_id": None})
+            return {"binding_id": None, "session_id": None}
+        sessions = self.local_sessions(selected, app_steward_entry=True)
+        if not sessions:
+            raise ValueError("the original steward Session is unavailable")
+        session = max(sessions, key=lambda item: (item.get("last_activity_at") or "", item["session_id"]))
+        with exclusive_file_lock(self.path, operation="read_app_steward_target"):
+            if self.read().get("app_steward_binding_id") != selected:
+                raise ValueError("App steward selection changed during discovery")
+            return {"binding_id": selected, "session_id": session["session_id"]}
+
     def _revoke_delivery_sources(self, binding_id: str) -> None:
         if self.controller is not None:
             from ..manager_context import revoke_conversation_sources
@@ -265,7 +300,10 @@ class ChatConversationBindings:
             "session_id", "goal_id", "agent_id", "executor_endpoint_id", "channel_id",
             "session_mode", "status", "project_context", "steward_context")}
 
-    def local_sessions(self, binding_id: str) -> list[dict[str, Any]]:
+    def local_sessions(self, binding_id: str, *, app_steward_entry: bool = False) -> list[dict[str, Any]]:
+        return self.local_session_snapshot(binding_id, app_steward_entry=app_steward_entry)["sessions"]
+
+    def local_session_snapshot(self, binding_id: str, *, app_steward_entry: bool = False) -> dict[str, Any]:
         """Read original targets; metadata hints never replace Core's grant.
 
         Provider IO and store inventory stay outside the publication fence.
@@ -291,16 +329,26 @@ class ChatConversationBindings:
             current = self.read()
             if next((item for item in current["bindings"] if item["binding_id"] == binding_id), None) != row:
                 raise ValueError("conversation binding changed during identity verification")
+            projects = self.projects.available()
             result = self._core("collaboration.conversation.local_sessions", {
                 "current": current, "binding_id": binding_id, "observation": observation,
-                "available_projects": self.projects.available(),
+                "available_projects": projects,
                 "sessions": [self._session_observation(session) for session in sessions],
+                **({"app_steward_entry": True} if app_steward_entry else {}),
                 **({"available_goal_ids": self.goal_scope_ids(row)} if row.get("goal_scope") == "all_registered" else {}),
             })
             # Build the lookup only after Core has rejected duplicate identity;
             # an IO dictionary must not silently turn ambiguity into one target.
             by_id = {session["session_id"]: session for session in sessions}
-            return [store.public_session(by_id[sid]) for sid in result["session_ids"]]
+            project = next(project for project in projects if project["project_ref"] == row["project_ref"])
+            # Project this exact Core-verified source under the same fence.
+            # Opening a conversation must not enumerate settings, unrelated
+            # Agent candidates, listener health or stop-recovery inventories.
+            return {"sessions": [store.public_session(by_id[sid]) for sid in result["session_ids"]],
+                    "conversation_source": {"binding_id": binding_id, "app_ref": row["transport_ref"],
+                        "context_kind": row["context_kind"], "audience": row.get("audience", "owner"),
+                        "project_title": Path(project["workspace_path"]).name, "context_available": True,
+                        "executor_endpoint_id": row["executor_endpoint_id"]}}
 
     def goal_scope_ids(self, binding: dict[str, Any]) -> list[str]:
         if binding.get("goal_scope") != "all_registered":

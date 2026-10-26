@@ -1008,7 +1008,7 @@ class ChatRequestHandler(
             try:
                 if bindings is None:
                     raise ValueError("conversation bindings unavailable")
-                sessions = bindings.local_sessions(query["conversation_binding_id"][0])
+                snapshot = bindings.local_session_snapshot(query["conversation_binding_id"][0])
             except (ValueError, OSError, KeyError):
                 # A failed provider/store read may contain private diagnostics.
                 # Refuse this selector; never fall back to an unfiltered list.
@@ -1016,7 +1016,7 @@ class ChatRequestHandler(
             # Older services ignore this new query. A matching selector in the
             # response lets callers reject their ordinary, unfiltered result.
             return self._send_json({"ok": True, "schema_version": "loopx_chat_session_list_v1",
-                                    "conversation_binding_id": query["conversation_binding_id"][0], "sessions": sessions})
+                                    "conversation_binding_id": query["conversation_binding_id"][0], **snapshot})
         goal_id = _compact_text((query.get("goal_id") or [""])[0], limit=160) or None
         agent_id = _compact_text((query.get("agent_id") or [""])[0], limit=80) or None
         channel_id = _compact_text((query.get("channel_id") or [""])[0], limit=160) or None
@@ -1668,6 +1668,7 @@ class ChatRequestHandler(
             CHAT_LARK_CHATS_PATH: self._lark_chats,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connections,
             PRIVATE_CONVERSATIONS_PATH: self._private_conversations,
+            "/api/chat/app-steward": self._app_steward,
             CHAT_GOAL_CHANNEL_TARGETS_PATH: self._goal_channel_targets,
             **self._configuration_get_routes(),
             DEFAULT_CHAT_STATUS_PATH: self._status,
@@ -1727,6 +1728,7 @@ class ChatRequestHandler(
             CHAT_LARK_APP_SETUPS_PATH: self._lark_setup_start,
             CHAT_LARK_CONNECTIONS_PATH: self._lark_connect,
             PRIVATE_CONVERSATIONS_PATH: self._private_conversation_connect,
+            "/api/chat/app-steward": self._select_app_steward,
             PRIVATE_CONVERSATIONS_PATH + "/agent-targets": self._private_conversation_agent_target,
             PRIVATE_CONVERSATIONS_PATH + "/owner-notifications": self._private_conversation_owner_notifications,
             PRIVATE_CONVERSATIONS_PATH + "/managed-steward": self._private_conversation_managed_steward,

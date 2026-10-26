@@ -28,7 +28,8 @@ def preflight_context_instruction(env: dict[str, str], path: Path, digest: str, 
         "--turn-instance-id", turn_id, "--context-delivery", "on", "--runtime-profile", "generic_cli", "--codex-context-dir", env["LOOPX_CODEX_CONTEXT_DIR"]]
     full = [*prefix, "context-read", *source]
     return ("Present that same immutable packet with:\n```sh\n" + shlex.join(project)
-        + "\n```\nFollow the returned command and all next_command pages; reconstruct any delta against "
+        + "\n```\nConsume any returned page content, then follow next_command through eof. "
+        "If no page content is returned, run command and follow all next_command pages. Reconstruct any delta against "
         "its exact retained baseline before following the original interaction_contract. "
         "If projection is unavailable, the baseline is absent/uncertain, or a response is incomplete, "
         "follow its full recovery reference. If the projection command itself fails, read the original "

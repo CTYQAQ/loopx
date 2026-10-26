@@ -304,6 +304,11 @@ def render_todo_markdown(payload: dict[str, Any]) -> str:
     elif "todo" in payload:
         marker = todo_marker_for_status(payload.get("status") or TODO_STATUS_OPEN)
         lines.extend(["", "## Todo", "", f"- [{marker}] {payload.get('todo')}"])
+    if (not payload.get("error") and payload.get("settlement_plan")
+            and (payload.get("replan_transition") or {}).get("turn_boundary") == "settle_original_turn_before_end"):
+        if payload.get("instruction"):
+            lines.extend(["", str(payload["instruction"])])
+        lines.extend(_render_settlement_plan(payload["settlement_plan"]))
     correctness = payload.get("local_state_write_correctness")
     if isinstance(correctness, dict):
         intent = correctness.get("write_intent") if isinstance(correctness.get("write_intent"), dict) else {}

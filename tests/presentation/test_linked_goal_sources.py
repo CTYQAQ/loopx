@@ -77,9 +77,13 @@ def native_source(w):
     return raw, request, {path: path.read_bytes() for path in (registry, state, log)}
 
 
-def test_app_parent_directory_reads_original_tasks_history_and_explicit_analysis(workspace):
+@pytest.mark.parametrize("separate_chat_store", [False, True])
+def test_app_parent_directory_reads_original_tasks_history_and_explicit_analysis(workspace, separate_chat_store):
     w = workspace
     raw, request, before = native_source(w)
+    if separate_chat_store:
+        w['server'].runtime_root = w['tmp_path'] / 'private-chat'
+        w['server'].runtime_root_override = str(w['server'].runtime_root)
     assert request('/api/chat/goal-sources', {'parent_goal_id': 'research-owner', 'source': raw})['ok']
     namespace = GoalSource.parse(raw).namespace
     directory = request('/status.json?view=workspace-directory')
@@ -99,7 +103,7 @@ def test_app_parent_directory_reads_original_tasks_history_and_explicit_analysis
         'goal_id': 'solver-goal', 'source_namespace': namespace, 'view': 'history'}))
     assert history['total'] == 3 and any(row.get('edge_type') == 'depends_on' for row in history['items'])
 
-    analysis_runtime = w['server'].runtime_root / 'goal-sources' / namespace
+    analysis_runtime = w['tmp_path'] / 'runtime' / 'goal-sources' / namespace
     pack = register_pack(runtime_root=analysis_runtime, owner_goal_id='solver-goal',
         input_path=w['tmp_path'] / 'input.json', source_root=w['sources'], title='Original source evidence')
     query = urlencode({'goal_id': 'solver-goal', 'source_namespace': namespace})
@@ -118,9 +122,7 @@ def test_app_parent_directory_reads_original_tasks_history_and_explicit_analysis
     host_registry = json.loads(w['server'].registry_path.read_text())
     assert [goal['id'] for goal in host_registry['goals']] == ['research-owner', 'other-owner']
     # A new App service reads the persisted relationship, not a browser URL or in-memory mirror.
-    from loopx.control_plane.status.goal_source import GoalSourceCatalog
-    w['server'].goal_source_catalog = GoalSourceCatalog(w['server'].registry_path, w['server'].runtime_root,
-                                                     history_projector=explore_history_rows)
+    del w['server'].goal_source_catalog
     assert request(endpoint + '?' + query)['pack']['job']['status'] == 'succeeded'
     assert len(w['count'].read_text().splitlines()) == 1
     bound = w['server'].registry_path.read_bytes()

@@ -404,6 +404,10 @@ def register_refresh_state_command(
         help="Print the refresh payload without appending.",
     )
     refresh_state_parser.add_argument(
+        "--settle-turn", action="store_true",
+        help="After verified writeback, execute the owed quota step once for this exact Turn; replay never creates another debit.",
+    )
+    refresh_state_parser.add_argument(
         "--no-global-sync",
         action="store_true",
         help="Do not refresh the shared global registry after writing the state run.",
@@ -476,6 +480,10 @@ def handle_refresh_state_command(
     outcome_update = None
     outcome_update_result = None
     try:
+        if getattr(args, "settle_turn", False) and not (
+            args.agent_id and args.turn_instance_id and bool(args.todo_id) != bool(args.replan_obligation_id)
+        ):
+            raise ValueError("--settle-turn requires --agent-id, --turn-instance-id and exactly one Todo/obligation binding")
         outcome_path = getattr(args, "goal_outcome_update_json", None)
         if outcome_path:
             if not args.agent_id:
@@ -825,6 +833,7 @@ def handle_refresh_state_command(
                 )
             )
         if not material_refresh_ready:
+            _settle_requested_refresh(payload, args, registry_path, goal_ref)
             print_payload(payload, fmt, render_state_refresh_markdown)
             return 0 if payload.get("ok") else 1
         if payload.get("explore_result") is not None:
@@ -913,5 +922,18 @@ def handle_refresh_state_command(
                 )
             ),
         )
+    _settle_requested_refresh(payload, args, registry_path, goal_ref)
     print_payload(payload, fmt, render_state_refresh_markdown)
     return 0 if payload.get("ok") else 1
+
+
+def _settle_requested_refresh(payload, args, registry_path, goal_ref):
+    if not getattr(args, "settle_turn", False):
+        return
+    from .refresh_settlement import settle_refreshed_turn
+
+    settle_refreshed_turn(payload, registry_path=registry_path,
+        runtime_root=resolve_runtime_root(load_registry(registry_path), args.runtime_root),
+        goal_id=args.goal_id, agent_id=args.agent_id, todo_id=args.todo_id,
+        replan_obligation_id=args.replan_obligation_id,
+        turn_instance_id=args.turn_instance_id, goal_ref=goal_ref)

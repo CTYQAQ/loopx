@@ -373,6 +373,14 @@ def handle_support_control_command(
                     "--scheduler-owner, or --execution-mode"
                 )
             runtime_profile = requested_runtime_profile
+            from copy import copy
+            from .context_machine import apply_context_machine_options
+
+            # Persist caller choices only. Machine defaults and private paths
+            # must resolve again on the next wake, including after rollback.
+            bootstrap_args = copy(args)
+            apply_context_machine_options(args, registry_path=agent_registry_path,
+                runtime_root_arg=args.runtime_root, heartbeat=True)
             payload = build_heartbeat_prompt(
                 goal_id=args.goal_id,
                 active_state=active_state,
@@ -416,7 +424,7 @@ def handle_support_control_command(
             if args.bootstrap and payload.get("ok"):
                 from ..control_plane.heartbeat.bootstrap_prompt import goal_bootstrap
                 from ..control_plane.heartbeat.budget import build_interface_budget
-                body = goal_bootstrap(args, registry=agent_registry_path)
+                body = goal_bootstrap(bootstrap_args, registry=agent_registry_path)
                 payload["task_body"] = body
                 payload["bootstrap"] = True
                 payload["interface_budget"] = build_interface_budget(

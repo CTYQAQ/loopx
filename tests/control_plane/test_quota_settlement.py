@@ -732,14 +732,23 @@ def test_cli_validation_projects_ordinary_completion_not_terminal_intent() -> No
     assert argv[argv.index("--turn-instance-id") + 1] == TURN_ID
 
 
-def test_in_flight_validation_never_projects_a_completion_command() -> None:
+def test_in_flight_validation_conditions_completion_on_original_deliverable() -> None:
     plan = build_codex_app_settlement_plan(
         goal_id=GOAL_ID, agent_id=AGENT_ID, todo_id=TODO_ID,
         scoped_cli_args="", lifecycle_actor_args="", turn_instance_id_ref=TURN_ID,
         delivery_boundary="in_flight_continuation",
     ).as_dict()
-    assert settlement_step_command(plan, SettlementStepKind.VALIDATION) is None
-    assert "command_condition" not in plan["ordered_steps"][0]
+    validation = plan["ordered_steps"][0]
+    assert validation["command_condition"] == "todo_deliverable_complete"
+    assert "conditional" not in validation
+    assert "keep the Todo open with its original declaration" in validation["precondition"]
+    command = settlement_step_command(plan, SettlementStepKind.VALIDATION)
+    assert command is not None
+    argv = shlex.split(command)
+    assert "--no-follow-up" not in argv
+    assert argv[argv.index("--todo-id") + 1] == TODO_ID
+    assert argv[argv.index("--agent-id") + 1] == AGENT_ID
+    assert argv[argv.index("--turn-instance-id") + 1] == TURN_ID
 
 
 def test_native_plan_rerender_reuses_one_runtime_projection_without_shared_mutability() -> None:

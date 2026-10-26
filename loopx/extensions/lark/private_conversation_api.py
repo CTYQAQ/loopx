@@ -40,7 +40,8 @@ class PrivateConversationRequestMixin:
         composed = getattr(self.server, "conversation_transports", None)
         lark_profiles = set(health) - set(composed.transports if composed is not None else {})
         deliveries = self.server.lark_private_conversations.health()
-        self._send_json({"ok": True, "revision": current["revision"], "connections": [
+        self._send_json({"ok": True, "revision": current["revision"],
+            "app_steward_binding_id": current.get("app_steward_binding_id"), "connections": [
             {"binding_id": row["binding_id"], "app_ref": row["transport_ref"], "context_kind": row["context_kind"],
              "project_ref": row["project_ref"], "context_available": row["project_ref"] in titles, "project_title": titles.get(row["project_ref"], "Unavailable workspace"),
              "executor_endpoint_id": row["executor_endpoint_id"], "grant": row["grant"],
@@ -66,6 +67,27 @@ class PrivateConversationRequestMixin:
             "stop_recoveries": [{**row,
                 "project_title": titles.get(row["project_ref"], "Unavailable workspace")}
                 for row in bindings.stop_recoveries(current)]})
+
+    def _app_steward(self) -> None:
+        try:
+            target = self.server.runtime_controller.project_contexts.conversation_bindings.app_steward_target()
+        except (ValueError, KeyError, OSError, RuntimeError):
+            self._send_error("The selected original steward is unavailable. Check its connection in Settings and retry.", status=409)
+            return
+        self._send_json({"ok": True, **target})
+
+    def _select_app_steward(self) -> None:
+        try:
+            body = self._read_json()
+            if (set(body) != {"binding_id", "revision"} or type(body["revision"]) is not int
+                    or (body["binding_id"] is not None and not isinstance(body["binding_id"], str))):
+                raise ValueError("select an existing owner steward at the current revision")
+            self.server.runtime_controller.project_contexts.conversation_bindings.select_app_steward(
+                body["binding_id"], expected_revision=body["revision"])
+        except (ValueError, KeyError, OSError, RuntimeError):
+            self._send_error("App steward selection could not be changed. Refresh the connection and retry.", status=409)
+            return
+        self._private_conversations()
 
     def _private_conversation_connect(self) -> None:
         from .goal_topic_runtime import _active_profile_configs

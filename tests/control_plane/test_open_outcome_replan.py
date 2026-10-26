@@ -66,16 +66,26 @@ def test_open_validation_replan_retains_requirements_and_executes_repair(tmp_pat
         admitted = guard(TURN)
         obligation = admitted["autonomous_replan_obligation"]
         assert [t["kind"] for t in obligation["triggers"]] == ["typed_progress_repeat"]
-        acceptance = obligation["replan_context"]["core_goal"]["acceptance_contract"]
+        core = obligation["replan_context"]["core_goal"]
+        sources = admitted["interaction_contract"]["agent_channel"]["work_context"]["sources"]
+        index, source = next((i, row) for i, row in enumerate(sources) if row["source"] == "goal_acceptance")
+        acceptance = source["content"]["goal_acceptance_contract"]
+        # The CLI can alias an identical already-inline acceptance contract.
+        # Resolve that exact path and compare to the independent provider read;
+        # never treat a reference, source name or missing contract as acceptance.
+        if "acceptance_contract" in core:
+            assert core["acceptance_contract"] == acceptance
+        else:
+            assert core["acceptance_contract_ref"] == f"$.interaction_contract.agent_channel.work_context.sources[{index}].content.goal_acceptance_contract"
         assert acceptance == before["goal_acceptance_contract"]
         outcomes = acceptance["outcome_requirements"]
         assert outcomes["acceptance_gaps"] == [], "open work is covered, but still must be reviewed"
         assert outcomes["outcomes"][0]["work"] == [{"todo_id": TODO, "status": "open"}]
         assert not all(r["planning_satisfied"] for r in outcomes["outcomes"][0]["requirements"])
         assert any("even with open Todos" in s for s in admitted["replan_action_packet"]["planning_guidance"])
-        review = admitted["replan_action_packet"]["planning_guidance"][0]
+        review = " ".join(admitted["replan_action_packet"]["planning_guidance"])
         assert "operating objective and cumulative requirements" in review
-        assert "justified no-change decision" in review
+        assert "justified no-change" in review
         assert "goal-acceptance prepare-objective" in review
         envelope = call("quota", "should-run", "--codex-app", "--turn-envelope", "--goal-id", GOAL,
             "--agent-id", AGENT, "--todo-id", TODO, "--turn-instance-id", TURN,

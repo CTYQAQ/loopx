@@ -12,6 +12,7 @@ import pytest
 
 from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
 from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+from loopx.control_plane.todos.active_state_todo_parser import parse_active_state_todos
 from loopx.control_plane.quota.turn_envelope import build_turn_envelope, turn_envelope_action_signature_document
 from loopx.control_plane.turn_driver.driver import build_loopx_turn_plan
 from loopx.control_plane.turn_driver.executor import validate_loopx_turn_host_result
@@ -37,12 +38,14 @@ def _fixture(tmp_path, monkeypatch, provider, *, replan=True):
         registry.write_text(json.dumps(data))
     _initialize_git_checkout(project)
     state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
-    code, listed = _run_cli(registry, runtime, "todo", "list", "--goal-id", GOAL_ID)
-    assert code == 0, listed
-    original = listed["todos"]
+    summary = parse_active_state_todos(state.read_text(), state_path=state, item_limit=None)
+    original = summary["agent_todos"]["items"]
     initialize_canonical_authority(runtime, GOAL_ID, build_todo_runtime_shadow_projection(
         goal_id=GOAL_ID, handoff_mode="soft_claim", todos=original,
     ), state_path=state, provider=provider)
+    code, listed = _run_cli(registry, runtime, "todo", "list", "--goal-id", GOAL_ID)
+    assert code == 0, listed
+    original = listed["todos"]
     turn = "empty-frontier-planning-turn"
     code, guard = _run_cli(registry, runtime, "quota", "should-run", "--codex-app",
         "--goal-id", GOAL_ID, "--agent-id", AGENT_ID, "--turn-instance-id", turn,
@@ -140,6 +143,22 @@ def test_bound_todoless_planning_executes_and_settles_once(tmp_path, monkeypatch
     assert code == 0 and listed["todos"] == original  # No hidden task or completion.
     prompt = (project / "received.txt").read_text()
     assert identity["replan_obligation_id"] in prompt
+    # Inspect the actual model input, not only the saved complete fixture.
+    authority = json.loads(prompt.split("Turn request:\n", 1)[1])["turn_authority"]
+    packet = authority["replan_action_packet"]
+    assert "read autonomous_replan_obligation.replan_context" not in prompt
+    assert "Read replan_action_packet.review" in prompt
+    assert "core_goal" not in authority  # The mandatory review owns its only model copy.
+    stages = {}
+    for stage in ("review", "writeback"):
+        command = shlex.split(packet[stage])
+        read = subprocess.run(command, capture_output=True, text=True, check=True)
+        stages[stage] = json.loads(read.stdout)
+        assert stages[stage]["obligation_id"] == identity["replan_obligation_id"]
+    assert stages["review"]["core_goal"]["objective"] == guard["autonomous_replan_obligation"]["replan_context"]["core_goal"]["objective"]
+    assert stages["review"]["context_id"] == stages["writeback"]["context_id"]
+    assert stages["writeback"]["writeback"]["settlement_plan"]["identity"] == identity
+    assert _classification_count(runtime, "quota_slot_spent") == 1
     # Read the actual source referenced in the Host prompt, preserving the
     # original observation instead of re-entering quota to reconstruct it.
     envelope = journal["plan"]["turn_envelope"]
@@ -158,9 +177,14 @@ def test_bound_todoless_planning_executes_and_settles_once(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_no_todo_requires_the_original_signed_scoped_binding(tmp_path, monkeypatch, provider):
+@pytest.mark.parametrize("captured", [False, True])
+def test_no_todo_requires_the_original_signed_scoped_binding(tmp_path, monkeypatch, provider, captured):
     _project, runtime, _registry, turn, guard, _original = _fixture(tmp_path, monkeypatch, provider)
+    if captured:
+        guard["replan_read_path"] = str(tmp_path / "original-decision.json")
     envelope = build_turn_envelope(guard)
+    binding = (lambda value: value["writeback"]["settlement_identity"]) if captured else (
+        lambda value: value["writeback"]["settlement_plan"]["identity"])
     valid = build_loopx_turn_plan(envelope, host="codex-cli", execution_mode="isolated-headless",
                                   turn_instance_id=turn)
     assert valid["route"]["would_invoke_host"] is True
@@ -172,7 +196,7 @@ def test_no_todo_requires_the_original_signed_scoped_binding(tmp_path, monkeypat
                          ("replan_obligation_id", "other-obligation"),
                          ("effect_id", "other-effect"), ("todo_id", "todo_surrogate")):
         changed = deepcopy(envelope)
-        changed["writeback"]["settlement_plan"]["identity"][field] = value
+        binding(changed)[field] = value
         # Recompute the integrity hash too: a semantic mismatch must not be
         # accepted merely because its internally consistent bytes are intact.
         digest = "sha256:" + sha256(json.dumps(turn_envelope_action_signature_document(changed),
@@ -181,9 +205,9 @@ def test_no_todo_requires_the_original_signed_scoped_binding(tmp_path, monkeypat
         refused = build_loopx_turn_plan(changed, host="codex-cli",
             execution_mode="isolated-headless", turn_instance_id=turn)
         assert refused["route"]["would_invoke_host"] is False, field
-    for missing in ("settlement_plan", "replan_action_packet"):
+    for missing in ("settlement_identity" if captured else "settlement_plan", "replan_action_packet"):
         changed = deepcopy(envelope)
-        if missing == "settlement_plan":
+        if missing != "replan_action_packet":
             changed["writeback"].pop(missing)
         else:
             changed.pop(missing)

@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { resolveTestPython } from "../../../../scripts/test-python.mjs";
 import { acceptChatTurn, conversationContextKey, conversationContextOfKey, conversationSupportsStatusProjection, createChatSession,
-  discoverBoundChatSession, fetchChatHistory, fetchChatProjects, resolveBoundChatSession } from "../src/data/chat";
+  discoverBoundChatSession, fetchChatHistory, fetchChatProjects, resolveBoundChatSession, resolveBoundConversation } from "../src/data/chat";
 
 // Invariant: continuation and refreshed history retain the verified original
 // Session. An absent/ignored selector, changed source or closed Session cannot
@@ -41,8 +41,25 @@ try {
   const calls: { path: string; method: string }[] = [];
   globalThis.fetch = (input, init) => {
     calls.push({ path: String(input), method: init?.method ?? "GET" });
+    if (String(input).startsWith("/api/chat/lark/private-conversations")) {
+      throw new Error("Unrelated settings inventory is unavailable");
+    }
     return originalFetch(new URL(String(input), origin), init);
   };
+  const original = await resolveBoundConversation(target);
+  assert.equal(original.session.session_id, sessionId);
+  assert.equal(original.source.binding_id, bindingId);
+  assert.equal(original.source.audience, "owner");
+  assert.equal(original.source.context_kind, "project");
+  assert.equal(original.source.project_title, "project");
+  assert.deepEqual(calls, [{path: `/api/chat/sessions?conversation_binding_id=${bindingId}`, method: "GET"}],
+    "Opening an original conversation uses one source-qualified read, independent of settings health");
+  child.stdin.write("settings-unavailable\n");
+  assert.equal((await next()).settings_available, false);
+  assert.equal((await originalFetch(new URL("/api/chat/lark/private-conversations", origin))).status, 503);
+  assert.equal((await resolveBoundConversation(target)).session.session_id, sessionId);
+  child.stdin.write("settings-recover\n");
+  assert.equal((await next()).settings_available, true);
   assert.deepEqual(conversationContextOfKey(conversationContextKey(context)), context);
   assert.equal((await discoverBoundChatSession(bindingId)).session_id, sessionId);
   const history = await fetchChatHistory(options);
@@ -71,6 +88,14 @@ try {
   assert.equal((await next()).source_verified, true);
   assert.equal((await resolveBoundChatSession(target)).session_id, sessionId);
   const routedFetch = globalThis.fetch;
+  for (const source of [undefined, {...original.source, binding_id: "f".repeat(24)},
+    {...original.source, audience: "group"}, {...original.source, context_available: false},
+    {...original.source, executor_endpoint_id: "another-executor"}]) {
+    globalThis.fetch = async () => new Response(JSON.stringify({ok: true,
+      conversation_binding_id: bindingId, sessions: history.sessions, conversation_source: source}));
+    await assert.rejects(() => resolveBoundConversation(target));
+  }
+  globalThis.fetch = routedFetch;
   const projects = await fetchChatProjects();
   assert.ok(projects.projects.length > 0, "The production workspace response is accepted");
   for (const malformed of [{ok: true}, {ok: true, projects: null},

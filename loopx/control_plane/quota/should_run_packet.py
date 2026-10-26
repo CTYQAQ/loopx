@@ -615,6 +615,8 @@ def _resolve_agent_lane_delivery_route(
             if isinstance(delivery_anchor, dict)
             else None
         ),
+        previous_delivery_boundary=(delivery_anchor or {}).get("delivery_boundary"),
+        previous_path_delta=(delivery_anchor or {}).get("path_delta"),
         continuity_todo=continuity_todo,
         continuity_actionable=bool(
             isinstance(continuity_todo, dict)

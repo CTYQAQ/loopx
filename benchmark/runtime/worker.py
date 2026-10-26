@@ -443,6 +443,9 @@ def run_once(env: dict[str, str]) -> dict:
     wake.mkdir(parents=True, exist_ok=False)
     home = Path(env["LOOPX_CODEX_HOME"])
     env = process_environment(home, base=env)
+    # Preserve this trial's resolved off/on choice in both preflight and solver
+    # subprocesses; an omitted off must not inherit a machine-wide opt-in.
+    env["LOOPX_CONTEXT_DELIVERY"] = execution.context_delivery
     # Internal transport arguments are derived afresh, never ambient authority.
     env.pop("LOOPX_CODEX_CONTEXT_DIR", None)
     env.pop("LOOPX_CODEX_CONTEXT_TRUST_ARGS", None)

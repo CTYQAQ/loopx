@@ -168,6 +168,63 @@ patch or an incompatible reader automatically recovers the same original full
 capture. Recovery never reruns the guard, asks the owner, spends quota or grants
 execution. Wire reduction alone does not establish actual model costs or outcomes.
 
+### Machine default
+
+**Settings → This machine → Capabilities → Differential context → Codex** uses the
+existing revision-locked preview, apply and readback operations in one switch action.
+Switching off uses the same transaction. A saved preference does not certify native
+host setup or actual delta use; the settings view states this explicitly. Its
+`context_delivery` machine namespace accepts
+`{"schema_version":"context_delivery_machine_defaults_v0","mode":"off"}` or
+the same object with `"mode":"on"`. The CLI exposes that same owner through
+`machine-config preview/apply --namespace context_delivery --config-json FILE`;
+apply requires the exact preview revision. Removing the namespace restores off.
+Sibling settings and Goal records are preserved. The application row selects Codex
+within this capability; the existing `mode` remains that Codex preference, with no
+additional global switch or host configuration authority. Read-only editors cannot
+save it. The UI does not alter other hosts or initialize the current native session.
+
+An explicit `--context-delivery on|off` wins; otherwise each invocation reads the
+machine default, with off when absent. The existing worker environment's explicit
+`LOOPX_CONTEXT_DELIVERY=off` also overrides inheritance; environment on alone does
+not enable delivery. Benchmark trials keep their existing `context_delivery=on`
+opt-in. Workers propagate the resolved trial choice, including default off, to
+both preflight and solver subprocesses without changing the caller's settings.
+On accepts only the two existing declared scenarios: Codex App heartbeat (`--codex-app` or its equivalent complete scheduler
+declaration), and the existing Codex benchmark heartbeat worker (`generic_cli`
+plus its explicit heartbeat worker environment). Missing, contradictory or
+unsupported Codex declarations return an error before admission. This machine
+preference is scoped to Codex: other explicitly resolved hosts keep full delivery.
+An explicit `--context-delivery on` on those hosts still errors. Declarations select
+an adapter; they do not authenticate a host or prove retained input.
+Native continuity currently requires POSIX; other platforms reject on explicitly.
+
+Both machine-inherited and explicitly enabled `heartbeat-prompt`, `quota should-run` and native context
+commands share a private `context-delivery` directory beneath the resolved
+machine runtime, with independent journals per native session. A missing leaf is
+created with `0700`; unsafe existing leaves are rejected without chmod or
+symlink traversal. Explicit on uses the same automatic location when none is supplied;
+caller-supplied locations remain supported. A handoff socket keeps its Host-owned
+projection path and does not acquire a second native journal.
+Unrelated quota commands and digest-bound recovery pages do not activate this
+setting. Ordinary machine validation still applies to business operations.
+
+For native setup, `quota context-config --codex-app --goal-id GOAL --agent-id AGENT`
+under machine on prepares only that private transport leaf and renders the
+existing hooks and recovery instructions. It does not install or trust hooks,
+change host configuration or enable diagnostics in a running parent. The native
+process still needs its exact reviewed hooks and `CODEX_ROLLOUT_TRACE_ROOT`
+configured before startup. Without current-input retention proof, delivery stays
+full. Generated machine-inherited hooks reload the same machine runtime, so off
+or removal stops their journal writes. Explicit manual on options remain explicit.
+
+Generate a persistent entrypoint with `heartbeat-prompt --bootstrap`. It retains
+caller-supplied options, including an explicit off, but never freezes resolved
+machine defaults or generated private paths. Existing v2 loaders reload the
+setting on each wake; old expanded prompts need regeneration. This setting does
+not restart stopped Goals, alter quota/leases or qualify installed Desktop,
+all-Goal adoption, actual solver costs or outcome benefit.
+
 ## 中文
 
 普通 Heartbeat/quota 默认在 `agent_channel.work_context` 返回完整选定 Todo、
@@ -231,6 +288,46 @@ TurnEnvelope。确认基线保留后，两入口仍逐轮发送 `planning_horizo
 或读者不兼容时，自动恢复同一原始 full capture，不重跑 guard、不问询、不扣额，
 也不授予执行权限。传输减少本身不证明实际模型费用或结果改善。
 
+### 机器级默认
+
+在**设置 → 本机设置 → 能力中心 → 差分上下文 → Codex**选择关闭或开启，沿用现有
+精确修订预览、应用和读回，由一次开关操作完成；关闭也使用同一事务。
+设置页明确区分已保存偏好与尚未验证的原生初始化、实际差分使用。机器 namespace 为 `context_delivery`，配置为
+`{"schema_version":"context_delivery_machine_defaults_v0","mode":"off"}`；开启时
+把 `mode` 改为 `on`。CLI 的 `machine-config preview/apply --namespace context_delivery
+--config-json FILE` 使用同一 owner；应用须带原预览修订。移除此 namespace 恢复关闭，
+不改写其他配置和 Goal 记录。应用行选择的是此能力下的 Codex；既有 `mode` 仍表示
+该 Codex 偏好，不新增总开关或宿主配置 authority。只读编辑器不能保存；界面不会
+改变其他应用或初始化当前原生会话。
+
+显式 `--context-delivery on|off` 优先；省略时每次读取机器设置，未配置则关闭。
+已有 worker 环境的 `LOOPX_CONTEXT_DELIVERY=off` 也覆盖继承；环境 on 本身不启用投递。
+benchmark trial 保留既有 `context_delivery=on` 启用方式。worker 将本次运行已解析的选择
+（含默认关闭）传给预检和 solver 子进程，不改写调用方原设置。
+开启仅接受已有两类声明：Codex App 心跳（`--codex-app` 或等价完整调度声明），以及
+现有 Codex benchmark 心跳 worker（`generic_cli` 与其显式心跳环境）。缺失、冲突、
+不支持的 Codex 声明在准入前报错。机器偏好仅作用于 Codex；其他已明确解析的宿主
+继续完整投递，对这些宿主显式指定 `--context-delivery on` 仍报错。声明只选择 adapter，
+不证明宿主身份或上下文保留。
+当前原生连续性依赖 POSIX；其他平台显式拒绝开启。
+
+机器继承与显式开启的入口共用已解析 machine runtime 下的私有 `context-delivery` 目录，并按原生
+会话隔离 journal。缺失末级目录以 `0700` 创建；不跟随末级符号链接、不修改不安全目录
+权限。显式 on 未指定路径时也自动选择目录，仍支持手工覆盖；handoff socket 保留
+原有 Host 投影路径，不另设原生 journal。无关 quota 命令和带原始摘要的恢复分页不激活此
+设置；业务操作仍须通过原有设备配置校验。
+
+机器开启后，`quota context-config --codex-app --goal-id GOAL --agent-id AGENT` 只准备
+私有传输末级目录并生成已有 hook 和恢复指令，不安装或信任 hook，也不更改宿主配置。
+原生进程启动前仍须配置已审阅的精确 hook 与 `CODEX_ROLLOUT_TRACE_ROOT`；无法证明当前
+输入保留时返回完整捕获。由机器继承生成的 hook 每次重读同一个 runtime，关闭或移除
+配置后停止 journal 写入；手工显式 on 保留其显式优先级。
+
+通过 `heartbeat-prompt --bootstrap` 生成持久入口，仅保留调用者显式参数（包括 off），
+不固化当前机器默认值或自动生成路径。已有 v2 loader 每次唤醒重读设置；旧展开式提示须
+重新生成。此开关不重启停用 Goal、不改变额度或 lease；正常 Desktop、全部 Goal 的实际
+采用和真实 solver 完整成本及效果仍须分别验收。
+
 ### Saved context cache / 已保存上下文缓存
 
 For `quota context-project`, enabling context delivery no longer requires a
@@ -244,9 +341,26 @@ Read-only recovery never creates a cache. With context delivery off, projection
 remains inert and reads the original capture. Failures retain that capture's
 exact digest and Turn receipt; they never rerun admission or spend quota.
 
+With delivery on, a successful saved projection also returns page zero using
+the existing `context_capture_page_v1` fields. Its content is bounded to 3 KiB
+to leave room for projection metadata; subsequent pages retain the normal 4 KiB
+size. Consume `content`, then follow
+`next_command` through `eof`; verify full byte coverage and the digest. The
+existing `command` still restarts at zero for older readers or incomplete inline
+output. If the optional first-page read fails, that same command remains usable.
+Off responses do not add a page. No new flag, admission or retention receipt is
+introduced; an inline page alone cannot prove complete input retention.
+
 `quota context-project` 开启上下文投递后，不再要求另外手工准备缓存目录。
 省略 `--decision-output-root` 时复用原生会话的私有上下文目录；显式指定的新目录
 在已存在的父目录下以 `0700` 创建。已有目录仍须属于当前用户、权限私有且不是
 符号链接；不修改不安全目录的权限。平台正常的父路径别名先解析再检查末级目录。
 只读恢复不创建缓存；关闭上下文投递时保持无副作用，读取原始 capture。失败仍保留
 原始摘要和 Turn 回执，不重新准入或扣减额度。
+
+开启时，成功的已保存投影同时用现有 `context_capture_page_v1` 字段返回第一页。
+该页内容最多 3 KiB，为投影元数据留出输出空间；后续仍按正常 4 KiB 读取。
+先读取 `content`，再沿 `next_command` 读至 `eof`，核验完整字节覆盖与摘要。
+原有 `command` 仍从零开始，供旧读取方或内联输出不完整时重读；可选的首屏读取
+失败时也保留该命令。关闭态不增加分页数据，不新增开关、准入或保留回执；
+单页内联内容不证明完整输入仍被保留。

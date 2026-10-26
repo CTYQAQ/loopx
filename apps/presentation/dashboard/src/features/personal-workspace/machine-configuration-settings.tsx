@@ -248,6 +248,26 @@ export function MachineConfigurationSettings({ section, onChanged }: {
     setError(null);
   }
 
+  async function setContextDelivery(mode: "off" | "on") {
+    if (busy || !editorAvailable || selected?.capability_id !== "context_delivery" || !selected.machine_namespace) return;
+    const namespace = selected.machine_namespace;
+    const configuration = {...selected.default, mode};
+    setBusy("apply"); setError(null); setNotice(null);
+    try {
+      const plan = await previewMachineConfiguration(namespace, configuration);
+      await applyMachineConfiguration(namespace, configuration, plan.plan_revision);
+      const next = await fetchMachineConfiguration();
+      setInspection(next);
+      if (next.machine_configuration?.namespaces[namespace]?.mode !== mode) {
+        throw new Error(locale === "zh-CN" ? "保存后的配置已变化，请刷新后重试。" : "The saved configuration changed. Refresh and retry.");
+      }
+      setNotice(locale === "zh-CN" ? "Codex 偏好已保存。" : "Codex preference saved.");
+      onChanged?.();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("machine.applyError"));
+    } finally { setBusy(null); }
+  }
+
   async function createPreview() {
     if (!editorAvailable || !selected?.machine_namespace || !desiredConfiguration || !editorValid || busy) return;
     setBusy("preview");
@@ -438,7 +458,21 @@ export function MachineConfigurationSettings({ section, onChanged }: {
             </section>
           ) : null}
 
-          {editorAvailable ? <>{editorMode === "json" || !selected.configuration_editor.fields.some((field) => field.key === "enabled" && field.input_kind === "boolean") ? <div className="personal-capability-editor-mode">
+          {selected.capability_id === "context_delivery" ? <section aria-label={locale === "zh-CN" ? "使用差分上下文的应用" : "Applications using differential context"} className="personal-capability-field-summary">
+            <div className="personal-capability-fields"><label className="is-boolean">
+              <span>Codex</span>
+              <input aria-label={locale === "zh-CN" ? "在 Codex 中使用差分上下文" : "Use differential context in Codex"}
+                type="checkbox" role="switch" checked={selectedCurrent?.mode === "on"} disabled={Boolean(busy) || !editorAvailable}
+                onChange={(event) => void setContextDelivery(event.target.checked ? "on" : "off")} />
+            </label></div>
+            <p role="status">{selectedCurrent?.mode === "on"
+              ? locale === "zh-CN" ? "已为 Codex 保存开启偏好；宿主就绪与实际使用尚未验证。" : "Codex preference is on; host readiness and actual use are not verified."
+              : locale === "zh-CN" ? "Codex 未开启。" : "Off for Codex."}</p>
+            <ContextHelp label={locale === "zh-CN" ? "Codex 支持范围与生效条件" : "Codex support and activation requirements"}><p>{locale === "zh-CN"
+              ? "目前仅支持 Codex App 心跳和 benchmark 心跳，无法确认或不支持的跑法报错。保存偏好不代表当前会话已采用差分，也不会改变其他应用或显式关闭的实验。宿主准备就绪且旧上下文完整时才使用差分，否则保留完整上下文。私有存储与会话隔离自动管理；每轮回执显示实际传输方式。"
+              : "Currently supports only Codex App and benchmark heartbeats; unknown or unsupported declarations return an error. Saving a preference does not establish use in the current session or change other applications or explicitly disabled runs. Delta requires a ready host and complete retained context; otherwise full context is preserved. Private storage and session isolation are automatic; each delivery reports its actual mode."}</p></ContextHelp>
+          </section> : null}
+          {editorAvailable && selected.capability_id !== "context_delivery" ? <>{editorMode === "json" || !selected.configuration_editor.fields.some((field) => field.key === "enabled" && field.input_kind === "boolean") ? <div className="personal-capability-editor-mode">
             <button onClick={() => changeMode(editorMode === "guided" ? "json" : "guided")} type="button">
               <Code2 aria-hidden size={14} />{t(editorMode === "guided" ? "machine.editJson" : "machine.backToForm")}
             </button>
@@ -487,7 +521,7 @@ export function MachineConfigurationSettings({ section, onChanged }: {
             </section>
           ) : null}
 
-          {editorAvailable ? <footer className="personal-capability-actions">
+          {editorAvailable && selected.capability_id !== "context_delivery" ? <footer className="personal-capability-actions">
             {configured ? <button className="is-danger" disabled={Boolean(busy)} onClick={() => void createRemovalPreview()} type="button"><Trash2 aria-hidden size={15} />{t("machine.previewRemoval")}</button> : null}
             <button disabled={Boolean(busy) || !editorValid} onClick={() => void createPreview()} type="button">{busy === "preview" ? t("common.loading") : t("machine.previewChanges")}</button>
             <button className="is-primary" disabled={Boolean(busy) || !preview} onClick={() => void applyPreview()} type="button">{busy === "apply" ? t("common.loading") : t("machine.applyPreview")}</button>

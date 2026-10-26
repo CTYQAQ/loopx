@@ -130,7 +130,7 @@ def _completion_settlement_error(
     )
 
 
-def _completion_settlement_plan(
+def _todo_settlement_plan(
     identity: SettlementIdentity, *, args: argparse.Namespace,
     registry_path: Path, runtime_root: Path,
     goal_ref: dict[str, str] | None,
@@ -153,6 +153,7 @@ def _completion_settlement_plan(
               f" --runtime-root {shlex.quote(str(runtime_root))}")
     plan = build_turn_scoped_cli_settlement_plan(
         goal_id=identity.goal_id, agent_id=identity.agent_id, todo_id=identity.todo_id,
+        replan_obligation_id=identity.replan_obligation_id,
         turn_instance_id=identity.turn_instance_id, command_prefix=prefix,
         scoped_cli_args="", lifecycle_actor_args=actor_args, writeback_path_args=path_args,
         goal_ref=goal_ref,
@@ -392,6 +393,21 @@ def handle_todo_command(
                 registry_path=registry_path,
                 runtime_root_arg=runtime_root_arg,
             )
+            successor_settlement = None
+            if replan_obligation_id and args.turn_instance_id:
+                runtime_root = resolve_runtime_root(load_registry(registry_path), runtime_root_arg)
+                successor_settlement = read_heartbeat_settlement(
+                    runtime_root, goal_id=args.goal_id, agent_id=args.claimed_by,
+                    todo_id=None, turn_instance_id=args.turn_instance_id,
+                    resolve_original_binding=True, registry_path=registry_path, goal_ref=goal_ref,
+                )
+                if successor_settlement is None or successor_settlement.identity.value is None:
+                    raise ValueError("replan successor requires the original admitted Turn binding")
+                if successor_settlement.identity.failure is not None:
+                    raise ValueError(successor_settlement.identity.failure.reason)
+                selected = (successor_settlement.semantic_replan_guard or {}).get("selected_obligation_id")
+                if selected != replan_obligation_id:
+                    raise ValueError("replan successor does not match the original Turn obligation")
             payload = add_goal_todo(
                 operation_id=args.operation_id,
                 registry_path=registry_path,
@@ -452,7 +468,22 @@ def handle_todo_command(
                     "turn_boundary": "end_current_heartbeat",
                 }
                 if not payload.get("dry_run"):
-                    payload["host_action"] = "end_current_heartbeat"
+                    if successor_settlement is None:
+                        payload["host_action"] = "end_current_heartbeat"
+                    else:
+                        identity = successor_settlement.identity.value
+                        assert identity is not None
+                        payload["settlement_identity"] = identity.as_dict()
+                        payload["settlement_plan"] = _todo_settlement_plan(
+                            identity, args=args, registry_path=registry_path,
+                            runtime_root=runtime_root, goal_ref=goal_ref,
+                        )
+                        payload["replan_transition"]["turn_boundary"] = "settle_original_turn_before_end"
+                        payload["instruction"] = (
+                            "Validate the successor and finish the returned original Turn settlement plan, "
+                            "then end this heartbeat. Do not select or execute the successor in this Turn. "
+                            "Creation alone is not a settled review."
+                        )
         elif args.todo_command == "claim":
             payload = update_goal_todo(
                 registry_path=registry_path,
@@ -598,7 +629,7 @@ def handle_todo_command(
                         "settlement_result": settlement_result_payload(
                             settlement_result
                         ),
-                        "settlement_plan": _completion_settlement_plan(
+                        "settlement_plan": _todo_settlement_plan(
                             identity,
                             args=args,
                             registry_path=registry_path,

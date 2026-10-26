@@ -84,7 +84,7 @@ def register_todo_command(
     todo_parser.add_argument(
         "--turn-instance-id",
         help=(
-            "For todo complete/supersede, bind the lifecycle receipt to the original "
+            "For todo complete/supersede or a replan successor add, bind the receipt to the original "
             "turn-scoped quota guard and reuse it on retries."
         ),
     )

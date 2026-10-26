@@ -594,12 +594,14 @@ def validate_shared_todo_options(args: argparse.Namespace) -> None:
         "complete",
         "supersede",
     }
-    if getattr(args, "turn_instance_id", None) and args.todo_command not in {"complete", "supersede"}:
+    if (getattr(args, "turn_instance_id", None) and args.todo_command not in {"complete", "supersede"}
+            and not (args.todo_command == "add" and getattr(args, "replan_obligation_id", None))):
         raise ValueError(
             "--turn-instance-id is supported only by todo complete/supersede settlement"
         )
     if getattr(args, "goal_instance_id", None) and (
-        args.todo_command not in {"complete", "supersede"}
+        (args.todo_command not in {"complete", "supersede"}
+         and not (args.todo_command == "add" and getattr(args, "replan_obligation_id", None)))
         or not getattr(args, "turn_instance_id", None)
     ):
         raise ValueError(

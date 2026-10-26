@@ -15,7 +15,9 @@ def ingress_path(store, row):
         _hash([row["session_id"], "external-" + row["request_ref"]]) + ".json")
 
 
-def test_request_inventory_keeps_native_source_scope_and_holds_revoked_binding(steward, monkeypatch):  # noqa: F811
+@pytest.mark.parametrize("revoke_during_read", [False, True])
+@pytest.mark.parametrize("revoke", ["binding", "provider"])
+def test_request_inventory_keeps_native_source_scope_and_holds_revoked_binding(steward, monkeypatch, revoke_during_read, revoke):  # noqa: F811
     from types import SimpleNamespace
     from urllib.parse import urlencode
     from loopx.presentation.request_control_api import RequestControlMixin
@@ -57,7 +59,21 @@ def test_request_inventory_keeps_native_source_scope_and_holds_revoked_binding(s
     assert value["rows"][0]["request_id"] == receipt["request_id"]
     # A fresh source read cannot turn a revoked personal binding into local-owner
     # scope, nor use cached brief content after the authorization disappears.
-    transport.bindings.disconnect(binding["binding_id"], expected_revision=transport.bindings.read()["revision"])
+    def withdraw_scope():
+        if revoke == "binding":
+            transport.bindings.disconnect(binding["binding_id"], expected_revision=transport.bindings.read()["revision"])
+        else:
+            provider.owner_ready = False
+    if revoke_during_read:
+        from loopx.control_plane.collaboration import conversation_inventory
+        read_requests = conversation_inventory.read_conversation_requests
+        def read_then_revoke(*args, **kwargs):
+            result = read_requests(*args, **kwargs)
+            withdraw_scope()
+            return result
+        monkeypatch.setattr(conversation_inventory, "read_conversation_requests", read_then_revoke)
+    else:
+        withdraw_scope()
     code, refused = reader.read()
     assert code == 400 and "rows" not in refused
     assert (capture.read_bytes() if capture.exists() else b"") == calls

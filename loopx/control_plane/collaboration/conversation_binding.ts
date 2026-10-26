@@ -175,7 +175,7 @@ function binding(value: unknown): JsonObject {
   };
 }
 
-function state(value: unknown): {schema_version: string; revision: number; bindings: JsonObject[]} {
+function state(value: unknown): {schema_version: string; revision: number; bindings: JsonObject[]; app_steward_binding_id?: string | null} {
   const row = requireJsonObject(value, "conversation bindings");
   if (row.schema_version !== SET_SCHEMA || !Number.isSafeInteger(row.revision)
       || Number(row.revision) < 0 || !Array.isArray(row.bindings)) {
@@ -198,7 +198,11 @@ function state(value: unknown): {schema_version: string; revision: number; bindi
   if (new Set(sessions).size !== sessions.length) {
     throw new EffectRuntimeRequestError("an attached Session cannot share two App audiences");
   }
-  return {schema_version: SET_SCHEMA, revision: Number(row.revision), bindings};
+  // This is an explicit local entry preference, not an audience grant. Retain a
+  // removed identity so disconnect/replacement cannot silently select a peer.
+  const preferred = row.app_steward_binding_id;
+  return {schema_version: SET_SCHEMA, revision: Number(row.revision), bindings,
+    ...(preferred !== undefined ? {app_steward_binding_id: preferred === null ? null : ref(preferred, "App steward binding")} : {})};
 }
 
 function observed(row: JsonObject, value: unknown): void {
@@ -213,7 +217,19 @@ export function planConversationBinding(params: JsonObject): JsonObject {
   const current = state(params.current);
   if (params.expected_revision !== current.revision) throw new EffectRuntimeRequestError("conversation binding revision changed");
   let rows: JsonObject[];
-  if (params.operation === "configure") {
+  if (params.operation === "select_app_steward") {
+    const id = params.binding_id === null ? null : ref(params.binding_id, "App steward binding");
+    if (id !== null) {
+      const selected = current.bindings.find(row => row.binding_id === id);
+      if (!selected || selected.context_kind !== "steward" || selected.audience === "group") {
+        throw new EffectRuntimeRequestError("select an existing private owner steward");
+      }
+      observed(selected, params.observation);
+      boundProject(params, selected);
+    }
+    if ((current.app_steward_binding_id ?? null) === id) return {changed: false, state: current};
+    return {changed: true, state: state({...current, revision: current.revision + 1, app_steward_binding_id: id})};
+  } else if (params.operation === "configure") {
     const candidate = binding(params.binding);
     observed(candidate, params.observation);
     if (candidate.audience === "group") {
@@ -381,6 +397,10 @@ export function listLocalBoundSessions(params: JsonObject): JsonObject {
   const id = ref(params.binding_id, "binding identity");
   const row = current.bindings.find(item => item.binding_id === id);
   if (!row) throw new EffectRuntimeRequestError("conversation binding is no longer authorized");
+  if (params.app_steward_entry === true
+      && (current.app_steward_binding_id !== id || row.context_kind !== "steward" || row.audience === "group")) {
+    throw new EffectRuntimeRequestError("the selected original steward is unavailable");
+  }
   observed(row, params.observation);
   if (row.audience === "group") throw new EffectRuntimeRequestError("local discovery requires a private binding");
   boundProject(params, row);

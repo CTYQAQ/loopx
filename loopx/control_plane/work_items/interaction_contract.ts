@@ -309,6 +309,8 @@ export function projectInteractionExecution(value: unknown): InteractionExecutio
     rawDelivery = rawAttempt;
     deliverySource = "canonical_attempt";
   }
+  // Replanning has its own Host route. Attempting that route never grants
+  // ordinary delivery authority, even when the canonical delivery fact is absent.
 
   const fixedBeforeUserGate = ([
     EffectiveAction.HEARTBEAT_SETTLED_SKIP,

@@ -317,7 +317,9 @@ def test_plain_quota_context_default_does_not_touch_transport(tmp_path, monkeypa
         args += ["--context-delivery", scenario]
     code, result = _run_cli(registry, runtime, *args, cwd=project)
     assert code == 0 and result["ok"] and result.get("schema_version") != "context_delivery_v1", result
-    assert build_parser().parse_args(["quota", "should-run"]).context_delivery == "off"
+    # Absence is distinct from an explicit off so a configured machine default
+    # can be inherited. The ordinary output above still proves default-off.
+    assert build_parser().parse_args(["quota", "should-run"]).context_delivery is None
 
 
 @pytest.mark.parametrize("activation", [[], ["--context-delivery", "off"], ["--context-delivery", "on"]])

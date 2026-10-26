@@ -1,4 +1,5 @@
 /** Compact Explore read model. Existing Graph/Harness owners retain all gates. */
+import {isDeepStrictEqual} from "node:util";
 import {createHash} from "node:crypto";
 import type {JsonObject} from "../effect_program.ts";
 import {EffectRuntimeRequestError} from "../effect_runtime_errors.ts";
@@ -6,7 +7,7 @@ import {requireInteger, requireJsonObject, requireNonEmptyString, requireStringA
 import {parseTodoTimestampMicros} from "../runtime_timestamp.ts";
 import {PLANNING_TODO_ID} from "../work_items/planning_relations.ts";
 
-import {EXPLORE_WRITEBACK_SUMMARY_LIMIT, exploreResultWritebackAffordance} from "./explore_result_writeback.ts";
+import {EXPLORE_WRITEBACK_SUMMARY_LIMIT, exploreBeforeWorkGuidance, exploreResultWritebackAffordance} from "./explore_result_writeback.ts";
 import {EXPLORE_RESULT_PAGE_MAX, normalizeExploreResultPages} from "./explore_result_page.ts";
 import {projectExploreMeasurementFeedback} from "./explore_measurements.ts";
 
@@ -34,6 +35,58 @@ export function exploreReusableContextPaths(content: JsonObject = {}): (string |
           ? [["harness", lane, index, "typed_evidence_audit"]] : []) : [];
     }),
   ];
+}
+
+/** The same authoring projection is used inline and by the captured writer. */
+function resultWritebackFields(writeback: JsonObject): JsonObject {
+  return {
+      result_writeback_option: writeback.option,
+      result_writeback_inline_option: writeback.inline_option,
+      result_writeback_inline_field: writeback.inline_field,
+      result_attachment_schema: writeback.attachment_schema,
+      path_delta_attachment_schema: writeback.path_delta_attachment_schema,
+      path_delta_attachment_template: writeback.path_delta_attachment_template,
+      linked_question_attachment_template: writeback.linked_question_attachment_template,
+      optional_question_evolution_example: writeback.optional_question_evolution_example,
+      result_writeback_guidance: writeback.guidance,
+      result_attachment_template: writeback.attachment_template,
+      optional_measurement_example: writeback.optional_measurement_example,
+  };
+}
+
+/** Reference only exact, recognized authoring already delivered by the captured
+ * settlement plan. Unknown/custom guidance stays inline: no prose classification
+ * or migration of old obligations to a later phase. Evidence and paging stay put.
+ */
+function withoutCurrentResultWriteback(content: JsonObject, attachment: JsonObject): JsonObject | null {
+  const rawGraph = content.graph;
+  if (content.ok !== true || content.graph_enabled !== true || !rawGraph || typeof rawGraph !== "object" || Array.isArray(rawGraph) ||
+      attachment.capability_id !== "explore" || attachment.guidance !== exploreResultWritebackAffordance().guidance) return null;
+  const graph = requireJsonObject(rawGraph, "Explore graph");
+  const fields = resultWritebackFields(attachment);
+  if (Object.entries(fields).some(([key, value]) => value === undefined || !isDeepStrictEqual(graph[key], value))) return null;
+  const retained = {...graph};
+  for (const key of Object.keys(fields)) delete retained[key];
+  return retained;
+}
+
+export function referenceExploreResultWriteback(content: JsonObject, attachment: JsonObject, read: string): JsonObject {
+  const retained = withoutCurrentResultWriteback(content, attachment);
+  return retained === null ? content : {...content, graph: {...retained,
+    result_writeback_guidance: exploreBeforeWorkGuidance(), result_writeback_read: read}};
+}
+
+/** A pure replan has no admitted Todo for refresh-state's result attachment.
+ * Preserve evidence collection obligations and the independent graph commands;
+ * do not advertise unusable authoring or invent a later attachment authority.
+ * The caller must establish the autonomous settlement binding first.
+ */
+export function omitUnboundExploreResultWriteback(content: JsonObject): JsonObject {
+  const retained = withoutCurrentResultWriteback(content, exploreResultWritebackAffordance());
+  return retained === null ? content : {...content, graph: {...retained,
+    result_writeback_guidance: exploreBeforeWorkGuidance() +
+      " The refresh-state Explore attachment requires an admitted Todo and is unavailable for this pure replan. " +
+      "The independent graph record commands remain available for reusable evidence."}};
 }
 
 function rows(value: unknown): JsonObject[] {
@@ -312,17 +365,7 @@ export function projectExploreTurnContext(params: JsonObject): JsonObject {
       },
       omitted_nodes: Math.max(0, nodes.length - 3),
       summary_command: command("summary"),
-      result_writeback_option: writeback.option,
-      result_writeback_inline_option: writeback.inline_option,
-      result_writeback_inline_field: writeback.inline_field,
-      result_attachment_schema: writeback.attachment_schema,
-      path_delta_attachment_schema: writeback.path_delta_attachment_schema,
-      path_delta_attachment_template: writeback.path_delta_attachment_template,
-      linked_question_attachment_template: writeback.linked_question_attachment_template,
-      optional_question_evolution_example: writeback.optional_question_evolution_example,
-      result_writeback_guidance: writeback.guidance,
-      result_attachment_template: writeback.attachment_template,
-      optional_measurement_example: writeback.optional_measurement_example,
+      ...resultWritebackFields(writeback),
       ...(measurementFeedback.length ? {
         measurement_feedback: visibleMeasurements,
         omitted_measurement_feedback: remainingMeasurements,

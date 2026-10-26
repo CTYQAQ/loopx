@@ -58,8 +58,8 @@
 .goal-vital-skeleton i:first-child { width: 64%; height: 18px; }
 .goal-vital-skeleton i:last-child { width: 40%; }
 
-@keyframes goal-popover-enter { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
-@keyframes goal-value-swap { from { opacity: 0; transform: translateY(3px); } }
+@keyframes goal-popover-enter { from { transform: translateY(-4px) scale(.98); } }
+@keyframes goal-value-swap { from { transform: translateY(3px); } }
 @keyframes goal-skeleton { to { background-position: -200% 0; } }
 
 @media (prefers-reduced-motion: reduce) {

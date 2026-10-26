@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ..effect_runtime import effect_runtime_result
+from ..effect_runtime import EffectRuntimeRejected, effect_runtime_result
 from ..scheduler.execution_context import (
     SchedulerExecutionContextResolution,
     render_scheduler_execution_args,
@@ -32,10 +32,16 @@ def _turn_envelope_result(
 ) -> dict[str, Any]:
     """Call the coarse TS owner and fail closed on transport shape drift."""
 
-    result = effect_runtime_result(
-        "quota.turn_envelope.evaluate",
-        {"operation": operation, **params},
-    )
+    request = {"operation": operation, **params}
+    try:
+        result = effect_runtime_result("quota.turn_envelope.evaluate", request)
+    except EffectRuntimeRejected as error:
+        if error.diagnostic_code != "request_too_large":
+            raise
+        # The client refused before sending this pure projection. Reuse the
+        # existing bounded local-snapshot transport, never truncate the source
+        # or re-enter quota admission. Small packets retain their normal path.
+        result = effect_runtime_result("quota.turn_envelope.evaluate", request, large_local_snapshot=True)
     if not isinstance(result, Mapping):
         raise RuntimeError("TypeScript Turn envelope result must be an object")
     return dict(result)
@@ -98,12 +104,14 @@ def build_turn_envelope(
 def bind_turn_decision_capture(
     payload: Mapping[str, Any], envelope: Mapping[str, Any], *,
     captured_decision_path: str, turn_instance_id: str, turn_key: str,
+    reader_argv: list[str] | None = None,
 ) -> dict[str, Any]:
     """Validate and bind original native Turn evidence through the existing TS owner."""
     return _turn_envelope_result(
         "bind_capture", payload=dict(payload), envelope=dict(envelope),
         captured_decision_path=captured_decision_path,
         turn_instance_id=turn_instance_id, turn_key=turn_key,
+        **({"reader_argv": reader_argv} if reader_argv is not None else {}),
     )
 
 

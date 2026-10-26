@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 import shutil
+import sys
 from typing import Iterator, Mapping, Sequence
 
 
@@ -33,6 +34,16 @@ def loopx_cli_argv(cli_bin: str | None = None) -> list[str]:
     # The executable selects this process; the option preserves that selection
     # when its returned commands start another process. Neither grants authority.
     return [program] if program == "loopx" else [program, "--cli-bin", program]
+
+
+def current_loopx_cli_argv() -> list[str]:
+    """Pin captured readers to this installed interpreter or explicit CLI.
+
+    A native Host can run from a project outside the source checkout. An ambient
+    ``loopx`` may be another installation and lack this capture's reader.
+    """
+    route = loopx_cli_argv()
+    return [sys.executable, "-m", "loopx.entrypoint"] if route == ["loopx"] else route
 
 
 def resolve_command_path(

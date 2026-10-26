@@ -56,17 +56,18 @@ export function turnScopedCliSettlementPlan(params: JsonObject): SettlementPlan 
     expected_receipt: "validation_receipt",
     precondition: "delivery result is independently validated",
   };
-  if (identity.binding_kind === "todo" && !inFlight) {
+  if (identity.binding_kind === "todo") {
     validation.command_template = requireNonEmptyString(commands.todo_completion, "todo_completion");
     validation.command_condition = "todo_deliverable_complete";
-    validation.precondition = "validate the deliverable; when complete, run ordinary Todo completion " +
+    validation.precondition = "validate the original Todo deliverable; when complete, run ordinary Todo completion " +
       "with its original declaration and current lease before writeback/spend. Use --evidence for " +
       "an artifact pointer; --result-file requires approved Goal acceptance criteria bound to this Todo, " +
       "not merely a Todo validator. No invented successor " +
-      "or --no-follow-up is required. Todo done does not settle the Turn";
-  } else if (inFlight) {
-    validation.precondition = "validate bounded in-flight progress; keep the Todo open and its " +
-      "original completion declaration unchanged";
+      "or --no-follow-up is required. Todo done does not settle the Turn. " +
+      (inFlight ? "For unfinished bounded progress, keep the Todo open with its original declaration. " +
+        "The projected in-flight boundary is not an instruction to retain completed work: " +
+        "when complete or changing route, use --delivery-boundary semantic_closeout with an " +
+        "evidence-linked vision decision on this same Turn; no new guard or binding is needed." : "");
   }
   const steps: SettlementStep[] = [
     validation,

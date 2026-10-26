@@ -104,10 +104,10 @@
 .personal-workspace-shell[data-pw-theme="loopx"] .personal-composer-pill { border-radius: 6px; }
 
 @starting-style {
-  .goal-overview-criteria li, .goal-overview-attention li { opacity: 0; transform: translateY(4px); }
+  .goal-overview-criteria li, .goal-overview-attention li { transform: translateY(4px); }
 }
 
-@keyframes goal-panel-enter { from { opacity: 0; transform: translateY(4px); } }
+@keyframes goal-panel-enter { from { transform: translateY(4px); } }
 
 @media (prefers-reduced-motion: reduce) {
   .personal-goal-view-panel:not([hidden]), .personal-composer-pill, .personal-composer-folded .personal-composer-tools-panel { animation: none; }

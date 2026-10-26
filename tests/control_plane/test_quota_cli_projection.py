@@ -17,6 +17,105 @@ from loopx.presentation.renderers.quota_markdown import (
 )
 
 
+@pytest.mark.parametrize("variant", ["text", "title", "different", "short", "incomplete", "unverified",
+    "unmatched", "ambiguous", "partial", "failed", "wrong-id", "wrong-selection", "duplicate", "existing-ref",
+    "archived", "done", "boolean-id"])
+def test_lane_title_reuses_only_exact_complete_current_task_in_same_packet(variant):
+    body = "Preserve every requirement and source. 完整要求🙂\n" * 100 + "Stop before publication."
+    title = body if variant != "short" else "Short label"
+    todo = {"todo_id": "todo_current", "text": body, "status": "open"}
+    if variant == "title":
+        todo.update(text="[P1] " + body, title=body)
+    if variant == "different":
+        todo["text"] = body + " Additional acceptance."
+    content = {"ok": True, "matched": True, "ambiguous": False, "todo": todo}
+    context = {"complete": True, "selected_todo_text_verified": True,
+        "sources": [{"source": "goal_acceptance", "content": {}},
+                    {"source": "selected_todo", "content": content}]}
+    lane = {"todo_id": "todo_current", "text": "Bounded display…", "title": title,
+        "claimed_by": "worker", "required_capabilities": ["shell"]}
+    payload = {"ok": True, "selected_todo": {"todo_id": "todo_current"},
+        "agent_lane_next_action": lane, "interaction_contract": {"agent_channel": {"work_context": context}}}
+    if variant == "incomplete":
+        context["complete"] = False
+    if variant == "unverified":
+        context["selected_todo_text_verified"] = False
+    if variant == "unmatched":
+        content["matched"] = False
+    if variant == "ambiguous":
+        content["ambiguous"] = True
+    if variant == "partial":
+        content["read_complete"] = False
+    if variant == "failed":
+        content["ok"] = False
+    if variant == "wrong-id":
+        todo["todo_id"] = "todo_other"
+    if variant == "wrong-selection":
+        payload["selected_todo"]["todo_id"] = "todo_other"
+    if variant == "duplicate":
+        context["sources"].append(deepcopy(context["sources"][-1]))
+    if variant == "existing-ref":
+        lane["title_ref"] = "caller-owned-reference"
+    if variant == "archived":
+        todo["archive_state"] = "archive"
+    if variant == "done":
+        todo["status"] = "done"
+    if variant == "boolean-id":
+        lane["todo_id"] = todo["todo_id"] = payload["selected_todo"]["todo_id"] = True
+    original = deepcopy(payload)
+    compact = compact_quota_should_run_cli_payload(payload)
+    assert payload == original
+    result = compact["agent_lane_next_action"]
+    if variant in {"text", "title"}:
+        field = "title" if variant == "title" else "text"
+        assert result == {key: value for key, value in lane.items() if key != "title"} | {
+            "title_ref": f"$.interaction_contract.agent_channel.work_context.sources[1].content.todo.{field}"}
+        assert compact["interaction_contract"]["agent_channel"]["work_context"] == context
+        assert todo[field] == title
+        assert len(json.dumps(compact, ensure_ascii=False)) < len(json.dumps(original, ensure_ascii=False)) - len(title) // 2
+        detailed = compact_quota_should_run_cli_payload(payload, include_todo_summary_detail=True)
+        assert detailed["agent_lane_next_action"] == lane
+    else:
+        assert result == lane
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_real_guard_keeps_multiline_task_once_without_differential_opt_in(tmp_path, monkeypatch, provider):
+    from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime, read_fixture_todos
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    from test_quota_settlement_cli import AGENT_ID, GOAL_ID, TODO_ID, _run_cli, _write_fixture
+
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    project, runtime, registry = _write_fixture(tmp_path)
+    state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    body = "Keep every requirement and provenance.\n" * 240 + "Stop before an unauthorized publication."
+    todos = read_fixture_todos(state)
+    task = next(todo for todo in todos if todo["todo_id"] == TODO_ID)
+    task.update(text=body, title=body)
+    initialize_canonical_authority(runtime, GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=todos, handoff_mode="soft_claim"),
+        state_path=state, provider=provider)
+    original_state = state.read_bytes()
+    code, full = _run_cli(registry, runtime, "quota", "should-run", "--goal-id", GOAL_ID,
+        "--agent-id", AGENT_ID, cwd=project)
+    assert code == 0 and full["should_run"], full
+    context = full["interaction_contract"]["agent_channel"]["work_context"]
+    assert context["complete"] and context["selected_todo_text_verified"]
+    index, source = next((i, source) for i, source in enumerate(context["sources"])
+        if source["source"] == "selected_todo")
+    assert source["content"]["todo"]["text"] == body
+    lane = full["agent_lane_next_action"]
+    assert lane["todo_id"] == TODO_ID and "title" not in lane
+    assert lane["title_ref"] == f"$.interaction_contract.agent_channel.work_context.sources[{index}].content.todo.text"
+    assert json.dumps(full, ensure_ascii=False).count(json.dumps(body, ensure_ascii=False)) == 1
+    assert "context_delivery" not in full
+    assert not list(project.rglob("presentation.json"))
+    assert state.read_bytes() == original_state
+    code, detail = _run_cli(registry, runtime, "todo", "list", "--goal-id", GOAL_ID,
+        "--todo-id", TODO_ID, cwd=project)
+    assert code == 0 and detail["todo"]["text"] == body and detail["todo"]["title"] == body
+
+
 @pytest.mark.parametrize("mirror", ["shared", "identical", "different", "boolean-number", "missing-root"])
 def test_fallback_reference_preserves_complete_same_packet_facts(mirror: str) -> None:
     fallback = {"notify_user": False, "blocked_items": [

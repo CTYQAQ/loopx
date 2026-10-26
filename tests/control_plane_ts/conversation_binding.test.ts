@@ -17,6 +17,37 @@ const current = {schema_version: "loopx_chat_conversation_bindings_v0", revision
 const request = {current, expected_revision: 0, operation: "configure", binding: row, observation,
   available_projects: [project]};
 
+test("the App steward is an explicit source preference, never a new grant or peer fallback", () => {
+  const steward = {...row, context_kind: "steward", grant: "portfolio_read", goal_ids: []};
+  const configured = planConversationBinding({...request, binding: steward}).state;
+  const choose = {current: configured, expected_revision: 1, operation: "select_app_steward",
+    binding_id: row.binding_id, observation, available_projects: [project]};
+  const selected = planConversationBinding(choose).state;
+  assert.equal(selected.app_steward_binding_id, row.binding_id);
+  assert.deepEqual(selected.bindings, configured.bindings, "Selection must not revise any grant or managed actor");
+  assert.equal(planConversationBinding({...choose, current: selected, expected_revision: 2}).changed, false);
+  for (const denied of [{expected_revision: 0}, {binding_id: "f".repeat(24)},
+    {observation: {...observation, provider_ref: "f".repeat(24)}},
+    {observation: {...observation, operator_ref: "f".repeat(24)}},
+    {observation: {...observation, verified: false}}, {available_projects: []},
+    {current: {...configured, bindings: [row]}}]) {
+    assert.throws(() => planConversationBinding({...choose, ...denied}));
+  }
+  const disconnected = planConversationBinding({current: selected, expected_revision: 2,
+    operation: "disconnect", binding_id: row.binding_id}).state;
+  assert.equal(disconnected.app_steward_binding_id, row.binding_id, "Revocation retains the unavailable original selection");
+  assert.throws(() => listLocalBoundSessions({current: disconnected, binding_id: row.binding_id,
+    app_steward_entry: true, observation, available_projects: [project], sessions: []}), /no longer authorized/);
+  const cleared = planConversationBinding({current: disconnected, expected_revision: 3,
+    operation: "select_app_steward", binding_id: null}).state;
+  assert.equal(cleared.app_steward_binding_id, null);
+  assert.deepEqual(cleared.bindings, []);
+  // A different steward may still be inspected normally, but cannot claim to
+  // be the explicitly selected App entry, including with an empty inventory.
+  assert.throws(() => listLocalBoundSessions({current: configured, binding_id: row.binding_id,
+    app_steward_entry: true, observation, available_projects: [project], sessions: []}), /selected original steward/);
+});
+
 for (const kind of ["project", "steward"]) for (const retryKind of ["routing", "quota"]) {
   test(`${kind} ${retryKind} recovery is bounded, source-bound and independent of context migrations`, () => {
     const selected = kind === "steward" ? {...row, context_kind: kind, grant: "portfolio_read", goal_ids: []} : row;

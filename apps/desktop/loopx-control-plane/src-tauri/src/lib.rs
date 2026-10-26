@@ -125,7 +125,11 @@ pub fn run() {
     // Release builds load the versioned LoopX Chat workspace that ships inside
     // the installed `loopx` release, so `loopx update` refreshes the frontend
     // and backend together instead of reusing a separately built asset bundle.
-    let endpoints = service_endpoints::ServiceEndpoints::allocate(!cfg!(dev))
+    // App and browser are clients of the same machine services. Private
+    // endpoints are an explicit developer/QA choice, never a second default
+    // Chat store created merely by opening a release window.
+    let private_endpoints = std::env::var_os("LOOPX_DESKTOP_PRIVATE_ENDPOINTS");
+    let endpoints = service_endpoints::ServiceEndpoints::for_window(private_endpoints.as_deref())
         .expect("could not allocate LoopX loopback endpoints");
     #[cfg(dev)]
     let web_origin = "http://127.0.0.1:5173".to_string();

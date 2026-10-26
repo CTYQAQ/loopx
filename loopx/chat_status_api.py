@@ -53,8 +53,15 @@ from .status_server import (
 from .control_plane.todos.list_readback import list_goal_todos
 
 
+def _status_runtime_root(server: Any) -> str | None:
+    """Registered work follows the same authority as the Chat coordinator."""
+    controller = getattr(server, "runtime_controller", None)
+    root = getattr(controller, "coordination_runtime_root", None)
+    return str(root) if root is not None else server.runtime_root_override
+
+
 def _goal_task_map(server: Any, goal_id: str) -> dict[str, Any] | None:
-    runtime_root = server.runtime_root_override
+    runtime_root = _status_runtime_root(server)
     source_read_at = now_utc_iso()
     try:
         listed = list_goal_todos(
@@ -198,6 +205,7 @@ class ChatStatusRequestMixin(ExtensionPresentationRequestMixin):
             )
             return
         try:
+            status_runtime_root = _status_runtime_root(self.server)
             registry = {}
             if views is not None or requested_goals is not None or delivery_review:
                 # Discovery reads only metadata. Full status/runtime reads keep
@@ -249,7 +257,7 @@ class ChatStatusRequestMixin(ExtensionPresentationRequestMixin):
                 # empty workspace (serve_chat); its status reports the same
                 # fact as a warning, so a fresh install is not a failed source.
                 allow_missing_registry=True,
-                runtime_root_override=self.server.runtime_root_override,
+                runtime_root_override=status_runtime_root,
                 limit=self.server.limit,
                 goal_id=goal_id,
                 include_zcode_goal_eligibility=not delivery_review,
@@ -324,11 +332,11 @@ class ChatStatusRequestMixin(ExtensionPresentationRequestMixin):
                     "goal_map": goal_map,
                     "acceptance": goal.get("acceptance_observation"),
                 }
-                validate_public_safe_value(projection)
             protected_paths = [
                 self.server.registry_path,
                 *self.server.scan_roots,
                 self.server.runtime_root,
+                *([status_runtime_root] if status_runtime_root else []),
             ]
             projection = json.loads(
                 redact_local_paths(
@@ -336,6 +344,9 @@ class ChatStatusRequestMixin(ExtensionPresentationRequestMixin):
                     protected_paths=protected_paths,
                 )
             )
+            if delivery_review:
+                # Validate the outbound view, after removing owner-local paths.
+                validate_public_safe_value(projection)
         except Exception as exc:  # noqa: BLE001 - do not expose local projection failures.
             # The storage owner already exposes inspection and reviewed import.
             # Preserve its typed refusal, not private paths or migration payloads.

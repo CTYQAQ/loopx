@@ -4,6 +4,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 
 BOOTSTRAP_INSTRUCTION = (
@@ -35,7 +36,7 @@ def render_heartbeat_bootstrap(command: list[str]) -> str:
     )
 
 
-def _goal_command(args, *, registry: Path, legacy: bool) -> list[str]:
+def _goal_command(args: Any, *, registry: Path, legacy: bool) -> list[str]:
     """Preserve explicit caller inputs, not yesterday's resolved registry values.
 
     The loaded command deliberately omits --bootstrap: one load cannot recurse.
@@ -71,7 +72,7 @@ def _goal_command(args, *, registry: Path, legacy: bool) -> list[str]:
         ("context_delivery", "--context-delivery"),
     ):
         value = getattr(args, field, None)
-        if value is not None and not (field == "context_delivery" and value == "off"):
+        if value is not None:
             if field == "active_state":
                 value = str(Path(value).expanduser().resolve())
             command += [flag, value]
@@ -92,7 +93,7 @@ def _goal_command(args, *, registry: Path, legacy: bool) -> list[str]:
     return command
 
 
-def goal_bootstrap(args, *, registry: Path) -> str:
+def goal_bootstrap(args: Any, *, registry: Path) -> str:
     """Use the heartbeat wrapper only for an App heartbeat scheduler."""
     heartbeat = (
         args.codex_app
@@ -107,7 +108,7 @@ def goal_bootstrap(args, *, registry: Path) -> str:
                             entry=LEGACY_HOST_BOOTSTRAP_ENTRY)
 
 
-def host_bootstrap_binding(prompt: str) -> dict | None:
+def host_bootstrap_binding(prompt: str) -> dict[str, Any] | None:
     """Recognize complete v2 loaders and the exact legacy host wrapper."""
     if not prompt.startswith((HEARTBEAT_BOOTSTRAP + "\n", LEGACY_HOST_BOOTSTRAP + "\n")):
         return None
@@ -115,7 +116,7 @@ def host_bootstrap_binding(prompt: str) -> dict | None:
         command = shlex.split(prompt.split("```sh\n", 1)[1].split("\n```", 1)[0])
         if command[1:3] != ["--format", "json"]:
             return None
-        values = dict(cli_bin=command[0], turn_instance_id=None, codex_app=False,
+        values: dict[str, Any] = dict(cli_bin=command[0], turn_instance_id=None, codex_app=False,
                       trae_app=False,
                       full=False, compact=False, brief=False, thin=False, turn_envelope=False,
                       visible_goal_host=None, available_capabilities=[], agent_scopes=[],

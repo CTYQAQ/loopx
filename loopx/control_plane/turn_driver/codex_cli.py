@@ -307,12 +307,24 @@ def codex_cli_result_schema(
 
 
 def _prompt(request: Mapping[str, Any]) -> str:
+    envelope = _mapping(request.get("turn_envelope"))
+    staged = _mapping(_mapping(envelope.get("detail_ref")).get("replan_action_packet")).get("review")
+    model_request = request
+    if staged:
+        from .host_candidate import extract_turn_authority, replan_prompt_instruction
+
+        authority = extract_turn_authority(request)
+        # The journal/executor retains the full signed envelope. The model gets
+        # its verified authority and immutable readers, not a second executor.
+        model_request = {key: value for key, value in request.items() if key != "turn_envelope"}
+        model_request["turn_authority"] = authority
     request_json = json.dumps(
-        request, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        model_request, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
     instructions = [
         "Execute exactly one bounded LoopX Turn in the current workspace.",
-        "Use the TurnEnvelope as the source of truth. Read work_context and remaining required_reads before primary_action; do not repeat fulfilled reads; perform work only when its contract allows it. The selected Todo summary is not its full requirements, and completing that work does not prove Goal completion.",
+        ("Use turn_authority as the verified authority for this Turn. " if staged else "Use the TurnEnvelope as the source of truth. ")
+        + "Read work_context and remaining required_reads before primary_action; do not repeat fulfilled reads; perform work only when its contract allows it. The selected Todo summary is not its full requirements, and completing that work does not prove Goal completion.",
         "Do not write LoopX state, spend quota, or apply scheduler changes; the adapter owns those effects.",
         "Return only the schema-constrained result. For validated_progress, repair_required, or replan_required, fill every material field with public-safe evidence.",
         "For those material results, preserve the actual delivery_batch_scale and delivery_outcome selected from the signed execution_profile's work and outcome requirements. Return work_evidence and validation_evidence as separate arrays of short public-safe strings; name the artifact or observed work in the first and the independent command or readback in the second. Omit both arrays for stop results.",
@@ -322,6 +334,8 @@ def _prompt(request: Mapping[str, Any]) -> str:
         "For user_action_required, wait, or iteration_failed, leave material-only fields empty and explain the stop in summary. iteration_failed ends only this iteration and never requests a retry or successor.",
         'completed_phases must be exactly ["host_execute","typed_result"], and turn_key must match the request.',
     ]
+    if staged:
+        instructions.append(replan_prompt_instruction(authority))
     instructions.extend(request.get("capability_instructions") or ())
     boundary = _mapping(_mapping(request.get("turn_envelope")).get("boundary"))
     if boundary.get("checkpointed_boundary_authority"):

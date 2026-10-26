@@ -670,7 +670,7 @@ fn exit_private_service(root: &Path, kind: ServiceKind, services: &mut ServiceSe
 
 #[cfg(unix)]
 #[test]
-fn exited_private_children_recover_individually_with_the_frozen_identity() {
+fn exited_owned_children_recover_individually_with_the_frozen_identity() {
     let _fixture = PRIVATE_RECOVERY_FIXTURE.lock().unwrap();
     let (root, runtime, endpoints) = private_recovery_fixture();
     let mut services = ServiceSet::start(&runtime, &endpoints, |_| {}).unwrap();
@@ -689,10 +689,12 @@ fn exited_private_children_recover_individually_with_the_frozen_identity() {
         services.last_recovery_attempt = None;
         let mut development = endpoints;
         development.isolated = false;
-        assert!(!services
+        // Ownership, rather than private/shared mode, authorizes recovery.
+        // Keep ephemeral fixture ports so this cannot touch machine services.
+        assert!(services
             .recover_exited(&development, Instant::now())
             .unwrap());
-        assert!(services.recover_exited(&endpoints, Instant::now()).unwrap());
+        assert!(!services.recover_exited(&endpoints, Instant::now()).unwrap());
         assert_ne!(
             services
                 .owned
@@ -836,4 +838,30 @@ fn private_recovery_cannot_start_an_unowned_or_development_service() {
     assert!(!services
         .recover_exited(&ServiceEndpoints::allocate(false).unwrap(), Instant::now())
         .unwrap());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn declared_machine_source_remains_authoritative_while_unloaded() {
+    let root = tempfile::tempdir().unwrap();
+    assert!(!platform_managed_service_declared(
+        Some(root.path().as_os_str()),
+        ServiceKind::Chat
+    ));
+    let launch_agents = root.path().join("Library/LaunchAgents");
+    fs::create_dir_all(&launch_agents).unwrap();
+    // Even a damaged declaration must not admit a different empty Chat store.
+    fs::write(
+        launch_agents.join("com.loopx.chat.plist"),
+        b"damaged declaration",
+    )
+    .unwrap();
+    assert!(platform_managed_service_declared(
+        Some(root.path().as_os_str()),
+        ServiceKind::Chat
+    ));
+    assert!(!platform_managed_service_declared(
+        Some(root.path().as_os_str()),
+        ServiceKind::Status
+    ));
 }

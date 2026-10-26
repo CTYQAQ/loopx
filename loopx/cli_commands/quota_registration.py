@@ -31,6 +31,7 @@ def register_quota_command(
             "context-project",
             "context-hook",
             "context-config",
+            "replan-view",
             "monitor-poll",
             "scheduler-ack",
             "scheduler-ack-current",
@@ -41,6 +42,11 @@ def register_quota_command(
         default="status",
         help="Use status for all groups, plan for next-turn groups, should-run for one goal, context-read for bounded original-capture recovery without a guard, context-project to present an existing digest-bound quota capture with native full/delta and a full-read fallback, context-hook for opt-in native Codex lifecycle IO, context-config for native hook/recovery configuration without installation or trust changes, monitor-poll for no-spend quiet poll evidence, scheduler-ack for successful Codex App RRULE state, scheduler-fail-current to suppress a repeated failed host update pair, spend-slot for accounting, or void-slot for a non-destructive accounting correction.",
     )
+    quota_parser.add_argument("--decision-file", help="Original captured decision for read-only replan-view.")
+    quota_parser.add_argument("--outcome-ref", help="Exact captured acceptance outcome reference for replan-view.")
+    quota_parser.add_argument("--source-hash", help="Original source_decision_hash for replan-view.")
+    quota_parser.add_argument("--replan-stage", choices=["review", "writeback", "acceptance", "explore"], default="review",
+                              help="Read decision context before opening its writeback format.")
     quota_parser.add_argument(
         "--goal-id",
         help="Goal id to check. Optional for status/plan (omit for all goals); required for should-run, scheduler ACK/failure, spend, and void. A scoped status/plan ranks only the selected goal, not the global next turn.",
@@ -203,11 +209,11 @@ def register_quota_command(
     quota_parser.add_argument("--capture-file", help="For context-read/context-project: original captured JSON file; no guard is evaluated.")
     from ..control_plane.turn_driver.codex_context import CONTEXT_DELIVERY_SETTINGS
 
-    quota_parser.add_argument("--context-delivery", choices=CONTEXT_DELIVERY_SETTINGS, default="off",
-        help="Experimental native packet reuse; off by default. On uses existing host declarations: "
+    quota_parser.add_argument("--context-delivery", choices=CONTEXT_DELIVERY_SETTINGS,
+        help="Experimental native packet reuse; inherits the machine setting, otherwise off. Explicit off bypasses machine defaults. On uses existing host declarations: "
              "Codex App heartbeat/resume/recovery (--codex-app), or the Codex benchmark heartbeat worker "
              "(generic_cli plus its explicit heartbeat worker settings). On rejects missing, contradictory or unsupported modes. "
-             "A directory alone never enables it; declarations are not retention proof.")
+             "Enabled supported calls choose private context/capture paths automatically unless overridden. A directory alone never enables it; declarations are not retention proof.")
     context_location = quota_parser.add_mutually_exclusive_group()
     context_location.add_argument("--codex-context-dir",
         help="Opt-in private native Codex lifecycle directory. For context-hook, consume one native hook event on stdin. "
@@ -217,7 +223,7 @@ def register_quota_command(
     context_location.add_argument("--codex-context-root",
         help="Existing private native context root, with independent journals per native session. "
              "Use for shared Codex App hook configuration; cannot combine with --codex-context-dir. "
-             "context-config renders native configuration for the exact Goal/Agent; no files, trust, guard or spend are changed.")
+             "context-config renders native configuration for the exact Goal/Agent; no host configuration, trust, guard or spend are changed.")
     quota_parser.add_argument("--capture-sha256", help="For context-read/context-project: exact SHA-256 supplied with the capture reference.")
     quota_parser.add_argument("--offset", type=int, default=0, help="For context-read: byte offset returned by the previous page.")
     quota_parser.add_argument("--page-bytes", type=int, default=4096,

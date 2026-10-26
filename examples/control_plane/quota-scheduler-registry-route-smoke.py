@@ -17,6 +17,7 @@ AGENT_ID = "codex-scheduler-route-smoke"
 GOAL_ID = "scheduler-route-smoke"
 sys.path.insert(0, str(REPO_ROOT))
 from examples.control_plane.quota_plan_fixtures import write_codex_heartbeat_fixture  # noqa: E402
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_source_fixture  # noqa: E402
 
 
 def write_registry(path: Path, *, project: Path, runtime: Path) -> None:
@@ -90,6 +91,8 @@ def main() -> None:
         global_runtime = root / "shared" / "runtime"
         write_registry(project_registry, project=project, runtime=project_runtime)
         write_registry(global_registry, project=project, runtime=global_runtime)
+        initialize_canonical_source_fixture(global_runtime, GOAL_ID,
+            state_path=project / ".loopx" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md")
 
         decision = run_cli(
             "--registry",

@@ -3,7 +3,7 @@ import {ContextHelp} from "./context-help";
 import {useEffect, useRef, useState} from "react";
 import {connectPrivateConversation, disconnectPrivateConversation, fetchPrivateConversations,
   changePrivateAgentTarget, changeOwnerNotifications, prepareManagedSteward, configureStewardMonitor, configureStewardReport, fetchChatProjects, fetchChatCapabilities, fetchLarkGroupChats, type PrivateConversation,
-  discoverBoundChatSession, type BoundConversationTarget,
+  discoverBoundChatSession, selectAppSteward, type BoundConversationTarget,
   type ChatProject, type LarkApp, type PrivateConversationStopRecovery} from "../../data/chat";
 import {useWorkspaceI18n} from "./i18n";
 import {StewardManagedMode} from "./steward-managed-mode";
@@ -18,6 +18,7 @@ export function PrivateConversationPanel({apps, onOpenOriginal}: {apps: LarkApp[
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [recoveries, setRecoveries] = useState<PrivateConversationStopRecovery[]>([]);
   const [revision, setRevision] = useState(0);
+  const [appStewardBindingId, setAppStewardBindingId] = useState<string | null>(null);
   const [app, setApp] = useState("");
   const [project, setProject] = useState("");
   const [executor, setExecutor] = useState("");
@@ -49,6 +50,7 @@ export function PrivateConversationPanel({apps, onOpenOriginal}: {apps: LarkApp[
   async function refresh() {
     const state = await fetchPrivateConversations();
     setRows(state.connections); setRecoveries(state.stop_recoveries); setRevision(state.revision);
+    setAppStewardBindingId(state.app_steward_binding_id);
   }
   useEffect(() => {
     let active = true;
@@ -66,7 +68,8 @@ export function PrivateConversationPanel({apps, onOpenOriginal}: {apps: LarkApp[
     async function readConnections() {
       try {
         const state = await fetchPrivateConversations(AbortSignal.timeout(5000));
-        if (active) {setRows(state.connections); setRecoveries(state.stop_recoveries); setRevision(state.revision);}
+        if (active) {setRows(state.connections); setRecoveries(state.stop_recoveries); setRevision(state.revision);
+          setAppStewardBindingId(state.app_steward_binding_id);}
       } catch (error) {failed(error);}
       finally {if (active) {setConnectionsLoading(false); timer = setTimeout(() => void readConnections(), 5000);}}
     }
@@ -126,12 +129,21 @@ export function PrivateConversationPanel({apps, onOpenOriginal}: {apps: LarkApp[
       </ContextHelp>
       <button className="personal-private-refresh" disabled={busy} aria-label={zh ? "刷新状态" : "Refresh status"} onClick={() => void act(refresh)} type="button"><RefreshCw size={16} aria-hidden="true"/></button>
     </header>
+    {appStewardBindingId !== null && !rows.some(row => row.binding_id === appStewardBindingId) ? <div className="personal-detail-actions">
+      <p role="alert">{zh ? "已选的 App 对话来源已失效。" : "The selected App Conversation source is unavailable."}</p>
+      <button type="button" disabled={busy} onClick={() => void act(() => selectAppSteward(null, revision))}>
+        {zh ? "取消 App 对话来源" : "Clear App Conversation source"}</button>
+    </div> : null}
     {rows.map(row => <article className="personal-private-connection" key={row.binding_id}>
       <header className="personal-private-heading">
       <strong>{row.app_ref} · {row.context_available ? row.project_title : (zh ? "工作区不可用" : "Workspace unavailable")}</strong>
       {onOpenOriginal && row.audience === "owner" ? <button type="button" disabled={!row.context_available || opening !== null}
         onClick={() => void openOriginal(row.binding_id)}>{opening === row.binding_id
           ? (zh ? "正在打开…" : "Opening…") : (zh ? "继续原会话" : "Continue original conversation")}</button> : null}
+      {row.context_kind === "steward" && row.audience === "owner" ? <button type="button" disabled={busy || (!row.context_available && appStewardBindingId !== row.binding_id)}
+        aria-pressed={appStewardBindingId === row.binding_id}
+        onClick={() => void act(() => selectAppSteward(appStewardBindingId === row.binding_id ? null : row.binding_id, revision))}>
+        {appStewardBindingId === row.binding_id ? (zh ? "App 管家 · 取消选择" : "App steward · Clear selection") : (zh ? "用于 App 管家" : "Use for App steward")}</button> : null}
       </header>
       <p>{row.context_kind === "steward" ? (row.goal_scope === "all_registered"
         ? (zh ? `LoopX 管家 · 全部已注册工作 · ${row.goal_count} 个 Goal` : `LoopX steward · All registered work · ${row.goal_count} Goals`)

@@ -85,7 +85,14 @@ def capability_configuration_editor(
     # effort the owning namespace would reject.
     steward_endpoints, steward_efforts = _steward_executor_editor_options()
     from .native_chat.machine_defaults import codex_profile_options
+    from ..control_plane.turn_driver.codex_context import CONTEXT_DELIVERY_SETTINGS
     definitions: dict[str, dict[str, Any]] = {
+        "context_delivery": {
+            "supported_scopes": ["machine"], "writable_scopes": ["machine"],
+            "fields": [_field("mode", "Codex App / benchmark heartbeats", "select",
+                options=CONTEXT_DELIVERY_SETTINGS, required=True,
+                description="On accepts only declared Codex App or benchmark heartbeats. Native host setup is still required; unsupported or unknown modes return an error.")],
+        },
         "codex_chat": {
             "supported_scopes": ["machine"], "writable_scopes": ["machine"],
             "fields": [

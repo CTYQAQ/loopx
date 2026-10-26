@@ -10,6 +10,24 @@ from loopx.capabilities.native_chat.conversation_bindings import ChatConversatio
 from loopx.extensions.lark.conversation_identity import identity_ref
 
 
+def test_app_steward_corrupt_legacy_configuration_never_falls_back(tmp_path):
+    bindings = ChatConversationBindings(root=tmp_path, project_contexts=None,
+        observe=lambda _: pytest.fail("an unselected entry must not probe a provider"))
+    assert bindings.app_steward_target() == {"binding_id": None, "session_id": None}
+    valid = bindings.read()
+    for change in [{"schema_version": "unrecognized"}, {"revision": True},
+                   {"bindings": None}, {"app_steward_binding_id": "invalid"}]:
+        bindings.path.write_text(json.dumps({**valid, **change}))
+        with pytest.raises(ValueError):
+            bindings.app_steward_target()
+    bindings.path.write_text(json.dumps(valid))
+    before = bindings.path.read_bytes()
+    assert bindings.app_steward_target() == {"binding_id": None, "session_id": None}
+    assert bindings.path.read_bytes() == before
+    assert bindings.select_app_steward(None, expected_revision=valid["revision"])["bindings"] == []
+    assert bindings.path.read_bytes() == before
+
+
 def _request_for_event(transport, event):
     binding = transport._binding("notes-app")
     return transport.core.read_request(

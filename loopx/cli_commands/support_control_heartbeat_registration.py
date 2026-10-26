@@ -176,20 +176,20 @@ def register_heartbeat_control_commands(
 
     from ..control_plane.turn_driver.codex_context import CONTEXT_DELIVERY_SETTINGS
 
-    heartbeat_prompt_parser.add_argument("--context-delivery", choices=CONTEXT_DELIVERY_SETTINGS, default="off",
-        help="Experimental native packet reuse; off by default. On uses existing host declarations: "
+    heartbeat_prompt_parser.add_argument("--context-delivery", choices=CONTEXT_DELIVERY_SETTINGS,
+        help="Experimental native packet reuse; inherits the machine setting, otherwise off. Explicit off bypasses machine defaults. On uses existing host declarations: "
              "Codex App heartbeat/resume/recovery (--codex-app), or the Codex benchmark heartbeat worker "
              "(generic_cli plus its explicit heartbeat worker settings). On rejects missing, contradictory or unsupported modes. "
-             "A directory alone never enables it; declarations are not retention proof.")
+             "Enabled supported calls choose private context/capture paths automatically unless overridden. A directory alone never enables it; declarations are not retention proof.")
     context_location = heartbeat_prompt_parser.add_mutually_exclusive_group()
     context_location.add_argument(
         "--codex-context-dir",
-        help="Carry the opt-in native context directory into guards; requires --decision-output-root. Does not install hooks or enable tracing.",
+        help="Carry the opt-in native context directory into guards; the enabled capture root is automatic unless overridden. Does not install hooks or enable tracing.",
     )
     context_location.add_argument(
         "--codex-context-root",
         help="Carry a shared private native context root into guards, isolated per native session; "
-             "requires --decision-output-root. Use quota context-config to render native setup.",
+             "the enabled capture root is automatic unless overridden. Use quota context-config to render native setup.",
     )
 
     heartbeat_prequota_parser = subparsers.add_parser(

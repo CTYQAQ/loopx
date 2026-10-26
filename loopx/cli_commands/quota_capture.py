@@ -9,11 +9,12 @@ import shlex
 import socket
 import stat
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable
 
 from ..control_plane.content_digest import BARE_SHA256_PATTERN
+from ..control_plane.effect_runtime import EffectRuntimeRejected
 from ..control_plane.quota.error_codes import QuotaCommandValidationError, QuotaDecisionTransportError
 from ..control_plane.turn_driver.decision_capture import (
     validate_handoff_socket, CONTEXT_CAPTURE_READ_GUIDANCE, context_capture_read_command,
@@ -21,20 +22,10 @@ from ..control_plane.turn_driver.decision_capture import (
 
 
 def native_context_activation(args: argparse.Namespace) -> dict[str, Any]:
-    from ..control_plane.turn_driver.codex_context import context_delivery_activation
+    from ..control_plane.turn_driver.codex_context import context_delivery_for_arguments
 
-    fields = {key: getattr(args, key, None) for key in ("host_surface", "scheduler_owner", "execution_mode")}
-    profiles = [value for value in (getattr(args, "runtime_profile", None),
-        "codex_app_heartbeat" if getattr(args, "codex_app", False) else None,
-        "trae_app" if getattr(args, "trae_app", False) else None) if value is not None]
     try:
-        if len(profiles) > 1:
-            return context_delivery_activation(getattr(args, "context_delivery", "off"))
-        return context_delivery_activation(getattr(args, "context_delivery", "off"),
-            runtime_profile=profiles[0] if profiles else None,
-            scheduler_execution_context=fields if any(fields.values()) else None,
-            benchmark_mode=os.environ.get("LOOPX_EXECUTION_MODE")
-                if os.environ.get("LOOPX_CONTEXT_DELIVERY") == "on" else None)
+        return context_delivery_for_arguments(args)
     except ValueError as exc:
         raise QuotaCommandValidationError(str(exc)) from exc
 
@@ -199,12 +190,46 @@ def project_saved_context_capture(args: argparse.Namespace) -> dict[str, Any]:
                     "Authority and freshness are unchanged. " + CONTEXT_CAPTURE_READ_GUIDANCE}
         # Off is inert; after native preparation an optional wire write can fall
         # back to the original reference without leaving an older selector live.
-    return {"ok": True, "mode": mode, **reference, **({"target": target} if target else {}),
+    result: dict[str, Any] = {"ok": True, "mode": mode, **reference, **({"target": target} if target else {}),
         "recovery": full_reference,
         "capture_sha256": args.capture_sha256,
         **({"context_delivery": activation} if activation["enabled"] else {}),
         "instruction": "Presentation of the original decision only; authority and freshness are unchanged. "
             + CONTEXT_CAPTURE_READ_GUIDANCE}
+    if activation["enabled"] and native_prepared:
+        # Reuse the public page protocol and its physical-file/digest/UTF-8
+        # checks. Older callers can still restart with command; current callers
+        # consume this page and avoid a descriptor-only model round trip.
+        # Reserve room for the descriptor in the same tool response; subsequent
+        # reads retain the ordinary page size and exact UTF-8 cursor.
+        page = read_context_capture(argparse.Namespace(capture_file=reference["path"],
+            capture_sha256=reference["sha256"], offset=0, page_bytes=3072))
+        if page["ok"]:
+            if not page["eof"]:
+                page["next_command"] = context_capture_read_command(Path(reference["path"]),
+                    reference["sha256"], offset=page["next_offset"])
+            result.update(page)
+            result["instruction"] = ("This result includes page zero. Consume its content, then follow "
+                "next_command through eof. command restarts at zero if the inline page is incomplete "
+                "or unsupported. " + result["instruction"])
+    return result
+
+
+def prepare_quota_capture(args: argparse.Namespace, directory: Path | None) -> Path | None:
+    """Validate transport options before allocating a new guard capture."""
+    if directory is None and (
+        getattr(args, "decision_output_dir", None) is not None
+        or getattr(args, "decision_output_root", None) is not None
+        or getattr(args, "decision_handoff_socket", None) is not None
+        or getattr(args, "codex_context_dir", None) is not None
+        or getattr(args, "codex_context_root", None) is not None
+        or getattr(args, "context_delivery", "off") != "off"
+    ):
+        from .quota_context import validate_quota_command_context_request
+
+        validate_quota_command_context_request(args)
+        return prepare_decision_capture(args)
+    return directory
 
 
 def prepare_decision_capture(args: argparse.Namespace) -> Path | None:
@@ -358,8 +383,18 @@ def handoff_decision(directory: Path | None, socket_path: str | None,
         return {}, digest
 
 
-def handle_native_context_command(args: argparse.Namespace, *, print_payload: Callable[..., None]) -> int | None:
+def handle_native_context_command(args: argparse.Namespace, *, print_payload: Callable[..., None],
+                                  registry_path: Path | None = None, runtime_root_arg: str | None = None) -> int | None:
     """Dispatch native presentation/lifecycle IO before any quota authority read."""
+    if registry_path is not None:
+        from .context_machine import apply_context_machine_options
+
+        try:
+            apply_context_machine_options(args, registry_path=registry_path, runtime_root_arg=runtime_root_arg)
+        except (OSError, ValueError, TypeError) as exc:
+            print_payload({"ok": False, "reason": str(exc)}, args.format,
+                lambda value: json.dumps(value, ensure_ascii=False, indent=2))
+            return 1
     if args.quota_command in ("context-config", "context-hook"):
         try:
             activation = native_context_activation(args)
@@ -379,12 +414,18 @@ def handle_native_context_command(args: argparse.Namespace, *, print_payload: Ca
             directory = getattr(args, "codex_context_root", None) or args.codex_context_dir
             if not directory:
                 raise ValueError("context-config requires codex-context-root or codex-context-dir")
+            machine_runtime = getattr(args, "_context_delivery_machine_runtime", None)
+            cli_argv = loopx_cli_argv() + (["--runtime-root", machine_runtime] if machine_runtime else [])
             config = codex_context_configuration(directory, goal_id=args.goal_id, agent_id=args.agent_id,
-                cli_argv=loopx_cli_argv(), scenario=activation["scenario"], session_root=bool(getattr(args, "codex_context_root", None)))
+                cli_argv=cli_argv, scenario=activation["scenario"], session_root=bool(getattr(args, "codex_context_root", None)),
+                inherit_machine=bool(machine_runtime))
             payload = {"ok": True, "context_delivery": activation, "native_config": config,
                 "activation": "Merge hooks and append developer_instructions to the existing native configuration; "
                     "review and trust only these exact hooks in Codex. Restart/resume with the resulting configuration. "
-                    "Pass --context-delivery on with the same declared host mode, context location and a decision-output-root to heartbeat-prompt/should-run. "
+                    + ("Machine defaults are re-read on each invocation; generated hooks inherit the same machine runtime. "
+                       "Omit per-command activation and location flags to retain that inheritance. " if machine_runtime else
+                       "Pass --context-delivery on with the same declared host mode, context location and a decision-output-root to heartbeat-prompt/should-run. ")
+                    +
                     "For delta, the native process must already have CODEX_ROLLOUT_TRACE_ROOT pointing to private diagnostics; "
                     "unavailable diagnostics preserve full delivery. Set --context-delivery off and remove context options to restore ordinary output. "
                     "This command installs nothing and grants no execution authority."}
@@ -426,3 +467,31 @@ def handle_native_context_command(args: argparse.Namespace, *, print_payload: Ca
         print_payload(payload, args.format, lambda value: str(value.get("content", value.get("reason", ""))))
         return 0 if payload["ok"] else 1
     return None
+
+
+def read_replan_view(args: argparse.Namespace) -> dict:
+    """Read a captured observation only; no registry, provider, guard or receipts."""
+    from ..control_plane.quota.turn_envelope import _turn_envelope_result
+    from ..command_invocation import current_loopx_cli_argv
+
+    if not args.decision_file or not args.source_hash:
+        raise ValueError("replan-view requires --decision-file and --source-hash")
+    path = Path(args.decision_file).expanduser()
+    with path.open(encoding="utf-8") as stream:
+        payload = json.load(stream)
+    return _turn_envelope_result("replan_view", payload=payload, source_hash=args.source_hash,
+                                 captured_decision_path=str(path), reader_argv=current_loopx_cli_argv(),
+                                 stage=args.replan_stage, outcome_ref=args.outcome_ref)
+
+
+def handle_replan_view(
+    args: argparse.Namespace,
+    print_payload: Callable[[dict[str, object], str, Callable[[dict[str, object]], str]], None],
+) -> int:
+    """Render the captured read without entering live quota dispatch or recovery."""
+    try:
+        view = read_replan_view(args)
+    except (OSError, ValueError, EffectRuntimeRejected) as exc:
+        view = {"ok": False, "reason": str(exc)}
+    print_payload(view, args.format, lambda value: json.dumps(value, ensure_ascii=False, indent=2))
+    return 0 if view["ok"] else 1

@@ -6,6 +6,7 @@ import { readConversationReturns, readTaskSessions } from "../data/conversation-
 import { currentChannelSession, useConversationHistory } from "../data/use-conversation-history";
 import { useChatProjects } from "../data/use-chat-projects";
 import { useBoundConversation } from "../data/use-bound-conversation";
+import {AppStewardEntry, useAppStewardTarget} from "../features/personal-workspace/app-steward-entry";
 import { goalSubtree } from "../features/personal-workspace/goal-hierarchy";
 import {compactWorkspaceText as compactShareText, workspaceAgentTodoFromItem} from "../features/personal-workspace/personal-workspace-model";
 import type { GoalAcceptanceObservation } from "../data/goal-acceptance-observation";
@@ -1251,7 +1252,7 @@ function PersonalGoalHome({
   rows,
   selectedGoalId: requestedGoalId,
   selectedWorkspaceRef: requestedWorkspaceRef,
-  boundConversation,
+  boundConversation: requestedBoundConversation,
   rootGoalId,
   onChangeGoalRoot,
   statusSourceControl,
@@ -1377,6 +1378,12 @@ function PersonalGoalHome({
       },
     };
   }, [sourceError, scopedModel, t]);
+  const appEntryEnabled = !readOnly && statusSourceControl.activeSource.kind === "local"
+    && !requestedGoalId && !rootGoalId && !requestedWorkspaceRef && !requestedBoundConversation
+    && selectedWorkAgentId == null && !selectedWorkSessionId && selectedView !== "chat";
+  const appEntry = useAppStewardTarget(appEntryEnabled);
+  const appEntryBlocked = appEntry.loading || appEntry.unavailable;
+  const boundConversation = requestedBoundConversation ?? appEntry.target;
   const selectedGoalId = rootGoalId && !model.goals.some(goal => goal.goalId === requestedGoalId)
     ? rootGoalId : requestedGoalId;
   const selectedWorkspaceRef = rootGoalId || boundConversation ? null : requestedWorkspaceRef;
@@ -1520,7 +1527,7 @@ function PersonalGoalHome({
     goalId: selectedGoal?.goalId,
     bound: boundConversation ?? undefined,
     managed: managedTarget ?? undefined,
-    enabled: !readOnly && (selectedWorkAgentId == null || managedTarget !== null) && (managedTarget ? Boolean(managedConversation.session) : boundConversation ? Boolean(originalConversation.session) : selectedAgent.available),
+    enabled: !readOnly && !appEntryBlocked && (selectedWorkAgentId == null || managedTarget !== null) && (managedTarget ? Boolean(managedConversation.session) : boundConversation ? Boolean(originalConversation.session) : selectedAgent.available),
   });
 
   // Who is speaking in the transcript. The manager channel answers as the LoopX
@@ -1740,7 +1747,7 @@ function PersonalGoalHome({
   }, [conversationHistory.history, contextId, selectedAgent.label]);
 
   useEffect(() => {
-    if (readOnly) return;
+    if (readOnly || appEntryBlocked) return;
     if (!selectedAgent.available) return;
     if (!conversationHistory.connectionKey || !conversationHistory.history) return;
     // Browsing a Goal (including palette navigation) must not create/resume
@@ -1998,7 +2005,7 @@ function PersonalGoalHome({
       retireRecoveryObservation?.();
       window.clearTimeout(handoffRetryTimer);
     };
-  }, [conversationHistory.connectionKey, contextId, model.goals[0]?.goalId, readOnly, selectedView, selectedGoal?.goalId, selectedAgent.agentId, selectedAgent.available, selectedAgent.label, selectedAgents, turnRecoveryRequest]);
+  }, [conversationHistory.connectionKey, contextId, model.goals[0]?.goalId, readOnly, appEntryBlocked, selectedView, selectedGoal?.goalId, selectedAgent.agentId, selectedAgent.available, selectedAgent.label, selectedAgents, turnRecoveryRequest]);
 
   // The projection deliberately outlives the mounted view. Its caller may be
   // running for a Goal the owner has already left, and the recovery stream's
@@ -2259,6 +2266,7 @@ function PersonalGoalHome({
       return;
     }
     const targetContextId = route?.contextId ?? contextId;
+    if (appEntryBlocked && targetContextId === contextId) throw new Error("The App steward entry is unavailable; retry its source lookup.");
     if (route?.queue && runtimeBindings[targetContextId]?.sessionId !== route.queue.sessionId) {
       throw new ChatApiError("The original Session changed; the message was not queued.", { delivery_state: "not_delivered" });
     }
@@ -2584,6 +2592,10 @@ function PersonalGoalHome({
       const gateSummary = gate && typeof gate === "object"
         ? String((gate as { summary?: unknown }).summary ?? "")
         : "";
+      // This controller is retired immediately before Turn dispatch. A failed
+      // Session/configuration read cannot have delivered the user's message;
+      // an unacknowledged dispatch after that boundary remains uncertain.
+      const preparationFailed = preparationControllers.current.get(targetContextId) === preparationController;
       const failureMessage = {
         agentLabel: answerIdentityLabel(targetContextId, selectedRoute.label),
         lines: gateSummary ? [gateSummary] : [],
@@ -2596,7 +2608,7 @@ function PersonalGoalHome({
           ? `原 ${answerIdentityLabel(targetContextId, selectedRoute.label)} 会话无法恢复。本地历史已经保留，请在运行详情里选择“重试恢复”或“开始新 Session”。`
           : payloadError?.delivery_state === "not_delivered" && payloadError.turn_replay_safe === true && !submittedTurnId
             ? `${locale === "zh-CN" ? "请求未提交；草稿和图片已保留，可以修改后重新发送。" : "Request not submitted. Draft and images retained; edit and send again."}\n\n${error instanceof Error ? error.message : ""}`
-          : preparationControllers.current.has(targetContextId)
+          : preparationFailed
             ? `${locale === "zh-CN" ? "尚未提交请求。连接执行器失败，可以重新发送。" : "Request not submitted. Could not connect to the executor; you can send again."}\n\n${error instanceof Error ? error.message : ""}`
           : error instanceof Error
             ? error.message
@@ -2606,8 +2618,8 @@ function PersonalGoalHome({
       if (route?.queue && !queueAccepted) throw error;
       // Only confirmed pre-admission rejection restores the composer. An
       // uncertain delivery must never invite an automatic duplicate request.
-      if (!submittedTurnId && payloadError?.delivery_state === "not_delivered"
-        && payloadError.turn_replay_safe === true) throw error;
+      if (preparationFailed || (!submittedTurnId && payloadError?.delivery_state === "not_delivered"
+        && payloadError.turn_replay_safe === true)) throw error;
     } finally {
       streamEnded = true;
       // A handed-off Turn is still running: its ownership stays for the
@@ -2936,7 +2948,8 @@ function PersonalGoalHome({
       <PersonalWorkspacePage
         typedActionsRevision={typedActionsRevision}
         workspaceConversations={{ ...workspaceProjects, selectedRef: selectedWorkspaceRef, onSelect: onSelectWorkspace,
-          onOpenOriginal: onOpenOriginalConversation, managed: managedTarget ? {target: managedTarget, ...managedConversation} : undefined, bound: boundConversation ? { target: boundConversation, ...originalConversation } : undefined }}
+          onOpenOriginal: onOpenOriginalConversation,
+          entryGate: appEntryBlocked ? {unavailable: appEntry.unavailable, retry: appEntry.retry} : undefined, managed: managedTarget ? {target: managedTarget, ...managedConversation} : undefined, bound: boundConversation ? { target: boundConversation, ...originalConversation } : undefined }}
         agents={(fixedSession ? [selectedAgent] : agentOptions).map((agent) => ({
           adapterKind: agent.adapterKind,
           agentId: agent.agentId,
@@ -3681,7 +3694,7 @@ export function DashboardPage() {
   useEffect(() => {
     // A source transition can still expose the previous source's Goal rows.
     // Reconcile only its committed URL, including during browser Back/Forward.
-    if (isLoading || (source.kind === "url" && search.statusUrl && search.statusUrl !== source.label)) return;
+    if (statusRequestActive || isLoading || (source.kind === "url" && search.statusUrl && search.statusUrl !== source.label)) return;
     if (search.statusUrl && source.kind === "example") {
       return;
     }
@@ -3708,7 +3721,7 @@ export function DashboardPage() {
         }),
       });
     }
-  }, [goalArchiveLoadState.phase, goalRows, isLoading, navigate, search.goalId, search.rootGoalId, search.statusUrl, source.kind, source.label]);
+  }, [goalArchiveLoadState.phase, goalRows, isLoading, navigate, search.goalId, search.rootGoalId, search.statusUrl, source.kind, source.label, statusRequestActive]);
 
   useEffect(() => {
     if (!progress || isLoading || !search.goalId || source.kind !== "url") return;
@@ -3751,7 +3764,7 @@ export function DashboardPage() {
     );
   }
 
-  return (
+  const home = (
     <PersonalGoalHome
       boundConversation={search.conversationBinding !== undefined || search.conversationSession !== undefined
         ? { bindingId: search.conversationBinding ?? "", sessionId: search.conversationSession ?? "" } : null}
@@ -3823,4 +3836,15 @@ export function DashboardPage() {
       theme={theme}
     />
   );
+  const defaultStewardEntry = search.view === "conversation" && !search.goalId && !search.rootGoalId
+    && search.workspace === undefined && search.workAgent === undefined && search.workSession === undefined
+    && search.conversationBinding === undefined && search.conversationSession === undefined
+    && activeStatusSource.kind === "local" && !activeStatusSource.readOnly;
+  return defaultStewardEntry ? <AppStewardEntry onOpen={target => void navigate({replace: true,
+    search: current => "goalId" in current && current.statusUrl === search.statusUrl && current.view === "conversation"
+      && !current.goalId && !current.rootGoalId && current.workspace === undefined && current.workAgent === undefined
+      && current.workSession === undefined && current.conversationBinding === undefined && current.conversationSession === undefined
+      ? {...current, conversationBinding: target.bindingId, conversationSession: target.sessionId} : current})}>
+    {home}
+  </AppStewardEntry> : home;
 }

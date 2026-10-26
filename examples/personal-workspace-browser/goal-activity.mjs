@@ -50,6 +50,23 @@ async function briefTile(page, kind) {
   };
 }
 
+/** Read the empty tile's explanation through the same help control an owner uses. */
+async function readEmptyBriefHelp(page, kind, explanation) {
+  const tile = page.getByTestId(`personal-brief-${kind}`);
+  const summary = await briefTile(page, kind);
+  assert.equal(summary.count, 0, "An unknown or unavailable execution never counts as running");
+  assert.equal(summary.rows, 0, "An empty execution tile contains no running Goal rows");
+  const help = tile.getByRole("button", {name: explanation, exact: true});
+  await help.click();
+  const bubble = tile.getByRole("tooltip");
+  await bubble.waitFor({state: "visible"});
+  assert.equal(await bubble.locator("p").innerText(), explanation);
+  await page.keyboard.press("Escape");
+  await bubble.waitFor({state: "hidden"});
+  assert.equal(await help.evaluate(element => element === document.activeElement), true,
+    "Closing execution help keeps focus on its originating control");
+}
+
 /** Home lane title, count and cards, mirroring the brief assertions. */
 async function lane(page, key) {
   const section = page.getByTestId(`personal-home-lane-${key}`);
@@ -434,7 +451,7 @@ export const goalActivityScenario = {
       assert.equal(await page.locator(".personal-goal-list .personal-goal-mark.is-live").count(), 0, "An unrecognized mode is never live");
       const runningTile = await briefTile(page, "running");
       assert.equal(runningTile.count, 0, "An unrecognized mode never counts as running");
-      assert.match(runningTile.text, /没有可确认的执行 · 2 个 Goal 执行方式未知/, "The empty running tile discloses the open turns");
+      await readEmptyBriefHelp(page, "running", "没有可确认的执行 · 2 个 Goal 执行方式未知");
       assert.equal(await page.getByTestId("personal-brief-claimed").count(), 0, "An unrecognized mode never counts as a host claim");
       assert.equal(await page.getByTestId("personal-home-lane-running").count(), 0, "An unrecognized mode never enters the running lane");
       await page.screenshot({ path: resolve(outputDir, "goal-activity-mode-unrecognized.png"), animations: "disabled" });
@@ -444,7 +461,7 @@ export const goalActivityScenario = {
       await englishRow.locator("small", { hasText: "Mode unknown" }).waitFor({ timeout: 15_000 });
       assert.match(await englishRow.locator("small").innerText(), /^Mode unknown · turn open/);
       assert.ok(await leadVisible(englishRow, "Mode unknown"), "The English unknown mode survives sidebar truncation");
-      assert.match(await page.getByTestId("personal-brief-running").innerText(), /No verified run · 2 Goal\(s\) with unknown execution mode/);
+      await readEmptyBriefHelp(page, "running", "No verified run · 2 Goal(s) with unknown execution mode");
       await page.screenshot({ path: resolve(outputDir, "goal-activity-mode-unrecognized-english.png"), animations: "disabled" });
       await page.setViewportSize({ width: 390, height: 844 });
       assert.equal(await briefTileOverflow(page), 0, "The disclosed empty state fits the 390px mobile width");
@@ -471,7 +488,7 @@ export const goalActivityScenario = {
       const queued = await goalRow(page, "Multi Agent Projection");
       await queued.locator("small", { hasText: "暂时读不到执行状态" }).waitFor({ timeout: 15_000 });
       assert.equal(await page.locator(".personal-goal-mark.is-live").count(), 0, "An unreadable session owner never produces a live Goal");
-      assert.match(await page.getByTestId("personal-brief-running").innerText(), /暂时读不到执行状态/, "The brief discloses unreadable run state");
+      await readEmptyBriefHelp(page, "running", "暂时读不到执行状态");
       await page.screenshot({ path: resolve(outputDir, "goal-activity-unavailable.png"), animations: "disabled" });
       coverageEntries.push(...await offline.close());
     } catch (error) {

@@ -15,6 +15,28 @@ def _inventory(api, session_id, **query):
     return call(path="/api/chat/request-inventory?" + urlencode({"session_id": session_id, **query}))
 
 
+def test_inventory_pins_code_revision_but_rereads_original_source(api, monkeypatch):
+    from loopx.control_plane import effect_runtime
+
+    _, _, route = _source(api)
+    _, fixture, _ = api
+    original = effect_runtime._runtime_fingerprint
+    scans = []
+    def fingerprint():
+        scans.append(True)
+        return original()
+    monkeypatch.setattr(effect_runtime, "_runtime_fingerprint", fingerprint)
+    first = _inventory(api, route["session_id"])
+    assert first[0] == 200 and first[1]["pending_count"] == 1
+    assert len(scans) == 1
+    source = _root(fixture["runtime"]) / "roundtrips" / (route["request_id"] + ".json")
+    source.write_text("{damaged")
+    second = _inventory(api, route["session_id"])
+    assert second[0] == 200 and second[1]["coverage"]["unreadable"] == 1
+    assert second[1]["pending_count"] == 0
+    assert len(scans) == 2, "Each HTTP read must qualify its own runtime revision"
+
+
 def test_read_and_adoption_still_owe_conclusion_and_queued_return_stays_visible(api):
     _, _, route = _source(api)
     _, f, server = api
@@ -65,15 +87,25 @@ def test_revision_and_cancellation_reuse_current_control_and_preserve_history(ap
     assert _inventory(api, route["session_id"], view="history", search="Corrected source")[1]["matched"] == 1
 
 
-def test_earlier_source_session_survives_reopen_and_other_audiences_are_excluded(api):
+def test_earlier_source_session_survives_reopen_and_other_audiences_are_excluded(api, monkeypatch):
+    from loopx.presentation.request_control_api import RequestControlMixin
+
     _, _, route = _source(api)
     _, f, server = api
     store = server.chat_store
     fresh = store.create_session(goal_id="loopx-manager", agent_id="codex", adapter_kind="codex_app_server",
         upstream_thread_id="new-steward-session", channel_id="manager")
+    scope_read = RequestControlMixin._request_inventory_scope
+    verified = []
+    def observe_scope(reader, session_id):
+        verified.append(session_id)
+        return scope_read(reader, session_id)
+    monkeypatch.setattr(RequestControlMixin, "_request_inventory_scope", observe_scope)
     code, value = _inventory(api, fresh["session_id"])
     assert code == 200 and value["pending_count"] == 1
     assert value["rows"][0]["source_session_id"] == route["session_id"]
+    assert verified.count(fresh["session_id"]) == 2
+    assert verified.count(route["session_id"]) == 2, "Older sources need their own closing authorization check"
     project = store.create_session(goal_id=f["ref"]["goal_id"], agent_id="codex", adapter_kind="codex_app_server",
         upstream_thread_id="project-owner", channel_id="goal." + f["ref"]["goal_id"])
     turn, _ = store.create_turn(project["session_id"], client_turn_id="other-conversation", message="Private project request", origin="web")
@@ -89,7 +121,11 @@ def test_earlier_source_session_survives_reopen_and_other_audiences_are_excluded
     assert _inventory(api, "missing-session")[0] == 400
 
 
-def test_paging_and_unreadable_source_do_not_report_empty_or_mutate_receipts(api):
+def test_paging_and_unreadable_source_do_not_report_empty_or_mutate_receipts(api, monkeypatch):
+    import loopx.chat_store as chat_store
+    from loopx.control_plane.collaboration import source_chat_observation
+    from loopx.presentation.request_control_api import RequestControlMixin
+
     _, _, route = _source(api)
     _, f, server = api
     session = server.chat_store.load_session(route["session_id"])
@@ -100,9 +136,26 @@ def test_paging_and_unreadable_source_do_not_report_empty_or_mutate_receipts(api
             request={"goal_id": f["ref"]["goal_id"], "agent_id": "agent-a"}, source_store=server.chat_store)
         server.chat_store.update_turn(session["session_id"], turn["turn_id"], status="completed", response={"context_handoff_receipt": delivered})
         server.chat_store.finalize_managed_turn_completion(session["session_id"], turn["turn_id"])
+    scope_read = RequestControlMixin._request_inventory_scope
+    verified = []
+    def observe_scope(reader, session_id):
+        verified.append(session_id)
+        return scope_read(reader, session_id)
+    monkeypatch.setattr(RequestControlMixin, "_request_inventory_scope", observe_scope)
+    read_json = source_chat_observation._read_json
+    turn_reads = []
+    def counted_read(path):
+        if path.parent.name == "turns" and not path.name.endswith(".events.json"):
+            turn_reads.append(path)
+        return read_json(path)
+    monkeypatch.setattr(source_chat_observation, "_read_json", counted_read)
+    monkeypatch.setattr(chat_store, "_read_json", counted_read)
     code, first = _inventory(api, route["session_id"])
     assert code == 200 and first["pending_count"] == 13 and len(first["rows"]) == 12, first
+    assert len(turn_reads) <= 3 * 13, "One inventory must not rescan full Turn history for every request"
+    assert len(verified) == 2, "Provider scope verification must not grow with rows from one source"
     second = _inventory(api, route["session_id"], offset=first["next_offset"])[1]
+    assert len(verified) == 4, "A new HTTP read must verify the source independently"
     assert len(second["rows"]) == 1 and second["next_offset"] is None
     assert second["snapshot_digest"] == first["snapshot_digest"]
     assert not {row["request_id"] for row in first["rows"]} & {row["request_id"] for row in second["rows"]}
@@ -134,3 +187,43 @@ def test_paging_and_unreadable_source_do_not_report_empty_or_mutate_receipts(api
     assert missing["coverage"]["unreadable"] == 1 and missing["pending_count"] == 12
     source.write_bytes(saved)
     assert _inventory(api, route["session_id"], offset=-1)[0] == 400
+
+
+def test_turn_locator_rereads_content_and_rejects_lost_identity(api):
+    import json
+    from loopx.control_plane.collaboration.source_chat_observation import original_turn_reader
+
+    _, _, route = _source(api)
+    _, _, server = api
+    store = server.chat_store
+    read = original_turn_reader(store, route["session_id"])
+    original = read("request-source")
+    assert original["turn_id"] == route["turn_id"]
+    response = {**original["response"], "message": "Current result"}
+    store.update_turn(route["session_id"], route["turn_id"], response=response)
+    assert read("request-source")["response"] == response
+    path = store._turn_path(route["session_id"], route["turn_id"])
+    current = path.read_bytes()
+    path.write_text(json.dumps({**original, "client_turn_id": "different-source"}))
+    assert read("request-source") is None
+    assert _inventory(api, route["session_id"])[1]["coverage"]["unreadable"] == 1
+    path.unlink()
+    assert read("request-source") is None
+    path.write_bytes(current)
+    assert _inventory(api, route["session_id"])[1]["pending_count"] == 1
+
+
+def test_inventory_withholds_all_content_when_closing_source_scope_changes(api, monkeypatch):
+    from loopx.presentation.request_control_api import RequestControlMixin
+
+    _, _, route = _source(api)
+    scope_read = RequestControlMixin._request_inventory_scope
+    verified = []
+    def observe_scope(reader, session_id):
+        observed, goals, core = scope_read(reader, session_id)
+        verified.append(session_id)
+        return (observed, [], core) if len(verified) == 2 else (observed, goals, core)
+    monkeypatch.setattr(RequestControlMixin, "_request_inventory_scope", observe_scope)
+    code, denied = _inventory(api, route["session_id"])
+    assert code == 400 and denied["error_code"] == "request_inventory_unavailable"
+    assert "rows" not in denied and "Check the current contract" not in str(denied)

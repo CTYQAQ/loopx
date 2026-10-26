@@ -171,10 +171,19 @@ def latest_accountable_agent_delivery(
         delivery_outcome = str(run.get("delivery_outcome") or "").strip()
         if not todo_id or delivery_outcome not in MATERIAL_DELIVERY_OUTCOMES:
             return None
+        checkpoint = run.get("vision_checkpoint")
+        vision = run.get("agent_vision")
         return {
             "todo_id": todo_id,
             "delivery_outcome": delivery_outcome,
             "generated_at": run.get("generated_at"),
+            # The run-history codec omits the long-standing default boundary.
+            **({"delivery_boundary": checkpoint.get("delivery_boundary", "semantic_closeout")}
+               if isinstance(checkpoint, dict) and checkpoint.get("agent_id") == safe_agent_id
+               and checkpoint.get("schema_version") == "vision_checkpoint_v0" else {}),
+            **({"path_delta": vision["path_delta"]}
+               if isinstance(vision, dict) and vision.get("agent_id") == safe_agent_id
+               and isinstance(vision.get("path_delta"), dict) else {}),
         }
     return None
 

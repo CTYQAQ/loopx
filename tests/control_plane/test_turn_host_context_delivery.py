@@ -164,9 +164,13 @@ def test_bound_replan_reaches_actual_host_with_original_evidence(tmp_path, monke
     prompt_path = project / "received.txt"
     prompt = prompt_path.read_text()
     authority = json.loads(prompt.split("Turn authority JSON:\n", 1)[1].split("\n\nWhen finished", 1)[0])
-    # Compare the actual provider input with the full native source, not a
-    # second reduced projection. Replan guidance and outcome choices are signed.
-    assert authority["replan_action_packet"] == source["replan_action_packet"]
+    # Compare preserved choices with the complete source and execute the reader
+    # actually delivered to the provider. No unconditional full-source detour.
+    packet = authority["replan_action_packet"]
+    for field in ("obligation_id", "required_outcome", "allowed_terminal"):
+        assert packet[field] == source["replan_action_packet"][field]
+    review = subprocess.run(shlex.split(packet["review"]), capture_output=True, text=True, check=True)
+    assert json.loads(review.stdout)["context_id"] == source["autonomous_replan_obligation"]["replan_context"]["context_id"]
     assert authority["action_signature"] == envelope["action_signature"]
     detail = authority["detail_ref"]
     assert detail == envelope["detail_ref"]
@@ -180,9 +184,10 @@ def test_bound_replan_reaches_actual_host_with_original_evidence(tmp_path, monke
     goal_read = next(r for r in authority["required_reads"] if r["source"] == "goal_state")
     delivered_goal = subprocess.run(shlex.split(goal_read["command"]), capture_output=True, check=True).stdout
     assert delivered_goal == goal_bytes and stop.encode() in delivered_goal
-    assert "replan_action_packet" in prompt and "replan_context" in prompt
+    assert "Read replan_action_packet.review" in prompt
+    assert "read autonomous_replan_obligation.replan_context" not in prompt
     assert "Never re-enter quota admission" in prompt
-    assert "Do not execute its writeback commands" in prompt
+    assert "Do not execute writeback commands" in prompt
     for field in ("obligation_id", "planning_guidance", "uncovered_frontier"):
         invalid = deepcopy(request)
         invalid["turn_envelope"]["replan_action_packet"][field] = "changed after signing"

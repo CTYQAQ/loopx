@@ -67,11 +67,13 @@ test("ordinary completion is conditional on deliverable acceptance, not Turn acc
   });
 });
 
-test("in-flight progress neither executes completion nor rewrites the declaration", () => {
+test("in-flight validation offers completion only after original deliverable acceptance", () => {
   const plan = turnScopedCliSettlementPlan({...input, delivery_boundary: "in_flight_continuation"});
-  assert.equal(plan.steps[0].command_template, undefined);
-  assert.equal(plan.steps[0].command_condition, undefined);
-  assert.match(plan.steps[0].precondition, /keep the Todo open/);
+  assert.equal(plan.steps[0].command_template, "ordinary completion");
+  assert.equal(plan.steps[0].command_condition, "todo_deliverable_complete");
+  assert.equal(plan.steps[0].conditional, undefined);
+  assert.match(plan.steps[0].precondition, /keep the Todo open with its original declaration/);
+  assert.match(plan.steps[0].precondition, /semantic_closeout.*same Turn; no new guard or binding/);
   assert.match(plan.steps[1].precondition, /^validation succeeded/);
   assert.match(plan.steps[1].precondition, /Route elimination needs evidence/);
   assert.match(plan.steps[1].precondition, /failure alone is not progress/);

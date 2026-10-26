@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {normalizeStrideDecision, strideControlContract, stridePlanningGuidance, strideReviewMismatch} from "../../loopx/control_plane/work_items/stride_policy.ts";
+import {normalizeStrideDecision, strideControlContract, strideReviewMismatch} from "../../loopx/control_plane/work_items/stride_policy.ts";
 import {buildVisionCheckpoint, VISION_REFRESH_REQUEST_SCHEMA} from "../../loopx/control_plane/goals/vision_checkpoint.ts";
 import {projectReplanSemantics} from "../../loopx/control_plane/work_items/replan_semantics.ts";
 
@@ -88,7 +88,6 @@ test("concrete independent plans retain action choice and fit the shared vision 
 
 test("goal-value questions are enabled review input, not persisted decisions or extra admission gates", () => {
   assert.equal(strideControlContract({stride_strategy: "off"}), null);
-  assert.deepEqual(stridePlanningGuidance("off"), []);
   const contract = strideControlContract({stride_strategy: "evidence_conditioned_v1"}, proposal.reference_obligation_id)!;
   assert.deepEqual(Object.keys(contract.decision_value_review as object),
     ["work_slice", "route_distance", "validation_scope"]);
@@ -374,13 +373,22 @@ test("independent v1 records preserve their values but cannot satisfy a current 
   assert.ok(Number(budget.total_usage) < 1800);
 });
 
-// The shipped syntax example must be authorable; off does not gain this prompt.
-test("ordinary-work guidance and its example retain off isolation and bounded authoring", () => {
-  assert.deepEqual(stridePlanningGuidance("off"), []);
-  const guidance = stridePlanningGuidance("evidence_conditioned_v1").join(" ");
-  assert.match(guidance, /coherent accepted deliverable/);
-  assert.match(guidance, /Do not bundle independent commitments/);
+// Shared review guidance does not enable the opt-in stride proposal contract.
+test("shared replan guidance retains stride-off isolation and bounded enabled authoring", () => {
+  const requirements = (strategy: string) => projectReplanSemantics({operation: "requirements",
+    obligation: {obligation_id: proposal.reference_obligation_id, triggers: [{kind: "periodic_review_due"}],
+      replan_context: {stride_strategy: strategy, context_id: contextId}}});
+  const off = requirements("off");
+  const enabled = requirements("evidence_conditioned_v1");
+  assert.equal(Object.hasOwn(off, "stride_control"), false);
+  assert.deepEqual(off.planning_guidance, enabled.planning_guidance);
+  assert.ok((off.planning_guidance as string[]).length > 0);
+  assert.equal(((off.writeback_contract as Record<string, unknown>).required_fields as string[])
+    .includes("agent_vision.stride_decision"), false);
+  assert.ok(((enabled.writeback_contract as Record<string, unknown>).required_fields as string[])
+    .includes("agent_vision.stride_decision"));
   const contract = strideControlContract({stride_strategy: "evidence_conditioned_v1", context_id: contextId}, proposal.reference_obligation_id)!;
+  assert.deepEqual(enabled.stride_control, contract);
   const example = contract.minimal_example as Record<string, unknown>;
   assert.equal(normalizeStrideDecision(example)[0]!.action, "verify");
   const prepared = buildVisionCheckpoint({...request, agent_vision_packet: {...packet, stride_decision: example}});

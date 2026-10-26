@@ -455,15 +455,16 @@ Generic CLI, visible native Goals, Claude and other hosts remain outside this
 opt-in. Harbor/container and installed desktop adoption retain their separate
 unqualified boundaries; listing an entry does not certify live adoption.
 
-For a trusted Codex host, create private context/capture directories and render
-the native setup through the installed CLI:
+For a trusted Codex host, render the native setup through the installed CLI.
+Private context/capture directories are selected and created automatically under
+the resolved machine runtime; advanced callers may override those locations:
 
 ```sh
 loopx --format json quota context-config --context-delivery on --codex-app \
-  --codex-context-root <private-context-root> --goal-id <goal> --agent-id <agent>
+  --goal-id <goal> --agent-id <agent>
 ```
 
-The read-only result contains `native_config.hooks` and
+The result contains `native_config.hooks` and
 `native_config.developer_instructions`. Merge the hooks into the host's existing
 `hooks.json` or inline hook configuration, and append the recovery instruction to
 its existing developer instructions. Preserve other configuration. Review and
@@ -474,8 +475,7 @@ different native sessions in separate journals, including interleaved sessions.
 
 Generate the normal bootstrap with `heartbeat-prompt --thin --codex-app
 --bootstrap`, its existing Goal/Agent/registry arguments, and
-`--context-delivery on --decision-output-root <private-capture-root> --codex-context-root
-<private-context-root>`; optionally add `--turn-envelope`. The loader preserves
+`--context-delivery on`; optionally add `--turn-envelope` or explicit private paths. The loader preserves
 these options without freezing a Turn ID. Each wake loads current instructions
 and binds the existing `LOOPX_TURN` before its generated guard. Selection keeps
 the same transport. An unset wake identity fails in the shell before admission.

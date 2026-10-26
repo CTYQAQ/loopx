@@ -60,10 +60,15 @@ def prepare_turn_decision_capture(
         if decision is None:
             raise ValueError("New Turn requires its full original decision")
         observation = dict(decision)
+    from ...command_invocation import current_loopx_cli_argv
+
     bound = bind_turn_decision_capture(
         observation, envelope, captured_decision_path=str(path),
         turn_instance_id=str(transaction.get("turn_instance_id") or transaction["turn_key"]),
         turn_key=transaction["turn_key"],
+        # New journals have a real immutable source and executable reader.
+        # Legacy journals retain their recorded delivery/recovery route.
+        reader_argv=current_loopx_cli_argv() if not existing_journal else None,
     )
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

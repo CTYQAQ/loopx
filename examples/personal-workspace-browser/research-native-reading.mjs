@@ -101,6 +101,27 @@ export const researchNativeReadingScenario = {
       await page.goto(`${owner.base}/chat/?goalId=${fixture.goal_id}&view=research&statusUrl=%2Fstatus.json`, {waitUntil: "domcontentloaded"});
       const native = page.getByRole("region", {name: "原生测量", exact: true});
       const selector = page.locator(".research-progress select");
+      await native.waitFor();
+      const pausedClock = await page.addStyleTag({content: "*, *::before, *::after {animation-play-state: paused !important;}"});
+      const tabs = page.getByRole("navigation", {name: "Goal 视图", exact: true});
+      await tabs.getByRole("button", {name: "概览", exact: true}).click();
+      await tabs.getByRole("button", {name: "研究", exact: true}).click();
+      const firstFrames = [];
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({width, height: 900});
+        // A suspended native WebView clock must not hide a populated document.
+        // DOM presence alone cannot prove that research is readable.
+        const opacity = await native.evaluate(element => {
+          let value = 1;
+          for (let node = element; node; node = node.parentElement) value *= Number(getComputedStyle(node).opacity);
+          return value;
+        });
+        firstFrames.push({width, opacity});
+        await page.screenshot({path: resolve(outputDir, `research-paused-first-frame-${width}.png`), animations: "allow"});
+      }
+      assert(firstFrames.every(frame => frame.opacity === 1), `Research remains readable with a suspended entrance clock: ${JSON.stringify(firstFrames)}`);
+      await pausedClock.evaluate(element => element.remove());
+      await page.setViewportSize({width: 1280, height: 900});
       for (const c of cases) {
         await selector.selectOption({label: c.id});
         const selected = await selector.inputValue();
