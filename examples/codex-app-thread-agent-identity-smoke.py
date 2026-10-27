@@ -54,6 +54,11 @@ def main() -> None:
         )
         runtime = root / "runtime"
         runtime.mkdir()
+        from loopx.control_plane.testing.canary_harness import import_fixture_authority
+        config = json.loads(registry.read_text(encoding="utf-8"))
+        config["common_runtime_root"] = str(runtime)
+        registry.write_text(json.dumps(config), encoding="utf-8")
+        import_fixture_authority(registry, "goal", provider="sqlite")
         global_payload = json.loads(registry.read_text(encoding="utf-8"))
         global_payload["registry_role"] = "global-local"
         global_payload["goals"][0]["source_registry"] = str(registry)
