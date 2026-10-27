@@ -13,7 +13,7 @@ from ..goals.activation import (
     goal_activation_state,
     normalize_goal_activation_state,
 )
-from ...history import load_index, load_registry
+from ..projects.registry_codec import load_registry
 from ... import paths
 from ...paths import global_registry_path, resolve_runtime_root
 from ...registry import registry_goals
@@ -58,27 +58,10 @@ def _registry_runtime_root(
     registry: dict[str, Any],
     *,
     registry_path: Path,
-    goal_id: str,
 ) -> Path:
-    runtime_root = resolve_runtime_root(registry, None).expanduser()
-    if not runtime_root.is_absolute():
-        goal = next(
-            (
-                item
-                for item in registry_goals(registry)
-                if str(item.get("id") or "") == goal_id
-            ),
-            None,
-        )
-        repo = Path(str((goal or {}).get("repo") or "")).expanduser()
-        if not repo.is_absolute():
-            repo = (
-                registry_path.parent.parent
-                if registry_path.parent.name == ".loopx"
-                else registry_path.parent
-            )
-        runtime_root = repo / runtime_root
-    return runtime_root.resolve()
+    return resolve_runtime_root(
+        registry, None, registry_path=registry_path,
+    ).expanduser().resolve()
 
 
 def _goal_source_route_packet(
@@ -131,7 +114,6 @@ def resolve_goal_source_runtime_route(
     invoked_runtime = _registry_runtime_root(
         registry_payload,
         registry_path=invoked_registry,
-        goal_id=goal_id,
     )
     if runtime_root_override:
         runtime_root = Path(runtime_root_override).expanduser().resolve()
@@ -200,7 +182,6 @@ def resolve_goal_source_runtime_route(
     source_runtime = _registry_runtime_root(
         source_payload,
         registry_path=source_registry,
-        goal_id=goal_id,
     )
     return _goal_source_route_packet(
         status="source_registry",
@@ -470,6 +451,8 @@ def _latest_route_source_row(
     goal_id: str,
     route_id: str,
 ) -> dict[str, Any] | None:
+    from ...history import load_index
+
     rows, _ = load_index(runtime_root / "goals" / goal_id / "runs" / "index.jsonl")
     for row in reversed(rows):
         marker = row.get("runtime_projection_route")
@@ -490,6 +473,8 @@ def _route_projection_is_current(
     source_generated_at: Any,
     marker_field: str,
 ) -> bool:
+    from ...history import load_index
+
     rows, _ = load_index(
         target_runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
     )

@@ -16,6 +16,17 @@ This is presentation validation, not a claim that a URL is reachable, public or
 authorized for another audience. Source collection, frozen evidence, redaction
 and delivery authorization retain those responsibilities.
 
+Exact authorized portfolio delivery reads retain eligible references recorded in
+the original Turn's path evidence, alongside their digest identities. New
+private portfolio inputs bind those references to the same frozen source and
+make them available to the report author as **recorded, unverified** citations.
+Local paths, credential-bearing and malformed reference values remain withheld;
+the source reader never fetches a URL. A recorded address proves neither public
+access nor permission to publish to a different audience. The original scope,
+source gaps and unread-artifact status remain authoritative; an opaque digest
+does not supply a missing URL. Existing v1 frozen inputs retain their original
+fact set and bytes. Ordinary managed Session inputs retain their existing scope.
+
 Text reports include the same authored overview values, labels and details as
 the HTML artifact. When that overview is present, it replaces the generated
 title-only opening; reports without highlights retain their compiled summary.
@@ -104,6 +115,13 @@ The same local calendar can explicitly repeat an already completed native Task
 in its original managed Session. This backend/configuration slice is described
 below; arbitrary new tasks from natural language and the unified Agent UI
 remain separate, unfinished acceptance.
+
+Calendar changes use the existing Goal configuration transaction. If a pause,
+schedule change or clear was written but its readback is unavailable or differs,
+the response retains the partial-write receipt instead of claiming that the old
+configuration was preserved. Reload the source configuration before deciding on
+another change. This does not rerun the task, confirm an unfinished result or
+retire a failed window; those remain with their original lifecycle owners.
 
 The steward becomes a persistent LoopX-managed Agent. Its original private
 conversation remains the user's entry point. Native monitor Todos, Turn
@@ -863,6 +881,19 @@ There is no new state store or background loop. A capture allows at most 512
 reader calls, 4,000 evidence rows and 4 MiB of evidence data, plus bounded source
 coverage metadata; exhaustion is partial coverage,
 not success or zero progress. These are IO bounds, not a model budget.
+
+New private and managed-Session editorial requests carry the local artifact
+format marker `source_fact_binding=frozen_source_v1`, also retained in the
+frozen source so stripping it from the request cannot select legacy behavior.
+Cache reuse, generation
+and independent generation validation derive the complete ordered fact list
+again from the unchanged frozen source, including its revision. A recomputed
+request digest cannot substitute an unsupported URL, summary or incomplete fact
+set. The generation receipt retains the same marker. Historical windows without
+it keep their original validation contract and bytes; they are not retroactively
+qualified or regenerated. This is source-to-fact consistency, not proof of a
+claim, public disclosure permission or URL reachability. Opaque references stay
+opaque when no permitted accessible source has been supplied.
 
 This source can also be read through the original Chat dynamic tool. Reading
 alone does not activate a subscription or deliver a report. The opt-in original

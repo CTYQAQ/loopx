@@ -374,7 +374,8 @@ def test_native_context_cli_without_retention_stays_full_and_preserves_receipt(t
         assert hashlib.sha256(observed).hexdigest() == wire["sha256"]
         assert json.loads(observed) == json.loads(Path(wire["recovery"]["path"]).read_text())
         assert json.loads(observed)["heartbeat_receipt"]["turn_instance_id"] == "native-full"
-        assert len(wire["content"].encode()) <= 3072 and "context" not in wire
+        assert wire["eof"] and wire["content"].encode() == observed and "context" not in wire
+        assert len(json.dumps(wire, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 64000
     assert _heartbeat_receipt_count(runtime, "native-full") == 1
     assert _spend_run_count(runtime) == 0 and state.read_bytes() == original
 
@@ -402,11 +403,11 @@ def test_native_fresh_work_turn_reads_current_full_without_old_recovery(tmp_path
                  hook_event_name="SessionStart", source="startup")
     context.codex_context_hook(str(root), event)
 
-    def guard(turn):
+    def guard(turn, cwd=project):
         rc, view = _run_cli(registry, runtime, "quota", "should-run", "--codex-app",
             "--goal-id", GOAL_ID, "--agent-id", AGENT_ID, "--todo-id", TODO_ID,
             "--turn-instance-id", turn, "--decision-output-root", str(captures),
-            "--context-delivery", "on", "--codex-context-dir", str(root), cwd=project)
+            "--context-delivery", "on", "--codex-context-dir", str(root), cwd=cwd)
         assert rc == 0, view
         return view
 
@@ -449,8 +450,11 @@ def test_native_fresh_work_turn_reads_current_full_without_old_recovery(tmp_path
     assert body["heartbeat_receipt"]["turn_instance_id"] == "native-work-next"
     assert context._state(root)["candidate"]["target"] == current["target"]
     assert Path(first["recovery"]["path"]).read_bytes() == original
-    warm = guard("native-work-next")
+    command_workspace = tmp_path / "independent-checkout"
+    command_workspace.mkdir()
+    warm = guard("native-work-next", cwd=command_workspace)
     assert warm["mode"] == "delta" and warm["target"] != current["target"]
+    assert context._state(root)["cwd"] == str(project)
     assert _heartbeat_receipt_count(runtime, "native-work-first") == 1
     assert _heartbeat_receipt_count(runtime, "native-work-next") == 1
     assert _spend_run_count(runtime) == 1
@@ -599,8 +603,8 @@ def test_larger_pages_need_explicit_output_budget_and_preserve_every_byte(tmp_pa
     assert not read_context_capture(args)["ok"]
 
 
-@pytest.mark.parametrize("declaration,limit", [(None, 7900), ("64000", 64000), ("999999", 7900), ("unknown", 7900)])
-def test_native_configuration_budget_keeps_guard_small_and_continuations_complete(tmp_path, monkeypatch, declaration, limit):
+@pytest.mark.parametrize("declaration", [None, "64000", "7900", "999999", "unknown"])
+def test_native_large_pages_do_not_depend_on_shell_environment(tmp_path, monkeypatch, declaration):
     from loopx.cli import build_parser
     from loopx.cli_commands.quota_capture import native_context_capture_view, read_context_capture
 
@@ -611,7 +615,9 @@ def test_native_configuration_budget_keeps_guard_small_and_continuations_complet
     page = native_context_capture_view({"requirements": '汉🙂"\\\t\n' * 12000,
         "last": "Stop before publication."}, tmp_path)
     original = Path(page["path"]).read_bytes()
-    assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 7900
+    limit = 64000
+    assert len(page["content"].encode()) > 32000
+    assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= limit
     collected, sizes = b"", []
     while True:
         assert page["ok"] and page["offset"] == len(collected)
@@ -624,5 +630,31 @@ def test_native_configuration_budget_keeps_guard_small_and_continuations_complet
         page = read_context_capture(args)
         assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= limit
     assert collected == original and hashlib.sha256(collected).hexdigest() == page["sha256"]
-    if declaration == "64000":
-        assert max(sizes) > 32000 and len(sizes) < len(original) / 20000
+    assert max(sizes) > 32000 and len(sizes) < len(original) / 20000
+
+
+def test_default_json_reader_and_generated_recovery_use_large_pages(tmp_path):
+    from loopx.cli import build_parser
+    from loopx.cli_commands.quota_capture import read_context_capture
+    from loopx.control_plane.turn_driver.decision_capture import context_capture_read_command
+
+    raw = json.dumps({"requirements": "完整要求🙂 " * 30000}, ensure_ascii=False).encode()
+    capture = tmp_path / "capture.json"
+    capture.write_bytes(raw)
+    digest = hashlib.sha256(raw).hexdigest()
+    parser = build_parser()
+    default = parser.parse_args(["--format", "json", "quota", "context-read",
+        "--capture-file", str(capture), "--capture-sha256", digest])
+    generated = parser.parse_args(shlex.split(context_capture_read_command(capture, digest))[1:])
+    for args in (default, generated):
+        collected, calls = b"", 0
+        while True:
+            page = read_context_capture(args)
+            assert page["ok"] and page["offset"] == len(collected)
+            collected += page["content"].encode()
+            calls += 1
+            if page["eof"]:
+                break
+            assert len(page["content"].encode()) > 32000
+            args = parser.parse_args(shlex.split(page["next_command"])[1:])
+        assert collected == raw and calls <= 10

@@ -94,6 +94,18 @@ authorize a restart. Discovery combines open home files with the private launch
 environment of Codex processes, covering warm app-servers that cached auth and
 closed their files. Arguments and environment values are never projected or logged.
 
+Version 0.12.10 retries only the read-only ownership scan, at most three times,
+when a consumer starts between process enumeration and file inspection or is
+independently proven to have exited during that inspection. A stable fresh
+snapshot must precede the existing service restart. PID reuse, an unreadable
+live process and persistent churn remain holds; no shutdown or credential
+transaction is retried by this scan. A failed environment read cannot turn an
+unreadable live Codex process into a proven exit.
+
+0.12.10 对进程枚举与文件检查之间新启动、或已独立证明退出的占用，最多进行三次
+只读重扫，再以稳定的新身份清单进入原受控重启流程。PID 复用、仍存活但身份不明及
+持续变化继续等待；重扫不重放退出、凭据事务或业务，也不扩大 VM 的重启权限。
+
 Each service's restoration intent is saved privately before unloading. Version
 0.12.7 waits up to five seconds for launchd to finish an acknowledged asynchronous
 unload; a job that remains loaded retains its recovery intent and fails without
@@ -131,14 +143,22 @@ catalog's running instance; raw arguments, environment and catalog paths stay
 private. Missing SPI/permissions, changed launch identities, ambiguous instances
 or unavailable manager reads preserve an explicit hold. No guest command runs.
 The existing App/LaunchAgent restart path is unchanged; externally managed
-workloads require their own idle/recovery qualification. This read-only CLI
-diagnostic is a staged prerequisite: the settings page still shows its existing
-busy cause, and VM recovery/new-auth adoption remain unqualified.
+workloads require their own idle/recovery qualification. In **Settings → Model
+provider → Native Codex accounts**, **Login holders** reads this same inventory.
+Its collapsed summary retains held and unknown observations; expanding it shows
+all observed PIDs, services and corroborated managers. **Recheck holders** only
+repeats the read. It does not check quota, enable a policy, reconcile recovery,
+switch accounts or end a process. The ordinary status timer does not repeat the
+process scan. A failed or incomplete read clears the earlier inventory and stays
+unknown, rather than reporting that no client remains. Restart eligibility is
+an observation, not a guarantee or another restart permission. Actual handoff
+still revalidates ownership through the original account transaction.
 
 0.12.9 的只读占用清单会核对脱离 App 进程树的 XPC 责任进程，并对已核验的
 Lima/Colima 管理器交叉读取原实例。识别到管理器不等于业务空闲或可以重启；
-未知或变化的身份保留等待，不执行 guest 命令，不新增强关目标。设置页的完整
-占用诊断与外部工作负载恢复仍待交付，不能把这一步视为真实换号已生效。
+未知或变化的身份保留等待，不执行 guest 命令，不新增强关目标。设置页的
+「登录占用」复用同一清单，可展开全部进程并只读重查；失败或部分读取显示未知。
+这不改变原切换权限，VM 恢复及真实换号后的新认证采用仍需分别验收。
 
 An operator-owned service independent of the App can run the same observer:
 
