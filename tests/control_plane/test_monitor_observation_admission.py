@@ -216,6 +216,7 @@ def test_receipt_bound_advancement_allows_one_auxiliary_due_monitor_receipt(
     ("provider", "writeback", "spend_first"),
     [
         ("file", False, False),
+        ("sqlite", False, False),
         ("file", True, False),
         ("sqlite", True, False),
         ("file", True, True),
@@ -381,12 +382,12 @@ def test_completed_advancement_retains_auxiliary_monitor_admission(
     assert resume["identity"]["turn_instance_id"] == turn
     assert resume["grants_new_delivery"] is False
     assert resume["progress_ref"] == "$.settlement_progress"
-    # Same stable fixture: v1.3.1 writeback was 1,831 chars; the bounded vision
-    # authoring contract and unavailable-monitor closeout now require 5,328.
-    # Keep useful decision guidance, with 672 chars of measured headroom. Spend
-    # and settled packets retain the original 2,000-character regression budget.
+    # Matched complete canonical fixtures emit 6,806 writeback characters on
+    # both File and SQLite, unchanged across the compared source revisions.
+    # Keep the full bounded vision/decision guidance, with 694 chars headroom.
+    # Spend (1,432) and settled (572) retain their 2,000-character ceiling.
     resume_budget = (
-        6_000 if (resume["next_step"] or {}).get("kind") == "durable_writeback"
+        7_500 if (resume["next_step"] or {}).get("kind") == "durable_writeback"
         else 2_000
     )
     assert len(json.dumps(resume, ensure_ascii=False, indent=2)) < resume_budget
