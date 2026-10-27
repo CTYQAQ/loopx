@@ -141,7 +141,9 @@ Successful Turn-bound ordinary completion returns verified settlement progress
 and, while writeback remains due, the existing same-identity settlement plan and
 next writeback command. That material-closeout plan includes the shared vision
 authoring schema; callers need not reconstruct identities or guess a JSON
-format after completion. It grants no new execution or terminal authority.
+format after completion. CLI Markdown shows the verified progress and next
+writeback command; JSON carries the full plan and authoring schema. This grants
+no new execution or terminal authority.
 
 The shared Todo summary keeps missing-successor diagnostics and counts, but its
 warning is review guidance, not an obligation to create a successor or terminate

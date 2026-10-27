@@ -718,6 +718,7 @@ def _execute_cli(command: str, state: _QualificationState) -> dict[str, Any]:
             "--registry": str(state.fixture.global_registry_path),
             "--turn-instance-id": state.turn_instance_id,
         },
+        accepted_return_codes=(0, 1) if _command_path(tokens or [])[0] == "refresh_state" else (0,),
     )
     payload = json.loads(output)
     if not isinstance(payload, dict):
@@ -921,6 +922,12 @@ def _execute_terminal_cli(
         if not tokens or not _matches_identity(tokens, state):
             raise _TerminalToolViolation("writeback_identity_mismatch")
         payload = _execute_cli(command, state)
+        if (payload.get("ok") is False and payload.get("appended") is False
+                and payload.get("error_code") == "progress_observation_invalid_arguments"):
+            # Only the CLI's pure input decoder emits this code, before refresh
+            # dispatch. Give the same model its real tool error within the
+            # original call budget; do not retry or count a committed effect.
+            return json.dumps(payload, ensure_ascii=False, sort_keys=True), "progress_observation_invalid_arguments"
         receipt_steps = _settlement_receipt_steps(payload)
         if receipt_steps != _EXPECTED_RECEIPT_STEPS[:2]:
             raise _TerminalToolViolation("writeback_receipt_mismatch")

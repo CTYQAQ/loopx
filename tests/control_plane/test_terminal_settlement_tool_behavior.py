@@ -21,6 +21,7 @@ from loopx.control_plane.testing.terminal_settlement_tool_behavior import (
     _build_fixture,
 )
 from loopx.control_plane.testing.vision_shell_host import shell_isolation_available
+from loopx.control_plane.todos.markdown import render_todo_markdown
 
 
 def _latest_quota_packet(request: Mapping[str, Any]) -> dict[str, Any]:
@@ -216,6 +217,9 @@ def test_real_tool_loop_settles_final_todo_after_spend(
         assert writeback["vision_authoring"]["schema_version"] == "goal_vision_replan_contract_v0"
         assert completed["next_cli_actions"] == [writeback["command_template"]]
         assert completed["settlement_result"]["receipts"][0]["step_kind"] == "validation"
+        markdown = render_todo_markdown(completed)
+        assert "writeback_required" in markdown
+        assert completed["next_cli_actions"][0] in markdown
 
 
 @pytest.mark.parametrize(
@@ -346,12 +350,13 @@ def test_terminal_failure_receipt_does_not_echo_cli_or_model_text(
 
 
 @pytest.mark.skipif(not shell_isolation_available(), reason="Draft authoring requires native OS isolation")
-@pytest.mark.parametrize(("draft_target", "coverage_observation"), [
-    (".scratch/vision.json", False), (".scratch/vision.json", True),
-    ("fixture/settlement-proof.json", False), ("outside", False),
+@pytest.mark.parametrize(("draft_target", "coverage_observation", "correct_input"), [
+    (".scratch/vision.json", False, False), (".scratch/vision.json", True, False),
+    (".scratch/vision.json", True, True),
+    ("fixture/settlement-proof.json", False, False), ("outside", False, False),
 ])
 def test_terminal_native_draft_preserves_proof_and_authority(
-    tmp_path: Path, draft_target: str, coverage_observation: bool,
+    tmp_path: Path, draft_target: str, coverage_observation: bool, correct_input: bool,
 ) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
     outside = tmp_path / "owner-private.json"
@@ -369,16 +374,32 @@ def test_terminal_native_draft_preserves_proof_and_authority(
         vision["path_delta"]["outcome"] = "stop"
         vision["path_delta"]["stopped"] = vision["path_delta"].pop("retained")
 
-    def writeback(request):
+    def authority_files():
+        root = tmp_path / "actor"
+        return {str(path.relative_to(root)): path.read_bytes()
+                for tree in (root / "runtime", root / "project/.codex", root / "project/.loopx", root / "home")
+                for path in tree.rglob("*") if path.is_file()}
+
+    before_rejection = {}
+
+    def writeback(request, *, omit_scope=False):
+        if correct_input and not omit_scope:
+            rejected = json.loads(request["messages"][-1]["content"])
+            assert rejected["ok"] is False and rejected["appended"] is False
+            assert rejected["error_code"] == "progress_observation_invalid_arguments"
+            assert "--progress-coverage-scope-id" in rejected["error"]
+            assert authority_files() == before_rejection
         command = _writeback_action(request).command + " --agent-vision-json .scratch/vision.json"
         if coverage_observation:
             packet = _latest_quota_packet(request)
             step = packet["interaction_contract"]["cli_channel"]["settlement_plan"]["ordered_steps"][1]
             assert "--progress-coverage-scope-id" in step["precondition"]
             assert "--progress-coverage-complete" in step["precondition"]
-            command += (" --progress-result-class no_followup"
-                        " --progress-coverage-scope-id terminal-settlement-fixture"
-                        " --progress-evidence-id fixture-settlement-proof")
+            command += " --progress-result-class no_followup --progress-evidence-id fixture-settlement-proof"
+            if not omit_scope:
+                command += " --progress-coverage-scope-id terminal-settlement-fixture"
+        if omit_scope:
+            before_rejection.update(authority_files())
         return ScriptedExecToolAction(command=command)
 
     def completion(request):
@@ -393,6 +414,7 @@ def test_terminal_native_draft_preserves_proof_and_authority(
             completion,
             ScriptedExecToolAction(command="cat > " + shlex.quote(target) + " <<'JSON'\n" +
                                   json.dumps(vision) + "\nJSON"),
+            *([partial(writeback, omit_scope=True)] if correct_input else []),
             writeback, _spend_action, _completion_action,
         ]),
     ).qualify(qualification_id="native-terminal-draft", fixture_root=tmp_path / "actor")
@@ -404,6 +426,32 @@ def test_terminal_native_draft_preserves_proof_and_authority(
     )
     assert (tmp_path / "actor/project/fixture/settlement-proof.json").read_bytes() == fixture.proof_target.read_bytes()
     assert outside.read_text() == "Owner artifact.\n"
+    if correct_input:
+        assert receipt["tool_call_count"] == 8
+        assert receipt["observed_tool_sequence"].count("progress_observation_invalid_arguments") == 1
+
+
+def test_terminal_input_rejections_do_not_reset_the_call_budget(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+
+    def rejected_writeback(request):
+        return ScriptedExecToolAction(command=_writeback_action(request).command +
+                                      " --progress-result-class no_followup")
+
+    transport = ScriptedDoubaoExecTransport([
+        ScriptedExecToolAction(command=fixture.quota_guard_command),
+        ScriptedExecToolAction(command="cat fixture/settlement-proof.json"),
+        partial(_completion_action, kind="validation"),
+        *([rejected_writeback] * 7),
+    ])
+    receipt = DoubaoTerminalSettlementToolBehaviorActor(
+        api_key="test-only-placeholder", transport=transport,
+    ).qualify(qualification_id="bounded-input-correction", fixture_root=tmp_path / "actor")
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "tool_call_budget_exhausted"
+    assert receipt["tool_call_count"] == 10
+    assert receipt["observed_tool_sequence"].count("progress_observation_invalid_arguments") == 7
+    assert receipt["settlement_receipt_steps"] == ["validation"]
 
 
 def test_ordinary_completion_requires_its_actual_validation_receipt(

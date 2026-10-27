@@ -309,6 +309,13 @@ writeback and spend receipts. Later receipts advance the original Turn's plan;
 they do not discard its identity-bound command templates. This follows the shared
 [quota-bound completion contract](../canonical-terminal-review.md#quota-bound-cli-completion)
 without changing the portfolio, repeats, contrasts or settlement order.
+The refresh CLI's pure progress-input decoder identifies invalid argument
+combinations before dispatch or authority writes. Its structured rejection is
+returned to the same model, which may correct its input within the original
+ten-call budget. Rejected calls remain counted and commit no settlement step;
+the actor never retries a command or restarts a scenario automatically. Other
+non-zero CLI results and fixture identity, route or ordering violations still
+fail immediately; non-zero execution alone does not prove rollback.
 After the proof is read, a terminal actor may author a project draft in
 `.scratch/` using the existing OS-isolated shell. Original fixture inputs and
 authority stores remain protected; private host data and external networking
