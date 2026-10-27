@@ -236,6 +236,10 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         # Plan only read offsets. Every actual model-facing page must
         # come from the public CLI, including digest verification.
         page_size = 3072 if adaptive or host == "code_mode" else 5000
+        if reader_output_bytes and not bounded_pages:
+            # Offset planning must match the bounded payload, with room for
+            # the serialized page metadata and escaped source text.
+            page_size = min(page_size, reader_output_bytes // 2)
         offsets, start, count = [0], 0, 0
         for character in raw.decode():
             size = len(character.encode())
@@ -436,8 +440,13 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             # Apply the selected public reader budget to every batched read,
             # retaining the original capture, digest and cursor.
             argv = shlex.split(command)
-            argv[argv.index("--page-bytes") + 1] = str(reader_output_bytes)
-            argv[argv.index("--max-page-output-bytes") + 1] = str(reader_output_bytes)
+            requested = argv.index("--page-bytes") + 1
+            argv[requested] = str(reader_output_bytes if bounded_pages else
+                                  min(int(argv[requested]), reader_output_bytes // 2))
+            if "--max-page-output-bytes" in argv:
+                argv[argv.index("--max-page-output-bytes") + 1] = str(reader_output_bytes)
+            else:
+                argv.extend(["--max-page-output-bytes", str(reader_output_bytes)])
             return shlex.join(argv)
         cmd = bounded_read(cmd)
         if host == "code_mode":
