@@ -16,6 +16,17 @@ This is presentation validation, not a claim that a URL is reachable, public or
 authorized for another audience. Source collection, frozen evidence, redaction
 and delivery authorization retain those responsibilities.
 
+Exact authorized portfolio delivery reads retain eligible references recorded in
+the original Turn's path evidence, alongside their digest identities. New
+private portfolio inputs bind those references to the same frozen source and
+make them available to the report author as **recorded, unverified** citations.
+Local paths, credential-bearing and malformed reference values remain withheld;
+the source reader never fetches a URL. A recorded address proves neither public
+access nor permission to publish to a different audience. The original scope,
+source gaps and unread-artifact status remain authoritative; an opaque digest
+does not supply a missing URL. Existing v1 frozen inputs retain their original
+fact set and bytes. Ordinary managed Session inputs retain their existing scope.
+
 Text reports include the same authored overview values, labels and details as
 the HTML artifact. When that overview is present, it replaces the generated
 title-only opening; reports without highlights retain their compiled summary.
