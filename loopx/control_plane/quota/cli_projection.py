@@ -582,25 +582,15 @@ def _deduplicate_next_action_warning(
     return compact
 
 
-def _deduplicate_agent_lane_next_action(
-    item: dict[str, Any], *, payload: dict[str, Any],
-) -> dict[str, Any]:
+def _deduplicate_agent_lane_next_action(item: dict[str, Any]) -> dict[str, Any]:
+    # Display-only omission stays local; exact source sharing runs once below.
     text = item.get("text")
     title = item.get("title")
-    if not isinstance(title, str):
-        return item
-    if isinstance(text, str) and (text == title or text.endswith(f" {title}")):
+    if isinstance(title, str) and isinstance(text, str) and (text == title or text.endswith(f" {title}")):
         compact = dict(item)
         compact.pop("title", None)
         return compact
-
-    from .turn_envelope import _turn_envelope_result
-
-    # Exact source sharing lives in the existing TypeScript context owner.
-    # The prefix-based display-only omission above is not a contract rule.
-    shared = _turn_envelope_result("reference_current_task_title",
-        payload={**payload, "agent_lane_next_action": item})
-    return shared["agent_lane_next_action"]
+    return item
 
 
 def _compact_goal_route_hint(route: dict[str, Any]) -> dict[str, Any]:
@@ -776,11 +766,21 @@ def _reference_inline_goal_acceptance(payload: dict[str, Any]) -> dict[str, Any]
     return result
 
 
-def _reference_explore_writeback_guidance(payload: dict[str, Any]) -> dict[str, Any]:
-    """Display adapter; reuse the TypeScript context reference owner."""
+def _reference_context(
+    payload: dict[str, Any], *, task_title: bool = True, explore_guidance: bool = True,
+) -> dict[str, Any]:
+    """One coarse transport call for the existing typed context owner."""
+    contract = payload.get("interaction_contract")
+    agent = contract.get("agent_channel") if isinstance(contract, dict) else None
+    context = agent.get("work_context") if isinstance(agent, dict) else None
+    # No source carrier means neither operation can act. Leave semantic matching
+    # and reference validation in TypeScript, rather than replicating its rules.
+    if not (task_title or explore_guidance) or not isinstance(context, dict) or not context.get("sources"):
+        return payload
     from .turn_envelope import _turn_envelope_result
 
-    return _turn_envelope_result("reference_explore_guidance", payload=payload)
+    return _turn_envelope_result("reference_context", payload=payload,
+        task_title=task_title, explore_guidance=explore_guidance)
 
 
 def compact_quota_should_run_cli_payload(
@@ -863,7 +863,7 @@ def compact_quota_should_run_cli_payload(
         if isinstance(agent_lane_next_action, dict):
             compact = dict(compact)
             compact["agent_lane_next_action"] = _deduplicate_agent_lane_next_action(
-                agent_lane_next_action, payload=compact,
+                agent_lane_next_action,
             )
         goal_route_hint = payload.get("goal_route_hint")
         if isinstance(goal_route_hint, dict):
@@ -878,8 +878,8 @@ def compact_quota_should_run_cli_payload(
         agent_lane_next_action.pop("content_revision", None)
         compact["agent_lane_next_action"] = agent_lane_next_action
     compact = _reference_inline_goal_acceptance(compact)
-    if not include_vision_detail:
-        compact = _reference_explore_writeback_guidance(compact)
+    compact = _reference_context(compact, task_title=not include_todo_summary_detail,
+        explore_guidance=not include_vision_detail)
     return _promote_interaction_contract(
         _promote_runtime_capability_reentry(compact)
     )

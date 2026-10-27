@@ -1359,11 +1359,11 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
     assertTurnEnvelopeConsumerVersion(requireJsonObject(request.envelope, "turn_envelope"));
     return {ok: true};
   }
-  if (operation === "reference_current_task_title") {
-    return referenceCurrentTaskTitle(requireJsonObject(request.payload, "quota decision"));
-  }
-  if (operation === "reference_explore_guidance") {
-    return referenceExploreGuidance(requireJsonObject(request.payload, "quota decision"));
+  if (operation === "reference_context") {
+    let payload = requireJsonObject(request.payload, "quota decision");
+    if (request.task_title === true) payload = referenceCurrentTaskTitle(payload);
+    if (request.explore_guidance === true) payload = referenceExploreGuidance(payload);
+    return payload;
   }
   if (operation === "build") return buildTurnEnvelope(request);
   if (operation === "context_delivery") return prepareContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);
