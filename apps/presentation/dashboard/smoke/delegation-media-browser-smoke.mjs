@@ -114,6 +114,24 @@ try {
     assert.ok(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
     assert.ok(await images.evaluateAll(nodes => nodes.every(node => Math.abs(node.clientWidth / node.clientHeight - 600 / 180) < .05)), 'Original images keep their full aspect ratio');
     await page.screenshot({path: resolve(output, 'images-narrow.png')});
+    // Refreshing the same source must keep the evidence the reader opened.
+    // This oracle also runs against an immutable pre-change packaged bundle.
+    const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/chat/request-inventory');
+    await dialog.getByRole('button', {name: '刷新委派', exact: true}).click();
+    await refreshed;
+    await page.waitForFunction(() => document.querySelector('.conversation-requests-body')?.getAttribute('aria-busy') === 'false');
+    assert.equal(await original.evaluate(node => node.parentElement.open), true,
+      'A same-source refresh must keep the original conversation expanded');
+    assert.equal(await articles.first().locator('.personal-md').innerText(), body);
+    assert.equal(await images.count(), 2);
+    const refreshOriginal = async nextMode => {
+      mode = nextMode;
+      const response = page.waitForResponse(value => new URL(value.url()).pathname === `/api/chat/sessions/${ready.session_id}`);
+      await dialog.getByRole('button', {name: '刷新委派', exact: true}).click(); await response;
+    };
+    await refreshOriginal('unavailable'); await row.getByRole('alert').waitFor(); assert.equal(await images.count(), 0);
+    await refreshOriginal('wrong-session'); await row.getByRole('alert').waitFor(); assert.equal(await images.count(), 0);
+    await refreshOriginal('images'); await images.first().waitFor();
     const reopen = async nextMode => {
       await original.click(); mode = nextMode; await original.click();
     };
@@ -129,7 +147,9 @@ try {
     const seen = new Promise(resolve => observed = resolve);
     await original.click(); await seen; await original.click(); release();
     assert.equal(await images.count(), 0, 'A late read cannot reopen a closed original');
-    await page.keyboard.press('Escape');
+    const modalSeen = new Promise(resolve => observed = resolve);
+    await original.click(); await modalSeen; await page.keyboard.press('Escape'); release();
+    assert.equal(await images.count(), 0, 'Closing the dialog cancels an open original reader');
     assert.equal(await trigger.evaluate(node => node === document.activeElement), true);
     await page.evaluate(() => localStorage.setItem('loopx-pw-locale', 'en')); mode = 'images';
     await page.reload();
@@ -142,11 +162,80 @@ try {
     await english.getByRole('img', {name: '原始图一.png', exact: true}).waitFor();
     const inspection = await inspect();
     assert.equal(inspection.source_unchanged, true); assert.equal(inspection.posts, 0);
+    await page.setViewportSize({width: 1440, height: 1000});
+
+    // The loaded second page and its open reader survive refresh as a unit.
+    const settled = () => page.waitForFunction(() => document.querySelector('.conversation-requests-body')?.getAttribute('aria-busy') === 'false');
+    const rows = count => page.waitForFunction(expected => document.querySelectorAll('.conversation-request-row').length === expected
+      && document.querySelector('.conversation-requests-body')?.getAttribute('aria-busy') === 'false', count);
+    const refresh = english.getByRole('button', {name: 'Refresh delegations', exact: true});
+    await english.getByRole('button', {name: 'Clear', exact: true}).click(); await rows(12);
+    await english.getByRole('button', {name: 'All records', exact: true}).click(); await rows(12);
+    await english.getByRole('button', {name: 'More records', exact: true}).click(); await rows(13);
+    const secondPage = english.locator('.conversation-request-row').filter({hasText: '核对账单导出的字段映射'});
+    await secondPage.locator(':scope > summary').click();
+    await secondPage.getByText('Original conversation', {exact: true}).click();
+    await secondPage.getByRole('img', {name: '原始图一.png', exact: true}).waitFor();
+    const nativeRow = english.locator('.conversation-request-row').filter({hasText: '复核迁移说明中的示例'});
+    await nativeRow.locator(':scope > summary').click();
+    await nativeRow.getByText('Original conversation', {exact: true}).click();
+    await nativeRow.locator('article').first().waitFor();
+    let inventoryMode = 'hold', releasePage, sawPage;
+    await page.route('**/api/chat/request-inventory?*', async route => {
+      if (new URL(route.request().url()).searchParams.get('offset') !== '12') return route.continue();
+      const response = await route.fetch();
+      if (inventoryMode === 'hold') {sawPage(); await new Promise(resolve => releasePage = resolve);}
+      if (inventoryMode === 'drift') {
+        const value = await response.json(); value.snapshot_digest = '0'.repeat(64);
+        return route.fulfill({response, json: value});
+      }
+      return route.fulfill({response}).catch(() => {});
+    });
+    const held = new Promise(resolve => sawPage = resolve);
+    const scroll = english.locator('.conversation-requests-body');
+    const beforeScroll = await scroll.evaluate(node => {node.scrollTop = 150; return node.scrollTop;});
+    await refresh.click(); await held;
+    const focusedInput = english.getByRole('searchbox', {name: 'Search delegations'});
+    await focusedInput.focus();
+    assert.equal(await english.locator('.conversation-request-row').count(), 13, 'Do not publish a half-refreshed inventory');
+    assert.equal(await secondPage.getByText('Original conversation', {exact: true}).evaluate(node => node.parentElement.open), true);
+    releasePage(); await rows(13);
+    assert.equal(await focusedInput.evaluate(node => node === document.activeElement), true, 'Refreshing evidence must not steal focus');
+    assert.ok(Math.abs(await scroll.evaluate(node => node.scrollTop) - beforeScroll) <= 1, 'Keep same-source reading position');
+    inventoryMode = 'normal';
+    // This return is appended by the real native Inbox drain, never by the
+    // browser response enrichment. The same open reader must show its body.
+    child.stdin.write('deliver\n'); assert.equal((await next()).event, 'deliver');
+    const delivered = '已核对本次迁移说明与示例，版本一致，原始检查结果已保留。';
+    await refresh.click(); await rows(13);
+    await nativeRow.getByText(delivered, {exact: true}).waitFor();
+    assert.equal(await secondPage.getByText('Original conversation', {exact: true}).evaluate(node => node.parentElement.open), true);
+    await nativeRow.getByText(delivered, {exact: true}).scrollIntoViewIfNeeded();
+    await page.screenshot({path: resolve(output, 'refresh-return-desktop.png')});
+    await page.setViewportSize({width: 390, height: 844});
+    await nativeRow.getByText(delivered, {exact: true}).scrollIntoViewIfNeeded();
+    assert.ok(await english.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({path: resolve(output, 'refresh-return-narrow.png')});
+    inventoryMode = 'drift'; await refresh.click(); await settled();
+    await english.getByRole('alert').waitFor(); await rows(0);
+    inventoryMode = 'normal'; await english.getByRole('button', {name: 'Retry', exact: true}).click(); await rows(12);
+    // A source/query change while an original read is in flight cannot carry
+    // its private evidence into the new result, even if the response arrives.
+    const sourceRow = english.locator('.conversation-request-row').filter({hasText: '复核迁移说明中的示例'});
+    await sourceRow.locator(':scope > summary').click(); mode = 'delayed';
+    const late = new Promise(resolve => observed = resolve);
+    await sourceRow.getByText('Original conversation', {exact: true}).click(); await late;
+    await english.getByRole('searchbox', {name: 'Search delegations'}).fill('reviewer');
+    await english.getByRole('button', {name: 'Search', exact: true}).click(); await rows(4);
+    release(); mode = 'images'; await page.unroute('**/api/chat/request-inventory?*');
+    assert.equal(await english.locator('article').count(), 0);
+    assert.equal(await english.locator('img').count(), 0);
+    assert.equal((await inspect()).posts, 0);
     assert.deepEqual(writes, [], 'Reading originals must not POST or start a Turn');
     assert.deepEqual(errors, []);
-    console.log('PASS: packaged original images/full body, same-Turn isolation, text-only, failed image/read, foreign-session denial, retry, late close, focus return, narrow aspect ratio, English and unchanged SQLite/Inbox; zero writes.');
+    console.log('PASS: packaged original images/full body, same-Turn isolation, read failures/retry, late close/query change, focus/scroll, bilingual/narrow, atomic two-page refresh, native return in the open reader and snapshot-drift denial; browser writes zero.');
   }
 } catch (error) {
   if (page) {await page.screenshot({path: resolve(output, 'failure.png')}).catch(() => {}); await writeFile(resolve(output, 'failure.txt'), await page.locator('body').innerText());}
   throw error;
-} finally {await browser?.close(); child.stdin.write('stop\n'); child.stdin.end();}
+} finally {await page?.unrouteAll({behavior: 'ignoreErrors'}); await browser?.close(); child.stdin.write('stop\n'); child.stdin.end();}
