@@ -14,6 +14,7 @@ from ..runtime.public_safety import public_safe_compact_text
 from .succession_warning import public_todo_summary
 from .resume_condition import TodoResumeRolloutEvents
 from ...agent_registry import registered_agent_ids_for_goal
+from ...materials import extract_review_materials
 from ..work_items.recommendation_source_io import (
     load_recommendation_source_goal, recommendation_source_context,
     project_agent_next_actions, recommendation_runs,
@@ -41,6 +42,10 @@ def _redacted_status_todo_fields(fields: dict[str, Any]) -> dict[str, Any]:
                         continue
                     material_copy = dict(material)
                     material_copy.pop("resolved_path", None)
+                    if any(isinstance(value, str) and value
+                           and public_safe_compact_text(value, limit=len(value)) is None
+                           for value in material_copy.values()):
+                        continue
                     redacted_materials.append(material_copy)
                 item_copy["review_materials"] = redacted_materials
             items.append(item_copy)
@@ -106,6 +111,19 @@ def active_state_todo_fields(
     from .goal_todo_projection import observe_todo_acceptance
     fields = observe_todo_acceptance(canonical["_todo_fields"], canonical,
         registry_path=source_registry, goal_id=goal_id)
+    # Material existence is a local read projection, not persisted Todo state.
+    # Derive it from the canonical text so stale display links cannot take over.
+    for key in ("user_todos", "agent_todos"):
+        summary = fields.get(key)
+        if not isinstance(summary, dict):
+            continue
+        for todo in summary.get("items") or []:
+            if not isinstance(todo, dict):
+                continue
+            materials = extract_review_materials(str(todo.get("text") or ""),
+                goal=goal, state_path=state_path)
+            if materials:
+                todo["review_materials"] = materials
     # An explicit canonical objective revision owns current intent. A scoped
     # check objective still cannot substitute for Goal intent. Keep this status
     # field as display content; admission uses the native revision and guard.

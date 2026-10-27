@@ -64,7 +64,10 @@ def summary_items(fields: dict[str, Any], role: str) -> list[dict[str, Any]]:
     return [item for item in summary.get("items") or [] if isinstance(item, dict)]
 
 
-def observe_todo_acceptance(fields, canonical, *, registry_path, goal_id):
+def observe_todo_acceptance(
+    fields: dict[str, Any], canonical: dict[str, Any], *,
+    registry_path: Path | None, goal_id: str,
+) -> dict[str, Any]:
     from ..goals.acceptance import observe_canonical_goal_acceptance
 
     acceptance = observe_canonical_goal_acceptance(

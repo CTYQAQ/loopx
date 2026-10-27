@@ -132,6 +132,47 @@ def test_unavailable_provider_does_not_restore_stale_display_tasks(promoted_goal
     assert "todo_stale" in state.read_text()
 
 
+def test_review_materials_follow_canonical_text_without_rewriting_authority(
+    tmp_path, provider, record_format,
+):
+    from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    material = docs / "review.md"
+    material.write_text("# Review\n\n## Proof\nSynthetic evidence.\n", encoding="utf-8")
+    state = tmp_path / "ACTIVE_GOAL_STATE.md"
+    state.write_text("## User Todo\n- [ ] Read `docs/stale.md`.\n", encoding="utf-8")
+    goal = {"id": "goal-a", "repo": str(tmp_path), "state_file": str(state)}
+    records = [{
+        "schema_version": "todo_item_v0", "todo_id": "todo_review", "index": 1,
+        "role": "user", "status": "open", "done": False, "archive_state": "active",
+        "source_section": "User Todo", "task_class": "user_action",
+        "text": ("Read [Review](docs/review.md#proof) and `../outside.md`. "
+                 f"Private [reference]({tmp_path / 'private.md'})."),
+    }]
+    runtime = tmp_path / "runtime"
+    initialize_canonical_authority(runtime, goal["id"], _projection(goal["id"], records, record_format),
+        state_path=state, provider=provider)
+    # A valid stale projection still must not supply current links.
+    state.write_text("## User Todo\n- [ ] Read `docs/stale.md`.\n", encoding="utf-8")
+    before_state = state.read_bytes()
+    before = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal["id"])
+    for exists in (True, False):
+        if not exists:
+            material.unlink()
+        fields = active_state_todo_fields(goal, runtime_root=runtime)
+        [todo] = fields["user_todos"]["items"]
+        review, outside = todo["review_materials"]
+        assert review == {"label": "Review", "path": "docs/review.md#proof", "anchor": "proof", "exists": exists}
+        assert outside["exists"] is False
+        assert "resolved_path" not in json.dumps(fields)
+        assert "docs/stale.md" not in json.dumps(fields)
+        assert str(tmp_path) not in json.dumps(todo["review_materials"])
+        assert state.read_bytes() == before_state
+        assert read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=goal["id"]) == before
+
+
 def test_empty_canonical_collection_is_an_explicit_empty_read_model(tmp_path):
     state = tmp_path / "state.md"
     state.write_text("# Goal\n\n## Agent Todo\n\n- [ ] Stale work\n")
