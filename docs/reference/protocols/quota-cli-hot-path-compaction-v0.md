@@ -85,6 +85,24 @@ neither enables native tracing nor changes the default-off transport switch.
 控制字段和原始捕获均保留。`--include-detail agent-todos` 保留内联标题。
 这是普通 CLI 序列化去重，差分开关关闭和开启时均适用，不会开启原生追踪或改变默认关闭。
 
+Exact Task-title and Explore-guidance sharing now use the existing TypeScript
+context owner; the Python quota projection delegates those operations. Current
+quota and Turn entrypoints retain their schemas. Explore guidance shares only
+identical inline durable-writeback instructions within the same response, and
+stays inline when the reference would be larger. Before relocating context,
+Turn and staged replan readers restore that guidance from its settlement owner.
+Dangling, chained, conflicting or incorrectly typed references reject rather
+than silently losing instructions. Settlement commands, identities and original
+source content remain unchanged. This shared-owner prerequisite does not qualify
+the proposed complete-contract cutover or claim an end-to-end efficiency gain.
+
+精确任务标题与 Explore 指引共享复用既有 TypeScript 上下文 owner，Python quota
+投影委托这两项操作；当前 quota 与 Turn 入口保持各自 schema。Explore 仅共享本响应
+内与 durable-writeback 指引完全相同的正文；引用更大时保留内联。Turn 与分阶段
+replan reader 在移动上下文前，从原结算 owner 恢复指引。悬空、链式、冲突或类型
+错误的引用会被拒绝，不静默丢失指令。结算命令、身份与原始源内容保持不变。
+这一共享 owner 前置不代表完整契约切换已通过验收，也不声称端到端效率提升。
+
 When a replan action carries a complete `vision_authoring` schema, the default
 `quota should-run` packet now retains it, alongside its executable writeback
 summary (`required_fields`, accepted path outcomes, and rule). Only when the
