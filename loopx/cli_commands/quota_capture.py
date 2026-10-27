@@ -18,7 +18,8 @@ from ..control_plane.effect_runtime import EffectRuntimeRejected
 from ..control_plane.quota.error_codes import QuotaCommandValidationError, QuotaDecisionTransportError
 from ..control_plane.turn_driver.decision_capture import (
     validate_handoff_socket, CONTEXT_CAPTURE_READ_GUIDANCE, CONTEXT_CAPTURE_PAGE_GUIDANCE, context_capture_read_command,
-    NATIVE_CONTEXT_PAGE_BYTES, NATIVE_CONTEXT_PAGE_OUTPUT_BYTES,
+    NATIVE_CONTEXT_PAGE_OUTPUT_BYTES,
+    native_context_page_budget,
     read_context_capture_file as _read_capture,
 )
 
@@ -35,7 +36,8 @@ def native_context_activation(args: argparse.Namespace) -> dict[str, Any]:
 def _capture_page(path: Path, raw: bytes, digest: str, *, offset: int, size: int,
                   output_limit: int | None, instruction: bool,
                   presentation: dict[str, Any] | None = None,
-                  next_page_bytes: int | None = None) -> dict[str, Any]:
+                  next_page_bytes: int | None = None,
+                  next_page_output_bytes: int | None = None) -> dict[str, Any]:
     end = min(offset + size, len(raw))
     while end < len(raw) and raw[end] & 0xC0 == 0x80:
         end -= 1
@@ -50,7 +52,7 @@ def _capture_page(path: Path, raw: bytes, digest: str, *, offset: int, size: int
             result["read_instruction"] = CONTEXT_CAPTURE_PAGE_GUIDANCE
         if cursor < len(raw):
             result["next_command"] = context_capture_read_command(path, digest, offset=cursor, page_bytes=next_page_bytes or size,
-                max_page_output_bytes=output_limit)
+                max_page_output_bytes=next_page_output_bytes or output_limit)
         return result
 
     def fits(result: dict[str, Any]) -> bool:
@@ -78,7 +80,8 @@ def _capture_page(path: Path, raw: bytes, digest: str, *, offset: int, size: int
 
 
 def read_context_capture(args: argparse.Namespace, *, presentation: dict[str, Any] | None = None,
-                         next_page_bytes: int | None = None) -> dict[str, Any]:
+                         next_page_bytes: int | None = None,
+                         next_page_output_bytes: int | None = None) -> dict[str, Any]:
     """Bounded local IO over immutable JSON, not a new context/authority owner.
 
     Verify the complete byte digest on every page. The cursor addresses bytes
@@ -120,7 +123,8 @@ def read_context_capture(args: argparse.Namespace, *, presentation: dict[str, An
             raise ValueError("capture offset is outside the file or not a UTF-8 boundary; use the returned next offset")
         return _capture_page(path, raw, digest, offset=offset, size=size,
             output_limit=output_limit, instruction=bool(context_dir),
-            presentation=presentation, next_page_bytes=next_page_bytes)
+            presentation=presentation, next_page_bytes=next_page_bytes,
+            next_page_output_bytes=next_page_output_bytes)
     except (OSError, ValueError, RecursionError) as exc:
         # Recovery is presentation-only: keep failures separate from quota's
         # collection error path and retain the existing receipt/capture.
@@ -147,8 +151,9 @@ def native_context_capture_view(projected: dict[str, Any], directory: Path, *,
         mode, target = projected["mode"], projected["target"]
         if mode == "full":
             reference = {key: projected["recovery"][key] for key in ("path", "sha256")}
+    page_bytes, output_bytes = native_context_page_budget()
     reference["command"] = context_capture_read_command(Path(reference["path"]), reference["sha256"],
-        page_bytes=NATIVE_CONTEXT_PAGE_BYTES, max_page_output_bytes=NATIVE_CONTEXT_PAGE_OUTPUT_BYTES)
+        page_bytes=page_bytes, max_page_output_bytes=output_bytes)
     result = {"ok": True, **(metadata or {}), "mode": mode, **reference,
         **({"target": target} if target else {})}
     # The codec puts native continuity semantics before its change tree. Keep
@@ -167,7 +172,7 @@ def native_context_capture_view(projected: dict[str, Any], directory: Path, *,
     page = read_context_capture(argparse.Namespace(capture_file=reference["path"],
         capture_sha256=reference["sha256"], offset=0, page_bytes=3072,
         format="json", max_page_output_bytes=NATIVE_CONTEXT_PAGE_OUTPUT_BYTES),
-        presentation=result, next_page_bytes=NATIVE_CONTEXT_PAGE_BYTES)
+        presentation=result, next_page_bytes=page_bytes, next_page_output_bytes=output_bytes)
     if page["ok"]:
         result = page
         from ..control_plane.turn_driver.codex_context import register_native_context_view
@@ -482,14 +487,19 @@ def handle_native_context_command(args: argparse.Namespace, *, print_payload: Ca
                 cli_argv=cli_argv, scenario=activation["scenario"], session_root=bool(getattr(args, "codex_context_root", None)),
                 inherit_machine=bool(machine_runtime))
             payload = {"ok": True, "context_delivery": activation, "native_config": config,
-                "activation": "Merge hooks and append developer_instructions to the existing native configuration; "
-                    "review and trust only these exact hooks in Codex. Restart/resume with the resulting configuration. "
+                "activation": "Apply config_overrides, merge hooks and append developer_instructions to the existing native configuration; "
+                    "review and trust only these exact hooks in Codex. "
+                    "Existing loaded threads may retain their original hook configuration; enabled/trusted "
+                    "discovery is not session initialization or live adoption. Start/resume through the host "
+                    "with the resulting configuration after active work reaches its normal safe boundary. "
                     + ("Machine defaults are re-read on each invocation; generated hooks inherit the same machine runtime. "
                        "Omit per-command activation and location flags to retain that inheritance. " if machine_runtime else
                        "Pass --context-delivery on with the same declared host mode, context location and a decision-output-root to heartbeat-prompt/should-run. ")
                     +
                     "Normal completed full reads establish an explicit continuity assumption; no input diagnostics or provider change is required. "
-                    "Known invalidation or incomplete reads keep full recovery. Set --context-delivery off and remove context options to restore ordinary output. "
+                    "The generated output profile uses 64000-byte continuations and a 20000-token native history limit; "
+                    "unknown budgets retain small pages. Known invalidation or incomplete reads keep full recovery. "
+                    "Set --context-delivery off and remove the generated context configuration, including its output overrides, to restore ordinary output. "
                     "This command installs nothing and grants no execution authority."}
         except (OSError, ValueError, TypeError) as exc:
             payload = {"ok": False, "reason": str(exc)}

@@ -3,7 +3,8 @@
 - 状态：已接受
 - 替代 / 关闭：无
 - 范围基线：架构审计使用 2026-09-16 的 `0aa6179de`；RFC inventory 依据
-  `5c62c5c03` 更新至 2026-10-11；管家故障复现基线单独保留在第 8 节。
+  `5c62c5c03` 更新至 2026-10-11；controller/契约修订使用 2026-10-27 的
+  `08e290fb5`。管家故障复现基线单独保留在第 8 节。
 - 责任：总纲拥有产品目标、跨领域依赖、优先级和组合验收；领域 RFC/稳定协议拥有具体规则；运行 Todo 拥有执行状态。
 - 语言：[English](loopx-overall-roadmap-v0.md) 与本文互为语义镜像。
 
@@ -135,6 +136,25 @@ managed 与 attached 的工作对话都应能持续在 LoopX 中进行：沿用�
 assessment 中有证据绑定的研究综合分析接入指标 → 汇报 → 研究历程，深入对照解释与
 建议实验，并在输出被拒绝时保留已观测成本。打包来源／恢复与理解检查只验证这一阅读切片；独立科学校准、安装采用和
 2.0 发布验收仍未完成。提出的实验属于建议，不授予执行权限。
+
+### 统一契约与 controller/executor 交付
+
+[Controller/executor RFC](controller-executor-unified-contract-v0.zh-CN.md) 细化
+S2/S4/S6/S7/S11：用一份受治理工作 schema 替代 quota/Turn packet 格式选择，并纳入
+完整首包与差分上下文。可选 controller 模型独自对接 Core，executor 接收自然语言工作
+和材料；身份、权限、恢复、结算仍归既有 host/Core owner。Session role、执行模式、
+唤醒来源和 benchmark 评估组保持正交。这是设计方向，不是已交付行为或成本收益证据。
+
+C1 的[消费链切换表](controller-executor-unified-contract-v0.zh-CN.md#c1-消费链替换与切换单元)
+覆盖 quota emission、直接生产契约的 Turn 入口和最终 native/structured host prompt。
+共享 capture 不表示这些消费者已统一。资格检查须追踪来源义务经过组合、重建到实际
+最终输入；新准入切换与历史回执重放分别处理。
+
+把该 RFC 的 C1–C9 任务/删除表放在既有工作流内：先验收统一单会话输入，再做角色绑定
+与共享生命周期、replan/结果编写、executor 交流、benchmark 复用、打包 App readback
+及退役。App heartbeat 流程和实际 benchmark 消费者分别验收；managed Codex 可以作为
+实现载体，但不能单独证明二者。复用活跃的上下文/恢复工作。这些任务项不创建新 Goal、
+scheduler 或并行路线图，不启动 benchmark，不提升默认。
 
 ### 研究与验收集成后的当前优先级
 
@@ -350,6 +370,7 @@ Muse 设计页在浏览器超时，其文章通过网页检索读取。本次调
 | [完整状态恢复与受控重新激活 v0](complete-state-recovery-v0.zh-CN.md) | S2/S10 | 已接受设计；备份创建与仅配置的隔离恢复已存在，完整状态验证／重新激活尚不存在 | M1：在 Settings/Capability Center 提供可读 inert audit，显示 owner／next action 且无 live authority；M3：恢复一个 packaged local 文件／SQLite Goal、继续未完成工作，并记录找回／丢失工作、人工成本、hold、owner 复用及零受保护重复 operation |
 | [可组合状态机与恢复验证 v0](composable-state-machines-recovery-verification-v0.zh-CN.md) | S2/S3/S10 | 仅设计；复用局部 conformance 证据 | P1：一条 typed 边界，再验 ownership/writeback/settlement 故障序列与有条件推进；真实入口及后端证据 |
 | [Agent Loop Effect Interpreter](agent-loop-effect-interpreter-v0.zh-CN.md) | S2 | Accepted；核心已实现，继续采用 | P0：复用 effect/recovery，先补 R1 部分提交反例，保持 replan ACK domain-local |
+| [Controller / Executor 与统一工作契约](controller-executor-unified-contract-v0.zh-CN.md) | S2/S4/S6/S7/S11 | 仅设计；schema cutover 与双会话未实现 | P1：C1–C9 收敛统一契约、精确差分、角色绑定、共享生命周期与 benchmark/App 采用；独立成果和完整成本先于默认提升 |
 | [TypeScript Control-Plane Migration Direction v0](typescript-control-plane-migration-v0.zh-CN.md) | S2 | Accepted；整笔事务迁移中 | P0/P1：R1–R4 热事务优先；T0–T4 caller/删除/成本证据；不是百 Agent 前全量重写 |
 | [Semantic Vocabulary Convergence and Commit-Time Drift Checks (v0)](semantic-vocabulary-convergence-v0.zh-CN.md) | S2 | 已接受；registry/inventory/drift 与后续 typed 切片存在 | P1：按语义角色收敛 vocabulary；盘点真实 producer/consumer；不凭枚举同名合并，schema 改动单独审阅 |
 | [LoopX Shared Control-Plane Authority and Pluggable State Providers (v0)](shared-goal-authority-state-provider-v0.zh-CN.md) | S2/S3/S7 | 已接受；store、局部事务和 service admission 基础已存在 | P1→P2：R5 本地 D1–D3；R6 认证跨 host；真实 backend/soak/恢复资格后才晋升 |

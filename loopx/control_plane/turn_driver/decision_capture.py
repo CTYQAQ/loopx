@@ -137,6 +137,17 @@ CONTEXT_CAPTURE_READ_GUIDANCE = (
 # This does not establish downstream retained-history capacity or retention.
 NATIVE_CONTEXT_PAGE_BYTES = 8192
 NATIVE_CONTEXT_PAGE_OUTPUT_BYTES = 7900
+# Installed together by the opt-in native configuration. Unknown hosts retain
+# the small-page boundary; this declaration is output capacity, not retention.
+NATIVE_CONTEXT_LARGE_OUTPUT_BYTES = 64000
+NATIVE_CONTEXT_HISTORY_TOKENS = 20000
+NATIVE_CONTEXT_OUTPUT_ENV = "LOOPX_CONTEXT_PAGE_OUTPUT_BYTES"
+
+
+def native_context_page_budget() -> tuple[int, int]:
+    if os.environ.get(NATIVE_CONTEXT_OUTPUT_ENV) == str(NATIVE_CONTEXT_LARGE_OUTPUT_BYTES):
+        return NATIVE_CONTEXT_LARGE_OUTPUT_BYTES, NATIVE_CONTEXT_LARGE_OUTPUT_BYTES
+    return NATIVE_CONTEXT_PAGE_BYTES, NATIVE_CONTEXT_PAGE_OUTPUT_BYTES
 
 
 def context_capture_read_command(path: Path, digest: str, *, offset: int = 0, page_bytes: int = 4096,

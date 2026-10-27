@@ -1,5 +1,16 @@
 # Required work context
 
+This page specifies current delivery behavior. The
+[unified-contract RFC](../architecture/rfcs/controller-executor-unified-contract-v0.md)
+proposes one full/delta/detail/recovery pipeline across entrypoints. Its
+controller-authored brief must retain complete original requirements and
+reachable evidence; experimental model-token targets never permit truncation
+or replace source-consumption obligations.
+The proposed shared composition boundary preserves source revisions and pending
+read obligations before capture. Recovering delivery from that immutable capture
+does not refresh authority; a legitimate new selection/authority check remains
+distinct from retrying transport.
+
 Ordinary Heartbeat/quota delivers the full effective selected Todo, enabled
 canonical acceptance and Agent-scoped User obligations at
 `interaction_contract.agent_channel.work_context`. These are current work
@@ -192,6 +203,13 @@ patch or an incompatible reader automatically recovers the same original full
 capture. Recovery never reruns the guard, asks the owner, spends quota or grants
 execution. Wire reduction alone does not establish actual model costs or outcomes.
 
+After reading a native delta completely, the Agent uses its changes with the
+retained model context. A resumed tool process may have no earlier Code Mode
+variables; that alone does not mean the model lost the baseline. Materializing a
+JavaScript object does not require another full read. If required baseline content
+is unavailable or continuity is uncertain, recover the same capture in full before
+dependent work. Compaction still invalidates the baseline and requires recovery.
+
 ### Machine default
 
 **Settings → This machine → Capabilities → Differential context → Codex** uses the
@@ -237,7 +255,7 @@ Native `quota should-run` and the saved `context-project` entry share the same
 paged presentation. Each returns page zero, a digest-pinned continuation and full
 recovery without another admission. The inline page contains up to 3 KiB and shrinks
 to keep the complete guard stdout, including recovery and instruction fields,
-within 7900 UTF-8 bytes. Continuations
+within 7900 UTF-8 bytes. Without the generated native output configuration, continuations
 request up to 8 KiB of content with `--max-page-output-bytes 7900`, which bounds
 successful JSON stdout including escaping, commands and newline. Consume the inline
 page before following next_command; when the retained-history limit is unknown,
@@ -262,12 +280,27 @@ their separate confirmed-input contract.
 
 For native setup, `quota context-config --codex-app --goal-id GOAL --agent-id AGENT`
 under machine on prepares only that private transport leaf and renders the
-existing hooks and recovery instructions. For an SSH Goal, replace `--codex-app`
+existing hooks, recovery instructions and `config_overrides`. Applying those overrides
+selects 64000-byte continuation outputs and a 20000-token native history limit;
+the initial guard remains within 7900 bytes. The worker applies this configuration
+automatically inside its isolated opt-in trial. The persistent instruction requests
+22000 tokens for each context-read tool result and 24000 for its code-mode emission,
+forwarding one stdout at a time. Unknown or unsupported output declarations retain
+the small-page default. Remove the generated output overrides together with the
+context setup on rollback; saving a machine preference alone does not apply them.
+This output sizing does not prove retained input, lower fees or task benefit.
+For an SSH Goal, replace `--codex-app`
 with `--runtime-profile codex_app_ssh_goal` in setup and the thin/bootstrap prompt.
 Its generated guard keeps the native Goal identity and visible-Goal settlement;
 it does not become a hosted heartbeat. It does not install or trust hooks,
 change host configuration or restart the running App. Configure and trust its
-exact hooks for the next native session. The native path preserves authentication,
+exact hooks for the next native session. Existing loaded threads may retain
+their earlier hook configuration despite enabled/trusted `hooks/list` readback;
+discovery does not deliver `SessionStart` or initialize a context journal. Use
+the host's start/resume path after active work reaches its normal safe boundary,
+then verify lifecycle delivery. Keep full delivery and the original capture
+until then; do not fabricate events, borrow another session's journal or restart
+an active host to manufacture adoption. The native path preserves authentication,
 endpoints, provider selection and connection mode, including implicit history via
 `previous_response_id`. It neither enables input diagnostics nor scans model-input
 history. Benchmark preparation stages those same hooks in its isolated trial home.
@@ -332,6 +365,12 @@ not restart stopped Goals, alter quota/leases or qualify installed Desktop,
 all-Goal adoption, actual solver costs or outcome benefit.
 
 ## 中文
+
+本页规定当前交付行为。[统一契约提案](../architecture/rfcs/controller-executor-unified-contract-v0.zh-CN.md)
+拟让所有入口复用 full/delta/detail/recovery 流程。controller 编写的工作说明必须
+保留完整原始要求与可访问证据；实验性模型 token 目标不允许截断，也不替代来源读取义务。
+提议的共享组合边界在 capture 前保留来源 revision 与未完成必读义务。从该不可变 capture
+恢复交付不刷新权限；合法的新选择/权限检查与传输重试仍是不同操作。
 
 普通 Heartbeat/quota 默认在 `agent_channel.work_context` 返回完整选定 Todo、
 启用的验收与当前 Agent 相关的 User Todo，附带来源和修订，不需要开启 TurnEnvelope。
@@ -403,6 +442,11 @@ TurnEnvelope。在基线连续性成立的口径内，两入口仍逐轮发送 `
 或读者不兼容时，自动恢复同一原始 full capture，不重跑 guard、不问询、不扣额，
 也不授予执行权限。传输减少本身不证明实际模型费用或结果改善。
 
+完整读完原生差分后，Agent 将变化与模型仍保留的上下文一起使用。恢复后的工具进程可能
+没有此前的 Code Mode 变量；仅此并不表示模型丢失了基线。不必为了组装 JavaScript
+对象再读一次全量。若当前工作所需的基线内容不可用或连续性不确定，仍须先完整恢复
+同一捕获，再做依赖它的工作。压缩仍会使基线失效，并要求恢复。
+
 ### 机器级默认
 
 在**设置 → 本机设置 → 能力中心 → 差分上下文 → Codex**选择关闭或开启，沿用现有
@@ -438,11 +482,17 @@ SSH Goal 使用 `--runtime-profile codex_app_ssh_goal` 生成 context-config 和
 沿用可见 Goal 的执行与结算身份；仅启用差分时接入捕获目录，不转换成自动心跳。
 原生 `quota should-run` 与已保存捕获的 `context-project` 共用分页呈现，直接返回第零页、
 固定摘要的后续读取与完整恢复，不另行准入。内联正文最多 3 KiB，必要时缩小，使包含
-恢复字段与完整指引的 guard stdout 不超过 7900 UTF-8 字节；后续命令最多请求
+恢复字段与完整指引的 guard stdout 不超过 7900 UTF-8 字节。未应用生成的原生输出配置时，后续命令最多请求
 8 KiB 正文，并用 `--max-page-output-bytes 7900` 将成功 JSON stdout（含转义、
 后续命令与换行）限制为 7900 字节。先消费内联页，再跟随 next_command；保留历史
 上限未知时，每次只读一个有界输出。该上限不证明模型保留。Code Mode 直接转发
 exec stdout；把整包重打进哈希工具不构成原始字节已被保留的证明。
+原生配置同时返回 `config_overrides`：应用后，续读输出上限为 64000 字节，原生历史
+上限为 20000 token，首次 guard 仍保持 7900 字节。开启的 benchmark worker 在其
+隔离会话内自动应用；持久指引要求每次续读直接输出预算 22000 token、Code Mode
+输出预算 24000 token，每次直接转发一份 stdout。未知或不支持的输出声明保持小页。
+回滚时同时移除生成的输出覆盖项；仅保存机器偏好并不会应用这些宿主配置。
+该设置不证明输入保留、总费用降低或任务效果改善。
 读取器校验不可变 capture 的摘要。Post-tool 适配层复用显式输入观察的字节范围校验，
 先将实际 UTF-8 正文与可信 journal 指向的物理捕获及固定摘要核对，再合并读取范围。
 正文改变、文件丢失或替换、符号链接及摘要失败均不得晋升基线；保留原始恢复引用，
@@ -453,7 +503,11 @@ exec stdout；把整包重打进哈希工具不构成原始字节已被保留的
 在失效事件发生前仍可用；这不是实际输入保留证明或模型 ACK。共享 codec 仍校验精确基线
 摘要、作用域、本轮控制与完整重建。显式 final-input Host 客户端保留独立的确认输入契约。
 
-为下次原生会话配置并信任精确 hooks，不重启当前 App。原生路径保留认证、端点、provider
+为下次原生会话配置并信任精确 hooks，不重启当前 App。已加载线程可能继续沿用旧 hook
+配置；`hooks/list` 的 enabled/trusted 读回不等于向该线程交付 `SessionStart` 或初始化
+context journal。当前工作到达正常安全边界后，沿宿主正常启动／恢复入口加载配置，再
+核验实际生命周期交付。此前保持全量与原捕获，不伪造事件、借用其他会话 journal 或为
+制造采用样本重启活动宿主。原生路径保留认证、端点、provider
 和连接方式，包括带 `previous_response_id` 的隐式历史；不启用输入诊断，也不逐轮扫描
 模型完整输入。Benchmark 在各自隔离的 trial home 内自动准备同一组 hooks。
 
@@ -512,7 +566,7 @@ exact digest and Turn receipt; they never rerun admission or spend quota.
 With delivery on, a successful saved projection also returns page zero using
 the existing `context_capture_page_v1` fields. Its content is bounded to 3 KiB
 and shrinks against the final presentation's 7900-byte stdout limit, including
-recovery, activation and instruction metadata. Subsequent native commands request up to
+recovery, activation and instruction metadata. Without the generated output profile, subsequent native commands request up to
 8 KiB of content within a 7900-byte successful JSON stdout limit. The optional
 JSON-only `--max-page-output-bytes` flag shrinks content at UTF-8 boundaries and
 preserves the limit in `next_command`. An insufficient limit returns an error
@@ -528,7 +582,10 @@ Codex 0.162.1 qualification uses a 10,000-token history setting and a 12,000-tok
 code-mode result budget with one directly forwarded stdout per call. Unknown
 budgets keep the existing 7900-byte native default. A larger requested result
 alone never proves history retention; missing output still needs same-capture
-recovery. This changes no host setting automatically.
+recovery. The reader flag changes no host setting. The shared native setup described
+above supplies the larger 64000-byte profile and its matching history/execution
+budgets together; only the opted-in worker applies them automatically. A legacy
+consumer that has not applied that setup keeps the existing small-page boundary.
 Consume `content`, then follow `next_command` through `eof` for full byte coverage.
 The reader verifies the original digest; do not retype or hash the content. The
 existing `command` still restarts at zero for older readers or incomplete inline
@@ -546,7 +603,7 @@ input retention.
 
 开启时，成功的已保存投影同时用现有 `context_capture_page_v1` 字段返回第一页。
 该页内容最多 3 KiB，按最终呈现的 7900 字节 stdout 上限缩小，包含恢复、启用配置与
-完整指引元数据；后续原生命令最多请求 8 KiB
+完整指引元数据；未应用生成的输出配置时，后续原生命令最多请求 8 KiB
 正文，成功 JSON stdout 限制为 7900 字节。可选的 JSON 专用参数
 `--max-page-output-bytes` 按 UTF-8 边界缩减正文，并在 `next_command` 中保留。
 上限不足时返回错误，不返回无进展的分页；增大上限后重读同一捕获。省略该参数
@@ -556,7 +613,9 @@ input retention.
 上限才能请求超过 8 KiB 的正文，最大仍受既有 capture 大小限制；上限包含转义、
 JSON 外层与换行，后续命令继承该值。Codex 0.162.1 定向验证采用 10,000 token 历史
 设置和 12,000 token code-mode 输出预算，每次直接转发一份 stdout。未知预算保持
-7900 字节原生默认；大输出请求不证明历史保留，缺失仍恢复同一 capture，不自动修改宿主设置。
+7900 字节原生默认；大输出请求不证明历史保留，缺失仍恢复同一 capture。
+读取参数本身不修改宿主设置。上述共享原生配置将 64000 字节分页与配套的历史和执行
+预算一起提供，仅开启的 worker 自动应用；尚未应用该配置的旧读取方保持小页边界。
 先读取 `content`，再沿 `next_command` 读至 `eof`，确保完整字节覆盖。
 读取器校验原始摘要；无需重抄正文或计算哈希。
 原有 `command` 仍从零开始，供旧读取方或内联输出不完整时重读；可选的首屏读取

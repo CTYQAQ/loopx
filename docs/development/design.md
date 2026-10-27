@@ -242,6 +242,22 @@ or failed translations retain original text and never silently launch a model.
 版本比较复用两条记录已核对的同一快照译文；版本关系与差异数仍按原始记录计算，
 两侧原文可原位展开，不把译文变化算作来源变化。
 
+Review the displayed translation against its original and cited context, including
+quantities, their referents, negation and uncertainty. Field coverage and preserved
+literals do not establish readable meaning. When the source supports a quantity,
+state it in ordinary localized prose; an opaque English compound in parentheses
+is insufficient. Keep exact source terms available, and leave ambiguous counts,
+units or identifiers unresolved rather than guessing. Correct saved translations
+through their existing versioned analysis owner; review does not itself rerun a
+model or rewrite a saved result. Record remaining content failures in the
+existing task and review.
+
+译文验收须对照原文及引用语境，核对数量所指、否定和不确定性。字段齐全、原始标记
+未变，不代表含义已经清楚。有来源支持的数量用界面语言正文说清，不能只留下括号内
+的连写英文；准确原词仍可查，含义不明的计数、单位和标识不猜测。修订沿版本化分析
+处理，评审不自动重跑模型或覆盖已存结果；剩余正文问题记入原任务和评审。
+
+
 刷新和前进后退保留视图、时间分组与证据焦点；标签之间保留阅读位置。选择状态按
 Goal 和来源隔离。研究中从侧栏切换 Goal 仍停留在研究页，读取新 Goal 自身证据；
 返回恢复原 Goal 的选择。首页及任务、会话、成果的明确链接保留各自目的地。
@@ -946,6 +962,8 @@ automated readability score or an additional owner approval.
 - [ ] Open a representative item and read its complete requirements, rationale
       and evidence once. Check keyboard/touch access, delayed loading, closing
       and return to the same item. Long content remains readable when expanded.
+      For translated research, apply the original/context comparison above to
+      actual saved output, not only a synthetic translation or its coverage count.
 - [ ] Inspect the entire page as well as the first viewport at desktop and
       narrow widths. Count repeated explanations across regions, remove or share
       them, and check that failures, uncertainty and action consequences remain

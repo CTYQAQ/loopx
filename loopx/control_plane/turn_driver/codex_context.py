@@ -19,6 +19,8 @@ from .decision_capture import (
     write_decision_capture, capture_context_projection, project_captured_context, CONTEXT_CAPTURE_PAGE_GUIDANCE,
     capture_page_range, read_context_capture_file,
     context_capture_read_command, NATIVE_CONTEXT_PAGE_BYTES, NATIVE_CONTEXT_PAGE_OUTPUT_BYTES,
+    NATIVE_CONTEXT_LARGE_OUTPUT_BYTES, NATIVE_CONTEXT_HISTORY_TOKENS, NATIVE_CONTEXT_OUTPUT_ENV,
+    native_context_page_budget,
 )
 
 # Native adapter activation reuses scheduler-owned host declarations. These
@@ -219,17 +221,23 @@ def _context_continuation_instructions(command: str) -> str:
 
 
 def codex_context_recovery_instructions(directory: str, *, goal_id: str, agent_id: str,
-                                         cli_argv: list[str], session_root: bool = False) -> str:
+                                         cli_argv: list[str], session_root: bool = False,
+                                         page_output_bytes: int = NATIVE_CONTEXT_PAGE_OUTPUT_BYTES) -> str:
     """Host-owned persistent instructions, independent of event-hook delivery."""
     import shlex
 
     command = shlex.join([*cli_argv, "--format", "json", "quota", "context-read",
         "--codex-context-root" if session_root else "--codex-context-dir", directory,
-        "--goal-id", goal_id, "--agent-id", agent_id, "--page-bytes", str(NATIVE_CONTEXT_PAGE_BYTES),
-        "--max-page-output-bytes", str(NATIVE_CONTEXT_PAGE_OUTPUT_BYTES)])
+        "--goal-id", goal_id, "--agent-id", agent_id, "--page-bytes", str(max(NATIVE_CONTEXT_PAGE_BYTES, page_output_bytes)),
+        "--max-page-output-bytes", str(page_output_bytes)])
     return (
         _context_continuation_instructions(command) +
-        "Follow the returned next_command through eof; verify complete bytes and digest. "
+        "Follow the returned next_command through eof; verify complete bytes and digest. " +
+        ("The generated native configuration supports 64000-byte context-read outputs and a 20000-token history limit. "
+         "Read one continuation per tool call with max_output_tokens=22000. In code-mode, also set the exec "
+         "pragma max_output_tokens to 24000 and forward successful stdout directly with text(result.output). "
+         "Keep the initial guard result small; these larger budgets apply to context-read calls only. "
+         if page_output_bytes == NATIVE_CONTEXT_LARGE_OUTPUT_BYTES else "") +
         "For code-mode reads, size batches against both direct-result and retained-history output limits; "
         "max_output_tokens alone does not establish the latter. Read one output at a time with "
         "--max-page-output-bytes when the effective history limit is unknown; for legacy default pages, "
@@ -262,10 +270,17 @@ def codex_context_configuration(directory: str, *, goal_id: str, agent_id: str,
         *(["--codex-app"] if scenario == "codex_app_heartbeat" else
           ["--runtime-profile", "codex_app_ssh_goal" if scenario == "codex_app_ssh_goal" else "generic_cli"]),
         option, directory]), "timeout": 10}
-    return {"hooks": {event: [{**({"matcher": "^Bash$"} if event == "PostToolUse" else {}),
-                              "hooks": [handler]}] for event in CONTEXT_LIFECYCLE_HOOKS},
+    # Native Interrupt handlers have a 3s ceiling. Declare the effective value
+    # rather than letting discovery silently clamp a different configuration.
+    return {"config_overrides": {
+            "tool_output_token_limit": NATIVE_CONTEXT_HISTORY_TOKENS,
+            "shell_environment_policy.set." + NATIVE_CONTEXT_OUTPUT_ENV: str(NATIVE_CONTEXT_LARGE_OUTPUT_BYTES)},
+        "hooks": {event: [{**({"matcher": "^Bash$"} if event == "PostToolUse" else {}),
+                              "hooks": [{**handler, "timeout": 3} if event == "Interrupt" else handler]}]
+                      for event in CONTEXT_LIFECYCLE_HOOKS},
         "developer_instructions": codex_context_recovery_instructions(directory, goal_id=goal_id,
-            agent_id=agent_id, cli_argv=cli_argv, session_root=session_root)}
+            agent_id=agent_id, cli_argv=cli_argv, session_root=session_root,
+            page_output_bytes=NATIVE_CONTEXT_LARGE_OUTPUT_BYTES)}
 
 
 def codex_context_hook(directory: str | None, event: dict[str, Any]) -> dict[str, Any]:
@@ -467,8 +482,9 @@ def project_codex_context(payload: dict[str, Any], *, directory: str | None, cap
                 request = _native_context_request(state, scope)
                 recovery = capture_context_projection(payload, directory=capture_directory,
                     read_guidance=CONTEXT_CAPTURE_PAGE_GUIDANCE)
+                page_bytes, output_bytes = native_context_page_budget()
                 recovery["command"] = context_capture_read_command(Path(recovery["path"]), recovery["sha256"],
-                    page_bytes=NATIVE_CONTEXT_PAGE_BYTES, max_page_output_bytes=NATIVE_CONTEXT_PAGE_OUTPUT_BYTES)
+                    page_bytes=page_bytes, max_page_output_bytes=output_bytes)
                 state["recovery"] = {**{key: recovery[key] for key in ("path", "sha256", "command")},
                     "goal_id": goal_id, "agent_id": agent_id,
                     "total_bytes": Path(recovery["path"]).stat().st_size}

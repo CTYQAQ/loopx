@@ -47,6 +47,11 @@ def _turn_envelope_result(
     return dict(result)
 
 
+def assert_turn_envelope_consumer_version(envelope: Mapping[str, Any]) -> None:
+    """Use the typed wire-version gate before any Host consumes this packet."""
+    _turn_envelope_result("consumer_version", envelope=dict(envelope))
+
+
 def turn_envelope_action_signature_document(
     envelope: Mapping[str, Any],
 ) -> dict[str, Any]:

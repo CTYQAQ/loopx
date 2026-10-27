@@ -6,6 +6,16 @@ advances one LoopX goal without hiding compute policy inside the timer.
 The timer only wakes the executor. LoopX decides whether that wakeup
 should spend delivery compute.
 
+The [unified-contract RFC](architecture/rfcs/controller-executor-unified-contract-v0.md)
+keeps Codex App heartbeat as a required product qualification path. Its proposed
+controller session would consume one canonical contract and delegate ordinary
+work to an executor. That profile is not enabled by this template: continue to
+use the installed runtime's fresh contract and existing scheduler/stop rules.
+
+中文：[统一契约提案](architecture/rfcs/controller-executor-unified-contract-v0.zh-CN.md)
+将 Codex App heartbeat 列为必验产品路径。拟议 controller 消费统一契约后向 executor
+交付业务任务；本模板不启用该模式，仍以已安装运行时的最新契约和调度/停止规则执行。
+
 ## Two Prompt Layers
 
 Keep the Codex App visible goal text and the heartbeat automation task body as
@@ -466,12 +476,30 @@ loopx --format json quota context-config --context-delivery on --codex-app \
   --goal-id <goal> --agent-id <agent>
 ```
 
-The result contains `native_config.hooks` and
+The result contains `native_config.config_overrides`, `native_config.hooks` and
 `native_config.developer_instructions`. Merge the hooks into the host's existing
 `hooks.json` or inline hook configuration, and append the recovery instruction to
-its existing developer instructions. Preserve other configuration. Review and
+its existing developer instructions. Apply each flat key/value in `config_overrides`
+to the native host configuration (or as a `-c key=value` override). This selects
+64000-byte context continuations, a 20000-token history limit, and a shell-scoped
+reader budget declaration. The initial guard stays small. Its instruction requests
+22000 tokens per reader result and 24000 for code-mode emission, with one directly
+forwarded stdout per call. Unconfigured hosts retain the small-page default;
+the isolated benchmark worker applies this profile automatically when opted in.
+Preserve other configuration. Review and
 trust only these exact hooks through Codex's native hook trust surface; the CLI
 does not install files, approve hashes, enable diagnostics or run a guard.
+Rollback removes these generated output overrides along with the context hooks
+and recovery instruction; restore any previous host values. The profile does not
+establish model retention, task gains or net fee savings.
+An already loaded native thread may keep its earlier hook configuration even
+when `hooks/list` discovers the new handlers as enabled and trusted. That readback
+does not deliver `SessionStart` or initialize its context journal. After active
+work reaches its normal safe boundary, use the host's start/resume path with the
+resulting configuration and verify actual lifecycle delivery before qualifying
+live use. Do not restart an active host merely to manufacture a sample. Until
+then, preserve full delivery and the original capture; do not fabricate events
+or borrow another session's journal.
 Use one configuration for the declared Goal/Agent. A shared private root keeps
 different native sessions in separate journals, including interleaved sessions.
 For an interactive SSH Goal, use `--runtime-profile codex_app_ssh_goal` in place

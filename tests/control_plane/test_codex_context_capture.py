@@ -87,14 +87,14 @@ def _last_page(request):
   + [(host, surface, False, True, False) for host in ("benchmark", "code_mode")
      for surface in ("quota_packet", "turn_envelope")]
   + [("code_mode", surface, False, True, True) for surface in ("quota_packet", "turn_envelope")])
-def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, host, surface, failed_primary, resumed, adaptive, hook_loss=None, shared_root=False, checkpoint_handoff=False, handoff_socket=None, native_pragma=False, native_read_batch=2, native_history_tokens=None, resume_loss=None, bounded_pages=False, ssh_goal=False, reader_output_bytes=None):
+def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, host, surface, failed_primary, resumed, adaptive, hook_loss=None, shared_root=False, checkpoint_handoff=False, handoff_socket=None, native_pragma=False, native_read_batch=2, native_history_tokens=None, resume_loss=None, bounded_pages=False, ssh_goal=False, reader_output_bytes=None, recovery_resume=False):
     # Real worker qualification follows returned cursors; output budgets can
     # shrink a page, so precomputed fixed offsets are not its production path.
     bounded_pages = bounded_pages or host == "benchmark"
-    # These shapes retain complete, independently checked reader pages in the
-    # native-selected replay. Other shapes below deliberately exercise reset
-    # and exact-original recovery instead of claiming qualified reuse.
-    qualified_resume = host == "benchmark" or ssh_goal or (adaptive and bounded_pages)
+    # Ordinary and batched CodeMode reads now share the native checkpoint
+    # owner. Preserve a verified replay; explicit history-loss cases below
+    # must still recover the original before dependent work.
+    qualified_resume = host in {"benchmark", "code_mode"} or ssh_goal
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     binary, env, workspace, home = _native_fixture(tmp_path)
     env.pop("CODEX_ROLLOUT_TRACE_ROOT", None)
@@ -130,6 +130,8 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             capture_output=True, text=True, timeout=15)
         assert prepared.returncode == 0, prepared.stderr
         native_configuration = json.loads(prepared.stdout)["native_config"]
+    automatic_output_budget = host == "benchmark" or native_configuration is not None
+    output_limit = reader_output_bytes or (64000 if automatic_output_budget else 7900)
     hook_command = (native_configuration["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         if native_configuration else shlex.join(cli + ["quota", "context-hook", "--context-delivery", "on", *host_args, context_option, str(lifecycle)]))
     if failed_primary:
@@ -221,7 +223,9 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             continued += ["--turn-instance-id", original["heartbeat_receipt"]["turn_instance_id"],
                           "--todo-id", TODO_ID]
             rendered = shlex.join(continued)
-        return rendered + " > " + shlex.quote(str(wire_paths[name])) + " && cat " + shlex.quote(str(wire_paths[name]))
+        # Observe the producer's stdout and retain an independent exact copy;
+        # a later cat is not the native guard's own output path.
+        return "set -o pipefail\n" + rendered + " | tee " + shlex.quote(str(wire_paths[name]))
 
     def pages(name, path):
         raw = path.read_bytes()
@@ -268,6 +272,12 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
     def delivered(request, name):
         return _delivered(request, page_digests[name])
 
+    def native_state():
+        from loopx.control_plane.turn_driver.codex_context import _state
+        directory = (lifecycle / hashlib.sha256(wires["warm"]["target"]["session_id"].encode()).hexdigest()
+                     if shared_root else lifecycle)
+        return _state(directory)
+
     def response(request, number, message):
         nonlocal command, root
         phase = stages["phase"]
@@ -275,9 +285,9 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             page = _last_page(request)
             assert page and page["ok"], page
             bounded_sizes.append(len(page["content"].encode()))
-            assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= (reader_output_bytes or 7900)
+            assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= output_limit
             if not page["eof"]:
-                assert f"--max-page-output-bytes {reader_output_bytes or 7900}" in page["next_command"]
+                assert f"--max-page-output-bytes {output_limit}" in page["next_command"]
                 return tool(page["next_command"], number)
         if stages["pages"]:
             cmd = stages["pages"].pop(0)
@@ -399,11 +409,23 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 return tool(page["next_command"], number)
             stages["phase"] = "recovered"
             return response(request, number, message)
+        elif phase == "recovery_resuming":
+            # The actual host has exited and reconstructed history again. Its
+            # model input must retain the recovered full body, and SessionStart
+            # must preserve that new baseline without another recovery read.
+            assert delivered(request, "recovery") == Path(wires["warm"]["recovery"]["path"]).read_text().rstrip("\n")
+            journal = native_state()
+            assert journal["candidate"]["target"]["context_epoch"] == stages["recovered_epoch"]
+            assert journal["candidate"]["capture_sha256"] == page_digests["recovery"]
+            stages["phase"] = "done"
+            return message
         else:
             assert phase == "recovered"
             recovered = delivered(request, "recovery")
             assert recovered == Path(wires["warm"]["recovery"]["path"]).read_text().rstrip("\n")
-            stages["phase"] = "done"
+            if recovery_resume:
+                stages["recovered_epoch"] = native_state()["context_epoch"]
+            stages["phase"] = "recovery_resuming" if recovery_resume else "done"
             return message
         return tool(cmd, number)
 
@@ -416,7 +438,8 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             argv[argv.index("--max-page-output-bytes") + 1] = str(reader_output_bytes)
             cmd = shlex.join(argv)
         if host == "code_mode":
-            pragma = '// @exec: {"max_output_tokens":12000}\n' if native_pragma else ""
+            pragma = ('// @exec: {"max_output_tokens":24000}\n' if automatic_output_budget else
+                '// @exec: {"max_output_tokens":12000}\n' if native_pragma else "")
             # Exercise the shipped default page size and bounded batching for
             # both output forms. One model round per page can exhaust the
             # unchanged native turn deadline before same-capture recovery ends.
@@ -425,7 +448,7 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 commands.append(stages["pages"].pop(0))
             if adaptive:
                 code = "".join("{const r=await tools.exec_command(" + json.dumps({
-                    "cmd": command, "login": False, "max_output_tokens": 11000 if reader_output_bytes else 2000 if bounded_pages else 2400})
+                    "cmd": command, "login": False, "max_output_tokens": 22000 if automatic_output_budget and "context-read" in shlex.split(command) else 11000 if reader_output_bytes else 2000 if bounded_pages else 2400})
                     + ");text(r.exit_code === 0 ? r.output : r);}" for command in commands)
                 return {"type": "custom_tool_call", "id": f"ctc_{number}", "call_id": f"call_{number}",
                     "name": "exec", "input": pragma + code}
@@ -433,7 +456,8 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 "name": "exec", "input": pragma + "".join("text(await tools.exec_command(" + json.dumps({
                     "cmd": command, "max_output_tokens": 2000}) + "));" for command in commands)}
         return {"type": "function_call", "id": f"fc_{number}", "call_id": f"call_{number}",
-            "name": "exec_command", "arguments": json.dumps({"cmd": cmd, "max_output_tokens": 2000})}
+            "name": "exec_command", "arguments": json.dumps({"cmd": cmd,
+                "max_output_tokens": 22000 if automatic_output_budget and "context-read" in shlex.split(cmd) else 2000})}
 
     def usage(request, number):
         count = (2000000 if host == "benchmark" else 30000) if number == stages["compact_response"] else 1
@@ -458,7 +482,10 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                     config.write_text(f"tool_output_token_limit={native_history_tokens}\n" + config.read_text())
             if native_configuration:
                 config = home / "config.toml"
-                config.write_text("developer_instructions=" + json.dumps(native_configuration["developer_instructions"])
+                config.write_text("".join(key + "=" + json.dumps(value) + "\n"
+                    for key, value in native_configuration["config_overrides"].items()
+                    if key != "tool_output_token_limit" or native_history_tokens is None)
+                    + "developer_instructions=" + json.dumps(native_configuration["developer_instructions"])
                     + "\n" + config.read_text())
             elif hook_loss:
                 from loopx.control_plane.turn_driver.codex_context import codex_context_recovery_instructions
@@ -585,6 +612,22 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             sandbox = "danger-full-access" if ssh_goal else "workspace-write"
             session_id = _app_server(binary, env, workspace, home, True, sandbox=sandbox, turn_timeout_sec=60)
             if resumed:
+                if not shared_root:
+                    candidate = json.loads((lifecycle / "session.json").read_text())["candidate"]
+                    assert candidate["capture_bytes_verified"] is True
+                    assert candidate["target"] == wires["cold"]["target"]
+                    checkpoint = candidate["native_resume"]
+                    assert checkpoint["read_source"] == {
+                        "path": str(read_paths["cold"]), "sha256": page_digests["cold"]}
+                    history_path = Path(checkpoint["path"])
+                    assert history_path.is_relative_to(home / "sessions")
+                    history = history_path.read_bytes()
+                    start, end = checkpoint["reader_start"], checkpoint["observed_bytes"]
+                    assert 0 < start < end <= len(history)
+                    assert hashlib.sha256(history[start:end]).hexdigest() == checkpoint["reader_sha256"]
+                assert _app_server(binary, env, workspace, home, True, sandbox=sandbox,
+                                   resume=session_id, turn_timeout_sec=60) == session_id
+            if recovery_resume:
                 assert _app_server(binary, env, workspace, home, True, sandbox=sandbox,
                                    resume=session_id, turn_timeout_sec=60) == session_id
     assert not errors, errors
@@ -679,6 +722,20 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
 
 
 @pytest.mark.parametrize("surface", ["quota_packet", "turn_envelope"])
+def test_native_compact_recovery_survives_process_resume(tmp_path, monkeypatch, surface):
+    test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
+        "code_mode", surface, False, True, True, bounded_pages=True, recovery_resume=True)
+
+
+@pytest.mark.parametrize("surface", ["quota_packet", "turn_envelope"])
+def test_native_generated_large_page_configuration(tmp_path, monkeypatch, surface):
+    # Apply only the public setup output: no manual reader or history override.
+    test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
+        "code_mode", surface, False, True, True, shared_root=True,
+        bounded_pages=True, native_pragma=True, native_read_batch=1, recovery_resume=True)
+
+
+@pytest.mark.parametrize("surface", ["quota_packet", "turn_envelope"])
 @pytest.mark.parametrize("loss", ["replace", "unqualified_profile"])
 def test_native_worker_resume_history_change_reads_current_full(tmp_path, monkeypatch, surface, loss):
     test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
@@ -721,7 +778,7 @@ def test_native_bounded_command_chain_recovers_with_unknown_history_limit(tmp_pa
     # Follow only public returned commands, one stdout per call, at the existing
     # native deadline and unknown-model history budget; no larger host limit.
     test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
-        "code_mode", surface, False, True, True, "missing", shared_root=True,
+        "code_mode", surface, False, True, True, "missing",
         native_read_batch=1, bounded_pages=True)
 
 

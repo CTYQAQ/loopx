@@ -15,8 +15,9 @@
 
 Sections 1–3 and 5–11 define the proposed experiment and integration boundaries;
 section 4 records source observations, not live qualification. Section 12 lists
-decisions needed before execution. Appendix A records provenance. Keep the
-Chinese mirror synchronized. Merge accepts a design basis, not a runtime
+decisions needed before execution. Appendix A records provenance. The Chinese
+file is a semantic mirror; keep both language versions synchronized. Merge
+accepts a design basis, not a runtime
 default, benchmark result, spending commitment or upstream implementation promise.
 Future measured checkpoints belong in the existing [RFC ledger](ledger/README.md).
 
