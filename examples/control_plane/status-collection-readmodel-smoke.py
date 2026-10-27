@@ -55,6 +55,8 @@ def write_registry(root: Path) -> Path:
                     {
                         "id": GOAL_ID,
                         "domain": "loopx-platform",
+                        "coordination": {"agent_model": "peer_v1",
+                            "registered_agents": ["codex-product-capability"]},
                         "status": "active",
                         "repo": str(project),
                         "state_file": state_file,
