@@ -105,6 +105,7 @@ def write_connected_goal_fixture(
         json.dumps(
             {
                 "schema_version": "0.1",
+                "common_runtime_root": str(project / ".loopx" / "runtime"),
                 "goals": [
                     {
                         "id": goal_id,
@@ -123,7 +124,10 @@ def write_connected_goal_fixture(
         + "\n"
     )
     registry.write_text(registry_text, encoding="utf-8")
-    return {registry: registry_text, state_file: state_text}
+    from loopx.control_plane.testing.canary_harness import import_fixture_authority
+    import_fixture_authority(registry, goal_id, provider="sqlite")
+    return {registry: registry.read_text(encoding="utf-8"),
+            state_file: state_file.read_text(encoding="utf-8")}
 
 
 def assert_fixture_unchanged(snapshot: dict[Path, str]) -> None:
