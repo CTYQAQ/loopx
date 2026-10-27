@@ -261,6 +261,15 @@ def assert_pr_resume_repository_binding() -> None:
 def assert_lifecycle(provider: str) -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-todo-durability-") as tmp:
         registry_path, runtime = write_fixture(Path(tmp))
+        # Declare every existing claim owner before the one canonical import.
+        registry = json.loads(registry_path.read_text(encoding='utf-8'))
+        registry['goals'][0]['coordination'] = {
+            'agent_model': 'peer_v1',
+            'registered_agents': ['fixture-agent', 'codex-product-capability',
+                'codex-side-bypass', 'codex-reviewer', 'codex-builder'],
+        }
+        registry_path.write_text(json.dumps(registry), encoding='utf-8')
+        import_fixture_authority(registry_path, GOAL_ID, provider=provider)
         status_payload = run_cli("status", registry_path=registry_path, runtime=runtime)
         item = attention_item(status_payload)
 
@@ -310,16 +319,6 @@ def assert_lifecycle(provider: str) -> None:
         assert "completed_todo_archive_warning" not in guard, guard
 
         first_todo_id = guard["agent_todo_summary"]["first_executable_items"][0]["todo_id"]
-        # Historical inspection above is read-only. Declare the fixture's
-        # existing claim owners before the reviewed import and normal writes.
-        registry = json.loads(registry_path.read_text(encoding='utf-8'))
-        registry['goals'][0]['coordination'] = {
-            'agent_model': 'peer_v1',
-            'registered_agents': ['fixture-agent', 'codex-product-capability',
-                'codex-side-bypass', 'codex-reviewer', 'codex-builder'],
-        }
-        registry_path.write_text(json.dumps(registry), encoding='utf-8')
-        import_fixture_authority(registry_path, GOAL_ID, provider=provider)
         original = read_canonical_todos_if_promoted(runtime_root=runtime, goal_id=GOAL_ID)
         assert original['source_authority'] == provider + '_v0'
         assert original['decision_read_from_provider'] is True and original['legacy_fallback_used'] is False
