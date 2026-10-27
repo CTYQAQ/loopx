@@ -1406,6 +1406,45 @@ def test_queued_claim_and_interrupt_share_one_turn_transition(
     ] == ["turn.queued", "turn.interrupt_requested"]
 
 
+@pytest.mark.parametrize("crash_after_intent", [False, True])
+def test_interrupt_preserves_a_successful_claim_and_durable_stop_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_after_intent: bool,
+) -> None:
+    store = ChatSessionStore(tmp_path)
+    session = store.create_session(
+        goal_id="goal-one", agent_id="codex", executor_endpoint_id="codex",
+        adapter_kind="codex_app_server", upstream_thread_id="thread-one", upstream_mode="chat",
+    )
+    sid = str(session["session_id"])
+    turn, _ = store.create_queued_turn(sid, client_turn_id="claim-first", message="claim then stop")
+    tid = str(turn["turn_id"])
+    claimed = store.claim_next_queued_turn(sid, host_claim_id="host-claim")
+    assert claimed is not None and claimed["host_claim_id"] == "host-claim"
+    original_write = chat_store._atomic_write_json
+
+    def write(path, payload, **kwargs):
+        if path == store._turn_path(sid, tid) and payload.get("status") == "interrupting":
+            # The intent must already survive independently of the status write.
+            assert store.events_after(sid, tid, None)[-1]["kind"] == "turn.interrupt_requested"
+            if crash_after_intent:
+                raise OSError("synthetic crash after durable intent")
+        return original_write(path, payload, **kwargs)
+
+    monkeypatch.setattr(chat_store, "_atomic_write_json", write)
+    if crash_after_intent:
+        with pytest.raises(OSError, match="synthetic crash after durable intent"):
+            store.begin_turn_interrupt(sid, tid, expected_statuses={"running"})
+    else:
+        assert store.begin_turn_interrupt(sid, tid, expected_statuses={"running"}) is not None
+    persisted = store.load_turn(sid, tid)
+    assert persisted is not None and persisted["host_claim_id"] == "host-claim"
+    assert persisted["status"] == ("running" if crash_after_intent else "interrupting")
+    assert store.load_session(sid)["active_turn_id"] == tid
+    assert [event["kind"] for event in store.events_after(sid, tid, None)] == [
+        "turn.queued", "turn.claimed_by_attached_host", "turn.interrupt_requested",
+    ]
+
+
 def test_interrupting_a_queued_turn_does_not_touch_the_active_adapter(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
