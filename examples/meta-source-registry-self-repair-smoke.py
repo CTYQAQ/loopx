@@ -142,8 +142,16 @@ def assert_meta_source_shadow(finding_kind: str) -> None:
         root = Path(tmp)
         registry_path, runtime, project = write_global_registry(root, finding_kind=finding_kind)
         from loopx.control_plane.testing.canary_harness import import_fixture_authority
-        for record in json.loads(registry_path.read_text())["goals"]:
-            import_fixture_authority(registry_path, record["id"], provider="sqlite")
+        # Author canonical fixture data via its owned project registry, then
+        # retain the deliberately broken shared source declaration for diagnostics.
+        fixture_registry = root / "fixture-source.json"
+        source = json.loads(registry_path.read_text())
+        source.pop("registry_role", None)
+        for record in source["goals"]:
+            record.pop("source_registry", None)
+        fixture_registry.write_text(json.dumps(source), encoding="utf-8")
+        for record in source["goals"]:
+            import_fixture_authority(fixture_registry, record["id"], provider="sqlite")
         status_payload = collect_status(
             registry_path=registry_path,
             runtime_root_override=str(runtime),
