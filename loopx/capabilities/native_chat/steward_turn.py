@@ -160,13 +160,14 @@ class StewardTurnHost:
                 and held.get("idempotency_key") == "monitor-recovery." + original["turn_id"])
             return {"monitor_restart_basis": {"original": original,
                 "event_kinds": [row["kind"] for row in events], "poll_absent": not present,
+                "contexts": [row["payload"] for row in events if row["kind"] == "manager.context"],
                 "old_worker_excluded": True, "lease_available": available}}
 
     @staticmethod
     def monitor_restart_request(original: Mapping[str, Any]) -> dict[str, Any] | None:
         """Prepare correlation only; current typed admission decides recovery."""
         prior = original.get("loopx_request") or {}
-        if (original.get("status") != "failed" or original.get("error_code") != "server_restarted"
+        if (original.get("status") != "failed" or original.get("error_code") not in {"server_restarted", "runtime_error"}
                 or prior.get("work_kind") != "monitor" or prior.get("monitor_restart_recovery") is not None):
             return None
         return {**prior, "monitor_restart_recovery": {"original_turn_id": original["turn_id"]}}
