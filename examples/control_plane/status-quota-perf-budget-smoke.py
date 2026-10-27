@@ -303,9 +303,10 @@ def main() -> int:
             check=False,
         )
         assert malformed_quota_returncode != 0, malformed_quota_payload
-        assert malformed_quota_payload.get("status_health_ok") is False, (
-            malformed_quota_payload
-        )
+        assert malformed_quota_payload["ok"] is False, malformed_quota_payload
+        assert malformed_quota_payload["error_code"] == "canonical_authority_required"
+        assert malformed_quota_payload["write_admitted"] is False
+        assert malformed_quota_payload["legacy_fallback_used"] is False
         assert malformed_quota_payload.get("should_run") is False, (
             malformed_quota_payload
         )
