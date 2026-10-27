@@ -346,8 +346,13 @@ def test_terminal_failure_receipt_does_not_echo_cli_or_model_text(
 
 
 @pytest.mark.skipif(not shell_isolation_available(), reason="Draft authoring requires native OS isolation")
-@pytest.mark.parametrize("draft_target", [".scratch/vision.json", "fixture/settlement-proof.json", "outside"])
-def test_terminal_native_draft_preserves_proof_and_authority(tmp_path: Path, draft_target: str) -> None:
+@pytest.mark.parametrize(("draft_target", "coverage_observation"), [
+    (".scratch/vision.json", False), (".scratch/vision.json", True),
+    ("fixture/settlement-proof.json", False), ("outside", False),
+])
+def test_terminal_native_draft_preserves_proof_and_authority(
+    tmp_path: Path, draft_target: str, coverage_observation: bool,
+) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
     outside = tmp_path / "owner-private.json"
     outside.write_text("Owner artifact.\n")
@@ -359,10 +364,22 @@ def test_terminal_native_draft_preserves_proof_and_authority(tmp_path: Path, dra
                        "observed_reality": "The proof was read and original Todo validation committed.",
                        "retained": ["Original validated delivery"], "evidence_refs": ["fixture-settlement-proof"]},
     }
+    if coverage_observation:
+        vision["state"] = "no_followup"
+        vision["path_delta"]["outcome"] = "stop"
+        vision["path_delta"]["stopped"] = vision["path_delta"].pop("retained")
 
     def writeback(request):
-        return ScriptedExecToolAction(command=_writeback_action(request).command +
-                                     " --agent-vision-json .scratch/vision.json")
+        command = _writeback_action(request).command + " --agent-vision-json .scratch/vision.json"
+        if coverage_observation:
+            packet = _latest_quota_packet(request)
+            step = packet["interaction_contract"]["cli_channel"]["settlement_plan"]["ordered_steps"][1]
+            assert "--progress-coverage-scope-id" in step["precondition"]
+            assert "--progress-coverage-complete" in step["precondition"]
+            command += (" --progress-result-class no_followup"
+                        " --progress-coverage-scope-id terminal-settlement-fixture"
+                        " --progress-evidence-id fixture-settlement-proof")
+        return ScriptedExecToolAction(command=command)
 
     def completion(request):
         tokens = shlex.split(_completion_action(request, kind="validation").command)

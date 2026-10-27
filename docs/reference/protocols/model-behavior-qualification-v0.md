@@ -317,6 +317,10 @@ at a time; the draft shell cannot invoke LoopX. The original ten-call limit and
 all committed receipt checks remain. Explicit foreign routes or Turn identities
 fail rather than being repaired, and failure receipts retain fixture-owned
 codes rather than echoing CLI errors or model-authored JSON.
+The shared plan also names the existing scope-input requirements for typed
+`no_followup` and `exploration_exhausted` observations. A Todo's completion is
+not itself evidence that a coverage scope is exhausted; the CLI still rejects
+missing coverage inputs before writeback.
 
 For selected-Todo and terminal qualification,
 a standalone `cat` may read up to eight workspace-confined files, optionally
