@@ -310,7 +310,7 @@ def main() -> int:
         assert malformed_quota_payload.get("should_run") is False, (
             malformed_quota_payload
         )
-        assert malformed_quota_payload.get("effective_action") == "quota_skip", (
+        assert malformed_quota_payload.get("decision") == "skip", (
             malformed_quota_payload
         )
         assert PRIVATE_DOC_MARKER not in json.dumps(malformed_quota_payload), (
