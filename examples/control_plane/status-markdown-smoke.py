@@ -996,7 +996,10 @@ def assert_project_asset_secret_scanner_boundaries() -> None:
 def assert_explicit_delivery_refresh(payload: dict, markdown: str) -> None:
     item = payload["attention_queue"]["items"][0]
     assert item["goal_id"] == DELIVERY_GOAL_ID, item
-    assert item["status"] == EXPLICIT_REFRESH_CLASSIFICATION, item
+    # Current canonical work stays primary; progress classification remains in history.
+    assert item["source"] == "active_state", item
+    assert item["status"] == "active_state_agent_todo", item
+    assert item["agent_todos"]["items"][0]["text"] == DELIVERY_AGENT_TODO, item
     readiness = item["handoff_readiness"]
     assert readiness["post_handoff_latest_run"]["classification"] == EXPLICIT_REFRESH_CLASSIFICATION, readiness
     assert readiness["post_handoff_latest_run"]["delivery_batch_scale"] == "multi_surface", readiness
