@@ -36,7 +36,10 @@ from loopx.control_plane.coordination.runtime_shadow import (
 from loopx.control_plane.todos.active_state_todo_parser import parse_active_state_todos
 
 ROOT = Path(__file__).resolve().parents[2]
-BOUNDARIES = ("intent", "tool", "result", "writeback", "spend", "receipt", "revoked")
+BOUNDARIES = (
+    "intent", "tool", "result", "writeback", "spend", "receipt", "revoked",
+    "retired_receipt",
+)
 
 # Independent downstream: append EVERY received operation, deliberately no dedup.
 SERVICE = """import json,os,sqlite3,sys
@@ -199,7 +202,9 @@ def test_export_interruption_preserves_requirements_and_original_settlement(
             **os.environ,
             "PYTHONPATH": str(ROOT),
             "FAULT_ROOT": str(tmp_path),
-            "FAULT_BOUNDARY": "result" if boundary == "revoked" else boundary,
+            "FAULT_BOUNDARY": {
+                "revoked": "result", "retired_receipt": "receipt",
+            }.get(boundary, boundary),
             "LOOPX_USAGE_PING": "0",
         }
         output = tmp_path / "first.stdout"
@@ -239,7 +244,7 @@ def test_export_interruption_preserves_requirements_and_original_settlement(
             running.kill()
             running.wait(timeout=10)
             assert running.returncode == -signal.SIGKILL
-        if boundary == "revoked":
+        if boundary in {"revoked", "retired_receipt"}:
             current = json.loads(registry.read_text())
             current["goals"][0]["status"] = "retired"
             registry.write_text(json.dumps(current))
@@ -273,10 +278,15 @@ def test_export_interruption_preserves_requirements_and_original_settlement(
             assert payload["recovery_decision"]["reinvoke_host"] is False
             assert len(spend_records(runtime, f.GOAL_ID)) == 0
             assert json.loads(journals[0].read_text()) == before
-        elif boundary == "revoked":
+        elif boundary in {"revoked", "retired_receipt"}:
             assert restarted.returncode == 1, payload
             assert payload.get("ok") is False, payload
-            assert len(spend_records(runtime, f.GOAL_ID)) == 0
+            assert "goal_not_registered" in json.dumps(payload), payload
+            # Retirement has no terminal replay exception. Preserve the original
+            # receipt/debit while refusing every new recovery invocation.
+            assert len(spend_records(runtime, f.GOAL_ID)) == (
+                1 if boundary == "retired_receipt" else 0
+            )
             assert json.loads(journals[0].read_text()) == before
         else:
             assert restarted.returncode == 0 and payload["status"] == "committed", (
@@ -293,6 +303,7 @@ def test_export_interruption_preserves_requirements_and_original_settlement(
                 timeout=60,
             )
             assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+            assert not any(json.loads(repeated.stdout)["effects"].values())
             assert len(spend_records(runtime, f.GOAL_ID)) == 1
         assert_host_stopped(workspace)
         assert capture_path.read_bytes() == capture
