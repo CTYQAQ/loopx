@@ -287,18 +287,18 @@ function foldPreimagesByFold(): ReadonlyMap<string, readonly string[]> {
   return preimages;
 }
 
-/** Longest fold one class member expands to; derived rather than assumed. */
-let classConsumptionLimit = 0;
+/** Longest fold one code point expands to; derived rather than assumed. */
+let foldConsumptionLimit = 0;
 
-function maximumClassConsumption(): number {
-  if (classConsumptionLimit === 0) {
+function maximumFoldConsumption(): number {
+  if (foldConsumptionLimit === 0) {
     let limit = 1;
     for (const folded of foldPreimagesByFold().keys()) {
       limit = Math.max(limit, [...folded].length);
     }
-    classConsumptionLimit = limit;
+    foldConsumptionLimit = limit;
   }
-  return classConsumptionLimit;
+  return foldConsumptionLimit;
 }
 
 /**
@@ -323,7 +323,7 @@ function classMemberMatches(body: string, candidate: string): boolean {
  */
 function classMatchLengths(body: string, symbols: readonly string[], start: number): number[] {
   const lengths: number[] = [];
-  for (let length = 1; length <= maximumClassConsumption() && start + length <= symbols.length; length += 1) {
+  for (let length = 1; length <= maximumFoldConsumption() && start + length <= symbols.length; length += 1) {
     if (classMemberMatches(body, symbols.slice(start, start + length).join(""))) {
       lengths.push(length);
     }
@@ -331,9 +331,26 @@ function classMatchLengths(body: string, symbols: readonly string[], start: numb
   return lengths;
 }
 
-/** Comparison always folds host case aliases; symbol indexes stay on code points. */
+/** A folded span can stand for one code point when it is a one-code-point fold or a mapped character. */
+function singleCharacterMatchLengths(symbols: readonly string[], start: number): number[] {
+  const lengths: number[] = [];
+  const preimages = foldPreimagesByFold();
+  for (let length = 1; length <= maximumFoldConsumption() && start + length <= symbols.length; length += 1) {
+    const candidate = symbols.slice(start, start + length).join("");
+    if ((length === 1 && caseFold(candidate) === candidate) || preimages.has(candidate)) {
+      lengths.push(length);
+    }
+  }
+  return lengths;
+}
+
+/**
+ * Match against the compared path's folded code points. One original code point
+ * may fold to several symbols (ß/SS), so token boundaries intentionally operate
+ * on the folded stream rather than assuming one symbol per host character.
+ */
 function fnmatchcase(value: string, pattern: string): boolean {
-  const symbols = [...value];
+  const symbols = [...caseFold(value)];
   const tokens = globTokens(pattern);
   const memo = new Map<string, boolean>();
   const match = (valueIndex: number, tokenIndex: number): boolean => {
@@ -351,25 +368,20 @@ function fnmatchcase(value: string, pattern: string): boolean {
       } else if (valueIndex === symbols.length) {
         result = false;
       } else if (token.kind === "question") {
-        result = match(valueIndex + 1, tokenIndex + 1);
+        result = singleCharacterMatchLengths(symbols, valueIndex)
+          .some((length) => match(valueIndex + length, tokenIndex + 1));
       } else if (token.kind === "class") {
         const lengths = classMatchLengths(token.body, symbols, valueIndex);
-        // Negation only excludes a single code point: a longer fold candidate
-        // (SS for ß) is two ordinary characters to a class, so it must remain
-        // available for the following tokens.
         result = token.negated
-          ? !lengths.includes(1) && match(valueIndex + 1, tokenIndex + 1)
+          ? singleCharacterMatchLengths(symbols, valueIndex).some((length) =>
+            !lengths.includes(length) && match(valueIndex + length, tokenIndex + 1))
           : lengths.some((length) => match(valueIndex + length, tokenIndex + 1));
       } else {
-        result = false;
-        for (let end = valueIndex + 1; end <= symbols.length; end += 1) {
-          const folded = caseFold(symbols.slice(valueIndex, end).join(""));
-          if (folded.length > token.folded.length) break;
-          if (folded === token.folded && match(end, tokenIndex + 1)) {
-            result = true;
-            break;
-          }
-        }
+        const literal = [...token.folded];
+        const end = valueIndex + literal.length;
+        result = end <= symbols.length &&
+          literal.every((symbol, index) => symbols[valueIndex + index] === symbol) &&
+          match(end, tokenIndex + 1);
       }
     }
     memo.set(key, result);

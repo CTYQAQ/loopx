@@ -121,6 +121,16 @@ def test_case_aliases_remain_exclusive_write_scopes(scope_goal):
     ("src/[ß-\u20df].ts", "src/SS.ts"),
     ("src/SS.ts", "src/[ß-\u20df].ts"),
     ("src/[\u212a-\u412a].ts", "src/K.ts"),
+    ("src/?.ts", "src/SS.ts"),
+    ("src/SS.ts", "src/?.ts"),
+    ("src/S?.ts", "src/ß.ts"),
+    ("src/ß.ts", "src/S?.ts"),
+    ("src/[S]S.ts", "src/ß.ts"),
+    ("src/ß.ts", "src/[S]S.ts"),
+    ("src/[!Σ].ts", "src/SS.ts"),
+    ("src/SS.ts", "src/[!Σ].ts"),
+    ("src/[!Σ]S.ts", "src/SSS.ts"),
+    ("src/SSS.ts", "src/[!Σ]S.ts"),
 ])
 def test_unicode_case_aliases_remain_exclusive_write_scopes(scope_goal, first_scope, second_scope):
     cli, current = scope_goal
@@ -141,6 +151,16 @@ def test_unicode_case_aliases_remain_exclusive_write_scopes(scope_goal, first_sc
     ("src/[ρ-ς].ts", "src/Σ.ts"),
     ("src/[ß-\u20df].ts", "src/SS.ts"),
     ("src/[\u212a-\u412a].ts", "src/K.ts"),
+    ("src/?.ts", "src/SS.ts"),
+    ("src/SS.ts", "src/?.ts"),
+    ("src/S?.ts", "src/ß.ts"),
+    ("src/ß.ts", "src/S?.ts"),
+    ("src/[S]S.ts", "src/ß.ts"),
+    ("src/ß.ts", "src/[S]S.ts"),
+    ("src/[!Σ].ts", "src/SS.ts"),
+    ("src/SS.ts", "src/[!Σ].ts"),
+    ("src/[!Σ]S.ts", "src/SSS.ts"),
+    ("src/SSS.ts", "src/[!Σ]S.ts"),
 ])
 def test_unicode_case_aliases_conflict_at_atomic_todo_claim(scope_goal, first_scope, second_scope):
     cli, current = scope_goal
@@ -234,6 +254,8 @@ def test_case_folded_negated_glob_class_excludes_case_variant(scope_goal):
     ("src/[!ß]x", "src/SSx"),
     ("src/[!ß-\u20df].ts", "src/SS.ts"),
     ("src/[\u212a-\u412a].ts", "src/i.ts"),
+    ("src/[!ß].ts", "src/SS.ts"),
+    ("src/[!Σ].ts", "src/Σ.ts"),
 ])
 def test_case_folded_negated_glob_class_excludes_unicode_alias(scope_goal, scope, target):
     cli, _ = scope_goal

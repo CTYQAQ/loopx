@@ -319,6 +319,14 @@ test("scope comparison folds case aliases without rewriting retained or request 
     ["src/[ρ-ς].ts", "src/Σ.ts"],
     ["src/[ρ-ς].ts", "src/σ.ts"],
     ["src/[ß-à].ts", "src/SS.ts"],
+    // A host character may be spelled by several code points. Glob tokens see
+    // the folded stream, so question, class and literal boundaries compose.
+    ["src/?.ts", "src/SS.ts"],
+    ["src/S?.ts", "src/ß.ts"],
+    ["src/[S]S.ts", "src/ß.ts"],
+    ["src/???.ts", "src/ﬃ.ts"],
+    ["src/[!Σ].ts", "src/SS.ts"],
+    ["src/[!Σ]S.ts", "src/SSS.ts"],
     // Wide intervals keep their original bounds, so the alias is found inside
     // the interval instead of by walking or widening it.
     ["src/[ß-\u20df].ts", "src/SS.ts"],
@@ -336,6 +344,12 @@ test("scope comparison folds case aliases without rewriting retained or request 
     ["src/[!ρ-ς].ts", "src/Σ.ts"],
     ["src/[!ß-\u20df].ts", "src/SS.ts"],
     ["src/[\u212a-\u412a].ts", "src/i.ts"],
+    ["src/?.ts", "src/SSS.ts"],
+    ["src/???.ts", "src/ß.ts"],
+    ["src/S?.ts", "src/Σ.ts"],
+    ["src/[S]S.ts", "src/S.ts"],
+    ["src/[!ß].ts", "src/SS.ts"],
+    ["src/[!Σ].ts", "src/Σ.ts"],
   ]) {
     assert.equal(evaluateTaskLeaseWriteScopesOverlap({left: [left], right: [right]}).overlap, false, `${left} excludes ${right}`);
   }
