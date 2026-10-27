@@ -9,7 +9,7 @@ import argparse
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 def prepare_turn_host_request(
@@ -21,7 +21,7 @@ def prepare_turn_host_request(
 ) -> tuple[Path, list[str] | None, Callable[..., Mapping[str, Any]] | None, dict[str, Any]]:
     project = Path(args.project).expanduser().resolve()
     planned_host = (
-        payload.get("host") if isinstance(payload.get("host"), dict) else {}
+        cast(dict[str, Any], payload.get("host")) if isinstance(payload.get("host"), dict) else {}
     )
     if planned_host.get("kind") != args.host:
         raise ValueError("--host must match the journaled LoopX Turn plan")
@@ -69,7 +69,7 @@ def prepare_turn_host_request(
                 failure_recovery_kind=args.validation_failure_kind,
             )
     envelope = (
-        payload.get("turn_envelope")
+        cast(dict[str, Any], payload.get("turn_envelope"))
         if isinstance(payload.get("turn_envelope"), dict)
         else {}
     )
