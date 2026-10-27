@@ -164,11 +164,15 @@ requirement. Parse/import errors do not count as detected mutations. The require
 mutation probes the independent oracle; the other four mutate production owners.
 
 Native Codex 0.164.0 with deterministic loopback inference **did not qualify**.
-On both the refreshed baseline and the candidate, two compaction/process-resume
+On baseline `218aa087b66bb99038b1ce7d782110741a5e42ae` and earlier candidate
+`9d9b1183489164246c4ae770a06a8d43b28b00ef`, two compaction/process-resume
 cases failed with missing `candidate`, and four history-change cases failed the
 complete model-visible JSON assertion. No paid model ran. Initial missing-binary,
 missing installed CLI and sandbox socket refusals are setup failures, not product
-passes. The same six later semantic failures are retained. This patch does not
+passes. The same six later semantic failures are retained. The subsequent legacy
+recovery repair does not inherit native qualification from those earlier runs.
+The final source hashes qualify the bounded tests listed below, not a final
+native-profile pass. This patch does not
 repair or qualify the unified writer proposed in #7430. Native installation,
 all-host context continuity and model outcomes remain outside the demonstrated
 claim, even though the injected-worker CLI path passes.

@@ -803,7 +803,10 @@
       "signatures": {
         "candidate_missing": 2,
         "incomplete_model_visible_json": 4
-      }
+      },
+      "baseline_revision": "218aa087b66bb99038b1ce7d782110741a5e42ae",
+      "candidate_revision": "9d9b1183489164246c4ae770a06a8d43b28b00ef",
+      "final_native_qualification": "not_established"
     },
     {
       "kind": "revocation_regression_before_fix",
