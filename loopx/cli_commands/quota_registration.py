@@ -231,7 +231,7 @@ def register_quota_command(
              "Larger pages require a sufficient --max-page-output-bytes within the capture limit; "
              "use only with known sufficient direct and retained-history output budgets.")
     quota_parser.add_argument("--max-page-output-bytes", type=int,
-        help="For JSON context-read: optional positive byte limit for successful page stdout, including JSON framing and newline. "
+        help="For JSON context-read and enabled native should-run/context-project: optional positive byte limit for successful page stdout, including JSON framing and newline. "
              "Content shrinks at UTF-8 boundaries; next_command preserves the limit. An insufficient limit returns an error.")
     quota_parser.add_argument(
         "--turn-instance-id",

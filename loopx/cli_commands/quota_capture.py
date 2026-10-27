@@ -141,7 +141,8 @@ def read_context_capture(args: argparse.Namespace, *, presentation: dict[str, An
 
 def native_context_capture_view(projected: dict[str, Any], directory: Path, *,
                                 context_directory: str | None = None,
-                                metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+                                metadata: dict[str, Any] | None = None,
+                                max_page_output_bytes: int | None = None) -> dict[str, Any]:
     """One paged presentation for ordinary and already-captured native calls.
 
     The guard/projector already ran. Only serialize its wire and prefetch the
@@ -149,6 +150,8 @@ def native_context_capture_view(projected: dict[str, Any], directory: Path, *,
     """
     from ..control_plane.turn_driver.decision_capture import write_decision_capture
 
+    if max_page_output_bytes is not None and max_page_output_bytes <= 0:
+        raise QuotaDecisionTransportError("Native context output limit must be positive.")
     wire = directory / "delivery.json"
     write_decision_capture(wire, projected)
     reference = {"path": str(wire), "sha256": hashlib.sha256(wire.read_bytes()).hexdigest()}
@@ -158,10 +161,18 @@ def native_context_capture_view(projected: dict[str, Any], directory: Path, *,
         if mode == "full":
             reference = {key: projected["recovery"][key] for key in ("path", "sha256")}
     page_bytes, output_bytes = native_context_page_budget()
+    if max_page_output_bytes is not None:
+        output_bytes = min(output_bytes, max_page_output_bytes)
+        page_bytes = min(page_bytes, output_bytes)
     reference["command"] = context_capture_read_command(Path(reference["path"]), reference["sha256"],
         page_bytes=page_bytes, max_page_output_bytes=output_bytes)
     result = {"ok": True, **(metadata or {}), "mode": mode, **reference,
         **({"target": target} if target else {})}
+    if max_page_output_bytes is not None and isinstance(result.get("recovery"), dict):
+        recovery = result["recovery"]
+        result["recovery"] = {**recovery, "command": context_capture_read_command(
+            Path(recovery["path"]), recovery["sha256"], page_bytes=page_bytes,
+            max_page_output_bytes=output_bytes)}
     # The codec puts native continuity semantics before its change tree. Keep
     # this shared transport frame neutral instead of copying that instruction
     # or replacing an assumption with a claim of confirmed final input.
@@ -254,7 +265,8 @@ def project_saved_context_capture(args: argparse.Namespace) -> dict[str, Any]:
         native_prepared = True
         native_view = native_context_capture_view(projected, cache, context_directory=directory,
             metadata={"recovery": full_reference, "capture_sha256": args.capture_sha256,
-                "context_delivery": activation})
+                "context_delivery": activation},
+            max_page_output_bytes=getattr(args, "max_page_output_bytes", None))
         reference = {key: native_view[key] for key in ("path", "sha256", "command")}
         mode, target = native_view["mode"], native_view.get("target")
     except (QuotaDecisionTransportError, OSError, ValueError, TypeError, RecursionError) as exc:
@@ -455,8 +467,13 @@ def handoff_decision(directory: Path | None, socket_path: str | None,
 def handle_native_context_command(args: argparse.Namespace, *, print_payload: Callable[..., None],
                                   registry_path: Path | None = None, runtime_root_arg: str | None = None) -> int | None:
     """Dispatch native presentation/lifecycle IO before any quota authority read."""
-    if getattr(args, "max_page_output_bytes", None) is not None and args.quota_command != "context-read":
-        print_payload({"ok": False, "reason": "max-page-output-bytes is only supported by JSON context-read"},
+    has_output_limit = getattr(args, "max_page_output_bytes", None) is not None
+    budget_scope_error = ("max-page-output-bytes is only supported by JSON context-read "
+        "or enabled native should-run/context-project")
+    if has_output_limit and args.quota_command != "context-read" and (
+        args.quota_command not in ("should-run", "context-project") or args.format != "json"
+        or getattr(args, "context_delivery", None) == "off"):
+        print_payload({"ok": False, "reason": budget_scope_error},
             args.format, lambda value: str(value["reason"]))
         return 1
     if registry_path is not None:
@@ -467,6 +484,16 @@ def handle_native_context_command(args: argparse.Namespace, *, print_payload: Ca
         except (OSError, ValueError, TypeError) as exc:
             print_payload({"ok": False, "reason": str(exc)}, args.format,
                 lambda value: json.dumps(value, ensure_ascii=False, indent=2))
+            return 1
+    if has_output_limit and args.quota_command != "context-read":
+        try:
+            if not native_context_activation(args)["enabled"]:
+                raise QuotaCommandValidationError(budget_scope_error)
+            if args.max_page_output_bytes <= 0:
+                raise QuotaCommandValidationError("max-page-output-bytes must be positive")
+        except QuotaCommandValidationError as exc:
+            print_payload({"ok": False, "reason": str(exc)}, args.format,
+                lambda value: str(value["reason"]))
             return 1
     if args.quota_command in ("context-config", "context-hook"):
         try:
