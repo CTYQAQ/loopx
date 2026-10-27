@@ -1383,8 +1383,9 @@ def test_scheduler_cache_misses_after_todo_state_changes_without_run(
     assert "selected_todo" not in refreshed
 
 
+@pytest.mark.parametrize("include_detail", [False, True])
 def test_scheduler_cache_tracks_todo_changes_beyond_display_limit(
-    tmp_path: Path,
+    tmp_path: Path, include_detail: bool,
 ) -> None:
     project, runtime, registry_path = _write_fixture(tmp_path)
     state_path = project / ".codex" / "goals" / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -1407,6 +1408,7 @@ def test_scheduler_cache_tracks_todo_changes_beyond_display_limit(
         GOAL_ID,
         "--agent-id",
         AGENT_ID,
+        *(["--include-detail", "agent-todos"] if include_detail else []),
     )
     initial_rc, initial = _run_cli(
         registry_path,
@@ -1455,19 +1457,34 @@ def test_scheduler_cache_tracks_todo_changes_beyond_display_limit(
     assert deferred_rc == 0, deferred
     assert (index_path.read_bytes() if index_path.exists() else None) == index_before
 
-    deferred_cached_rc, deferred_cached = _run_cli(
-        registry_path,
-        runtime,
-        *guard,
-        "--use-projection-cache",
-        cwd=project,
-    )
-    deferred_fresh_rc, deferred_fresh = _run_cli(
-        registry_path,
-        runtime,
-        *guard,
-        cwd=project,
-    )
+    def read_deferred_guard(*cache_args: str) -> tuple[int, dict[str, Any]]:
+        from copy import deepcopy
+
+        started = datetime.now(timezone.utc).replace(microsecond=0)
+        rc, payload = _run_cli(registry_path, runtime, *guard, *cache_args, cwd=project)
+        finished = datetime.now(timezone.utc)
+        assert rc == 0, payload
+        comparable = deepcopy(payload)
+        # The legacy compact view omits item details; its explicit detail
+        # mode and the complete contract must both retain the observation.
+        if not include_detail and "deferred_items" not in comparable["agent_todo_summary"]:
+            return rc, comparable
+        deferred_items = comparable["agent_todo_summary"]["deferred_items"]
+        assert len(deferred_items) == 1
+        assert deferred_items[0]["todo_id"] == "todo_tail_39"
+        condition = deferred_items[0]["resume_condition"]
+        # These are separate live evaluations after a cache miss. Check each
+        # observation clock against its own invocation, then compare every
+        # other fact, including the due time, readiness and receipt semantics.
+        evaluated = datetime.fromisoformat(condition.pop("evaluated_at").replace("Z", "+00:00"))
+        assert evaluated.tzinfo is not None
+        assert started <= evaluated <= finished
+        assert condition["scheduled_for"] == "2099-01-01T00:00:00Z"
+        assert condition["satisfied"] is False
+        return rc, comparable
+
+    deferred_cached_rc, deferred_cached = read_deferred_guard("--use-projection-cache")
+    deferred_fresh_rc, deferred_fresh = read_deferred_guard()
     assert deferred_cached_rc == deferred_fresh_rc == 0, deferred_cached
     assert deferred_cached["status_projection_cache"]["hit"] is False
     assert (
