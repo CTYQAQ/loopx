@@ -465,7 +465,10 @@ class StewardTurnHost:
                         client_id = native_steward_client_id(actor, request["turn_instance_id"])
                         existing = None
             if existing is not None:
-                restart_request = self.monitor_restart_request(existing) if work_kind == "monitor" else None
+                # Keep the separately proven legacy admission-refusal route
+                # below ahead of broader runtime-error observation candidates.
+                restart_request = (self.monitor_restart_request(existing)
+                    if work_kind == "monitor" and not self._monitor_selection_failed_before_poll(existing) else None)
                 if restart_request is not None:
                     client_id += ".restart-recovery"
                     continued = self.store.turn_for_client(actor["session_id"], client_id)
