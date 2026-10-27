@@ -281,7 +281,11 @@ def _candidate_text(data: bytes) -> str | None:
             break
     else:
         text = data.decode("utf-8", errors="replace")
-    return None if "\x00" in text else text
+    if "\x00" in text:
+        return None
+    # The previous text-mode read translated universal newlines. Keep the
+    # receipt's line numbers identical for CRLF and CR-only sources.
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def scan_paths(

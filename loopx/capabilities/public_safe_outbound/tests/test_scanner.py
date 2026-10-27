@@ -228,6 +228,14 @@ def test_undecodable_candidate_bytes_fail_closed_instead_of_reading_clean(tmp_pa
     assert str(candidate) not in compact_json(res)
 
 
+def test_cr_only_unicode_candidate_keeps_the_text_read_line_numbers(tmp_path: Path) -> None:
+    """The decoded read keeps universal-newline line numbering."""
+    candidate = tmp_path / "cr-only.log"
+    candidate.write_bytes(("first line\rkey " + SK_SECRET + "\r").encode("utf-16"))
+    res = scan_paths([candidate])
+    assert [(hit.rule_id, hit.line) for hit in res.hits] == [("sk_bearer", 2)]
+
+
 def test_unreadable_requested_file_fails_closed(tmp_path: Path) -> None:
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         pytest.skip("root bypasses file mode checks")
