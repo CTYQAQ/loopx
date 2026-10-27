@@ -146,6 +146,14 @@ def assert_parseable_agent_todos(agent_todos: dict, *, hot_path: bool = False) -
         ), first_open
     assert str(first_open["todo_id"]).startswith("todo_"), first_open
 
+    if hot_path:
+        assert "first_open_items" not in agent_todos, agent_todos
+        assert "deferred_items" not in agent_todos, agent_todos
+        assert agent_todos["payload_compaction"]["schema_version"] == (
+            "quota_cli_todo_summary_compaction_v0"
+        ), agent_todos
+        return
+
     second_open = visible_items[1]
     assert second_open["priority"] == "P2", second_open
     assert second_open["status"] == "open", second_open
@@ -159,13 +167,6 @@ def assert_parseable_agent_todos(agent_todos: dict, *, hot_path: bool = False) -
         assert handoff_note["intent"] == "review_pr", handoff_note
         assert handoff_note["evidence_refs"] == ["todo:todo_handoff_review:evidence"], handoff_note
 
-    if hot_path:
-        assert "first_open_items" not in agent_todos, agent_todos
-        assert "deferred_items" not in agent_todos, agent_todos
-        assert agent_todos["payload_compaction"]["schema_version"] == (
-            "quota_cli_todo_summary_compaction_v0"
-        ), agent_todos
-        return
 
     deferred_by_id = {item["todo_id"]: item for item in agent_todos["deferred_items"]}
     assert set(deferred_by_id) == {"todo_deferred_surface", "todo_pr_deferred"}, agent_todos
