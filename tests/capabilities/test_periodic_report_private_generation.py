@@ -23,6 +23,8 @@ from loopx.capabilities.periodic_report.pending_intent import (
 from loopx.capabilities.periodic_report.private_generation import (
     attempt_directory,
     freeze_private_report,
+    prepare_private_report,
+    prepare_session_report,
     validate_private_generation,
 )
 from loopx.registry import atomic_write_json
@@ -159,6 +161,119 @@ def _prepared_report(tmp_path: Path):
         "sections": sections,
     }
     return root, window, response
+
+
+def _source_prepared_report(tmp_path: Path, *, local: bool):
+    _, window, response = _prepared_report(tmp_path / "template")
+    root = tmp_path / "bound-runtime"
+    source = {"rows": [{"todo_id": "todo_source", "text": "保留原始证据与未完成工作", "status": "open"}]}
+    source["source_revision"] = _canonical_digest(source)
+
+    def read(arguments):
+        rows = ([{"goal_id": "encoding-goal", "activation_state": "active"}]
+            if arguments["view"] == "portfolio" else source["rows"]
+            if arguments["view"] == "todos" else [])
+        return {"ok": True, "rows": rows, "matched": len(rows), "next_offset": None,
+            "source": {"source_revision": source["source_revision"], "status": "read"}}
+
+    def prepare():
+        if local:
+            return prepare_session_report(root=root, window=window,
+                actor={"session_id": "original-session"}, read=lambda: source,
+                reporting="保留实际来源。")
+        return prepare_private_report(root=root, window=window, read=read,
+            authorization_scope_id="scope-example", authorization_goal_ids=["encoding-goal"],
+            reporting="保留实际来源。")
+
+    request = prepare()
+    response["request_digest"] = request["request_digest"]
+    for section in response["sections"]:
+        for item in section["items"]:
+            item["source_ref"] = request["facts"][0]["source_ref"]
+    return root, window, response, prepare
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_source_bound_report_keeps_complete_facts_and_original_artifacts(tmp_path, local):
+    root, window, response, prepare = _source_prepared_report(tmp_path, local=local)
+    folder = attempt_directory(root, window)
+    before = {name: (folder / name).read_bytes() for name in ["source.json", "editorial-request.json"]}
+    request = prepare()
+    assert len(request["facts"]) == len(json.loads(before["source.json"])["rows"]) + 1
+    receipt = freeze_private_report(root=root, window=window, response=response)
+    assert validate_private_generation(folder) == receipt
+    assert {name: (folder / name).read_bytes() for name in before} == before
+    bundle = json.loads((folder / "generation-bundle.json").read_text())
+    assert all(item["source_ref"] == request["facts"][0]["source_ref"]
+        for section in bundle["document"]["sections"] for item in section["items"])
+
+
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("entrypoint", ["prepare", "freeze"])
+@pytest.mark.parametrize("substitution", ["url", "summary", "omission", "revision", "binding_removed"])
+def test_source_bound_report_rejects_rehashed_input_substitution(tmp_path, local, entrypoint, substitution):
+    root, window, response, prepare = _source_prepared_report(tmp_path, local=local)
+    folder = attempt_directory(root, window)
+    original_source = (folder / "source.json").read_bytes()
+    request = json.loads((folder / "editorial-request.json").read_text())
+    if substitution == "url":
+        request["facts"][0]["source_ref"] = "https://example.org/not-in-the-frozen-evidence"
+    elif substitution == "summary":
+        request["facts"][0]["summary"] = "原始来源没有提供的成功结论。"
+    elif substitution == "omission":
+        request["facts"].pop()
+    elif substitution == "revision":
+        request["source_revision"] = "sha256:" + "e" * 64
+    else:
+        request.pop("source_fact_binding", None)
+        request["facts"][0]["source_ref"] = "https://example.org/removed-input-binding"
+    request["request_digest"] = _canonical_digest({k: v for k, v in request.items() if k != "request_digest"})
+    atomic_write_json(folder / "editorial-request.json", request)
+    response["request_digest"] = request["request_digest"]
+    for section in response["sections"]:
+        for item in section["items"]:
+            item["source_ref"] = request["facts"][0]["source_ref"]
+    with pytest.raises(ValueError, match="facts do not match"):
+        if entrypoint == "prepare":
+            prepare()
+        else:
+            freeze_private_report(root=root, window=window, response=response)
+    assert (folder / "source.json").read_bytes() == original_source
+    assert not (folder / "editorial-response.json").exists()
+    assert not (folder / "private-generation.json").exists()
+    assert not (folder / "report.md").exists()
+
+
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("remove_binding", [False, True])
+def test_generation_validator_rejects_rehashed_facts_with_self_consistent_receipts(tmp_path, local, remove_binding):
+    from loopx.capabilities.periodic_report.incremental import build_periodic_report_publication_candidate
+    from loopx.capabilities.periodic_report.post_writeback_hook import evaluate_periodic_report_trigger_evaluation_intent
+
+    root, window, response, _ = _source_prepared_report(tmp_path, local=local)
+    folder = attempt_directory(root, window)
+    receipt = freeze_private_report(root=root, window=window, response=response)
+    request = json.loads((folder / "editorial-request.json").read_text())
+    request["facts"][0]["summary"] = "替换了原始来源不支持的事实。"
+    if remove_binding:
+        request.pop("source_fact_binding", None)
+        receipt.pop("source_fact_binding", None)
+    request["request_digest"] = _canonical_digest({k: v for k, v in request.items() if k != "request_digest"})
+    response["request_digest"] = request["request_digest"]
+    candidate = build_periodic_report_publication_candidate(goal_id=window["goal_id"],
+        agent_id=window["agent_id"], generation_id=receipt["generation_id"],
+        trigger_receipt=evaluate_periodic_report_trigger_evaluation_intent(cadence_intent(window)),
+        facts=request["facts"], baseline=None)
+    # Every existing self-digest is consistent; the unchanged independent
+    # source remains the oracle, rather than another hash of substituted facts.
+    atomic_write_json(folder / "editorial-request.json", request)
+    atomic_write_json(folder / "editorial-response.json", response)
+    atomic_write_json(folder / "publication-candidate.json", candidate)
+    atomic_write_json(folder / "private-generation.json", {**receipt,
+        "request_digest": request["request_digest"], "publication_candidate_id": candidate["candidate_id"],
+        "publication_candidate_sha256": _canonical_digest(candidate)})
+    with pytest.raises(ValueError, match="facts do not match"):
+        validate_private_generation(folder)
 
 
 def test_private_report_artifacts_use_canonical_utf8_on_windows_text_mode(

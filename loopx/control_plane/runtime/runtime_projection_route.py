@@ -13,7 +13,7 @@ from ..goals.activation import (
     goal_activation_state,
     normalize_goal_activation_state,
 )
-from ...history import load_index, load_registry
+from ..projects.registry_codec import load_registry
 from ... import paths
 from ...paths import global_registry_path, resolve_runtime_root
 from ...registry import registry_goals
@@ -451,6 +451,8 @@ def _latest_route_source_row(
     goal_id: str,
     route_id: str,
 ) -> dict[str, Any] | None:
+    from ...history import load_index
+
     rows, _ = load_index(runtime_root / "goals" / goal_id / "runs" / "index.jsonl")
     for row in reversed(rows):
         marker = row.get("runtime_projection_route")
@@ -471,6 +473,8 @@ def _route_projection_is_current(
     source_generated_at: Any,
     marker_field: str,
 ) -> bool:
+    from ...history import load_index
+
     rows, _ = load_index(
         target_runtime_root / "goals" / goal_id / "runs" / "index.jsonl"
     )
