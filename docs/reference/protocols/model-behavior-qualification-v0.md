@@ -316,6 +316,10 @@ ten-call budget. Rejected calls remain counted and commit no settlement step;
 the actor never retries a command or restarts a scenario automatically. Other
 non-zero CLI results and fixture identity, route or ordering violations still
 fail immediately; non-zero execution alone does not prove rollback.
+The shared CLI transport retains the process exit code and transient stdout;
+even a non-zero process that emitted valid committed-receipt JSON fails unless
+it is that exact pre-dispatch input rejection. Raw stdout is never copied into
+durable qualification receipts.
 After the proof is read, a terminal actor may author a project draft in
 `.scratch/` using the existing OS-isolated shell. Original fixture inputs and
 authority stores remain protected; private host data and external networking

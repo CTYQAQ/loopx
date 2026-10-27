@@ -25,6 +25,7 @@ from .doubao_model_behavior_actor import (
 from .model_tool_behavior import (
     DoubaoExecToolClient,
     QUOTA_FIRST_TOOL_INSTRUCTION,
+    LoopxCliExecutionError,
     argument_value,
     digest_text,
     execute_loopx_cli,
@@ -710,16 +711,28 @@ def _execute_cli(command: str, state: _QualificationState) -> dict[str, Any]:
             raise _TerminalToolViolation("vision_draft_outside_workspace")
     if tokens and "--format" not in tokens:
         command = shlex.join([tokens[0], "--format", "json", *tokens[1:]])
-    output = execute_loopx_cli(
-        command,
-        source_root=state.fixture.source_root,
-        project_root=state.fixture.project_root,
-        argument_overrides={
-            "--registry": str(state.fixture.global_registry_path),
-            "--turn-instance-id": state.turn_instance_id,
-        },
-        accepted_return_codes=(0, 1) if _command_path(tokens or [])[0] == "refresh_state" else (0,),
-    )
+    try:
+        output = execute_loopx_cli(
+            command,
+            source_root=state.fixture.source_root,
+            project_root=state.fixture.project_root,
+            argument_overrides={
+                "--registry": str(state.fixture.global_registry_path),
+                "--turn-instance-id": state.turn_instance_id,
+            },
+        )
+    except LoopxCliExecutionError as exc:
+        if exc.returncode != 1 or _command_path(tokens or [])[0] != "refresh_state":
+            raise
+        try:
+            rejected = json.loads(exc.stdout)
+        except (json.JSONDecodeError, TypeError):
+            raise exc from None
+        if not (isinstance(rejected, dict) and rejected.get("ok") is False
+                and rejected.get("appended") is False
+                and rejected.get("error_code") == "progress_observation_invalid_arguments"):
+            raise
+        return rejected
     payload = json.loads(output)
     if not isinstance(payload, dict):
         raise ValueError("LoopX command output must be an object")

@@ -454,6 +454,56 @@ def test_terminal_input_rejections_do_not_reset_the_call_budget(tmp_path: Path) 
     assert receipt["settlement_receipt_steps"] == ["validation"]
 
 
+@pytest.mark.parametrize("payload_ok", [False, True])
+def test_nonzero_after_actual_writeback_cannot_advance_to_spend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload_ok: bool,
+) -> None:
+    from loopx.control_plane.quota.settlement import read_heartbeat_settlement
+    from loopx.control_plane.testing import terminal_settlement_tool_behavior as terminal
+    from loopx.control_plane.testing.model_tool_behavior import LoopxCliExecutionError
+
+    fixture = _build_fixture(tmp_path / "oracle")
+    execute = terminal.execute_loopx_cli
+    committed = {}
+
+    def fail_after_writeback(command, **kwargs):
+        output = execute(command, **kwargs)
+        if "refresh-state" in command:
+            payload = json.loads(output)
+            assert payload["ok"] is True
+            committed.update(payload["settlement_identity"])
+            # Inject only a post-effect process failure; the actual CLI above
+            # produced the independent writeback and committed receipt.
+            payload["ok"] = payload_ok
+            raise LoopxCliExecutionError(1, "synthetic post-effect failure", stdout=json.dumps(payload))
+        return output
+
+    monkeypatch.setattr(terminal, "execute_loopx_cli", fail_after_writeback)
+    transport = ScriptedDoubaoExecTransport([
+        ScriptedExecToolAction(command=fixture.quota_guard_command),
+        ScriptedExecToolAction(command="cat fixture/settlement-proof.json"),
+        partial(_completion_action, kind="validation"), _writeback_action,
+        _spend_action, _completion_action,
+    ])
+    receipt = DoubaoTerminalSettlementToolBehaviorActor(
+        api_key="test-only-placeholder", transport=transport,
+    ).qualify(qualification_id="nonzero-after-writeback", fixture_root=tmp_path / "actor")
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "tool_execution_failed"
+    assert receipt["tool_call_count"] == len(transport.requests) == 4
+    assert receipt["settlement_receipt_steps"] == ["validation"]
+    assert "synthetic post-effect" not in json.dumps(receipt)
+    # Independent canonical readback proves that the failure did not roll back
+    # the real write; neither a debit nor terminal effect followed it.
+    readback = read_heartbeat_settlement(
+        tmp_path / "actor/runtime", goal_id=committed["goal_id"],
+        agent_id=committed["agent_id"], todo_id=committed["todo_id"],
+        turn_instance_id=committed["turn_instance_id"],
+    )
+    assert readback is not None
+    assert readback.progress["next_step"] == "quota_spend"
+
+
 def test_ordinary_completion_requires_its_actual_validation_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
