@@ -726,6 +726,7 @@ def test_managed_turn_accepts_exact_material_monitor_poll_closeout(
         coordination={"registered_agents": [agent_id], "agent_model": "peer_v1"},
         claim_scope_agent_id=agent_id,
     )
+    initialize_canonical_source_fixture(runtime_root, GOAL_ID, state_path=state_path, provider="sqlite")
     packet = build_live_quota_should_run_decision(
         status,
         goal_id=GOAL_ID,
