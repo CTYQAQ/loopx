@@ -5,7 +5,9 @@ production SQLite/history/analysis HTTP owners. No model or solver runs.
 These captures show renderer behavior, not installed-App adoption or independently
 qualified translation meaning.
 
-- Rendered product source: `8bfe566767a213b93c0fda3a16b089f1229c1e1b`.
+- Rendered product source: `4a49f62f0eb5ac74c524ac26155f03d3c47c2433`.
+- The rendered source includes the current-main translated-search integration;
+  the evidence refresh changes only this scenario and its captures.
 - Before: `fb0303f33327c51da434a215f0c757b5d1a5b16a`.
 - Both views use the same 31-event fixed snapshot, including two revisions of
   one finding, a refuted observation and an unverified follow-up.

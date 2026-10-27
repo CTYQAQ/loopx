@@ -206,11 +206,16 @@ export const researchDisplayLanguageScenario = {
         await search.fill("V18 是否在固定预算");
         await allRecords.evaluate(element => element.scrollIntoView({block: "start"}));
         await page.screenshot({path: resolve(outputDir, `research-translated-search-title-${width}.png`), animations: "disabled"});
-        await allRecords.getByRole("status", {name: /^匹配 1 \/ 30 条已读记录/}).waitFor();
+        await allRecords.getByRole("status", {name: new RegExp(`^匹配 1 / ${capture.events.length} 条已读记录`)}).waitFor();
         assert.equal(await allRecords.locator(".research-history-records > li").count(), 1, "Displayed Chinese titles are searchable");
         const finding = capture.events.find(event => event.event_kind === "finding");
         await search.fill(`第4次尝试 ${finding.event_id}`);
-        await allRecords.getByRole("status", {name: /^匹配 1 \/ 30 条已读记录/}).waitFor();
+        await allRecords.getByRole("status", {name: new RegExp(`^匹配 2 / ${capture.events.length} 条已读记录`)}).waitFor();
+        const lineageIds = [finding.event_id, capture.events.at(-1).event_id];
+        assert.deepEqual((await downloadRecords()).records, originalsExport.records.filter(event => lineageIds.includes(event.event_id)),
+          "The original id also matches its explicit successor lineage; downloads retain both original records");
+        await search.fill(`第4次尝试 ${finding.event_id} fixed-v1`);
+        await allRecords.getByRole("status", {name: new RegExp(`^匹配 1 / ${capture.events.length} 条已读记录`)}).waitFor();
         const translatedFinding = allRecords.locator(".research-history-records > li").first();
         await translatedFinding.locator(":scope > details > summary").click();
         assert.match(await translatedFinding.innerText(), /实测变化为 -0.25ms/);
@@ -218,13 +223,13 @@ export const researchDisplayLanguageScenario = {
         assert.deepEqual(exported.records, originalsExport.records.filter(event => event.event_id === finding.event_id),
           "Chinese matching downloads the original event, not translated prose");
         await page.screenshot({path: resolve(outputDir, `research-translated-search-body-${width}.png`), animations: "disabled"});
-        await search.fill(`核对原始证据 ${finding.event_id}`);
-        await allRecords.getByRole("status", {name: /^匹配 1 \/ 30 条已读记录/}).waitFor();
+        await search.fill(`核对原始证据 ${finding.event_id} fixed-v1`);
+        await allRecords.getByRole("status", {name: new RegExp(`^匹配 1 / ${capture.events.length} 条已读记录`)}).waitFor();
         await original.click();
-        await allRecords.getByRole("status", {name: /^匹配 0 \/ 30 条已读记录/}).waitFor();
-        assert.equal(await search.inputValue(), `核对原始证据 ${finding.event_id}`, "Original view retains the query but removes translation-only matches");
+        await allRecords.getByRole("status", {name: new RegExp(`^匹配 0 / ${capture.events.length} 条已读记录`)}).waitFor();
+        assert.equal(await search.inputValue(), `核对原始证据 ${finding.event_id} fixed-v1`, "Original view retains the query but removes translation-only matches");
         await history.getByRole("button", {name: "查看译文", exact: true}).click();
-        await allRecords.getByRole("status", {name: /^匹配 1 \/ 30 条已读记录/}).waitFor();
+        await allRecords.getByRole("status", {name: new RegExp(`^匹配 1 / ${capture.events.length} 条已读记录`)}).waitFor();
         await search.fill(capture.events[0].title);
         assert.equal(await allRecords.locator(".research-history-records > li").count(), 1, "Search matches original text while translations are displayed");
         const record = allRecords.locator(".research-history-records > li").first();
@@ -348,9 +353,9 @@ export const researchDisplayLanguageScenario = {
         assert.match(await history.locator(".research-route-caption").first().innerText(), /Does V18/);
         await allRecords.locator(":scope > summary").click();
         await search.fill("V18 是否在固定预算");
-        await allRecords.getByRole("status", {name: /^匹配 0 \/ 30 条已读记录/}).waitFor();
+        await allRecords.getByRole("status", {name: new RegExp(`^匹配 0 / ${capture.events.length} 条已读记录`)}).waitFor();
         await search.fill(capture.events[0].title);
-        await allRecords.getByRole("status", {name: /^匹配 1 \/ 30 条已读记录/}).waitFor();
+        await allRecords.getByRole("status", {name: new RegExp(`^匹配 1 / ${capture.events.length} 条已读记录`)}).waitFor();
         assert.equal(await allRecords.locator(".research-history-records > li strong").first().innerText(), capture.events[0].title,
           "A mismatched source cannot retain the previous translation's search aliases");
         await allRecords.locator(":scope > summary").click();
