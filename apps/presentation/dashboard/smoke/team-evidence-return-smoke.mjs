@@ -143,7 +143,12 @@ try {
   const correction = evidence.getByRole("region", {name: "纠偏证据路径", exact: true});
   await correction.getByText("负责人指定的版本固定检查器", {exact: true}).waitFor();
   await verificationGap.waitFor();
-  await correction.getByText("检查在声明文件的隔离副本上执行；不代表远程复核者身份或异议已解决。", {exact: true}).waitFor();
+  const checkScope = correction.getByText("检查在声明文件的隔离副本上执行；不代表远程复核者身份或异议已解决。", {exact: true});
+  await checkScope.waitFor({state: "hidden"});
+  await correction.getByRole("button", {name: "独立检查范围", exact: true}).click();
+  await checkScope.waitFor();
+  await page.keyboard.press("Escape");
+  await checkScope.waitFor({state: "hidden"});
   await selectedOutput().waitFor();
   await verificationGap.scrollIntoViewIfNeeded();
   await page.screenshot({path: resolve(outputDir, "team-local-checker-gap-desktop.png"), animations: "disabled"});
