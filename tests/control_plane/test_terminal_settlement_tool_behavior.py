@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
@@ -19,6 +20,7 @@ from loopx.control_plane.testing.terminal_settlement_tool_behavior import (
     DoubaoTerminalSettlementToolBehaviorActor,
     _build_fixture,
 )
+from loopx.control_plane.testing.vision_shell_host import shell_isolation_available
 
 
 def _latest_quota_packet(request: Mapping[str, Any]) -> dict[str, Any]:
@@ -37,6 +39,16 @@ def _latest_quota_packet(request: Mapping[str, Any]) -> dict[str, Any]:
 def _writeback_action(request: Mapping[str, Any]) -> ScriptedExecToolAction:
     packet = _latest_quota_packet(request)
     command = packet["interaction_contract"]["cli_channel"]["next_cli_actions"][0]
+    for message in reversed(request["messages"]):
+        if message["role"] != "tool":
+            continue
+        try:
+            result = json.loads(message["content"])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(result, dict) and result.get("settlement_plan") and result.get("next_cli_actions"):
+            command = result["next_cli_actions"][0]
+            break
     command = (
         command.replace("<validated_progress>", "terminal_settlement_validated")
         .replace("<scale>", "single_surface")
@@ -193,23 +205,35 @@ def test_real_tool_loop_settles_final_todo_after_spend(
     assert quota_result["selected_todo"]["todo_id"] == (
         TERMINAL_SETTLEMENT_FIXTURE_TODO_ID
     )
+    if ordinary_completion:
+        results = [json.loads(message["content"]) for message in transport.requests[-1]["messages"]
+                   if message["role"] == "tool" and message["content"].startswith("{")]
+        completed = next(result for result in results if result.get("status") == "done")
+        assert completed["settlement_progress"]["next_step"] == "durable_writeback"
+        plan = completed["settlement_plan"]
+        assert plan["identity"] == completed["settlement_identity"]
+        writeback = next(step for step in plan["ordered_steps"] if step["kind"] == "durable_writeback")
+        assert writeback["vision_authoring"]["schema_version"] == "goal_vision_replan_contract_v0"
+        assert completed["next_cli_actions"] == [writeback["command_template"]]
+        assert completed["settlement_result"]["receipts"][0]["step_kind"] == "validation"
 
 
 @pytest.mark.parametrize(
-    ("read_proof", "foreign_actor", "expected_failure"),
-    [(False, False, "completion_before_validation"),
-     (True, True, "completion_identity_mismatch")],
+    ("read_proof", "drift_option", "expected_failure"),
+    [(False, None, "completion_before_validation"),
+     (True, "--agent-id", "completion_identity_mismatch"),
+     (True, "--turn-instance-id", "completion_identity_mismatch")],
 )
 def test_ordinary_completion_cannot_bypass_validation_or_identity(
-    tmp_path: Path, read_proof: bool, foreign_actor: bool, expected_failure: str,
+    tmp_path: Path, read_proof: bool, drift_option: str | None, expected_failure: str,
 ) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
 
     def completion(request: Mapping[str, Any]) -> ScriptedExecToolAction:
-        command = _completion_action(request, kind="validation").command
-        if foreign_actor:
-            command = command.replace("--agent-id codex-terminal-settlement", "--agent-id foreign-agent")
-        return ScriptedExecToolAction(command=command)
+        tokens = shlex.split(_completion_action(request, kind="validation").command)
+        if drift_option:
+            tokens[tokens.index(drift_option) + 1] = "foreign-identity"
+        return ScriptedExecToolAction(command=shlex.join(tokens))
 
     transport = ScriptedDoubaoExecTransport([
         ScriptedExecToolAction(command=fixture.quota_guard_command.replace(
@@ -244,6 +268,113 @@ def test_ordinary_completion_does_not_authorize_an_unscoped_writeback(tmp_path: 
     assert receipt["failure_code"] == "writeback_identity_mismatch"
     assert receipt["settlement_receipt_steps"] == ["validation"]
     assert receipt["terminal_order_observed"] is False
+
+
+def test_terminal_fixture_requires_quota_before_reading_proof(tmp_path: Path) -> None:
+    receipt = DoubaoTerminalSettlementToolBehaviorActor(
+        api_key="test-only-placeholder",
+        transport=ScriptedDoubaoExecTransport([
+            ScriptedExecToolAction(command="cat fixture/settlement-proof.json"),
+        ]),
+    ).qualify(qualification_id="read-before-quota", fixture_root=tmp_path / "actor")
+    assert receipt["failure_code"] == "workspace_read_before_quota"
+    assert receipt["qualification_passed"] is False
+    assert receipt["settlement_receipt_steps"] == []
+
+
+@pytest.mark.parametrize("option", ["--registry", "--runtime-root", "--project", "--state-file"])
+def test_terminal_fixture_rejects_foreign_routes(tmp_path: Path, option: str) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    outside = tmp_path / "owner-state.json"
+    outside.write_text("Owner state must remain unchanged.\n")
+
+    def completion(request):
+        tokens = shlex.split(_completion_action(request, kind="validation").command)
+        if option in tokens:
+            tokens[tokens.index(option) + 1] = str(outside)
+        else:
+            tokens += [option, str(outside)]
+        return ScriptedExecToolAction(command=shlex.join(tokens))
+
+    receipt = DoubaoTerminalSettlementToolBehaviorActor(
+        api_key="test-only-placeholder", transport=ScriptedDoubaoExecTransport([
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat fixture/settlement-proof.json"), completion,
+        ]),
+    ).qualify(qualification_id="foreign-route", fixture_root=tmp_path / "actor")
+    assert receipt["failure_code"] == "fixture_route_mismatch"
+    assert receipt["qualification_passed"] is False
+    assert receipt["settlement_receipt_steps"] == []
+    assert outside.read_text() == "Owner state must remain unchanged.\n"
+
+
+def test_terminal_failure_receipt_does_not_echo_cli_or_model_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loopx.control_plane.testing import terminal_settlement_tool_behavior as terminal
+
+    fixture = _build_fixture(tmp_path / "oracle")
+    execute = terminal._execute_cli
+
+    def failed_writeback(command, state):
+        if "refresh-state" in command:
+            raise RuntimeError("private-model-payload-and-private-file-name")
+        return execute(command, state)
+
+    monkeypatch.setattr(terminal, "_execute_cli", failed_writeback)
+    receipt = DoubaoTerminalSettlementToolBehaviorActor(
+        api_key="test-only-placeholder", transport=ScriptedDoubaoExecTransport([
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat fixture/settlement-proof.json"), _writeback_action,
+        ]),
+    ).qualify(qualification_id="redacted-cli-failure", fixture_root=tmp_path / "actor")
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "tool_execution_failed"
+    assert "private-model-payload" not in json.dumps(receipt)
+
+
+@pytest.mark.skipif(not shell_isolation_available(), reason="Draft authoring requires native OS isolation")
+@pytest.mark.parametrize("draft_target", [".scratch/vision.json", "fixture/settlement-proof.json", "outside"])
+def test_terminal_native_draft_preserves_proof_and_authority(tmp_path: Path, draft_target: str) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    outside = tmp_path / "owner-private.json"
+    outside.write_text("Owner artifact.\n")
+    target = str(outside) if draft_target == "outside" else draft_target
+    vision = {
+        "schema_version": "goal_vision_replan_contract_v0", "state": "vision_closed",
+        "vision_patch": {"acceptance_summary": "Original proof and Todo completion independently validated."},
+        "path_delta": {"outcome": "no_change", "prior_assumption": "Final delivery required validation.",
+                       "observed_reality": "The proof was read and original Todo validation committed.",
+                       "retained": ["Original validated delivery"], "evidence_refs": ["fixture-settlement-proof"]},
+    }
+
+    def writeback(request):
+        return ScriptedExecToolAction(command=_writeback_action(request).command +
+                                     " --agent-vision-json .scratch/vision.json")
+
+    def completion(request):
+        tokens = shlex.split(_completion_action(request, kind="validation").command)
+        tokens[tokens.index("--turn-instance-id") + 1] = "${LOOPX_TURN:?}"
+        return ScriptedExecToolAction(command=shlex.join(tokens))
+
+    receipt = DoubaoTerminalSettlementToolBehaviorActor(
+        api_key="test-only-placeholder", transport=ScriptedDoubaoExecTransport([
+            ScriptedExecToolAction(command=fixture.quota_guard_command),
+            ScriptedExecToolAction(command="cat fixture/settlement-proof.json"),
+            completion,
+            ScriptedExecToolAction(command="cat > " + shlex.quote(target) + " <<'JSON'\n" +
+                                  json.dumps(vision) + "\nJSON"),
+            writeback, _spend_action, _completion_action,
+        ]),
+    ).qualify(qualification_id="native-terminal-draft", fixture_root=tmp_path / "actor")
+    passed = draft_target == ".scratch/vision.json"
+    assert receipt["qualification_passed"] is passed, receipt
+    assert receipt["boundary"]["shell_commands_executed"] is True
+    assert receipt["settlement_receipt_steps"] == (
+        ["validation", "durable_writeback", "quota_spend", "terminal_closeout"] if passed else ["validation"]
+    )
+    assert (tmp_path / "actor/project/fixture/settlement-proof.json").read_bytes() == fixture.proof_target.read_bytes()
+    assert outside.read_text() == "Owner artifact.\n"
 
 
 def test_ordinary_completion_requires_its_actual_validation_receipt(

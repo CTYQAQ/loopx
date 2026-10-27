@@ -21,9 +21,12 @@ from ..control_plane.capability_hooks import PostWritebackHookRegistration
 from ..control_plane.quota.settlement import (
     QuotaSettlementReadback,
     SettlementIdentity,
+    SettlementStepKind,
     build_turn_scoped_cli_settlement_plan,
+    attach_settlement_progress,
     read_heartbeat_settlement,
     settlement_result_payload,
+    settlement_step_command,
 )
 from ..control_plane.runtime.time import chronology_key
 from ..control_plane.todos.markdown import render_todo_markdown
@@ -134,6 +137,7 @@ def _todo_settlement_plan(
     identity: SettlementIdentity, *, args: argparse.Namespace,
     registry_path: Path, runtime_root: Path,
     goal_ref: dict[str, str] | None,
+    quota_spend_source: str = "heartbeat",
 ) -> dict[str, object]:
     """Render the native plan with the original route and supplied lease facts."""
     actor_args = ""
@@ -156,7 +160,7 @@ def _todo_settlement_plan(
         replan_obligation_id=identity.replan_obligation_id,
         turn_instance_id=identity.turn_instance_id, command_prefix=prefix,
         scoped_cli_args="", lifecycle_actor_args=actor_args, writeback_path_args=path_args,
-        goal_ref=goal_ref,
+        goal_ref=goal_ref, quota_spend_source=quota_spend_source,
     ).as_dict()
 
     from ..capabilities.explore.turn_context import project_settlement_attachment
@@ -633,6 +637,8 @@ def handle_todo_command(
                     no_follow_up=bool(args.no_follow_up),
                 )
                 if completion_error is not None:
+                    progress = settlement_readback.progress
+                    assert progress is not None
                     settlement_result = settlement_readback.settlement
                     payload = {
                         "ok": False,
@@ -652,6 +658,7 @@ def handle_todo_command(
                             registry_path=registry_path,
                             runtime_root=runtime_root,
                             goal_ref=goal_ref,
+                            quota_spend_source=progress["quota_spend_source"],
                         ),
                         "error": completion_error,
                     }
@@ -825,6 +832,25 @@ def handle_todo_command(
             payload["ok"] = False
             payload["receipt_repair_required"] = True
             payload["error"] = settlement_result.failure.reason
+        elif not args.no_follow_up:
+            attach_settlement_progress(
+                payload, settlement_readback, registry_path=registry_path,
+                runtime_root=runtime_root, goal_ref=goal_ref,
+            )
+            progress = settlement_readback.progress
+            assert progress is not None
+            if progress.get("next_step") == "durable_writeback":
+                identity = settlement_readback.identity.value
+                assert identity is not None
+                plan = _todo_settlement_plan(
+                    identity, args=args, registry_path=registry_path,
+                    runtime_root=runtime_root, goal_ref=goal_ref,
+                    quota_spend_source=progress["quota_spend_source"],
+                )
+                payload["settlement_plan"] = plan
+                payload["next_cli_actions"] = [settlement_step_command(
+                    plan, SettlementStepKind.DURABLE_WRITEBACK,
+                )]
     if (
         args.todo_command == "complete"
         and payload.get("ok")

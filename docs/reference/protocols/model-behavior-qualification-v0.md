@@ -309,6 +309,14 @@ writeback and spend receipts. Later receipts advance the original Turn's plan;
 they do not discard its identity-bound command templates. This follows the shared
 [quota-bound completion contract](../canonical-terminal-review.md#quota-bound-cli-completion)
 without changing the portfolio, repeats, contrasts or settlement order.
+After the proof is read, a terminal actor may author a project draft in
+`.scratch/` using the existing OS-isolated shell. Original fixture inputs and
+authority stores remain protected; private host data and external networking
+are unavailable. LoopX mutations still use one direct, identity-bound CLI call
+at a time; the draft shell cannot invoke LoopX. The original ten-call limit and
+all committed receipt checks remain. Explicit foreign routes or Turn identities
+fail rather than being repaired, and failure receipts retain fixture-owned
+codes rather than echoing CLI errors or model-authored JSON.
 
 For selected-Todo and terminal qualification,
 a standalone `cat` may read up to eight workspace-confined files, optionally
