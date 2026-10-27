@@ -1314,11 +1314,13 @@ def test_interrupt_does_not_overwrite_a_completed_turn(
     assert (session_id, turn_id) not in runtime.cancelled_turns
 
 
+@pytest.mark.parametrize("contender", ["claim", "expiry"])
 def test_queued_claim_and_interrupt_share_one_turn_transition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    contender: str,
 ) -> None:
-    """A queued claim and an interrupt serialize on the same Turn write lock.
+    """A queued writer and an interrupt serialize on the same Turn write lock.
 
     Before the claim took the Turn lock, the two writers could interleave: the
     interrupt read ``queued``, the claim committed ``running`` with a
@@ -1344,6 +1346,8 @@ def test_queued_claim_and_interrupt_share_one_turn_transition(
     )
     assert created is True
     turn_id = str(queued["turn_id"])
+    if contender == "expiry":
+        store.update_turn(session_id, turn_id, expires_at="2000-01-01T00:00:00Z")
 
     original_load_turn = store.load_turn
     interrupt_read = threading.Event()
@@ -1379,6 +1383,9 @@ def test_queued_claim_and_interrupt_share_one_turn_transition(
     claim_thread = threading.Thread(
         target=lambda: claimed.append(
             store.claim_next_queued_turn(session_id, host_claim_id="host-claim")
+            if contender == "claim" else store._settle_expired_queued_turns(
+                session_id, now=chat_store.datetime.max.replace(tzinfo=chat_store.timezone.utc),
+            )
         ),
         name="claim-turn",
         daemon=True,
@@ -1395,7 +1402,7 @@ def test_queued_claim_and_interrupt_share_one_turn_transition(
     assert turn["status"] == "interrupting"
     assert turn.get("host_claim_id") is None
     # The claim must not publish a Turn the interrupt already owns as active.
-    assert claimed == [None]
+    assert claimed == ([None] if contender == "claim" else [[]])
     current = store.load_session(session_id)
     assert current is not None
     assert current["active_turn_id"] is None
