@@ -195,6 +195,8 @@ def _write_fixture(tmp_path: Path) -> tuple[Path, Path]:
         + "\n",
         encoding="utf-8",
     )
+    from canonical_authority_fixture import initialize_canonical_source_fixture
+    initialize_canonical_source_fixture(runtime, GOAL_ID, state_path=state_file, provider="sqlite")
     return registry_path, state_file
 
 
