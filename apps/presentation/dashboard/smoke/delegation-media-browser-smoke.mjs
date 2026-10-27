@@ -83,6 +83,9 @@ try {
   const input = dialog.getByRole('searchbox', {name: '搜索委派'});
   await page.waitForFunction(() => document.querySelector('.conversation-requests-body')?.getAttribute('aria-busy') === 'false');
   await page.screenshot({path: resolve(output, 'default-desktop.png')});
+  await page.setViewportSize({width: 390, height: 844});
+  await page.screenshot({path: resolve(output, 'default-narrow.png')});
+  await page.setViewportSize({width: 1440, height: 1000});
   await input.fill('核对账单导出的字段映射');
   await dialog.getByRole('button', {name: '搜索', exact: true}).click();
   const row = dialog.locator('.conversation-request-row');
