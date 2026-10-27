@@ -119,13 +119,19 @@ def test_bounded_continuation_rechecks_original_capture_and_utf8_cursor(tmp_path
     assert "no guard, admission or spend" in result["recovery"]
 
 
-def test_page_output_budget_rejects_guard_use_without_admission(tmp_path, monkeypatch):
+@pytest.mark.parametrize("extra,limit,reason", [
+    ([], 7000, "only supported by JSON context-read"),
+    (["--codex-app", "--context-delivery", "off"], 7000, "only supported by JSON context-read"),
+    (["--codex-app", "--context-delivery", "on"], 0, "must be positive"),
+    (["--codex-app", "--context-delivery", "on"], -1, "must be positive"),
+])
+def test_page_output_budget_rejects_guard_use_without_admission(tmp_path, monkeypatch, extra, limit, reason):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     project, runtime, registry = _write_fixture(tmp_path)
     code, result = _run_cli(registry, runtime, "quota", "should-run", "--goal-id", GOAL_ID,
         "--agent-id", AGENT_ID, "--todo-id", TODO_ID, "--turn-instance-id", "invalid-page-budget-guard",
-        "--max-page-output-bytes", "7000", cwd=project)
-    assert code == 1 and not result["ok"] and "only supported by JSON context-read" in result["reason"]
+        "--max-page-output-bytes", str(limit), *extra, cwd=project)
+    assert code == 1 and not result["ok"] and reason in result["reason"]
     assert _heartbeat_receipt_count(runtime, "invalid-page-budget-guard") == 0
     assert _spend_run_count(runtime) == 0
 

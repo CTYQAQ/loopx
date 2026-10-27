@@ -243,10 +243,11 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         # Plan only read offsets. Every actual model-facing page must
         # come from the public CLI, including digest verification.
         page_size = 3072 if adaptive or host == "code_mode" else 5000
-        if reader_output_bytes and not bounded_pages:
+        page_output_budget = reader_output_bytes or native_guard_output_bytes
+        if page_output_budget and not bounded_pages:
             # Offset planning must match the bounded payload, with room for
             # the serialized page metadata and escaped source text.
-            page_size = min(page_size, reader_output_bytes // 2)
+            page_size = min(page_size, page_output_budget // 2)
         offsets, start, count = [0], 0, 0
         for character in raw.decode():
             size = len(character.encode())
@@ -349,7 +350,7 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             descriptor = _last_page(request)
             assert descriptor and descriptor["ok"], "native guard is not complete model-visible JSON"
             assert descriptor == json.loads(wire_paths[name].read_bytes())
-            assert len(json.dumps(descriptor, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 7900
+            assert len(json.dumps(descriptor, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= (native_guard_output_bytes or 64000)
             read_commands[name] = descriptor["command"]
             # The public native CLI now shares context-project's paged reader.
             # Keep the independent full-wire oracle separate from its page view.
@@ -458,6 +459,13 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 argv.extend(["--max-page-output-bytes", str(budget)])
             return shlex.join(argv)
         cmd = bounded_read(cmd, primary=True)
+
+        def tool_output_tokens(command, fallback):
+            if automatic_output_budget and any(part in shlex.split(command)
+                    for part in ("context-read", "should-run", "context-project")):
+                return 22000
+            return fallback
+
         if host == "code_mode":
             pragma = ('// @exec: {"max_output_tokens":24000}\n' if automatic_output_budget else
                 '// @exec: {"max_output_tokens":12000}\n' if native_pragma else "")
@@ -469,16 +477,16 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
                 commands.append(bounded_read(stages["pages"].pop(0)))
             if adaptive:
                 code = "".join("{const r=await tools.exec_command(" + json.dumps({
-                    "cmd": command, "login": False, "max_output_tokens": 22000 if automatic_output_budget and "context-read" in shlex.split(command) else 11000 if reader_output_bytes else 2000 if bounded_pages else 2400})
+                    "cmd": command, "login": False, "max_output_tokens": tool_output_tokens(command, 11000 if reader_output_bytes else 2000 if bounded_pages else 2400)})
                     + ");text(r.exit_code === 0 ? r.output : r);}" for command in commands)
                 return {"type": "custom_tool_call", "id": f"ctc_{number}", "call_id": f"call_{number}",
                     "name": "exec", "input": pragma + code}
             return {"type": "custom_tool_call", "id": f"ctc_{number}", "call_id": f"call_{number}",
                 "name": "exec", "input": pragma + "".join("text(await tools.exec_command(" + json.dumps({
-                    "cmd": command, "max_output_tokens": 2000}) + "));" for command in commands)}
+                    "cmd": command, "max_output_tokens": tool_output_tokens(command, 2000)}) + "));" for command in commands)}
         return {"type": "function_call", "id": f"fc_{number}", "call_id": f"call_{number}",
             "name": "exec_command", "arguments": json.dumps({"cmd": cmd,
-                "max_output_tokens": 22000 if automatic_output_budget and "context-read" in shlex.split(cmd) else 2000})}
+                "max_output_tokens": tool_output_tokens(cmd, 2000)})}
 
     def usage(request, number):
         count = (2000000 if host == "benchmark" else 30000) if number == stages["compact_response"] else 1
