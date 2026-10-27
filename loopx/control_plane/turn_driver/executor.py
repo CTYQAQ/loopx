@@ -1554,6 +1554,12 @@ def run_loopx_turn_once(
         if journal is not None:
             if goal_admission is not None:
                 goal_admission.require_current()
+                if not goal_admission.enabled:
+                    # Recovery needs current lifetime authority, not a new quota admission.
+                    with goal_admission.launch_lifetime(
+                        operation="turn_recovery_lifetime",
+                    ):
+                        pass
             envelope = (
                 plan.get("turn_envelope")
                 if isinstance(plan.get("turn_envelope"), Mapping)
@@ -1683,6 +1689,7 @@ def run_loopx_turn_once(
                 "status": "in_progress",
                 "host": host_projection,
                 "completed_phases": [],
+                "host_attempt_count": 0,
                 "plan": dict(plan),
             }
             persist_journal(journal)

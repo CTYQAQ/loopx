@@ -83,6 +83,12 @@ def execute_turn_run_once(
     execution_started = False
     try:
         project = Path(args.project).expanduser().resolve()
+        if args.execute and goal_admission is None:
+            # Cached-result recovery still needs the legacy lifetime check.
+            goal_admission = FirstPartyHostGoalAdmission.for_plan(
+                registry_path=registry_path, goal_id=args.goal_id,
+                planned_goal_ref=goal_ref,
+            )
         planned_host = (
             payload.get("host") if isinstance(payload.get("host"), dict) else {}
         )
