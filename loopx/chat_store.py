@@ -1416,6 +1416,39 @@ class ChatSessionStore(ChatIngressStore):
             _atomic_write_json(path, payload, preserve_mode=True)
             return payload
 
+    def begin_turn_interrupt(
+        self,
+        session_id: str,
+        turn_id: str,
+        *,
+        expected_statuses: set[str],
+    ) -> dict[str, Any] | None:
+        """Record stop intent and enter `interrupting` as one Turn transition.
+
+        Holding the Turn write lock across the status check, the durable intent
+        event and the status write closes the completion race: a Turn that
+        already reached a terminal state cannot gain a stop-intent event after
+        its terminal outcome, and a Turn this call does interrupt cannot lose
+        that intent to a later completion. The event still precedes the status
+        change, so a crash between them leaves the requested stop recorded
+        rather than silently turning it into an automatic review.
+        """
+        path = self._turn_path(session_id, turn_id)
+        with exclusive_file_lock(
+            path,
+            agent_id="loopx-chat",
+            operation="begin_chat_turn_interrupt",
+        ):
+            payload = self.load_turn(session_id, turn_id)
+            if payload is None:
+                raise KeyError("chat turn was not found")
+            if payload.get("status") not in expected_statuses:
+                return None
+            self.append_event(session_id, turn_id, kind="turn.interrupt_requested", payload={})
+            payload["status"] = "interrupting"
+            _atomic_write_json(path, payload, preserve_mode=True)
+            return payload
+
     def append_completed_response_events(
         self,
         session_id: str,
