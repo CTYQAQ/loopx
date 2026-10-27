@@ -257,6 +257,10 @@ operation. Monitoring requires the separate explicit setting below.
 If the host restarts before a native watch observes anything, the original
 idle pump can create one separately correlated Chat continuation. It preserves
 the failed request and uses the same native observation identity and deadline.
+For a bound steward, this also covers a portfolio read explicitly refused
+because its authorization snapshot changed. The exact original failure and a
+single empty `external_authorization_changed` context must both be present;
+other runtime errors or missing, conflicting or unreadable context do not qualify.
 The shared typed admission requires an untouched observation-only request, an
 available original worker lock, complete event/history reads and no pending or
 committed native poll receipt. It rechecks current authority, lease generation
