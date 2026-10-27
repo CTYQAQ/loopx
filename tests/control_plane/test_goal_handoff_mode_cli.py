@@ -72,12 +72,13 @@ def _write_canonical_workspace(
     tmp_path: Path,
     *,
     handoff_mode: str,
+    registered_agents: list[str] | None = None,
 ) -> tuple[Path, Path]:
     registry, _runtime, state = promoted_create_fixture(
         tmp_path,
         goal_id=GOAL_ID,
         handoff_mode=handoff_mode,
-        registered_agents=[AGENT_A, AGENT_B],
+        registered_agents=registered_agents if registered_agents is not None else [AGENT_A, AGENT_B],
     )
     return registry, state
 
@@ -286,32 +287,37 @@ def test_handoff_mode_set_same_value_is_idempotent(
 
 
 @pytest.mark.parametrize(
-    ("claim_actor", "lease_args", "expected_error"),
+    ("claim_actor", "registered_agents", "lease_args", "expected_error"),
     [
-        (AGENT_A, (), "claim_actor_mismatch"),
+        (None, [AGENT_B], (), "handoff_mode_requires_lease"),
+        (AGENT_A, [AGENT_A, AGENT_B], (), "claim_actor_mismatch"),
         (
             AGENT_B,
+            [AGENT_A, AGENT_B],
             ("--task-lease-idempotency-key", "missing-proof", "--task-lease-expected-version", "1"),
-            "handoff_mode_requires_lease",
+            "version_mismatch",
         ),
     ],
 )
 def test_cli_hard_mode_claim_maps_typed_refusals_without_writing(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    claim_actor: str,
+    claim_actor: str | None,
+    registered_agents: list[str],
     lease_args: tuple[str, ...],
     expected_error: str,
 ) -> None:
     registry, _state = _write_canonical_workspace(
         tmp_path,
         handoff_mode=HANDOFF_MODE_HARD_LEASE,
+        registered_agents=registered_agents,
     )
     todo = _add_todo(registry)
     _, before = _run_cli(capsys, registry, "todo", "list", "--goal-id", GOAL_ID)
 
-    # Proof-free self-claim prepares execution. Foreign actors and explicitly
-    # supplied but unavailable lease proof retain their distinct refusals.
+    # Only explicit self-claim prepares execution. The old single-agent call
+    # without an actor still needs a lease; foreign actors and wrong CAS fail
+    # earlier without authorizing or mutating the assignment.
     exit_code, payload = _run_cli(
         capsys,
         registry,
@@ -323,8 +329,7 @@ def test_cli_hard_mode_claim_maps_typed_refusals_without_writing(
         todo["todo_id"],
         "--claimed-by",
         AGENT_B,
-        "--agent-id",
-        claim_actor,
+        *(() if claim_actor is None else ("--agent-id", claim_actor)),
         *lease_args,
     )
 
