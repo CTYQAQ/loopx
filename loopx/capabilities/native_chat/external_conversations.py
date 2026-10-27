@@ -159,7 +159,10 @@ class ChatExternalConversations:
             with exclusive_file_lock(self.root / "source-fences" / f"{row['binding_id']}.{row['source']['source_ref']}.json", operation="route_external_chat_request"):
                 selected = self.bindings.resolve(binding_id=row["binding_id"], **row["source"], include_observation=True)
                 source = source_observation(selected)
-                if (self.controller.store.load_session(row["session_id"]) != session
+                # Adopting an already admitted Turn only repairs correlation:
+                # its execution and newer input may legitimately have advanced.
+                # The typed planner below must still prove that exact receipt.
+                if not plan.get("admitted_turn_id") and (self.controller.store.load_session(row["session_id"]) != session
                         or self.controller.store.load_turn(row["session_id"], row["turn_id"]) != turn
                         or source_requests() != requests):
                     return row
