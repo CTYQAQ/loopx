@@ -8,9 +8,13 @@ from pathlib import Path
 import pytest
 
 from loopx.cli import main as cli_main
+from loopx.control_plane.effect_runtime import EffectRuntimeRejected
 from loopx.control_plane.goals.goal_vision import normalize_goal_vision_packet
 from loopx.control_plane.goals.goal_frontier import fallback_source
-from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime
+from canonical_authority_fixture import (
+    initialize_canonical_authority, initialize_canonical_source_fixture,
+    isolate_sqlite_runtime, read_fixture_todos,
+)
 from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 from loopx.control_plane.coordination.local_authority import read_canonical_todos_if_promoted
 from loopx.control_plane.todos.todo_summary import TODO_ITEM_SCHEMA_VERSION
@@ -90,6 +94,7 @@ def _write_fixture(
     unrelated_deferred_count: int,
     fallback_present: bool = True,
     prerequisite_status: str = "open",
+    provider: str | None = "sqlite",
 ) -> list[str]:
     state_file = tmp_path / "ACTIVE_GOAL_STATE.md"
     state_file.write_text(
@@ -147,6 +152,8 @@ def _write_fixture(
         )
         + "\n"
     )
+    if provider is not None:
+        initialize_canonical_source_fixture(runtime, GOAL_ID, state_path=state_file, provider=provider)
     return [
         "--format",
         "json",
@@ -265,7 +272,7 @@ def test_real_cli_reads_only_direct_fallback_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     depth: int,
 ) -> None:
-    args = _write_fixture(tmp_path, unrelated_deferred_count=20)
+    args = _write_fixture(tmp_path, unrelated_deferred_count=20, provider=None)
     state_file = tmp_path / "ACTIVE_GOAL_STATE.md"
     state = state_file.read_text()
     if depth:
@@ -281,6 +288,9 @@ def test_real_cli_reads_only_direct_fallback_dependencies(
             f"resume_when=todo_done:todo_chain_{index + 1} -->\n"
         )
     state_file.write_text(state)
+    initialize_canonical_source_fixture(
+        tmp_path / "runtime", GOAL_ID, state_path=state_file, provider="sqlite",
+    )
     reads: list[str] = []
     original_read = fallback_source.read_fallback_source_snapshot
 
@@ -371,7 +381,7 @@ def test_real_cli_fallback_monitor_wait_requires_generation_condition(
     generation: int | None,
     expected_gap: str | None,
 ) -> None:
-    args = _write_fixture(tmp_path, unrelated_deferred_count=0)
+    args = _write_fixture(tmp_path, unrelated_deferred_count=0, provider=None)
     state_file = tmp_path / "ACTIVE_GOAL_STATE.md"
     generation_metadata = (
         f" resume_monitor_generation={generation}" if generation is not None else ""
@@ -391,6 +401,9 @@ def test_real_cli_fallback_monitor_wait_requires_generation_condition(
         "material_change_generation=3 -->\n"
     )
     state_file.write_text(state)
+    initialize_canonical_source_fixture(
+        tmp_path / "runtime", GOAL_ID, state_path=state_file, provider="sqlite",
+    )
 
     assert cli_main(args) == 0
     result = json.loads(capsys.readouterr().out)
@@ -403,12 +416,12 @@ def test_real_cli_fallback_monitor_wait_requires_generation_condition(
 
 
 @pytest.mark.parametrize("duplicate_id", [FALLBACK_TODO_ID, PREREQUISITE_TODO_ID])
-def test_real_cli_ambiguous_canonical_fallback_read_is_uncertain(
+def test_duplicate_authored_fallback_is_rejected_before_canonical_creation(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     duplicate_id: str,
 ) -> None:
-    args = _write_fixture(tmp_path, unrelated_deferred_count=0)
+    args = _write_fixture(tmp_path, unrelated_deferred_count=0, provider=None)
     state_file = tmp_path / "ACTIVE_GOAL_STATE.md"
     state_file.write_text(
         state_file.read_text()
@@ -416,13 +429,19 @@ def test_real_cli_ambiguous_canonical_fallback_read_is_uncertain(
         + f"  <!-- loopx:todo todo_id={duplicate_id} status=open -->\n"
     )
 
-    # The canonical succession gate rejects duplicate identities before a
-    # frontier can be projected. Do not fabricate fallback advice from it.
+    before = state_file.read_bytes()
+    with pytest.raises(EffectRuntimeRejected, match="duplicate succession identity"):
+        initialize_canonical_source_fixture(
+            tmp_path / "runtime", GOAL_ID, state_path=state_file, provider="sqlite",
+        )
+    assert state_file.read_bytes() == before
+    # Invalid authored input never becomes authority. The actual CLI cannot
+    # fabricate fallback advice from the uninitialized source afterward.
     assert cli_main(args) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["should_run"] is False
     assert result["state"] == "blocked_health"
-    assert "duplicate succession identity" in result["verbose_debug"]["error"]
+    assert "canonical_authority_required" in json.dumps(result)
     assert "goal_frontier_projection" not in result
 
 
@@ -437,12 +456,10 @@ def test_real_provider_cli_uses_one_snapshot_including_archived_dependency(
     if provider == "sqlite":
         isolate_sqlite_runtime(tmp_path, monkeypatch)
     args = _write_fixture(tmp_path, unrelated_deferred_count=20,
-                          prerequisite_status=dependency_status)
+                          prerequisite_status=dependency_status, provider=None)
     state_file = tmp_path / "ACTIVE_GOAL_STATE.md"
     runtime_root = tmp_path / "runtime"
-    rows = fallback_source.read_fallback_source_snapshot(
-        registry_path=tmp_path / "registry.json", runtime_root=runtime_root, goal_id=GOAL_ID,
-    )
+    rows = read_fixture_todos(state_file)
     for row in rows:
         row["schema_version"] = TODO_ITEM_SCHEMA_VERSION
     if dependency_status == "done":

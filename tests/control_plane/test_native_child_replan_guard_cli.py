@@ -124,7 +124,9 @@ def test_legal_replan_reports_native_child_without_settling_parent(
     identity = guard["heartbeat_receipt"]["settlement_identity"]
     assert identity.get("todo_id") == (TODO if todo_bound else None)
     assert bool(identity.get("replan_obligation_id")) is not todo_bound
-    assert guard["interaction_contract"]["agent_channel"]["delivery_allowed"] is True
+    assert guard["interaction_contract"]["agent_channel"]["delivery_allowed"] is False
+    assert guard["interaction_contract"]["agent_channel"]["must_attempt"] is True
+    assert guard["heartbeat_receipt"]["semantic_replan_obligation_id"]
     original_index = index.read_bytes()
     base = ("native-child", "--goal-id", GOAL, "--agent-id", AGENT,
             "--turn-instance-id", TURN)

@@ -143,9 +143,11 @@ def write_monitor_poll_todo_state(
             runtime_root=runtime_root,
             goal_id=goal_id,
         )
-    except CanonicalAuthorityRequired:
+    except CanonicalAuthorityRequired as error:
         if not execute or not monitor_effect_id or lease_proof is not None:
-            raise
+            raise CanonicalAuthorityRequired(
+                goal_id=goal_id, operation="monitor_poll", payload=error.payload,
+            ) from error
         # This explicit original-operation read can only return an immutable
         # business receipt. Its existing typed owner validates exact intent;
         # no receipt still refuses below, without reopening the retired writer.

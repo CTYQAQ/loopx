@@ -9,12 +9,49 @@ import pytest
 import test_quota_settlement_cli as fixture
 from canonical_authority_fixture import (
     initialize_canonical_authority, isolate_sqlite_runtime,
+    read_fixture_todos,
     without_resume_observation_time as stable,
 )
 
 from loopx.cli import main as cli_main
 from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 from loopx.control_plane.quota.settlement import read_heartbeat_settlement
+from loopx.control_plane.todos.contract import TODO_DECISION_SCOPE_OUTCOME_SCHEMA_VERSION
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_quota_next_action_preserves_canonical_decision_receipt_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str,
+) -> None:
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    project, runtime, registry = fixture._write_fixture(tmp_path)
+    state = fixture._configure_read_only_todo(project)
+    rows = read_fixture_todos(state)
+    target = next(row for row in rows if row["todo_id"] == fixture.TODO_ID)
+    target["decision_scope_outcomes"] = [{
+        "schema_version": TODO_DECISION_SCOPE_OUTCOME_SCHEMA_VERSION,
+        "outcome": "reject",
+        "decision_scope": {"schema_version": "decision_scope_v0", "kind": "direction",
+                           "granularity": "action", "scope_key": "previous_route"},
+        "source_todo_id": "todo_previous_gate",
+    }]
+    initialize_canonical_authority(runtime, fixture.GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=fixture.GOAL_ID, todos=rows,
+            handoff_mode="soft_claim", leases=[]), state_path=state, provider=provider)
+    code, source = fixture._run_cli(registry, runtime, "todo", "list",
+        "--goal-id", fixture.GOAL_ID, cwd=project)
+    assert code == 0, source
+    canonical = next(row for row in source["todos"] if row["todo_id"] == fixture.TODO_ID)
+    version = canonical["decision_scope_outcomes"][0]["schema_version"]
+    assert version == TODO_DECISION_SCOPE_OUTCOME_SCHEMA_VERSION
+    code, guard = fixture._run_cli(registry, runtime, "quota", "should-run",
+        "--goal-id", fixture.GOAL_ID, "--agent-id", fixture.AGENT_ID, "--codex-app",
+        cwd=project)
+    assert code == 0, guard
+    action = guard["agent_lane_next_action"]
+    assert action["todo_id"] == canonical["todo_id"]
+    assert action["decision_scope_outcomes"][0]["schema_version"] == version
+
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
@@ -44,10 +81,9 @@ def test_waiting_original_turn_preserves_other_todo_step_and_settles_once(
                 "--format", "json", *args])
             return code, json.loads(capsys.readouterr().out)
 
-    code, initial = run("todo", "list", "--goal-id", fixture.GOAL_ID)
-    assert code == 0, initial
+    source_todos = read_fixture_todos(state)
     canonical = initialize_canonical_authority(runtime, fixture.GOAL_ID,
-        build_todo_runtime_shadow_projection(goal_id=fixture.GOAL_ID, todos=initial["todos"],
+        build_todo_runtime_shadow_projection(goal_id=fixture.GOAL_ID, todos=source_todos,
             handoff_mode="soft_claim", leases=[]), state_path=state, provider=provider)
     binding = ("--agent-id", fixture.AGENT_ID, "--todo-id", fixture.TODO_ID,
         "--turn-instance-id", "original-next-action-turn")
@@ -137,11 +173,10 @@ def test_todoless_replan_refuses_step_and_recovers_original_settlement(
     def run(*args: str) -> tuple[int, dict]:
         return fixture._run_cli(registry, runtime, *args, cwd=project)
 
-    code, listed = run("todo", "list", "--goal-id", fixture.GOAL_ID)
-    assert code == 0, listed
+    source_todos = read_fixture_todos(state)
     initialize_canonical_authority(runtime, fixture.GOAL_ID,
         build_todo_runtime_shadow_projection(goal_id=fixture.GOAL_ID,
-            todos=listed["todos"], handoff_mode="soft_claim", leases=[]),
+            todos=source_todos, handoff_mode="soft_claim", leases=[]),
         state_path=state, provider=provider)
     turn = "replan-recommendation-recovery"
     guard_args = ("quota", "should-run", "--codex-app", "--goal-id", fixture.GOAL_ID,

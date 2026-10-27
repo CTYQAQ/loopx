@@ -482,10 +482,15 @@ The result contains `native_config.config_overrides`, `native_config.hooks` and
 its existing developer instructions. Apply each flat key/value in `config_overrides`
 to the native host configuration (or as a `-c key=value` override). This selects
 64000-byte context continuations, a 20000-token history limit, and a shell-scoped
-reader budget declaration. The initial guard stays small. Its instruction requests
+reader budget declaration. The initial guard uses the same output budget. Its instruction requests
 22000 tokens per reader result and 24000 for code-mode emission, with one directly
-forwarded stdout per call. Unconfigured hosts retain the small-page default;
+forwarded stdout per call. Native paging uses this default without the shell declaration;
 the isolated benchmark worker applies this profile automatically when opted in.
+Keep short context readers in the foreground (`exec_command`'s normal 10000 ms
+wait). Early output followed by polling can leave the native post-tool hook with
+only an empty tail, so a visibly complete page still cannot establish a baseline.
+Consume every chunk if a command yields and preserve full fallback when hook
+coverage is incomplete; do not re-admit or invent a retention receipt.
 Preserve other configuration. Review and
 trust only these exact hooks through Codex's native hook trust surface; the CLI
 does not install files, approve hashes, enable diagnostics or run a guard.
@@ -514,14 +519,31 @@ these options without freezing a Turn ID. Each wake loads current instructions
 and binds the existing `LOOPX_TURN` before its generated guard. Selection keeps
 the same transport. An unset wake identity fails in the shell before admission.
 
+Native guards and JSON recovery readers use the existing 64000-byte output
+profile even when an App shell lacks the configuration environment override.
+Small captures finish inline; larger captures continue with the same large-page
+budget. Explicit smaller budgets remain available for truncated-range recovery.
+The native hook accepts complete JSON records alongside other shell output and
+still verifies each record against the trusted original capture before reuse.
+
 Native reuse assumes a normally completed full read was read and remains
 available until a lifecycle invalidation. `PostToolUse` merges complete reader
 ranges in the existing private session journal. EOF alone, known read failures,
 malformed/truncated pages and interrupted paging cannot establish a baseline.
-Compaction, clear, fork, session/workspace change and every SessionStart, including
-same-session resume, invalidate it; ordinary tools and turn endings do not.
+Compaction, clear, fork, session/workspace change and unqualified SessionStart
+invalidate it; ordinary tools and turn endings do not. A same-session resume can
+retain its baseline only when the native replay checkpoint verifies continuity.
 Read the pinned original completely before establishing a new differential chain.
 Repeated events and parallel pages are idempotent.
+Workspace identity comes from native lifecycle events, not a shell command's
+working directory. The same native session can run projection and recovery
+commands in a subdirectory or another checkout without discarding its baseline.
+A native SessionStart reporting a changed workspace still retires the previous
+candidate and recovery selector. Session, Goal and Agent isolation remains in
+force; changing command directories grants no work or publication authority.
+工作区身份由原生生命周期事件确定。命令切换到子目录或另一 checkout 不会清除同一
+原生会话的差分基线；原生 SessionStart 报告工作区变化时仍清除旧基线和恢复选择器。
+Session、Goal 和 Agent 隔离保持不变，切换命令目录不授予工作或发布权限。
 This replaces per-request input-history proof, not the capture integrity check.
 It preserves native providers, authentication, endpoints and connection mode,
 including implicit history. No input diagnostics or forced HTTP is required.

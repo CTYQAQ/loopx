@@ -163,7 +163,7 @@ def _locked(directory: str) -> Iterator[Path]:
 
     root = _private_root(directory)
     fd = os.open(root / "lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
-    with os.fdopen(fd, "r+") as lock:
+    with os.fdopen(fd, "r+", encoding="utf-8") as lock:
         if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
             raise ValueError("context lock is not a regular file")
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -193,8 +193,7 @@ def read_codex_context_reference(directory: str, *, goal_id: str | None, agent_i
     state = _state(_private_root(directory))
     session = os.environ.get("CODEX_THREAD_ID")
     if (not session or state.get("session_id") != session
-            or not isinstance(state.get("cwd"), str)
-            or Path(state["cwd"]).resolve() != Path.cwd().resolve()):
+            or not isinstance(state.get("cwd"), str) or not state["cwd"]):
         raise ValueError("original capture lookup requires the same native session and workspace")
     recovery = state.get("recovery")
     if (not goal_id or not agent_id or not isinstance(recovery, dict)
@@ -236,7 +235,6 @@ def codex_context_recovery_instructions(directory: str, *, goal_id: str, agent_i
         ("The generated native configuration supports 64000-byte context-read outputs and a 20000-token history limit. "
          "Read one continuation per tool call with max_output_tokens=22000. In code-mode, also set the exec "
          "pragma max_output_tokens to 24000 and forward successful stdout directly with text(result.output). "
-         "Keep the initial guard result small; these larger budgets apply to context-read calls only. "
          if page_output_bytes == NATIVE_CONTEXT_LARGE_OUTPUT_BYTES else "") +
         "For code-mode reads, size batches against both direct-result and retained-history output limits; "
         "max_output_tokens alone does not establish the latter. Read one output at a time with "
@@ -343,7 +341,7 @@ def codex_context_hook(directory: str | None, event: dict[str, Any]) -> dict[str
 
 
 def _context_pages(value: object) -> list[dict[str, Any]]:
-    """Decode native shell/MCP JSON output; never classify arbitrary prose.
+    """Decode native shell/MCP JSON records; never classify arbitrary prose.
 
     Incomplete JSON has no successful page. The pending delivery stays pending.
     Native output truncation that is not reported here remains an assumption gap.
@@ -352,7 +350,19 @@ def _context_pages(value: object) -> list[dict[str, Any]]:
         try:
             value = json.loads(value)
         except ValueError:
-            return []
+            # CLI stdout is one complete JSON record per line. Other commands
+            # may precede/follow it in the same shell result; do not search for
+            # embedded JSON substrings or accept an incomplete record. Capture
+            # identity and every reported byte are still verified below.
+            pages = []
+            for line in value.splitlines():
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(record, dict):
+                    pages.extend(_context_pages(record))
+            return pages
     if not isinstance(value, dict):
         return []
     if value.get("schema_version") == "context_capture_page_v1":
@@ -469,10 +479,10 @@ def project_codex_context(payload: dict[str, Any], *, directory: str | None, cap
                 if (not isinstance(session, str) or not session
                         or (native_session and session != native_session)):
                     return payload  # Do not replace a different native session's recovery.
-                if (not native_session or not isinstance(state.get("cwd"), str)
-                        or Path(state["cwd"]).resolve() != Path.cwd().resolve()):
-                    # A later tool can restore cwd/identity and make an old
-                    # selector eligible again, so invalidate before full fallback.
+                # Native lifecycle events own workspace identity and epoch.
+                # A shell tool may run in another checkout without changing
+                # the host session or losing its previously delivered context.
+                if (not native_session or not isinstance(state.get("cwd"), str) or not state["cwd"]):
                     raise ValueError("context recovery requires the same native session and workspace")
                 if not isinstance(epoch, str) or not epoch:
                     raise ValueError("context recovery requires a native context epoch")
