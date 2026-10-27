@@ -135,6 +135,8 @@ def write_registry(root: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
+    from loopx.control_plane.testing.canary_harness import import_fixture_authority
+    import_fixture_authority(registry_path, "configure-goal-fixture", provider="sqlite")
     return registry_path
 
 
