@@ -8,7 +8,7 @@ from loopx import cli
 from loopx.control_plane.quota import refresh_external_delivery as bridge
 from loopx.control_plane.quota.settlement import SettlementIdentity
 from loopx.state_refresh import refresh_state_run
-from canonical_authority_fixture import isolate_sqlite_runtime
+from tests.control_plane.canonical_authority_fixture import isolate_sqlite_runtime
 from tests.control_plane.test_quota_settlement_cli import (
     AGENT_ID, GOAL_ID, TODO_ID, TURN_ID, _write_fixture, _initialize_fixture_authority,
 )

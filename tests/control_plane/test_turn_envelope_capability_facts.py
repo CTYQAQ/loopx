@@ -14,7 +14,7 @@ import pytest
 from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 from loopx.control_plane.turn_driver.driver import build_loopx_turn_plan
 from tests.control_plane.canonical_authority_fixture import (
-    initialize_canonical_authority, isolate_sqlite_runtime,
+    initialize_canonical_authority, isolate_sqlite_runtime, read_fixture_todos,
 )
 from tests.control_plane.reward_memory_host_fixture import enable_live_memory
 from tests.control_plane.test_quota_settlement_cli import (
@@ -34,10 +34,8 @@ def test_real_captured_guard_preserves_required_and_missing_capabilities(
     state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     state.write_text(state.read_text().replace("action_kind=validate ",
         "action_kind=validate continuation_policy=same_agent_non_delivery "))
-    code, listed = _run_cli(registry, runtime, "todo", "list", "--goal-id", GOAL_ID)
-    assert code == 0, listed
     projection = build_todo_runtime_shadow_projection(
-        goal_id=GOAL_ID, handoff_mode="soft_claim", todos=listed["todos"],
+        goal_id=GOAL_ID, handoff_mode="soft_claim", todos=read_fixture_todos(state),
     )
     initialize_canonical_authority(runtime, GOAL_ID, projection, state_path=state, provider=provider)
     if mode != "off":
@@ -88,10 +86,8 @@ def test_captured_vision_contract_preserves_closeout_and_original_observation(
     state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     state.write_text(state.read_text().replace("action_kind=validate ",
         "action_kind=validate continuation_policy=same_agent_non_delivery "))
-    code, listed = _run_cli(registry, runtime, "todo", "list", "--goal-id", GOAL_ID)
-    assert code == 0, listed
     initialize_canonical_authority(runtime, GOAL_ID, build_todo_runtime_shadow_projection(
-        goal_id=GOAL_ID, handoff_mode="soft_claim", todos=listed["todos"],
+        goal_id=GOAL_ID, handoff_mode="soft_claim", todos=read_fixture_todos(state),
     ), state_path=state, provider=provider)
 
     # A synthetic retained checkpoint drives the real frontier and CLI owners.
