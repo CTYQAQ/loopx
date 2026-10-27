@@ -1683,6 +1683,7 @@ def run_loopx_turn_once(
                 "status": "in_progress",
                 "host": host_projection,
                 "completed_phases": [],
+                "host_attempt_count": 0,
                 "plan": dict(plan),
             }
             persist_journal(journal)
