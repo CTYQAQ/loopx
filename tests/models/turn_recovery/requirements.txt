@@ -1,6 +1,6 @@
 # Python 3.11 qualification dependencies; product runtime has no Python dependencies.
 PyYAML==6.0.3
-Pygments==2.19.2
+Pygments==2.21.0
 attrs==25.4.0
 hypothesis==6.142.4
 iniconfig==2.3.0

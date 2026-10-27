@@ -194,7 +194,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r tests/models/turn_recovery/requirements.txt
 .venv/bin/python -m pip install --no-deps --no-build-isolation -e .
 .venv/bin/python -m pip check
-.venv/bin/python -m pytest -q tests/test_loopx_turn_executor.py tests/control_plane/test_turn_host_decision_capture.py tests/control_plane/test_turn_interruption_recovery.py tests/control_plane/test_turn_recovery_state_machine.py tests/control_plane/test_host_process.py tests/control_plane/test_first_party_host_runtime.py tests/control_plane/test_effect_program_fault_replay_matrix.py --basetemp=./recovery-results
+.venv/bin/python -m pytest -q tests/test_stage2c_dependency_lock.py tests/test_loopx_turn_executor.py tests/control_plane/test_turn_host_decision_capture.py tests/control_plane/test_turn_interruption_recovery.py tests/control_plane/test_turn_recovery_state_machine.py tests/control_plane/test_host_process.py tests/control_plane/test_first_party_host_runtime.py tests/control_plane/test_effect_program_fault_replay_matrix.py --basetemp=./recovery-results
 node --experimental-strip-types --test --test-isolation=none tests/control_plane_ts/turn_journal.test.ts tests/control_plane_ts/first_party_host_runtime.test.ts tests/control_plane_ts/effect_program.test.ts tests/control_plane_ts/turn_settlement.test.ts tests/control_plane_ts/context_delivery.test.ts
 .venv/bin/python tests/control_plane/check_turn_recovery_mutations.py mutation-results.json
 npm ci
@@ -259,3 +259,18 @@ six reproduced baseline/candidate failures. A real model, independent personnel
 review, third-party execution, Windows process faults, power-loss testing and
 continuous external fencing remain unqualified. The module's bounded proposal
 is reviewable; the complete all-host RFC acceptance is not claimed.
+
+
+CI subsequently caught two dependency-integration errors at `4472325f287a`:
+the existing Stage 2C hash lock did not yet include Hypothesis, and this
+qualification profile had pinned Pygments 2.19.2 from the original environment.
+[GHSA-5239-wwwm-4pmq](https://github.com/advisories/GHSA-5239-wwwm-4pmq)
+affects versions below 2.20.0. The profile now uses the repository's existing
+2.21.0 pin. The Stage 2C lock adds only Hypothesis, sortedcontainers and their
+published distribution hashes, without unlocking other packages or adding a
+security exemption. After correction, a fresh environment passed the full
+176-case selection (including lock coverage), the seven kernel invariant checks
+and the complete kernel ruff scope. Earlier results remain historical; the JSON
+contains the corrected dependency-file hashes and fresh sixteen-case records.
+The separate 16-case lease run predates this formatter-only dependency correction
+and is not relabeled as a run under the corrected environment.
