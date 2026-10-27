@@ -305,7 +305,8 @@ The plan's conditional ordinary Todo completion may run during validation,
 before writeback and spend. The actor requires the original Goal/Agent/Todo/Turn
 arguments and its committed validation receipt; ordinary completion does not
 qualify terminal closeout. `--no-follow-up` still requires both matching
-writeback and spend receipts. This follows the shared
+writeback and spend receipts. Later receipts advance the original Turn's plan;
+they do not discard its identity-bound command templates. This follows the shared
 [quota-bound completion contract](../canonical-terminal-review.md#quota-bound-cli-completion)
 without changing the portfolio, repeats, contrasts or settlement order.
 

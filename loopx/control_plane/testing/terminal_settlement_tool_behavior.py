@@ -884,8 +884,11 @@ class DoubaoTerminalSettlementToolBehaviorActor:
                     "role": "system",
                     "content": (
                         "You are Codex running one LoopX heartbeat. Follow the "
-                        "production heartbeat task and choose each next action "
-                        "from the latest tool result. "
+                        "production heartbeat task. Retain the settlement plan "
+                        "returned by the original quota guard for this same Turn; "
+                        "use each later committed receipt to choose its next "
+                        "remaining step. A receipt without command templates does "
+                        "not replace that plan. "
                         f"{QUOTA_FIRST_TOOL_INSTRUCTION}"
                         "The exec tool's current workspace is the connected goal "
                         "project root, so task "
@@ -900,7 +903,8 @@ class DoubaoTerminalSettlementToolBehaviorActor:
                         "the final --no-follow-up closeout after spend. Preserve "
                         "the projected Goal, Agent, Todo and Turn arguments. Fill "
                         "the writeback placeholders from the proof's typed fields "
-                        "and choose each later command from the latest tool result."
+                        "in the original next_cli_actions[0]; execute the complete "
+                        "projected command, not a bare command name or help lookup."
                     ),
                 },
                 {"role": "user", "content": fixture.task_body},

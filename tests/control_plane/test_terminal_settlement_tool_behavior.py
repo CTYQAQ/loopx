@@ -186,6 +186,7 @@ def test_real_tool_loop_settles_final_todo_after_spend(
     assert "the host validates that tool result" in system_prompt
     assert "validation step's command_condition" in system_prompt
     assert "distinct from the final --no-follow-up closeout after spend" in system_prompt
+    assert "A receipt without command templates does not replace that plan" in system_prompt
     assert first["messages"][1] == {"role": "user", "content": fixture.task_body}
     assert TERMINAL_SETTLEMENT_FIXTURE_TODO_ID not in fixture.task_body
     quota_result = _latest_quota_packet(transport.requests[2])
@@ -223,6 +224,25 @@ def test_ordinary_completion_cannot_bypass_validation_or_identity(
     assert receipt["qualification_passed"] is False
     assert receipt["failure_code"] == expected_failure
     assert receipt["settlement_receipt_steps"] == []
+    assert receipt["terminal_order_observed"] is False
+
+
+def test_ordinary_completion_does_not_authorize_an_unscoped_writeback(tmp_path: Path) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+    transport = ScriptedDoubaoExecTransport([
+        ScriptedExecToolAction(command=fixture.quota_guard_command.replace(
+            '"${LOOPX_TURN:?}"', "turn-test-001",
+        )),
+        ScriptedExecToolAction(command="cat fixture/settlement-proof.json"),
+        partial(_completion_action, kind="validation"),
+        ScriptedExecToolAction(command="loopx refresh-state"),
+    ])
+    receipt = DoubaoTerminalSettlementToolBehaviorActor(
+        api_key="test-only-placeholder", transport=transport,
+    ).qualify(qualification_id="ordinary-completion-unscoped-writeback", fixture_root=tmp_path / "actor")
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "writeback_identity_mismatch"
+    assert receipt["settlement_receipt_steps"] == ["validation"]
     assert receipt["terminal_order_observed"] is False
 
 
