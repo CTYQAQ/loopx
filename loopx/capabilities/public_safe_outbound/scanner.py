@@ -12,6 +12,7 @@ It does not modify files.
 """
 from __future__ import annotations
 
+import codecs
 import json
 import os
 import re
@@ -251,6 +252,38 @@ def scan_texts(texts: Mapping[str, str]) -> ScanResult:
     return _finish(result)
 
 
+# Windows tools write Unicode text with a byte-order mark. Windows PowerShell
+# 5.1 -- the default powershell.exe on supported Windows versions -- writes
+# `>` and `Out-File` output as UTF-16LE with a BOM, so a captured log is not
+# UTF-8. UTF-32 is checked before UTF-16 because BOM_UTF32_LE starts with
+# BOM_UTF16_LE.
+_BOM_CODECS: tuple[tuple[bytes, str], ...] = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF8, "utf-8-sig"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+
+
+def _candidate_text(data: bytes) -> str | None:
+    """Decode one candidate with the codec its BOM declares, or fail closed.
+
+    Reading every file as UTF-8 turns UTF-16 bytes into NUL-interleaved
+    mojibake that no rule can match, so a private path or credential in a
+    PowerShell capture would read as clean. Bytes with no BOM are read as
+    UTF-8; a NUL left after decoding is not text this scanner can review, so
+    the caller reports it unscanned instead of returning a silent pass.
+    """
+    for bom, encoding in _BOM_CODECS:
+        if data.startswith(bom):
+            text = data.decode(encoding, errors="replace")
+            break
+    else:
+        text = data.decode("utf-8", errors="replace")
+    return None if "\x00" in text else text
+
+
 def scan_paths(
     paths: Iterable[Path],
     *,
@@ -272,9 +305,11 @@ def scan_paths(
 
     A path that is not a file (a directory, or a glob that matched nothing) is
     skipped: it names no content to check. A file that exists but cannot be
-    read, or that exceeds ``limit_bytes``, is content the caller asked to check
-    and did not get, so it is reported as unscanned and ``ok`` stays False.
-    Skip reasons are content-free, like the rest of the receipt.
+    read, that exceeds ``limit_bytes``, or whose bytes do not decode to text
+    (a BOM declares UTF-16/UTF-32; anything else must be NUL-free UTF-8) is
+    content the caller asked to check and did not get, so it is reported as
+    unscanned and ``ok`` stays False. Skip reasons are content-free, like the
+    rest of the receipt.
     """
     result, markers = _start_scan()
     seen: set[str] = set()
@@ -294,9 +329,13 @@ def scan_paths(
             result.unscanned.append("content_too_large")
             continue
         try:
-            text = p.read_text(encoding="utf-8", errors="replace")
+            data = p.read_bytes()
         except OSError:
             result.unscanned.append("content_unreadable")
+            continue
+        text = _candidate_text(data)
+        if text is None:
+            result.unscanned.append("content_not_text")
             continue
         result.hits.extend(_scan_one(_location(p, root), text, markers))
     return _finish(result)
