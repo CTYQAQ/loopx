@@ -871,6 +871,19 @@ reader calls, 4,000 evidence rows and 4 MiB of evidence data, plus bounded sourc
 coverage metadata; exhaustion is partial coverage,
 not success or zero progress. These are IO bounds, not a model budget.
 
+New private and managed-Session editorial requests carry the local artifact
+format marker `source_fact_binding=frozen_source_v1`, also retained in the
+frozen source so stripping it from the request cannot select legacy behavior.
+Cache reuse, generation
+and independent generation validation derive the complete ordered fact list
+again from the unchanged frozen source, including its revision. A recomputed
+request digest cannot substitute an unsupported URL, summary or incomplete fact
+set. The generation receipt retains the same marker. Historical windows without
+it keep their original validation contract and bytes; they are not retroactively
+qualified or regenerated. This is source-to-fact consistency, not proof of a
+claim, public disclosure permission or URL reachability. Opaque references stay
+opaque when no permitted accessible source has been supplied.
+
 This source can also be read through the original Chat dynamic tool. Reading
 alone does not activate a subscription or deliver a report. The opt-in original
 steward report path binds it to the admitted calendar window, native generation

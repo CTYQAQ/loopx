@@ -52,6 +52,32 @@ def configured_local_report(steward, tmp_path, monkeypatch, provider="sqlite", s
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+def test_local_report_rejects_source_substitution_before_original_model(steward, tmp_path, monkeypatch, provider):
+    from loopx.capabilities.periodic_report.pending_intent import _canonical_digest
+    from loopx.registry import atomic_write_json
+
+    session, reports, _, _ = configured_local_report(steward, tmp_path, monkeypatch, provider)
+    store, _, bot, _, _, capture, _ = steward
+    sid = session["session_id"]
+    reports.frontier(sid)
+    _, window = reports.current_window(sid)
+    request = {"actor": reports.selected(sid)["actor"], "report_window_id": window["window_id"]}
+    messages, calls, writes = store.messages(sid), capture.read_bytes(), list(bot.writes)
+    reports.prepare(request, None)
+    folder = attempt_directory(reports.root, window)
+    original_source = (folder / "source.json").read_bytes()
+    editorial = json.loads((folder / "editorial-request.json").read_text())
+    editorial["facts"][0]["source_ref"] = "https://example.org/not-in-the-original-goal"
+    editorial["request_digest"] = _canonical_digest({k: v for k, v in editorial.items() if k != "request_digest"})
+    atomic_write_json(folder / "editorial-request.json", editorial)
+    with pytest.raises(ValueError, match="facts do not match"):
+        reports.prepare(request, None)
+    assert (folder / "source.json").read_bytes() == original_source
+    assert not (folder / "private-generation.json").exists()
+    assert store.messages(sid) == messages and capture.read_bytes() == calls and bot.writes == writes
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_local_agent_calendar_report_uses_original_worker_and_verified_core_return(steward, tmp_path, monkeypatch, provider):
     from loopx.capabilities.native_chat.steward_monitor import StewardMonitor
     from loopx.capabilities.native_chat.steward_managed_mode import ManagedSessionTurn
