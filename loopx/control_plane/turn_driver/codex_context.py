@@ -163,7 +163,7 @@ def _locked(directory: str) -> Iterator[Path]:
 
     root = _private_root(directory)
     fd = os.open(root / "lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
-    with os.fdopen(fd, "r+") as lock:
+    with os.fdopen(fd, "r+", encoding="utf-8") as lock:
         if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
             raise ValueError("context lock is not a regular file")
         fcntl.flock(lock, fcntl.LOCK_EX)
