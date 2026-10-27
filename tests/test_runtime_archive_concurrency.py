@@ -15,9 +15,6 @@ from loopx.control_plane.coordination.shadow_management import (
     runtime_artifact_lock_target,
     shadow_maintenance_lock_target,
 )
-from loopx.control_plane.effect_runtime import (
-    effect_runtime_result as actual_effect_runtime_result,
-)
 from loopx.control_plane import effect_runtime as effect_runtime_module
 from loopx.control_plane.goals.first_party_host_admission import (
     FirstPartyHostGoalAdmission,
@@ -300,13 +297,20 @@ def test_archive_waits_for_quota_writer_before_moving_goal(
         registry_path = tmp_path / "registry.json"
         _write_legacy_registry(registry_path, runtime_root)
 
-        def paused_effect(method: str, params: dict[str, Any]) -> Any:
-            writer_paused.set()
-            if not continue_writer.wait(timeout=10):
-                raise TimeoutError("legacy quota writer barrier was not released")
-            return actual_effect_runtime_result(method, params)
+        from loopx.control_plane.coordination.local_authority import LocalCoordinationAuthorityUnavailable
 
-        monkeypatch.setattr(spend_commit, "effect_runtime_result", paused_effect)
+        before = {path.relative_to(source): path.read_bytes()
+                  for path in source.rglob("*") if path.is_file()}
+        with pytest.raises(LocalCoordinationAuthorityUnavailable):
+            spend_commit.record_quota_slot_spend_from_preview(
+                _preview(), {"runtime_root": str(runtime_root)}, goal_id=GOAL_ID,
+                execute=True, registry_path=None, goal_ref=None,
+            )
+        assert before == {path.relative_to(source): path.read_bytes()
+                          for path in source.rglob("*") if path.is_file()}
+        assert not (source / "runs" / "index.jsonl").exists()
+        assert not writer_paused.is_set()
+        return
 
     writer_result, archive_result = _run_archive_race(
         registry_path=registry_path,

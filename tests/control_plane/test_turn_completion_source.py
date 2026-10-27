@@ -199,7 +199,22 @@ def test_native_legacy_turn_recovers_history_but_cannot_complete_without_source(
     )
     assert resumed_code == 0 and resumed["status"] == "committed", resumed
     assert resumed["effects"]["host_invoked"] is False
-    assert results[1]["provider_status"] == "replayed", results[1]
+    # Recovery reads the original accepted completion; it must not invoke the
+    # lifecycle writer again after its execution lease was retired.
+    assert len(results) == 1
+    recovered = _turn_journal(runtime)
+    assert recovered["writeback"]["completion"] == {
+        "todo_id": "todo_fixture0001", "continuation": "active_goal",
+    }
+    assert _todo(prefix)["todo"]["completion_turn_key"] == journal["turn_key"]
+    assert (project / "host-calls.txt").read_text() == "x"
+    replay_code, replay = _cli(
+        [], *argv[:-1], "--resume-turn-key", str(journal["turn_key"]), "--execute"
+    )
+    assert replay_code == 0 and replay["replayed"] is True, replay
+    assert not any(replay["effects"].values())
+    assert len(results) == 1
+    assert _turn_journal(runtime) == recovered
     assert _todo(prefix)["todo"]["status"] == "done"
 
 
@@ -474,5 +489,20 @@ def test_native_turn_recovers_accepted_completion_before_checking_new_text(
     )
     assert resumed_code == 0 and resumed["status"] == "committed", resumed
     assert resumed["effects"]["host_invoked"] is False
-    assert completions[1]["provider_status"] == "replayed", completions[1]
+    # Recovery reads the original accepted completion; it must not invoke the
+    # lifecycle writer again after its execution lease was retired.
+    assert len(completions) == 1
+    recovered = _turn_journal(runtime)
+    assert recovered["writeback"]["completion"] == {
+        "todo_id": "todo_fixture0001", "continuation": "active_goal",
+    }
+    assert _todo(prefix)["todo"]["completion_turn_key"] == journal["turn_key"]
+    assert (project / "host-calls.txt").read_text() == "x"
+    replay_code, replay = _cli(
+        [], *argv[:-1], "--resume-turn-key", str(journal["turn_key"]), "--execute"
+    )
+    assert replay_code == 0 and replay["replayed"] is True, replay
+    assert not any(replay["effects"].values())
+    assert len(completions) == 1
+    assert _turn_journal(runtime) == recovered
     assert _todo(prefix)["todo"]["text"] == "[P0] A later requirement after acceptance."
