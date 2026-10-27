@@ -33,6 +33,7 @@ from loopx.presentation.renderers.quota_markdown import render_quota_should_run_
 from loopx.presentation.renderers.status_markdown import render_status_markdown
 from loopx.quota import build_quota_should_run
 from loopx.status import collect_status
+from tests.control_plane.canonical_authority_fixture import initialize_canonical_source_fixture
 
 
 def _registry(tmp_path: Path, goal_ids: tuple[str, ...] = ("goal-a", "goal-b")) -> Path:
@@ -61,6 +62,9 @@ def _registry(tmp_path: Path, goal_ids: tuple[str, ...] = ("goal-a", "goal-b")) 
         ),
         encoding="utf-8",
     )
+    for goal_id in goal_ids:
+        initialize_canonical_source_fixture(tmp_path / "runtime", goal_id,
+            state_path=tmp_path / "ACTIVE_GOAL_STATE.md")
     return registry_path
 
 
