@@ -760,11 +760,14 @@ def test_native_code_mode_pragma_retains_delta_and_recovers(tmp_path, monkeypatc
 @pytest.mark.parametrize("surface", ["quota_packet", "turn_envelope"])
 def test_native_known_history_budget_keeps_larger_batches_and_recovery(tmp_path, monkeypatch, surface):
     # The unknown loopback model otherwise inherits a byte-based fallback.
-    # Match a declared 10k-token history budget only in this separate case;
-    # existing low-budget/truncation coverage and host defaults stay intact.
+    # This lower-than-generated 10k-token history limit applies to the whole
+    # eight-page batch. Bound each serialized public read to 4k bytes, leaving
+    # framing headroom under its 40k-byte fallback. The full capture, eight-read
+    # batching, recovery and independent byte/cursor assertions remain intact.
     test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch,
         "code_mode", surface, False, True, True, "missing", shared_root=True,
-        native_pragma=True, native_read_batch=8, native_history_tokens=10000)
+        native_pragma=True, native_read_batch=8, native_history_tokens=10000,
+        reader_output_bytes=4000)
 
 
 @pytest.mark.parametrize("surface", ["quota_packet", "turn_envelope"])

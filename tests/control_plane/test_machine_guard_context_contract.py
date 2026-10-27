@@ -150,4 +150,3 @@ def test_mcp_legacy_retry_keeps_raw_transport_without_new_parser_flags(monkeypat
     result = json.loads(control.run_cli(args, legacy_args=legacy))
     assert result == {"ok": True, "should_run": False}
     assert len(calls) == 2 and os.environ["LOOPX_CONTEXT_DELIVERY"] == "on"
-
