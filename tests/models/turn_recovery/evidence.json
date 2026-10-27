@@ -19,7 +19,7 @@
     "tests/models/turn_recovery/TurnRecovery.tla": "3e362eb09bb43e0e9c4636bee2c657608808998dcab2170e9d1f958ead0a1677",
     "tests/models/turn_recovery/TurnRecovery.cfg": "4c1227941d232389407df78d44d32b02ac554edb3b17c0bfb3cd49872f878cf5",
     "tests/models/turn_recovery/Unsafe.cfg": "2fabe115ffeb2b1fd2b5937058217541f73250221b5afb77d26cbf18f84f288b",
-    "tests/models/turn_recovery/requirements.txt": "52b12a9c2a3ba121f5e9225b66dcfb3830468a4883016080a80aa92383fda58c",
+    "tests/models/turn_recovery/requirements.txt": "e819a8b3a3b2bc35a2b15132233e73aa713fe9f79e8d4366712b5545e634a27d",
     "tests/requirements-stage2c-linux-py311.txt": "eace18917359f05ad4b402362550c53a9c49c742638900b48981fdb8fbe25b65"
   },
   "scope": "One original Turn, local cooperative owners, durable result reuse; unknown Host outcomes refuse redispatch.",
@@ -33,7 +33,7 @@
         "status": "in_progress",
         "completed_phases": [],
         "host_attempt_count": 1,
-        "turn_key": "sha256:ef8ed0e04d392a104f918af1bb7960f7b106866ff1a49649701e0578ad910467"
+        "turn_key": "sha256:739af8ca99ce328242060ef0ddfdcaefda95dd221321134685796305c68b17df"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [],
@@ -48,7 +48,7 @@
       },
       "downstream_calls": 0,
       "settlements": 0,
-      "capture_sha256": "8eff8cdf16d391859c853e1982922eefb630bcdf6b6f745ffb7959cfec77a797",
+      "capture_sha256": "d0f17d287727307305dd955071390b3366b81268d1f83445a62695e6623f0b81",
       "stop_observation": "host_not_started"
     },
     {
@@ -60,7 +60,7 @@
         "status": "in_progress",
         "completed_phases": [],
         "host_attempt_count": 1,
-        "turn_key": "sha256:64a1dda2024ccdaa682f46948f0ea4bc760c60db258688ec94b9200f2ec862d7"
+        "turn_key": "sha256:375b2e8d9c4ea7ca0135ea6d26a268390032cd1a2e651f1180521a79e352186c"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [],
@@ -75,7 +75,7 @@
       },
       "downstream_calls": 0,
       "settlements": 0,
-      "capture_sha256": "67845962addf235b18cee2dfbc195f68a7b159cb8ed9538ed7a43ce245cbdeca",
+      "capture_sha256": "e35f621778bdc3114ab8a8aec7f6b33b2c99688a0860bd6226563dabdaa74cb1",
       "stop_observation": "host_not_started"
     },
     {
@@ -95,7 +95,7 @@
           "scheduler_ack"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:e3093310e945fae6b6fa27fe2d4595c1e9f73fb72a1406f9712fdd92714a822b"
+        "turn_key": "sha256:af24ce582eef1847d6f4403e64d0e1ba5bc14b247ee1872d42253a0069c58820"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -110,7 +110,7 @@
       "recorded_effects": null,
       "downstream_calls": 1,
       "settlements": 1,
-      "capture_sha256": "1fba96d181caab1dce28343f1cc0a44f0d05f64d1a35a8be806333698dd2c462",
+      "capture_sha256": "e928af0ad759c9ca81163137322e68b2edbf65002d8a655cf0298b6419674f7c",
       "stop_observation": "host_stopped"
     },
     {
@@ -130,7 +130,7 @@
           "scheduler_ack"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:6117175218a988e2f10b2656c2513f14da7cc389ad70cb3995b46b61f29162a2"
+        "turn_key": "sha256:d91afea5c4f507579777fe8226418ac6edfd2e5936dcd0854c00e5ac5b63cfb3"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -145,7 +145,7 @@
       "recorded_effects": null,
       "downstream_calls": 1,
       "settlements": 1,
-      "capture_sha256": "79e248ff84e80ffb753db45825c28959385aca3d8376ccdb8449c6fea64e1029",
+      "capture_sha256": "9177a5957e8aeb22469699f4ce92cb17f9f46e6f2ee53f9019f8a58911e0761f",
       "stop_observation": "host_stopped"
     },
     {
@@ -160,7 +160,7 @@
           "typed_result"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:27feb3ca29b51aca7d76b4d7374a3008549ec43934cf9dadcbeb3e18c90727ff"
+        "turn_key": "sha256:5e8a10c59d1409120e0340009ab5c2ee512f60179fb5eab2b673defcfab0d309"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -180,7 +180,7 @@
       },
       "downstream_calls": 1,
       "settlements": 0,
-      "capture_sha256": "fa9962d2f5414cc1713ab2d78db3c7ef647d5f93ae39c56f4ee1eea3652b5bdc",
+      "capture_sha256": "c4c594bfd2be69f7ac2bac2c10b2c436c33f4acff304b1a96d290f71b076e834",
       "stop_observation": "host_stopped"
     },
     {
@@ -195,7 +195,7 @@
           "typed_result"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:ff623beb189b67e28ca9304faba08c315feaaf1a802d993ca042cddfa329a5fb"
+        "turn_key": "sha256:d374142b0ef3a21d58dc97ede994dd8e6d35b321f824868182f462e553f69235"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -215,7 +215,7 @@
       },
       "downstream_calls": 1,
       "settlements": 0,
-      "capture_sha256": "64113a3ac421c7a57f6e813466a8ead2240bc3dc8f175f770ba3bfcdab325e70",
+      "capture_sha256": "56273701d31f5763cae8f8d212abcc5c5886971732f2bb5bd315ca3f235e50eb",
       "stop_observation": "host_stopped"
     },
     {
@@ -227,7 +227,7 @@
         "status": "in_progress",
         "completed_phases": [],
         "host_attempt_count": 1,
-        "turn_key": "sha256:aeb1ff78ca3e7e51735f761e4942361bf15e0c49571d4bd7e6bfe56026f188b2"
+        "turn_key": "sha256:5c32ef00a7520160e6c2b1f63071b4145882e3fb0dd0c47b86f0c8b839c636cb"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -247,7 +247,7 @@
       },
       "downstream_calls": 1,
       "settlements": 0,
-      "capture_sha256": "513f37be651f8678180974941439faa54655ff2d6163ef6910db5e7df91cea26",
+      "capture_sha256": "124caa6e91818c97e3f99976672a682ee7c191b4dc2a31d3c5ac30e1d020d989",
       "stop_observation": "host_stopped"
     },
     {
@@ -259,7 +259,7 @@
         "status": "in_progress",
         "completed_phases": [],
         "host_attempt_count": 1,
-        "turn_key": "sha256:6793c7658f7a45a45a9d696f50a38c72b65adc90c9d73d7050b7fc7b846dde05"
+        "turn_key": "sha256:e58c173a436bda7c5d8e9dd93783bd9d5770950b2275fb4b8c8d6c8324910034"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -279,7 +279,7 @@
       },
       "downstream_calls": 1,
       "settlements": 0,
-      "capture_sha256": "6265551cb58ee9b445cb8155e1b552f43878ef4ab43ca7744434018f22304acf",
+      "capture_sha256": "ca7253837b56988c3d59d68a518095a6a3a5a2d28dd6e2f1390d0ef8656e8209",
       "stop_observation": "host_stopped"
     },
     {
@@ -294,7 +294,7 @@
           "typed_result"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:c31f9b3c1075703c83e4df5cdb48265c2242f90c3d34ad55891d9c3b62c96056"
+        "turn_key": "sha256:8dbb0ba0ae12752c0c75fd92f31e9ed8ea1f031403709c81a4383961d59d00de"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -309,7 +309,7 @@
       "recorded_effects": null,
       "downstream_calls": 1,
       "settlements": 1,
-      "capture_sha256": "7e22ed20ab313fda433a56804fcc66c979a90721670e2dde1a41af8c353c1d1c",
+      "capture_sha256": "d089c3674521a76652c010285a6bfb9b98ad08ed28c38f57785cce2b051b9e7a",
       "stop_observation": "host_stopped"
     },
     {
@@ -324,7 +324,7 @@
           "typed_result"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:83c00d3d8faee5dfb278bf44957af7d79df506925638272b00f1969917542446"
+        "turn_key": "sha256:95662538d142728c911463561768a91af1c8d7a31e58195a0233b2f1c58bea64"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -339,7 +339,7 @@
       "recorded_effects": null,
       "downstream_calls": 1,
       "settlements": 1,
-      "capture_sha256": "7d1695b456a779c98bdf47a2fcaf4b4f5cddc769fbc2c1f5e47cd05149307326",
+      "capture_sha256": "1a442c4fb938283887cf201d0eeaf3537d7e0f9f689307df9c243c89a126cbd3",
       "stop_observation": "host_stopped"
     },
     {
@@ -355,7 +355,7 @@
           "validation"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:e06cb39641ead3af019722a5543a925b45c64969a89b075d5f15dad73bcdbe05"
+        "turn_key": "sha256:6130efe5d571cc52ec5046f28f0a2dd3d6f47bcc6c79fc81edd2fbe9d948bc09"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -370,7 +370,7 @@
       "recorded_effects": null,
       "downstream_calls": 1,
       "settlements": 1,
-      "capture_sha256": "0edfaa9759b9b816269b6250257f54b4becb58a4acd8c35fa40a9cd98fcc2c43",
+      "capture_sha256": "70d7f044c3c2e98429ab32627077bd6a81db243e63bfc95689e4387dc82406bf",
       "stop_observation": "host_stopped"
     },
     {
@@ -386,7 +386,7 @@
           "validation"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:f28419af0130d80a4579b0bdc865362301fb4155600e055023993eb091bdbd14"
+        "turn_key": "sha256:463dbed359b9aedf28e61cb004975794e54d3f823513444100b3d715a2be52fc"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -401,7 +401,7 @@
       "recorded_effects": null,
       "downstream_calls": 1,
       "settlements": 1,
-      "capture_sha256": "d4ed0adbea415aa7f6160b78b39821fcce57695bdc3ddea39fb657353ddbc3a6",
+      "capture_sha256": "5a7f03a9b2bbc4f03d53243b609d899733dd4ea7f9e2566b9038f998e0e3d291",
       "stop_observation": "host_stopped"
     },
     {
@@ -418,7 +418,7 @@
           "durable_writeback"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:5246d8a3ab1696a265b446911becd5752c86409a5cbe286be70d0c59dfa6d739"
+        "turn_key": "sha256:9559bef4274019dd35fb1fa1cfb9d73e5caee53b547a4ef0a6b1a933f1efb6b9"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -433,7 +433,7 @@
       "recorded_effects": null,
       "downstream_calls": 1,
       "settlements": 1,
-      "capture_sha256": "41b81af80cd7f47627dd0f5fd8067205455485513bfbd4af5c0abf0b1308e337",
+      "capture_sha256": "f1e8e176df8f20dbbebe8c298f8f2a48a489b0c45b1b1d1c6a076d9868ce240b",
       "stop_observation": "host_stopped"
     },
     {
@@ -450,7 +450,7 @@
           "durable_writeback"
         ],
         "host_attempt_count": 1,
-        "turn_key": "sha256:73f1e44e257233eb12113d142346ec6604d49c38e0cd93f845ff3ec4f079c08a"
+        "turn_key": "sha256:d604cd52cc7b1182e52f16b8de2781983244c6528fa0fff0f1c898bcc716c017"
       },
       "original_effect_id": "loopx-turn-real-cli-e2e:codex-turn-e2e:todo_turnreale2e01:synthetic-export-original",
       "downstream_records": [
@@ -465,7 +465,7 @@
       "recorded_effects": null,
       "downstream_calls": 1,
       "settlements": 1,
-      "capture_sha256": "c075034a830892f82ab840abcb6f63926b7cb02bc9e654c9d1cb018071dae988",
+      "capture_sha256": "d2cf819367dd9f2ec7657466ca3ce047e32fbfcaf185e7542e722651f18f172f",
       "stop_observation": "host_stopped"
     },
     {
@@ -831,6 +831,18 @@
       ],
       "correction": "add Hypothesis and sortedcontainers pinned distribution hashes; use existing repository Pygments 2.21.0; no security exemption",
       "local_revalidation": "176 passed; kernel invariants 7 passed; whole kernel ruff scope passed"
+    },
+    {
+      "kind": "followup_ci",
+      "revision": "e9719aa665046173f863218da72be9318540cc55",
+      "failures": [
+        "verifier setuptools 83.0.0 rejected by GHSA-xmj3-9gf7-h52w",
+        "browser Goal drawer header geometry assertion"
+      ],
+      "resolution": [
+        "verifier environment pins 84.1.0; standard project build isolation; fresh full 176 selection passed",
+        "UI assertion is already addressed by PR 7427; no duplicate UI change made; CI not claimed green"
+      ]
     }
   ],
   "unverified": [
@@ -881,7 +893,14 @@
       "failed": 0
     },
     "kernel_ruff_scope": "passed",
-    "pygments": "2.21.0"
+    "pygments": "2.21.0",
+    "verifier_environment_setuptools": "84.1.0",
+    "project_build_isolation": "uses unchanged pyproject.toml setuptools==83.0.0",
+    "patched_verifier_selection": {
+      "passed": 176,
+      "failed": 0,
+      "fresh_environment": true
+    }
   },
   "submission_target": "71057d44f0d50a3636fcd8796f7c98717ce41742"
 }

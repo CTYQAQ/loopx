@@ -192,7 +192,7 @@ bounded selection; `package-lock.json` pins the existing TypeScript tools.
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r tests/models/turn_recovery/requirements.txt
-.venv/bin/python -m pip install --no-deps --no-build-isolation -e .
+.venv/bin/python -m pip install --no-deps -e .
 .venv/bin/python -m pip check
 .venv/bin/python -m pytest -q tests/test_stage2c_dependency_lock.py tests/test_loopx_turn_executor.py tests/control_plane/test_turn_host_decision_capture.py tests/control_plane/test_turn_interruption_recovery.py tests/control_plane/test_turn_recovery_state_machine.py tests/control_plane/test_host_process.py tests/control_plane/test_first_party_host_runtime.py tests/control_plane/test_effect_program_fault_replay_matrix.py --basetemp=./recovery-results
 node --experimental-strip-types --test --test-isolation=none tests/control_plane_ts/turn_journal.test.ts tests/control_plane_ts/first_party_host_runtime.test.ts tests/control_plane_ts/effect_program.test.ts tests/control_plane_ts/turn_settlement.test.ts tests/control_plane_ts/context_delivery.test.ts
@@ -274,3 +274,22 @@ and the complete kernel ruff scope. Earlier results remain historical; the JSON
 contains the corrected dependency-file hashes and fresh sixteen-case records.
 The separate 16-case lease run predates this formatter-only dependency correction
 and is not relabeled as a run under the corrected environment.
+
+
+The next dependency-review run also rejected the verifier environment's explicit
+Setuptools 83.0.0 pin under
+[GHSA-xmj3-9gf7-h52w](https://github.com/advisories/GHSA-xmj3-9gf7-h52w).
+The verifier environment now pins the patched 84.1.0. Project installation uses
+normal PEP 517 build isolation, which retains this baseline's existing
+`pyproject.toml` build-system pin. This does not upgrade the repository's default
+build tool or duplicate #7205/#7206; those PRs own that separate change. Windows
+legacy wheel installation is not qualified here. The new default-build browser
+failure is a Goal drawer geometry assertion in unchanged UI files; its cause is
+unverified, and this recovery patch does not modify UI padding or test thresholds.
+
+The isolated verifier was recreated with Setuptools 84.1.0 and Pygments 2.21.0,
+then the complete 176-case selection passed again. The sixteen raw subprocess
+records and dependency-file hash in `evidence.json` now refer to that run.
+The UI build failure matches the existing `typed-actions.mjs` change in #7427
+(`dc16fce9a8b34a073cc664643c7afd20201b2592` at inspection); it remains a separate
+integration hold, not a recovery-module pass or an authored UI repair.
