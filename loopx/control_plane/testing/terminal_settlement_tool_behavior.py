@@ -689,8 +689,13 @@ def _execute_cli(command: str, state: _QualificationState) -> dict[str, Any]:
         "--registry": {fixture.global_registry_path.resolve(),
                        (fixture.project_root / ".loopx/registry.json").resolve()},
     }
+    guard_registry = argument_value(loopx_command_tokens(fixture.quota_guard_command) or [], "--registry")
     for option, allowed in routes.items():
         supplied = argument_value(tokens or [], option)
+        # Bind the exact host reference emitted by the original task (such as
+        # $HOME's registry) to this isolated fixture, as the CLI bridge does.
+        if option == "--registry" and supplied == guard_registry:
+            continue
         if supplied and (fixture.project_root / supplied).resolve() not in allowed:
             raise _TerminalToolViolation("fixture_route_mismatch")
     vision = argument_value(tokens or [], "--agent-vision-json")
@@ -863,6 +868,108 @@ def _reentry_receipt(
     }
 
 
+def _execute_todo_completion(
+    command: str, tokens: list[str], state: _QualificationState,
+) -> tuple[str, str]:
+    terminal = "--no-follow-up" in tokens
+    if terminal:
+        if not state.spend_committed:
+            raise _TerminalToolViolation("terminal_closeout_before_spend")
+        if not _matches_identity(tokens, state):
+            raise _TerminalToolViolation("terminal_closeout_contract_mismatch")
+    else:
+        if not state.proof_read:
+            raise _TerminalToolViolation("completion_before_validation")
+        if state.writeback_committed:
+            raise _TerminalToolViolation("completion_after_writeback")
+        if not _matches_identity(tokens, state):
+            raise _TerminalToolViolation("completion_identity_mismatch")
+    payload = _execute_cli(command, state)
+    receipt_steps = _settlement_receipt_steps(payload)
+    expected_steps = _EXPECTED_RECEIPT_STEPS if terminal else _EXPECTED_RECEIPT_STEPS[:1]
+    if receipt_steps != expected_steps:
+        raise _TerminalToolViolation("terminal_closeout_receipt_mismatch" if terminal
+                                     else "completion_receipt_mismatch")
+    state.receipt_steps = receipt_steps
+    kind = "terminal_closeout" if terminal else "todo_completion"
+    output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return output, kind
+
+
+def _execute_terminal_cli(
+    command: str, tokens: list[str], state: _QualificationState,
+) -> tuple[str, str] | None:
+    command_kind, command_action = _command_path(tokens)
+    if command_kind == "quota" and command_action == "should-run":
+        if state.quota_packet is not None:
+            raise _TerminalToolViolation("repeated_quota_should_run")
+        payload = _execute_cli(command, state)
+        state.quota_packet = payload
+        state.contract = _quota_contract(payload)
+        kind = "quota_should_run"
+        output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    elif command_kind == "refresh_state":
+        if state.quota_packet is None:
+            raise _TerminalToolViolation("writeback_before_quota")
+        if not state.proof_read:
+            raise _TerminalToolViolation("writeback_before_validation")
+        if not tokens or not _matches_identity(tokens, state):
+            raise _TerminalToolViolation("writeback_identity_mismatch")
+        payload = _execute_cli(command, state)
+        receipt_steps = _settlement_receipt_steps(payload)
+        if receipt_steps != _EXPECTED_RECEIPT_STEPS[:2]:
+            raise _TerminalToolViolation("writeback_receipt_mismatch")
+        state.writeback_committed = True
+        state.receipt_steps = receipt_steps
+        kind = "durable_writeback"
+        output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    elif command_kind == "quota" and command_action == "spend-slot":
+        if not state.writeback_committed:
+            raise _TerminalToolViolation("quota_spend_before_writeback")
+        if not tokens or not _matches_identity(tokens, state):
+            raise _TerminalToolViolation("quota_spend_identity_mismatch")
+        if "--execute" not in tokens or argument_value(
+            tokens, "--source"
+        ) != "heartbeat":
+            raise _TerminalToolViolation("quota_spend_contract_mismatch")
+        payload = _execute_cli(command, state)
+        receipt_steps = _settlement_receipt_steps(payload)
+        if receipt_steps != _EXPECTED_RECEIPT_STEPS[:3]:
+            raise _TerminalToolViolation("quota_spend_receipt_mismatch")
+        state.spend_committed = True
+        state.receipt_steps = receipt_steps
+        kind = "quota_spend"
+        output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    elif command_kind == "todo" and command_action == "complete":
+        return _execute_todo_completion(command, tokens, state)
+    else:
+        return None
+    return output, kind
+
+
+def _execute_terminal_workspace(
+    command: str, state: _QualificationState, workspace_shell: VisionShellHost | None, resources: ExitStack,
+) -> tuple[str, str, VisionShellHost | None]:
+    read_plan = bounded_workspace_read_plan(command, fixture=cast(Any, state.fixture))
+    if read_plan or not state.proof_read or state.writeback_committed:
+        output = _execute_workspace_read(command, state=state)
+        kind = "delivery_validation" if state.proof_read else "workspace_read"
+    else:
+        if workspace_shell is None:
+            def reject_nested_cli(_argv: list[str], _cwd: Path, _output: str) -> str:
+                raise ValueError("Run each original LoopX command directly, outside the draft shell")
+            workspace_shell = VisionShellHost(
+                state.fixture.project_root, reject_nested_cli, turn_instance_id=state.turn_instance_id,
+            )
+            resources.callback(workspace_shell.close)
+        state.workspace_shell_executed = True
+        output, exit_code = workspace_shell.execute(command)
+        if exit_code:
+            raise _TerminalToolViolation("workspace_authoring_failed")
+        kind = "workspace_authoring"
+    return output, kind, workspace_shell
+
+
 class DoubaoTerminalSettlementToolBehaviorActor:
     """Prove the model follows the real post-spend terminal closeout plan."""
 
@@ -977,94 +1084,17 @@ class DoubaoTerminalSettlementToolBehaviorActor:
                         ),
                     )
                 tokens = loopx_command_tokens(tool_call.command)
-                command_kind, command_action = (
-                    _command_path(tokens) if tokens else ("workspace_read", None)
-                )
                 kind = "unexpected_command"
                 output = ""
                 failure_code: str | None = None
                 try:
-                    if command_kind == "quota" and command_action == "should-run":
-                        if state.quota_packet is not None:
-                            raise _TerminalToolViolation("repeated_quota_should_run")
-                        payload = _execute_cli(tool_call.command, state)
-                        state.quota_packet = payload
-                        state.contract = _quota_contract(payload)
-                        kind = "quota_should_run"
-                        output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-                    elif command_kind == "refresh_state":
-                        if state.quota_packet is None:
-                            raise _TerminalToolViolation("writeback_before_quota")
-                        if not state.proof_read:
-                            raise _TerminalToolViolation("writeback_before_validation")
-                        if not tokens or not _matches_identity(tokens, state):
-                            raise _TerminalToolViolation("writeback_identity_mismatch")
-                        payload = _execute_cli(tool_call.command, state)
-                        receipt_steps = _settlement_receipt_steps(payload)
-                        if receipt_steps != _EXPECTED_RECEIPT_STEPS[:2]:
-                            raise _TerminalToolViolation("writeback_receipt_mismatch")
-                        state.writeback_committed = True
-                        state.receipt_steps = receipt_steps
-                        kind = "durable_writeback"
-                        output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-                    elif command_kind == "quota" and command_action == "spend-slot":
-                        if not state.writeback_committed:
-                            raise _TerminalToolViolation("quota_spend_before_writeback")
-                        if not tokens or not _matches_identity(tokens, state):
-                            raise _TerminalToolViolation("quota_spend_identity_mismatch")
-                        if "--execute" not in tokens or argument_value(
-                            tokens, "--source"
-                        ) != "heartbeat":
-                            raise _TerminalToolViolation("quota_spend_contract_mismatch")
-                        payload = _execute_cli(tool_call.command, state)
-                        receipt_steps = _settlement_receipt_steps(payload)
-                        if receipt_steps != _EXPECTED_RECEIPT_STEPS[:3]:
-                            raise _TerminalToolViolation("quota_spend_receipt_mismatch")
-                        state.spend_committed = True
-                        state.receipt_steps = receipt_steps
-                        kind = "quota_spend"
-                        output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-                    elif command_kind == "todo" and command_action == "complete":
-                        terminal = "--no-follow-up" in tokens
-                        if terminal:
-                            if not state.spend_committed:
-                                raise _TerminalToolViolation("terminal_closeout_before_spend")
-                            if not _matches_identity(tokens, state):
-                                raise _TerminalToolViolation("terminal_closeout_contract_mismatch")
-                        else:
-                            if not state.proof_read:
-                                raise _TerminalToolViolation("completion_before_validation")
-                            if state.writeback_committed:
-                                raise _TerminalToolViolation("completion_after_writeback")
-                            if not _matches_identity(tokens, state):
-                                raise _TerminalToolViolation("completion_identity_mismatch")
-                        payload = _execute_cli(tool_call.command, state)
-                        receipt_steps = _settlement_receipt_steps(payload)
-                        expected_steps = _EXPECTED_RECEIPT_STEPS if terminal else _EXPECTED_RECEIPT_STEPS[:1]
-                        if receipt_steps != expected_steps:
-                            raise _TerminalToolViolation("terminal_closeout_receipt_mismatch" if terminal
-                                                         else "completion_receipt_mismatch")
-                        state.receipt_steps = receipt_steps
-                        kind = "terminal_closeout" if terminal else "todo_completion"
-                        output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                    handled = _execute_terminal_cli(tool_call.command, tokens, state) if tokens else None
+                    if handled is not None:
+                        output, kind = handled
                     else:
-                        read_plan = bounded_workspace_read_plan(tool_call.command, fixture=cast(Any, fixture))
-                        if read_plan or not state.proof_read or state.writeback_committed:
-                            output = _execute_workspace_read(tool_call.command, state=state)
-                            kind = "delivery_validation" if state.proof_read else "workspace_read"
-                        else:
-                            if workspace_shell is None:
-                                def reject_nested_cli(_argv: list[str], _cwd: Path, _output: str) -> str:
-                                    raise ValueError("Run each original LoopX command directly, outside the draft shell")
-                                workspace_shell = VisionShellHost(
-                                    fixture.project_root, reject_nested_cli, turn_instance_id=state.turn_instance_id,
-                                )
-                                resources.callback(workspace_shell.close)
-                            state.workspace_shell_executed = True
-                            output, exit_code = workspace_shell.execute(tool_call.command)
-                            if exit_code:
-                                raise _TerminalToolViolation("workspace_authoring_failed")
-                            kind = "workspace_authoring"
+                        output, kind, workspace_shell = _execute_terminal_workspace(
+                            tool_call.command, state, workspace_shell, resources,
+                        )
                 except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
                     failure_code = _terminal_failure_code(exc)
 
