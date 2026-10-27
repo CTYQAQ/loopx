@@ -270,7 +270,7 @@ def exercise_split_runtime(root: Path) -> None:
         dream_row = assert_public_projection(read_rows(shared_runtime), "dreaming_decision")
         assert dream_row["dreaming_decision"]["decision"] == "defer", dream_row
         assert dream_row["source_dreaming_proposal"]["proposal_id"] == proposal_id, dream_row
-        dream_status = run_cli(shared_registry, shared_runtime, "status", "--goal-id", GOAL_ID)
+        dream_status = run_cli(shared_registry, shared_runtime, "status", "--goal-id", GOAL_ID, runtime_override=False)
         assert dream_status["run_history"]["goals"][0]["latest_status_run"][
             "classification"
         ] == "dreaming_proposal_deferred"
