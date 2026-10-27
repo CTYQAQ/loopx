@@ -785,7 +785,8 @@ def assert_dependency_blockers_stay_separate(payload: dict, markdown: str) -> No
     blocker_item = items_by_goal[DEPENDENCY_BLOCKER_GOAL_ID]
     assert current_item["waiting_on"] == "codex", current_item
     assert current_item["agent_todos"]["open_count"] == 2, current_item
-    assert "user_todos" not in current_item, current_item
+    assert current_item["user_todos"]["open_count"] == 0, current_item
+    assert current_item["user_todos"]["items"] == [], current_item
     blockers = current_item["dependency_blockers"]
     assert blockers["open_count"] == 1, blockers
     assert blockers["source"] == "attention_queue.user_todos", blockers
