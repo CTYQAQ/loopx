@@ -85,6 +85,7 @@ def write_source(
 
     for record in json.loads(registry.read_text())["goals"]:
         import_fixture_authority(registry, record["id"], provider="sqlite")
+    goal = next(record for record in json.loads(registry.read_text())["goals"] if record["id"] == GOAL_ID)
     return project, registry, goal
 
 
