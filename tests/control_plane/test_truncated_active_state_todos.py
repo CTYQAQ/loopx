@@ -9,8 +9,8 @@ from loopx.contract import check_contract
 from loopx.control_plane.testing.canary_harness import run_json_cli_result
 from loopx.status import active_state_todo_fields, collect_status
 from loopx.todos import list_goal_todos
-from loopx.control_plane.coordination.local_authority import LocalCoordinationAuthorityUnavailable
-from loopx.control_plane.todos.active_state_todo_parser import parse_active_state_todos
+from loopx.control_plane.coordination.local_authority import LocalCoordinationAuthorityUnavailable, CanonicalAuthorityRequired
+from loopx.control_plane.todos.active_state_todo_parser import active_state_incomplete_warning
 from tests.control_plane.canonical_authority_fixture import initialize_canonical_source_fixture
 
 
@@ -73,12 +73,13 @@ def test_truncated_legacy_agent_todo_section_is_not_projected_as_empty(tmp_path:
     original = state_path.read_bytes()
     # Explicit source inspection still diagnoses the migration input. Ordinary
     # readers must not use that input as a substitute for canonical authority.
-    source = parse_active_state_todos(wounded)
-    assert source["state_incomplete"]["kind"] == "state_incomplete"
-    assert source["state_incomplete"]["roles"] == ["agent"]
-    listed = list_goal_todos(registry_path=registry_path, goal_id=GOAL_ID)
-    assert listed["ok"] is False and listed["error_code"] == "canonical_authority_required"
-    assert listed["todo_count"] == 0
+    source = active_state_incomplete_warning(wounded)
+    assert source["kind"] == "state_incomplete"
+    assert source["roles"] == ["agent"]
+    with pytest.raises(CanonicalAuthorityRequired) as error:
+        list_goal_todos(registry_path=registry_path, goal_id=GOAL_ID)
+    assert error.value.payload["write_admitted"] is False
+    assert error.value.payload["legacy_fallback_used"] is False
     with pytest.raises(LocalCoordinationAuthorityUnavailable):
         active_state_todo_fields(goal, runtime_root=runtime_root)
     contract = check_contract(registry_path=registry_path, runtime_root_override=str(runtime_root),

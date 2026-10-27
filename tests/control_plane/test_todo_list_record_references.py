@@ -74,9 +74,11 @@ def test_real_cli_references_reconstruct_all_scoped_lanes_and_counts(tmp_path, m
     runtime = Path(json.loads(registry.read_text())["common_runtime_root"])
     if provider == "legacy":
         before = state.read_bytes()
-        denied = list_goal_todos(registry_path=registry, goal_id=GOAL_ID, json_references=True)
-        assert denied["ok"] is False and denied["error_code"] == "canonical_authority_required"
-        assert denied["write_admitted"] is False and denied["legacy_fallback_used"] is False
+        from loopx.control_plane.coordination.local_authority import CanonicalAuthorityRequired
+        with pytest.raises(CanonicalAuthorityRequired) as error:
+            list_goal_todos(registry_path=registry, goal_id=GOAL_ID, json_references=True)
+        assert error.value.payload["write_admitted"] is False
+        assert error.value.payload["legacy_fallback_used"] is False
         assert state.read_bytes() == before
         return
     if provider != "legacy":
