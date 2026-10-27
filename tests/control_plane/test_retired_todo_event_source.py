@@ -166,7 +166,7 @@ def test_retired_source_is_scoped_and_later_healthy_goal_remains_visible(tmp_pat
     data["goals"] = goals[:1]
     registry.write_text(json.dumps(data))
     code, first = run_json_cli_result("status", registry_path=registry)
-    assert code == 0, first
+    assert code == 1 and first["ok"] is False, first
     assert first["attention_queue"]["items"][0]["status"] == "canonical_authority_required"
     data["goals"] = goals
     registry.write_text(json.dumps(data))
@@ -175,7 +175,7 @@ def test_retired_source_is_scoped_and_later_healthy_goal_remains_visible(tmp_pat
             state = Path(goals[0]["state_file"])
             state.write_text(state.read_text().replace("task_class=advancement_task", "task_class=maintenance_task"))
         code, payload = run_json_cli_result("status", registry_path=registry)
-        assert code == 0, payload
+        assert code == 1 and payload["ok"] is False, payload
         _assert_portfolio_refusal(payload)
         assert old.read_bytes() == before
     code, mutation = run_json_cli_result("todo", "add", "--goal-id", "retired",
@@ -187,7 +187,7 @@ def test_retired_source_is_scoped_and_later_healthy_goal_remains_visible(tmp_pat
     assert old.read_bytes() == before
     old.unlink()
     code, still_unmigrated = run_json_cli_result("status", registry_path=registry)
-    assert code == 0
+    assert code == 1 and still_unmigrated["ok"] is False
     _assert_portfolio_refusal(still_unmigrated)
     initialize_canonical_source_fixture(runtime, "retired",
         state_path=Path(goals[0]["state_file"]), provider="sqlite")
