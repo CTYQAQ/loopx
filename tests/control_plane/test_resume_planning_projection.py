@@ -283,6 +283,11 @@ def test_public_quota_capacity_wait_uses_provider_after_cutover_without_display_
             "quota", "should-run", "--goal-id", "goal-a", "--agent-id", "agent-a",
              *capabilities, registry_path=registry, runtime_root=runtime,
         )
+        if provider is None:
+            assert code == 1 and packet["error_code"] == "canonical_authority_required", packet
+            assert packet["should_run"] is False
+            assert state.read_bytes() == before
+            continue
         assert code == 0, packet
         assert packet["agent_todo_summary"]["current_agent_deferred_resume_count"] == count
         if count:

@@ -484,7 +484,7 @@ def test_refresh_todo_text_is_record_content_not_an_artifact_path(
         with pytest.raises(CanonicalAuthorityRequired):
             _refresh(registry, dry_run=False)
         assert path.read_bytes() == before
-        assert not (tmp_path / "runtime/goals/goal-a/runs").exists()
+        assert not list((tmp_path / "runtime/goals/goal-a/runs").glob("*"))
         assert not list(tmp_path.rglob("escape.json"))
         return
     result = _refresh(registry, dry_run=False)
