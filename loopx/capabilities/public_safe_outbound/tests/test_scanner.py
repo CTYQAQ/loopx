@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import json
 import os
 from pathlib import Path
@@ -226,6 +227,27 @@ def test_undecodable_candidate_bytes_fail_closed_instead_of_reading_clean(tmp_pa
     assert res.hits == []
     assert res.unscanned == ["content_not_text"]
     assert str(candidate) not in compact_json(res)
+
+
+def test_undecodable_candidate_bytes_never_read_clean(tmp_path: Path) -> None:
+    """Replacement decoding would certify a mangled copy of the candidate.
+
+    A malformed UTF-8 byte and a truncated BOM-marked UTF-16 candidate both
+    carry text the scanner cannot vouch for. Decoding them with ``errors=
+    "replace"`` yields U+FFFD, which no rule matches, so the scan would review
+    a different document and could return a clean receipt for bytes it never
+    saw. Both must be reported unscanned, not clean.
+    """
+    malformed_utf8 = tmp_path / "malformed-utf8.log"
+    malformed_utf8.write_bytes(b"run from C:\\Users\\example-user\\notes.txt\n\xff")
+    truncated_utf16 = tmp_path / "truncated-utf16.log"
+    body = ("key " + SK_SECRET + "\n").encode("utf-16-le")
+    truncated_utf16.write_bytes(codecs.BOM_UTF16_LE + body[:-1])
+    for candidate in (malformed_utf8, truncated_utf16):
+        res = scan_paths([candidate], root=tmp_path)
+        assert res.ok is False, candidate.name
+        assert res.hits == [], candidate.name
+        assert res.unscanned == ["content_not_text"], candidate.name
 
 
 def test_cr_only_unicode_candidate_keeps_the_text_read_line_numbers(tmp_path: Path) -> None:

@@ -274,13 +274,22 @@ def _candidate_text(data: bytes) -> str | None:
     PowerShell capture would read as clean. Bytes with no BOM are read as
     UTF-8; a NUL left after decoding is not text this scanner can review, so
     the caller reports it unscanned instead of returning a silent pass.
+
+    The decode is strict. Replacement decoding would turn undecodable bytes
+    into U+FFFD -- ordinary text to every rule -- so the scan would review a
+    mangled copy of the candidate and could still hand back a clean receipt for
+    content it never actually saw. A candidate the codec cannot decode in full
+    is therefore reported unscanned, exactly like NUL-bearing bytes.
     """
     for bom, encoding in _BOM_CODECS:
         if data.startswith(bom):
-            text = data.decode(encoding, errors="replace")
             break
     else:
-        text = data.decode("utf-8", errors="replace")
+        encoding = "utf-8"
+    try:
+        text = data.decode(encoding)
+    except UnicodeDecodeError:
+        return None
     if "\x00" in text:
         return None
     # The previous text-mode read translated universal newlines. Keep the
