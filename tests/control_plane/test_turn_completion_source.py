@@ -149,6 +149,11 @@ def test_native_legacy_turn_recovers_history_but_cannot_complete_without_source(
 
     monkeypatch.setattr(context_readback, "attach_work_context", legacy_context)
     host, validator = _completion_host_and_validation_scripts()
+    host = host.replace(
+        "request = json.load(sys.stdin)",
+        'request = json.load(sys.stdin)\ncalls = pathlib.Path("host-calls.txt")\n'
+        'calls.write_text(calls.read_text() + "x" if calls.exists() else "x")',
+    )
     argv = _turn_run_once_completion_argv(project, runtime, registry, host, validator)
     actual_write = command.write_turn_validated_completion
     results = []
@@ -424,6 +429,11 @@ def test_native_turn_recovers_accepted_completion_before_checking_new_text(
         "json",
     ]
     host, validator = _completion_host_and_validation_scripts()
+    host = host.replace(
+        "request = json.load(sys.stdin)",
+        'request = json.load(sys.stdin)\ncalls = pathlib.Path("host-calls.txt")\n'
+        'calls.write_text(calls.read_text() + "x" if calls.exists() else "x")',
+    )
     argv = _turn_run_once_completion_argv(project, runtime, registry, host, validator)
     actual_completion = command.write_turn_validated_completion
     completions: list[dict] = []
