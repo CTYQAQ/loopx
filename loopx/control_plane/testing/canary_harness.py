@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -238,3 +239,32 @@ def import_fixture_authority(registry_path: Path, goal_id: str, *, provider: str
     assert readback["source_authority"] == f"{provider}_v0", readback
     assert readback["decision_read_from_provider"] is True, readback
     assert readback["legacy_fallback_used"] is False, readback
+
+
+def assert_todo_read_unchanged(current, previous):
+    """Compare complete readback except validated evaluator/observation clocks."""
+    def stable(payload):
+        payload = without_resume_observation_time(payload)
+        envelope = payload["projection_envelope"]
+        assert envelope["schema_version"] == "loopx_projection_envelope_v0"
+        for key in ("observed_at", "served_at"):
+            assert datetime.fromisoformat(envelope.pop(key).replace("Z", "+00:00")).tzinfo is not None
+        for source in envelope["sources"]:
+            assert datetime.fromisoformat(source.pop("last_read_at").replace("Z", "+00:00")).tzinfo is not None
+        return payload
+
+    assert stable(current) == stable(previous)
+
+
+
+def without_resume_observation_time(value):
+    """Compare all readback facts except the typed evaluator's observation time."""
+    if isinstance(value, list):
+        return [without_resume_observation_time(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    is_resume = value.get("schema_version") == "todo_resume_condition_v0"
+    if is_resume and "evaluated_at" in value:
+        assert datetime.fromisoformat(value["evaluated_at"].replace("Z", "+00:00")).tzinfo is not None
+    return {key: without_resume_observation_time(item) for key, item in value.items()
+            if not (is_resume and key == "evaluated_at")}
