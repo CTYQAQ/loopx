@@ -29,8 +29,9 @@ current-lifetime preflight on original-journal recovery. #6838 shares the existi
 legacy launch helper but does not add this executor recovery callsite. No new
 permission engine or admission schema is added. The executing CLI now passes
 the existing legacy lifetime admission to the driver as well as the Host. The
-driver reuses its lifetime-only check before recovery, without a new quota
-admission. Preview retains its no-capture behavior.
+driver reuses `launch_lifetime` for both source instances and legacy registrations
+before recovery, without a new quota admission. Preview retains its no-capture
+behavior.
 
 The revoke-after-result counterexample found that the CLI discarded legacy
 admission before calling the driver, and `require_current()` deliberately
@@ -62,7 +63,7 @@ decision (`blocked`, reason `host_outcome_unknown`), not a successful result.
 | Validator accepts | Append `validation` | Continue original settlement |
 | Settlement prepares a provider effect | Existing `effect_attempts` with original effect reference | Query provider; committed means reuse; absent means retry same reference; unknown means stop |
 | Provider checkpoint commits | Append `durable_writeback` / `quota_spend` | Resume only remaining phases |
-| Scheduler closeout commits | `committed` or `stopped`, original receipt | Return retained receipt without another debit |
+| Scheduler closeout commits | `committed` or `stopped`, original receipt | With a current Goal lifetime, return retained receipt without another debit |
 
 The journal owner checks transitions and writes a temporary file then replaces
 the journal under mutation locks. Provider commits and the journal checkpoint
@@ -110,9 +111,13 @@ identity to bypass that refusal.
 No new schema or ID is introduced. New initial journals explicitly persist the
 existing attempt counter as zero. Historical incomplete journals without that
 counter fail closed because non-dispatch cannot be proven. Terminal journals
-and journals with a saved typed result retain their recovery route. Explicitly
-recorded failed-Host retry policy is unchanged and is not qualified as safe
-replay of arbitrary external effects by this change.
+and journals with a saved typed result retain their recovery route while the
+Goal remains active. Retired Goals have no executing-recovery compatibility
+path, including terminal receipt replay. Refusal preserves the original journal,
+provider receipts and committed debit; `inspect-journal` remains read-only.
+No retirement fallback, alternate identity or registration migration is added.
+Explicitly recorded failed-Host retry policy is unchanged and is not qualified
+as safe replay of arbitrary external effects by this change.
 
 Old versions can parse these records but lack the new refusal. Therefore a
 downgrade must first reconcile or quarantine unresolved Host intents; do not
@@ -123,6 +128,11 @@ effects is not promised.
 
 
 ## Fault evidence and qualification limits
+
+The original measurements in this section and `evidence.json` describe head
+`335eae25f2544456c9bb644ea5db311210f747e0`. They remain historical evidence;
+their source hashes do not certify later integration repairs. Fresh integration
+validation is recorded separately below and in the PR description.
 
 All experiments use disposable workspaces. `test_turn_interruption_recovery.py`
 pauses the real CLI at a journal boundary, sends SIGKILL, and starts another
@@ -144,6 +154,7 @@ refer to LoopX authority backends; the Turn journal itself remains a JSON file.
 | Quota committed, checkpoint absent | Read original debit, one spend record | Real CLI SIGKILL, both providers |
 | Terminal commit, response lost | Replay original receipt, one spend record | Real CLI SIGKILL, both providers |
 | Authority retired during interruption | No post-restart writeback/debit, evidence preserved | Real CLI SIGKILL, both providers |
+| Terminal commit, then Goal retired | Refuse executing replay; preserve journal, one original debit and downstream operation | Real CLI SIGKILL, both providers |
 | Old Goal generation returns a result | Reject result before journal/writeback | Existing source-lifetime driver tests and owner mutation |
 | Context baseline lost/corrupt/reordered | Same-capture full, current control facts retained | Existing TS codec checks; native qualification below failed |
 | Tool still runs when owner disappears | Observe real process termination separately from effect records | Existing process-supervisor tests and downstream readback |
@@ -293,3 +304,36 @@ records and dependency-file hash in `evidence.json` now refer to that run.
 The UI build failure matches the existing `typed-actions.mjs` change in #7427
 (`dc16fce9a8b34a073cc664643c7afd20201b2592` at inspection); it remains a separate
 integration hold, not a recovery-module pass or an authored UI repair.
+
+## Main integration and lifecycle support
+
+The integration repair merges main
+`15471f8e832d7fb5893539fa053170ea233de5a7` through
+`c3c647d1409e2abe997304f9fcf7bbe2cb247763`. It retains main's
+`prepare_turn_host_request` extraction and the recovery admission capture.
+Recovery then delegates both source-instance and legacy-registration checks to
+the existing `launch_lifetime` owner, instead of branching again in the executor.
+It adds no lifecycle owner, migration or retired-Goal replay exception.
+
+Using the same AST metric, original head `335eae25f2544456c9bb644ea5db311210f747e0`
+and the integration baseline both have 92 statements and 56 decision points in
+`run_loopx_turn_once`. Runtime repair
+`fc9b182a5ce0094c3f698a9ef590677a1a62054a` has 90 statements and 55 decision
+points. The original failure is retained; the unchanged 90/60 limits now pass.
+The full maintainability ratchet passes without a budget or exception change.
+
+The process matrix retains active-Goal terminal replay and adds retired-terminal
+refusal for File and SQLite. It requires the original journal and single committed
+debit to remain unchanged, alongside the independent downstream-operation check.
+The refusal is the supported lifecycle boundary; it is not a compatibility gap
+to fill with another branch.
+
+Fresh bounded checks use Python 3.14.8 and Node 24.21.0: 139 TypeScript tests,
+control-plane typechecking and all five mutation probes pass. An extra two-file
+mypy invocation recursively includes the dependency graph and fails with 5,417
+errors in 617 files on both the immutable integration baseline and repair.
+Comparing the complete diagnostics with source line coordinates removed finds
+no additions or removals. This is not a passing whole-repository Python typecheck.
+The PR description records the final Python and premerge results. The model and
+six historical native failures above are not rerun or newly qualified by this
+bounded integration repair.
