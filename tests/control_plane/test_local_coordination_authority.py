@@ -1150,7 +1150,7 @@ def test_canonical_hard_lease_claim_cli_atomically_acquires_ownership(
                         "repo": str(project),
                         "state_file": ".codex/goals/goal-a/ACTIVE_GOAL_STATE.md",
                         "coordination": {
-                            "registered_agents": ["agent-a", "agent-b"]
+                            "registered_agents": ["agent-a"]
                         },
                     }
                 ],
@@ -1194,11 +1194,12 @@ def test_canonical_hard_lease_claim_cli_atomically_acquires_ownership(
         "todo_atomic_claim",
         "--claimed-by",
         "agent-a",
-        "--agent-id",
-        "agent-a",
         "--claim-operation-id",
         "atomic-cli-claim",
     ]
+    # The legacy single-agent call has no explicit actor and must not acquire
+    # execution. Explicit self-claim is a different, managed operation.
+    before = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
     initial_failure = subprocess.run(
         base_command,
         capture_output=True,
@@ -1217,15 +1218,17 @@ def test_canonical_hard_lease_claim_cli_atomically_acquires_ownership(
     assert recovery.get("command") == "loopx todo claim"
     assert recovery.get("requires_flags") == ["--task-lease-idempotency-key"]
     assert "--task-lease-expected-version" in (recovery.get("optional_flags") or [])
+    _assert_same_todo_content(list_goal_todos(registry_path=registry_path, goal_id="goal-a"), before)
 
     command = [
         *base_command,
+        "--agent-id",
+        "agent-a",
         "--task-lease-idempotency-key",
         "turn:atomic-cli-claim",
         "--task-lease-expected-version",
         "0",
     ]
-    before = list_goal_todos(registry_path=registry_path, goal_id="goal-a")
     preview = json.loads(
         subprocess.run(
             [*command, "--dry-run"],
