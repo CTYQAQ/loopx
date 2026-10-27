@@ -139,7 +139,11 @@ def _portfolio_fixture(root: Path, alias: str | None = None):
 
 
 def _assert_portfolio_refusal(payload):
-    rows = {item["goal_id"]: item for item in payload["attention_queue"]["items"]}
+    items = payload["attention_queue"]["items"]
+    rows = {
+        "retired": next(item for item in items if item["goal_id"] == "retired" and item.get("todo_source") == "unavailable"),
+        "healthy": next(item for item in items if item["goal_id"] == "healthy" and "agent_todos" in item),
+    }
     assert rows["retired"]["status"] == "canonical_authority_required"
     assert rows["retired"]["todo_source"] == "unavailable"
     assert rows["retired"]["waiting_on"] == "user_or_controller"
@@ -167,7 +171,9 @@ def test_retired_source_is_scoped_and_later_healthy_goal_remains_visible(tmp_pat
     registry.write_text(json.dumps(data))
     code, first = run_json_cli_result("status", registry_path=registry)
     assert code == 1 and first["ok"] is False, first
-    assert first["attention_queue"]["items"][0]["status"] == "canonical_authority_required"
+    refused = next(item for item in first["attention_queue"]["items"]
+        if item["goal_id"] == "retired" and item.get("todo_source") == "unavailable")
+    assert refused["status"] == "canonical_authority_required"
     data["goals"] = goals
     registry.write_text(json.dumps(data))
     for rewrite_annotation in (False, True):
