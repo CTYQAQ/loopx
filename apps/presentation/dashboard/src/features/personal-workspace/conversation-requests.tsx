@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from "react";
 import {ChevronRight, ListChecks, RefreshCw, X} from "lucide-react";
-import {fetchChatSession, fetchChatSessions, requestJson, type ChatVisibleMessage} from "../../data/chat";
+import {fetchChatSession, fetchChatSessions, requestJson, type ChatImageAttachment, type ChatVisibleMessage} from "../../data/chat";
 import {z} from "zod";
 import {fetchConversationRequests, type ConversationRequest, type ConversationRequestInventory} from "../../data/conversation-requests";
 import {ContextHelp} from "./context-help";
@@ -130,6 +130,12 @@ function requestStage(row: ConversationRequest, zh: boolean) {
   }
 }
 
+function OriginalImage({attachment, zh}: {attachment: ChatImageAttachment; zh: boolean}) {
+  const [failed, setFailed] = useState(false);
+  return failed ? <p role="status">{zh ? "图片无法显示：" : "Image unavailable: "}{attachment.name}</p>
+    : <img src={attachment.data_url} alt={attachment.name} onError={() => setFailed(true)}/>;
+}
+
 function OriginalRequest({row, zh}: {row: ConversationRequest; zh: boolean}) {
   const [messages, setMessages] = useState<ChatVisibleMessage[] | null>(null);
   const [error, setError] = useState(false);
@@ -144,6 +150,7 @@ function OriginalRequest({row, zh}: {row: ConversationRequest; zh: boolean}) {
     const abort = new AbortController();
     void fetchChatSession(row.source_session_id, abort.signal).then(value => {
       if (abort.signal.aborted) return;
+      if (value.session.session_id !== row.source_session_id) throw new Error("Original conversation scope changed.");
       const source = value.messages.filter(message => message.turn_id === row.source_turn_id);
       if (!source.length) setError(true); else setMessages(source);
     }).catch(() => {if (!abort.signal.aborted) setError(true);});
@@ -151,7 +158,12 @@ function OriginalRequest({row, zh}: {row: ConversationRequest; zh: boolean}) {
   }, [open, row.source_session_id, row.source_turn_id]);
   return <details onToggle={event => setOpen(event.currentTarget.open)}><summary>{zh ? "原对话" : "Original conversation"}</summary>
     <div ref={content} tabIndex={-1}>{error ? <p role="alert">{zh ? "原对话暂时无法读取，请重新打开重试。" : "Original conversation unavailable. Reopen to retry."}</p>
-      : messages ? messages.map(message => <article key={message.message_id}><strong>{message.role === "user" ? (zh ? "你" : "You") : "LoopX"}</strong><MarkdownText text={message.text}/></article>)
+        : messages ? messages.map(message => <article key={message.message_id}>
+          <strong>{message.role === "user" ? (zh ? "你" : "You") : "LoopX"}</strong><MarkdownText text={message.text}/>
+          {message.attachments?.length ? <div className="conversation-request-images">
+            {message.attachments.map(attachment => <OriginalImage key={attachment.id} attachment={attachment} zh={zh}/>)}
+          </div> : null}
+        </article>)
       : <p role="status">{zh ? "正在读取…" : "Loading…"}</p>}</div>
   </details>;
 }
