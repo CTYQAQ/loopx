@@ -227,6 +227,9 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             continued += ["--turn-instance-id", original["heartbeat_receipt"]["turn_instance_id"],
                           "--todo-id", TODO_ID]
             rendered = shlex.join(continued)
+        if native_guard_output_bytes is not None:
+            assert "--max-page-output-bytes" not in shlex.split(rendered)
+            rendered += f" --max-page-output-bytes {native_guard_output_bytes}"
         # Observe the producer's stdout and retain an independent exact copy;
         # a later cat is not the native guard's own output path.
         return "set -o pipefail\n" + rendered + " | tee " + shlex.quote(str(wire_paths[name]))
@@ -438,13 +441,6 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         return tool(cmd, number)
 
     def tool(cmd, number):
-        if native_guard_output_bytes is not None:
-            argv = shlex.split(cmd)
-            if "should-run" in argv or "context-project" in argv:
-                assert "--max-page-output-bytes" not in argv
-                argv.extend(["--max-page-output-bytes", str(native_guard_output_bytes)])
-                cmd = shlex.join(argv)
-
         def bounded_read(command, *, primary=False):
             budget = reader_output_bytes or native_guard_output_bytes
             if not budget or "context-read" not in shlex.split(command):
