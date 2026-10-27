@@ -689,6 +689,11 @@ def _execute_cli(command: str, state: _QualificationState) -> dict[str, Any]:
         "--registry": {fixture.global_registry_path.resolve(),
                        (fixture.project_root / ".loopx/registry.json").resolve()},
     }
+    scoped = {*routes, "--goal-id", "--agent-id", "--todo-id", "--turn-instance-id", "--agent-vision-json"}
+    if any(token.partition("=")[1] and token.partition("=")[0] in scoped for token in tokens or []):
+        raise _TerminalToolViolation("nonliteral_fixture_argument")
+    if any((tokens or []).count(option) > 1 for option in scoped):
+        raise _TerminalToolViolation("duplicate_fixture_argument")
     guard_registry = argument_value(loopx_command_tokens(fixture.quota_guard_command) or [], "--registry")
     for option, allowed in routes.items():
         supplied = argument_value(tokens or [], option)

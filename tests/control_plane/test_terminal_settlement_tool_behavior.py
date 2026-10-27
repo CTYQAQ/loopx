@@ -283,14 +283,24 @@ def test_terminal_fixture_requires_quota_before_reading_proof(tmp_path: Path) ->
 
 
 @pytest.mark.parametrize("option", ["--registry", "--runtime-root", "--project", "--state-file"])
-def test_terminal_fixture_rejects_foreign_routes(tmp_path: Path, option: str) -> None:
+@pytest.mark.parametrize("spelling", ["separate", "inline", "duplicate"])
+def test_terminal_fixture_rejects_foreign_routes(tmp_path: Path, option: str, spelling: str) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
     outside = tmp_path / "owner-state.json"
     outside.write_text("Owner state must remain unchanged.\n")
 
     def completion(request):
         tokens = shlex.split(_completion_action(request, kind="validation").command)
-        if option in tokens:
+        if spelling == "duplicate":
+            if option not in tokens:
+                tokens += [option, str(tmp_path / "actor/project")]
+            tokens += [option, str(outside)]
+        elif spelling == "inline":
+            if option in tokens:
+                index = tokens.index(option)
+                del tokens[index:index + 2]
+            tokens += [option + "=" + str(outside)]
+        elif option in tokens:
             tokens[tokens.index(option) + 1] = str(outside)
         else:
             tokens += [option, str(outside)]
@@ -302,7 +312,9 @@ def test_terminal_fixture_rejects_foreign_routes(tmp_path: Path, option: str) ->
             ScriptedExecToolAction(command="cat fixture/settlement-proof.json"), completion,
         ]),
     ).qualify(qualification_id="foreign-route", fixture_root=tmp_path / "actor")
-    assert receipt["failure_code"] == "fixture_route_mismatch"
+    assert receipt["failure_code"] == {"separate": "fixture_route_mismatch",
+                                       "inline": "nonliteral_fixture_argument",
+                                       "duplicate": "duplicate_fixture_argument"}[spelling]
     assert receipt["qualification_passed"] is False
     assert receipt["settlement_receipt_steps"] == []
     assert outside.read_text() == "Owner state must remain unchanged.\n"
