@@ -21,7 +21,7 @@ from ..todos.summary_item import todo_text_content_revision
 
 
 def _source_content(read, *, registry_path, runtime_root, goal_id, todo_id,
-                    inline_goal_source=False):
+                    inline_goal_source=False, agent_id=None):
     source = read.get("source")
     if source == "goal_state":
         _goal, _project, state_file = resolve_goal_state(
@@ -73,7 +73,7 @@ def _source_content(read, *, registry_path, runtime_root, goal_id, todo_id,
         # selected-Todo read owns its body; do not transport it a second time
         # through the bounded acceptance RPC before discarding it here.
         return inspect_goal_acceptance(registry_path=registry_path, goal_id=goal_id,
-            runtime_root=str(runtime_root), todo_id=todo_id, include_work_details=False)
+            runtime_root=str(runtime_root), todo_id=todo_id, context_agent_id=agent_id, include_work_details=False)
     if source == "selected_todo":
         if not todo_id:
             raise ValueError("selected Todo identity is unavailable")
@@ -157,7 +157,7 @@ def attach_work_context(payload: dict[str, Any], *, registry_path: Path,
         try:
             result["content"] = _source_content(read, registry_path=registry_path,
                 runtime_root=runtime_root, goal_id=goal_id, todo_id=plan.get("todo_id"),
-                inline_goal_source=inline_goal_source)
+                inline_goal_source=inline_goal_source, agent_id=agent_id)
         except (OSError, ValueError, RuntimeError):
             result["error_code"] = "context_source_unavailable"
         results.append(result)
