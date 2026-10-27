@@ -55,6 +55,8 @@ def write_registry(root: Path) -> Path:
                     {
                         "id": GOAL_ID,
                         "domain": "loopx-platform",
+                        "coordination": {"agent_model": "peer_v1",
+                            "registered_agents": ["codex-product-capability"]},
                         "status": "active",
                         "repo": str(project),
                         "state_file": state_file,
@@ -75,6 +77,8 @@ def write_registry(root: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
+    from loopx.control_plane.testing.canary_harness import import_fixture_authority
+    import_fixture_authority(registry_path, GOAL_ID, provider="sqlite")
     return registry_path
 
 
