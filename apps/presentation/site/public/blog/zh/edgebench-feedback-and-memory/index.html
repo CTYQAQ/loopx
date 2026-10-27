@@ -17,14 +17,14 @@
 </head>
 <body><main id="main"><div class="language"><a href="../">← LoopX 博客</a><a href="../../edgebench-feedback-and-memory/" lang="en">English</a></div>
 <header>
-<p class="muted">黄睿腾 · 更新于 2026 年 10 月 26 日 · 探索性研究</p>
+<p class="muted">黄睿腾 · 更新于 2026 年 10 月 28 日 · 探索性研究</p>
 <h1>让长程 Agent 的下一步有据可依</h1>
 <p class="subtitle">从可信反馈，到持续进展，再到上下文成本</p>
 <p class="lead">长时间运行之后，我们关心三个问题：第一次好结果之后还有什么改善，改善有没有保住，整个过程花了多少成本。</p>
 <p>我们的 EdgeBench 研究经历了三个阶段：先让评测和续跑可信，再看积累的证据能否改变后续工作，最后削减交付这些证据的成本。早期 Lean 和后来的 Ad Placement 轨迹显示了实际进展。更强的基础模型基线也在前进。这些观察支持继续发展 LoopX，但尚不能分离各机制的贡献及净收益。</p>
 <p>当前判断是<strong>有限正向</strong>：已有后程有效工作和恢复复盘流程改善的实例，尚无一般性的因果增益估计，也没有完整费用比较。</p>
 </header>
-<nav aria-label="文章目录"><a href="#thesis">研究问题</a><a href="#ledger">可信反馈</a><a href="#later-common-windows">后程进展</a><a href="#memory">证据与决策</a><a href="#context">完整成本</a><a href="#new-study">下一轮验证</a></nav>
+<nav aria-label="文章目录"><a href="#thesis">研究问题</a><a href="#ledger">可信反馈</a><a href="#repair-cases">具体修复</a><a href="#later-common-windows">后程进展</a><a href="#memory">证据与决策</a><a href="#context">完整成本</a><a href="#new-study">下一轮验证</a></nav>
 <section id="thesis"><h2>1. 更多时间，应该换来什么？</h2>
 <p>LoopX 让原始目标、验收条件、工作归属和证据跨会话、跨宿主持久化。控制面约束状态转换，为模型的下一步提供反馈，但不能认证这个选择是否高明。一条发现、一次读取回执、一条 replan 记录都只是中间证据；真正需要追踪的链条，要落到实际工作和经过验证的成果。</p>
 <ol class="flow" aria-label="基于证据的工作循环"><li><strong>目标</strong><span>验收与范围</span></li><li><strong>证据</strong><span>结果与限制</span></li><li><strong>决策</strong><span>继续或换方向</span></li><li><strong>工作</strong><span>执行与验证</span></li><li><strong>保留</strong><span>保住最佳有效成果</span></li></ol>
@@ -45,7 +45,22 @@
 <table><thead><tr><th>盲跑 Lean 原始分</th><th>早期 Resume v14</th><th>后期 Resume（#5844）</th><th>早期 Explore v14</th><th>后期 Explore（#5844）</th></tr></thead><tbody><tr><td>180 分钟</td><td>0.1103</td><td>0.3478</td><td>0.1134</td><td>0.4019</td></tr><tr><td>450 分钟</td><td>0.1882</td><td>0.5243</td><td>0.1996</td><td>0.5605</td></tr></tbody></table>
 <p>这些单次运行的共同窗口里，后期原始分约为早期的 2.8–3.5 倍。提示、任务入口、runner 可靠性和 LoopX 机制一起变化。它支持整体系统有进展，不足以归因给某个机制，也不能保证其他题的终态表现。</p>
 </section>
-<section id="later-common-windows"><h2>3. 第一次好结果之后，还发生了什么？</h2>
+<section id="repair-cases"><h2>3. 轨迹怎样变成具体修复</h2>
+<p>研究不只产出分数，也暴露了值得修的工程问题。先分清它们作用在哪一层，才知道该用什么证据检查。</p>
+<table><thead><tr><th>类别与修复</th><th>研究暴露的问题</th></tr></thead><tbody>
+<tr><td>反馈可信 · <a href="https://github.com/loopx-project/loopx/pull/7072">#7072</a></td><td>失败留下局部分数，下游却多算了一个完成</td></tr>
+<tr><td>读取成本 · <a href="https://github.com/loopx-project/loopx/pull/7013">#7013</a></td><td>一次上下文读取反复计算同一运行时修订</td></tr>
+<tr><td>决策与结算 · <a href="https://github.com/loopx-project/loopx/pull/7269">#7269</a></td><td>事实、推进义务、执行许可和原回合收尾混淆</td></tr>
+<tr><td>恢复入口 · <a href="../typescript-control-plane-refactor/#model-assisted-semantics">#7145 案例</a></td><td>恢复命令可能换到另一运行时</td></tr>
+</tbody></table>
+<h3>有了分数，为什么还不算完成？</h3>
+<p>一次运行中途失败，仍可能留下有用的历史分数。旧桥接路径也把这样的 native 结果写进 <code>final_result.json</code>，而 SForge 的发现流程把这个文件当作完成信号。写入方只想保存结果，展示方却增加了一个 done。</p>
+<p><a href="https://github.com/loopx-project/loopx/pull/7072">#7072</a> 保留完整 <code>RunResult</code>，按桥接层的结果状态分流：<code>terminal</code> 写 final，其余写 <code>partial_result.json</code>。检查走真实发现流程和 HTTP 页面，确认 failed、usage_limited、cancelled、missing 不再误计完成，既有终态及普通非 native 行为保持。终态也不等于目标验收成功；预算耗尽、受控暂停等仍需按原状态解释。<strong>历史分数、运行完成和目标达成，是三个读数。</strong></p>
+<h3>同一份事实，不必在一次读取里反复算</h3>
+<p><a href="https://github.com/loopx-project/loopx/pull/7013">#7013</a> 将已有请求级运行时作用域用于 <code>explore_turn_context</code>：一次读取复用同一修订，下一次读取重新获取。没有跨请求持久缓存，也不用新增配置。</p>
+<p>原 PR 的历史实测使用 600 条合成研究记录、真实隔离 CLI，预热后三次未插桩样本的中位数为：<strong>File 4.005 → 0.495 秒，SQLite 4.268 → 0.603 秒</strong>。完整 JSON 与日志字节相同；回归还检查下一次读取看见新增发现、畸形历史照常报错且失败后作用域恢复。它证明同负载下宿主读取更快，不代表 Agent 整体提速八倍或模型 tokens 减少。</p>
+</section>
+<section id="later-common-windows"><h2>4. 第一次好结果之后，还发生了什么？</h2>
 <p>后来的实验把重点转向十几个小时之后的工作。先比较共同观察窗口，再拆开起点、后续增量和保留的候选。只看终点排名，很容易混淆它们。</p>
 <table><thead><tr><th>历史批次</th><th>观察结果</th><th>含义</th></tr></thead><tbody>
 <tr><td>Sol/xhigh，新旧 LoopX，Ad Placement · 14h</td><td>49,589,589,573 → 49,615,495,839</td><td>新版 2h 时落后、14h 时领先，终态工作区与保留的 best 一致</td></tr>
@@ -58,7 +73,7 @@
 <p>另一组 Astra/xhigh 的 12 小时比较更不利：Official 达到 0.881813，LoopX 为 0.786257，两边 6h 到 12h 的 best 都没有提升。LoopX 记录了 36 次完成的压缩，Official 为四次；未缓存输入约为其 5.32 倍。压缩可能与有效工作重叠，版本、恢复、共享负载和评分条件也有差异。但轨迹仍指出了实际挑战：更多改动和控制活动，没有转化为更多验收价值。</p>
 <details><summary>这些窗口的条件与限制</summary><p>Sol 新旧研究采用 planned + Explore、Sol/xhigh、关闭 TurnEnvelope、Agent 主动申请 native feedback、一小时冷却。14h 是读过早期结果后，按最早实际结束时间以下的最大整小时选定，并非完成 18h。另一组 Astra 比较各臂自己的前 12h，包含准备。Sol 窗口对齐了 7,522 个独立 response 和 52 个收到的原生结果，Astra 为 5,277 个 response、45 个结果；累计计数没有反复累加，reasoning 已在 output 中。历史基础设施失败及整次运行完整性未知继续保留。处理包不同、自适应重启，以及此前操作者读到过一个 Official 终态汇总，都限制了因果判断。</p></details>
 </section>
-<section id="memory"><h2>4. 证据有没有改变下一步工作？</h2>
+<section id="memory"><h2>5. 证据有没有改变下一步工作？</h2>
 <span id="decision-followthrough"></span><p>成熟 checkpoint 可以帮助观察一个具体决策边界。接收者继承相同科学状态和 incumbent，再追踪它读了什么证据、选了什么实验、实际做了什么、原生反馈如何。负向本地结果若能在明确条件下排除一条分支，也有价值。继续原方向有依据时，replan 不必强行改道。</p>
 <p>近期 <a href="https://github.com/loopx-project/loopx/pull/7269">#7269</a> 让 Agent 先读目标、事实和反馈，再读写回格式；释放过时的任务选择偏好，并在创建 successor 后保留原 Turn 的结算身份。它对应两个真实往返来源：决策前先读大段写入指令，以及后续任务创建后还要补一轮确认结算归属。</p>
 <span id="staged-replan-outcomes"></span><table><thead><tr><th>同点 Sol/max 接续</th><th>基线 → 修订</th><th>口径</th></tr></thead><tbody>
@@ -70,8 +85,11 @@
 <p>这是<strong>流程的有限正向证据</strong>，伴随 Grid 小幅成果优势、Schema 反馈中性，不等于全任务加速。这组每题一对、各对同一原 checkpoint、Sol/max、普通 cadence 为三个有效工作 Turn，差分、TurnEnvelope 和 stride 关闭。恢复准备阶段暂用 cadence 一，直到语义复盘与原生 Turn 完成。它不是多轮稳定态三 Turn 复盘研究。</p>
 <span id="checkpoint-research"></span><span id="continuation-inputs"></span><span id="matched-context-4h"></span><p>更早 Graph、Portfolio 的 retained／fresh-context 接续回答的是另一问题；源点龄、重建费用和接续仍算在原累计 36h 内。早期一个名义上“with #7197”的臂没有实际收到分段 reader，其得分不能判断该处理有益或有害。后来的 Astra 到 Sol 接续又同时换了模型和 effort。这些历史有诊断价值，但不能当成独立冷启动或互换的消融。</p>
 </section>
-<section id="context"><h2>5. 效率要算完整过程</h2>
+<section id="context"><h2>6. 效率要算完整过程</h2>
 <span id="research-cost"></span><span id="measure"></span><p>完整账单包括模型输入输出、工具响应与重试、上下文重建、复盘结算、评测、共享资源和操作者介入。缓存输入在部分计费条件下更便宜，但不是免费；reasoning 已在 output 里。没有实际价格与账户对账，token 向量只能描述用量，不能直接当作费用。</p>
+<h3 id="input-share">把结构输入单独计量</h3>
+<p><strong>LoopX 输入占比 = LoopX 相关 packet 的实际输入 tokens 之和 ÷ 全部模型实际输入 tokens 之和。</strong> 两者须覆盖同一请求集合和窗口，重复回执去重；另一次请求重新消费同一上下文，则是新的实际成本。</p>
+<p>分母包含缓存与未缓存输入，缓存部分及归因覆盖单列，不平均逐请求百分比。只有总输入、没有 packet 实际归因时，占比仍未知，不能填零，也不能由字符或传输字节换算成“实测 token”。结构占比本身还不是净效率损失：它是否减少无效工作、帮助保留成果，要与完整成本一起判断。</p>
 <span id="later-usage"></span><table><thead><tr><th>#7269 共同窗口</th><th>未缓存输入</th><th>缓存输入</th><th>输出</th></tr></thead><tbody>
 <tr><td>Grid 基线</td><td>504,047</td><td>26,283,904</td><td>115,147</td></tr>
 <tr><td>Grid 修订</td><td>522,198（+3.60%）</td><td>35,629,184（+35.56%）</td><td>174,366（+51.43%）</td></tr>
@@ -84,7 +102,7 @@
 <p>历史离线回放说明了为什么必须算总量：结构化 Host 和原生呈现字节下降 57.72%、60.23%，原生入口加完整恢复上升 6.37%。这些是历史字节观察，不是当前提交的模型 token 结果。早期离线探针还曾报告 CLI 字节增加 2.25%，但因漏掉最终 CLI 压缩并重新格式化入口，已撤回其实际 CLI 交付测量资格。该数字仅作为无效历史记录保留，不用于完整交付或成本结论。不能把视图缩小 60% 写成总成本下降 60%。</p>
 <p>当前效率工作把普通入口、分段交付接到共享传输，减少重复读取和重新绑定，消掉可避免的结算往返。差分关闭的默认路径同样重要；开启后也必须正确恢复，并让产品和 benchmark 都易于启用。<strong>所有机制合计 15%</strong> 的参考目标尚未完成资格验证；它不是每个机制各有一份额度，也不能用来漏记失败和重建成本。</p>
 </section>
-<span id="patches"></span><span id="planned-stride"></span><span id="distribution"></span><span id="rerun"></span><section id="new-study"><h2>6. 从零开始的上下文验证</h2>
+<span id="patches"></span><span id="planned-stride"></span><span id="distribution"></span><span id="rerun"></span><section id="new-study"><h2>7. 从零开始的上下文验证</h2>
 <p>当前上下文研究让 Grid、Schema、Ad Placement 从原始任务开始，使用 Sol/max，每题最多 18h。可用的历史 Official 或旧 LoopX 作为描述性参考，保留模型／effort、源码、评分器、机会和时钟差异，不冒称严格配对；旧材料无法回答相应问题时再补 base。各次尝试按实际源码、连续性依据和传输路径分别分析，不合并成同一处理。</p>
 <p>先核实实际交付确实改变：首次完整读取、声明连续性依据的后续差分、已知基线失效时的完整回退，以及一次从复盘到工作的完整交互。再比较有效进展、成果保留和完整用量。开关、回执、局部小包都不能替代这些证据。Feature 偏离预期时，停止相关尝试，保留其成本和历史，修复后用新的尝试身份重启。</p>
 <p>新原生 Hook 路径的首批 Grid、Ad 交互已完成完整分页、一次差分及后续任务工作。同一次捕获内，差分载荷分别比对应完整包小 19.53%、19.48%；这只是一轮读取的载荷比较，不含分页封装、后续模型输入、Hook、恢复或复盘费用，不能外推为总成本下降。完整复盘到后续原生成果、持续收益和故障恢复仍待验证。</p><p>效果目标是很多小时之后仍能取得有效进展并保住成果；效率目标是用更低完整成本和人工介入取得同等验收价值。下一份结果需要同时回答它们；当前运行不重置原定截止时间，替换尝试的失败和消耗也保留。</p>
