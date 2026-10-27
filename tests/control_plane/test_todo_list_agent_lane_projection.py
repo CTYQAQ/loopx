@@ -266,6 +266,12 @@ def test_agent_lane_retains_bounded_blocked_advancement_reason(
     with state_file.open("a", encoding="utf-8") as stream:
         stream.write("\n".join(blocked) + "\n")
 
+    from canonical_authority_fixture import advance_canonical_fixture_authority, read_fixture_todos
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    runtime = Path(json.loads(registry_path.read_text(encoding="utf-8"))["common_runtime_root"])
+    advance_canonical_fixture_authority(runtime, GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=read_fixture_todos(state_file),
+            handoff_mode="soft_claim"), operation_id="fixture-blocked-lane-added")
     payload = list_goal_todos(
         registry_path=registry_path,
         goal_id=GOAL_ID,
