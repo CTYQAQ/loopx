@@ -217,11 +217,28 @@ function singleCharacterVariants(value: string): string[] {
   return [...variants];
 }
 
+/** A range wider than this is compared by case variants instead of walked. */
+const RANGE_MEMBER_LIMIT = 4096;
+
+/** Code points a range covers, or null when the interval is too wide to walk. */
+function rangeMembers(low: string, high: string): string[] | null {
+  const start = low.codePointAt(0);
+  const end = high.codePointAt(0);
+  if (start === undefined || end === undefined || start > end) return [];
+  if (end - start + 1 > RANGE_MEMBER_LIMIT) return null;
+  const members: string[] = [];
+  for (let code = start; code <= end; code += 1) {
+    members.push(String.fromCodePoint(code));
+  }
+  return members;
+}
+
 /**
  * Class membership is a symmetric fold equivalence: a member and the compared text
  * match when their canonical fold is equal. That covers non-reciprocal Unicode
  * aliases (a class member ς against Σ) and folds that change length (ß against SS).
- * Ranges keep their original interval and only ever consume one unit.
+ * Every range member is compared by its fold, so a general interval keeps its
+ * original bounds without losing either kind of alias.
  */
 function classMemberMatches(body: string, candidate: string, foldCase: boolean): boolean {
   const {literals, ranges} = characterClass(body);
@@ -230,15 +247,23 @@ function classMemberMatches(body: string, candidate: string, foldCase: boolean):
     if (literal === candidate || (foldCase && caseFold(literal) === folded)) return true;
   }
   for (const [low, high] of ranges) {
-    // A one-element range is a literal written in range syntax, so it has to
-    // accept the same multi-character folds (ß/SS) a literal member does.
-    if (low === high) {
-      if (low === candidate || (foldCase && caseFold(low) === folded)) return true;
+    if (!foldCase) {
+      if ([...candidate].length === 1 && low <= candidate && candidate <= high) return true;
       continue;
     }
-    if ([...candidate].length !== 1) continue;
-    for (const variant of (foldCase ? singleCharacterVariants(candidate) : [candidate])) {
-      if (low <= variant && variant <= high) return true;
+    const members = rangeMembers(low, high);
+    if (members === null) {
+      // Walking a very wide interval on every comparison would dominate the
+      // decision, so fall back to the candidate's own case variants. Ordinary
+      // scopes use short intervals, which take the exact path below.
+      if ([...candidate].length !== 1) continue;
+      for (const variant of singleCharacterVariants(candidate)) {
+        if (low <= variant && variant <= high) return true;
+      }
+      continue;
+    }
+    for (const member of members) {
+      if (caseFold(member) === folded) return true;
     }
   }
   return false;

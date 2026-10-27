@@ -316,6 +316,9 @@ test("scope comparison folds case aliases without rewriting retained or request 
     ["src/[ς-ς].ts", "src/Σ.ts"],
     ["src/[ß-ß].ts", "src/SS.ts"],
     ["src/[!ß]S.ts", "src/SS.ts"],
+    ["src/[ρ-ς].ts", "src/Σ.ts"],
+    ["src/[ρ-ς].ts", "src/σ.ts"],
+    ["src/[ß-à].ts", "src/SS.ts"],
   ]) {
     assert.equal(evaluateTaskLeaseWriteScopesOverlap({left: [left], right: [right]}).overlap, true, `${left} overlaps ${right}`);
   }
@@ -325,6 +328,7 @@ test("scope comparison folds case aliases without rewriting retained or request 
     ["src/[!ß]x", "src/SSx"],
     ["src/[!ß]S.ts", "src/S.ts"],
     ["src/[ß-ß].ts", "src/S.ts"],
+    ["src/[!ρ-ς].ts", "src/Σ.ts"],
   ]) {
     assert.equal(evaluateTaskLeaseWriteScopesOverlap({left: [left], right: [right]}).overlap, false, `${left} excludes ${right}`);
   }
