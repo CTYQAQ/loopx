@@ -361,7 +361,7 @@ def test_inline_reentry_reads_gates_changed_after_choice_receipt(
         if len(calls) == 1:
             assert result.rejected and result.receipt_status == "selection_retained"
             if changed_gate == "user_gate":
-                _append_blocking_user_gate(project)
+                _append_blocking_user_gate(project, global_gate=True)
                 _advance_frontier(project, runtime, "fixture-new-user-gate")
             else:
                 data = json.loads(registry.read_text())
