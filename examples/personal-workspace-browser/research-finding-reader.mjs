@@ -61,7 +61,7 @@ export const researchFindingReaderScenario = {
       assert.equal(await article.count(), 1, "A dense question presents one full document, not twenty stacked documents");
       assert.equal(await picker.inputValue(), "finding-19");
       await page.waitForURL(/research_finding=finding-19/);
-      assert.match(await reader.locator(".research-finding-exceptions").innerText(), /已反驳 3.*待检查 4/);
+      assert.match(await reader.locator(".research-finding-exceptions").innerText(), /已反驳 3.*暂定结论 4/);
       assert.equal(await history.locator(".research-history-canvas").isVisible(), false, "The selected text leads; history is available on demand");
       await page.screenshot({path: resolve(outputDir, "research-finding-reader-desktop.png"), animations: "disabled"});
       await page.locator(".personal-channel-scroll").evaluate(element => element.scrollTop = 0);
@@ -115,7 +115,7 @@ export const researchFindingReaderScenario = {
         await page.setViewportSize({width, height: 900});
         const group = history.locator(".research-trail-question").first();
         assert.equal(await group.locator("h4").innerText(), "合成研究：质量、延迟和未知成本应如何一起判断？");
-        assert.match(await group.locator("header").innerText(), /20 条决策记录.*已反驳 3.*待检查 4/s);
+        assert.match(await group.locator("header").innerText(), /20 条决策记录.*已反驳 3.*暂定结论 4/s);
         const decisions = group.locator(".research-trail-list button");
         if (width === 1440) assert.equal(await decisions.count(), 3, "A question starts with three records, not repeated title cards");
         await group.scrollIntoViewIfNeeded();
@@ -178,7 +178,7 @@ export const researchFindingReaderScenario = {
       assert.equal(await article.count(), 0, "An unknown explicit finding does not silently open a different record");
       assert.match(await reader.innerText(), /找不到所选结论/);
       await picker.selectOption("finding-4");
-      assert.match(await article.innerText(), /待检查/);
+      assert.match(await article.innerText(), /暂定结论/);
       await page.evaluate(() => localStorage.setItem("loopx-pw-locale", "en"));
       await page.reload({waitUntil: "domcontentloaded"});
       await reader.getByRole("combobox", {name: "Choose a question finding", exact: true}).waitFor();
