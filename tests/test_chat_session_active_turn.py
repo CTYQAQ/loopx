@@ -1379,7 +1379,17 @@ def test_queued_claim_and_interrupt_share_one_turn_transition(
     interrupt_thread.start()
     assert interrupt_read.wait(timeout=2)
 
-    claimed: list[dict[str, object] | None] = []
+    candidate_read = threading.Event()
+    original_queued_turns = store.queued_turns
+
+    def observe_candidate(requested_session_id):
+        turns = original_queued_turns(requested_session_id)
+        if threading.current_thread().name == "claim-turn":
+            candidate_read.set()
+        return turns
+
+    monkeypatch.setattr(store, "queued_turns", observe_candidate)
+    claimed: list[dict[str, object] | list | None] = []
     claim_thread = threading.Thread(
         target=lambda: claimed.append(
             store.claim_next_queued_turn(session_id, host_claim_id="host-claim")
@@ -1391,6 +1401,7 @@ def test_queued_claim_and_interrupt_share_one_turn_transition(
         daemon=True,
     )
     claim_thread.start()
+    assert candidate_read.wait(timeout=2)
     resume_interrupt.set()
     interrupt_thread.join(timeout=5)
     claim_thread.join(timeout=5)
