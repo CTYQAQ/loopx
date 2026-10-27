@@ -1553,13 +1553,12 @@ def run_loopx_turn_once(
         recovery_decision: dict[str, Any] | None = None
         if journal is not None:
             if goal_admission is not None:
-                goal_admission.require_current()
-                if not goal_admission.enabled:
-                    # Recovery needs current lifetime authority, not a new quota admission.
-                    with goal_admission.launch_lifetime(
-                        operation="turn_recovery_lifetime",
-                    ):
-                        pass
+                # One lifetime owner checks source instances and legacy registrations;
+                # recovery does not reserve another quota interval.
+                with goal_admission.launch_lifetime(
+                    operation="turn_recovery_lifetime",
+                ):
+                    pass
             envelope = (
                 plan.get("turn_envelope")
                 if isinstance(plan.get("turn_envelope"), Mapping)
