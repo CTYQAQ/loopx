@@ -229,8 +229,14 @@ function classMemberMatches(body: string, candidate: string, foldCase: boolean):
   for (const literal of literals) {
     if (literal === candidate || (foldCase && caseFold(literal) === folded)) return true;
   }
-  if ([...candidate].length !== 1) return false;
   for (const [low, high] of ranges) {
+    // A one-element range is a literal written in range syntax, so it has to
+    // accept the same multi-character folds (ß/SS) a literal member does.
+    if (low === high) {
+      if (low === candidate || (foldCase && caseFold(low) === folded)) return true;
+      continue;
+    }
+    if ([...candidate].length !== 1) continue;
     for (const variant of (foldCase ? singleCharacterVariants(candidate) : [candidate])) {
       if (low <= variant && variant <= high) return true;
     }
@@ -273,10 +279,12 @@ function fnmatchcase(value: string, pattern: string, foldCase = false): boolean 
       } else if (token.kind === "question") {
         result = match(valueIndex + 1, tokenIndex + 1);
       } else if (token.kind === "class") {
-        // Negation applies after the union of every fold-equivalent candidate.
         const lengths = classMatchLengths(token.body, value, valueIndex, foldCase);
+        // Negation only excludes a single character: a longer fold candidate
+        // (SS for ß) is two ordinary characters to a class, so it must remain
+        // available for the following tokens.
         result = token.negated
-          ? lengths.length === 0 && match(valueIndex + 1, tokenIndex + 1)
+          ? !lengths.includes(1) && match(valueIndex + 1, tokenIndex + 1)
           : lengths.some((length) => match(valueIndex + length, tokenIndex + 1));
       } else {
         result = false;
