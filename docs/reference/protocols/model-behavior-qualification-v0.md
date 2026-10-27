@@ -325,9 +325,12 @@ After the proof is read, a terminal actor may author a project draft in
 authority stores remain protected; private host data and external networking
 are unavailable. LoopX mutations still use one direct, identity-bound CLI call
 at a time; the draft shell cannot invoke LoopX. The original ten-call limit and
-all committed receipt checks remain. Explicit foreign routes or Turn identities
-fail rather than being repaired, and failure receipts retain fixture-owned
-codes rather than echoing CLI errors or model-authored JSON.
+all committed receipt checks remain. Explicit foreign routes fail rather than
+being repaired. After the initial quota guard, completion, writeback and spend
+must retain the fixture Turn. The initial guard's host Turn reference is rebound
+by the existing CLI bridge; it is not a foreign-Turn refusal test. Failure
+receipts retain fixture-owned codes rather than echoing CLI errors or
+model-authored JSON.
 The shared plan also names the existing scope-input requirements for typed
 `no_followup` and `exploration_exhausted` observations. A Todo's completion is
 not itself evidence that a coverage scope is exhausted; the CLI still rejects
