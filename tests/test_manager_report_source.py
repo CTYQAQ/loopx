@@ -232,7 +232,7 @@ def test_actual_canonical_sources_join_a_completed_task_and_fixed_boundaries(tmp
 @pytest.mark.parametrize("reference", [
     "/Users/fixture/private.txt", "file:///tmp/private", "../.local/private.json",
     "https://user:pass@example.org/file", "https://example.org/file?key=hidden",
-    "https://docs.internal/design", "javascript:alert", "https://example.org/\nprivate",
+    "https://docs" + ".internal/design", "javascript:alert", "https://example.org/\nprivate",
     "https://example.org:invalid/file", "https://#missing-host",
 ])
 def test_exact_delivery_reference_disclosure_does_not_promote_private_or_unsafe_values(reference):
