@@ -1424,6 +1424,33 @@ def test_queued_claim_and_interrupt_share_one_turn_transition(
     ] == ["turn.queued", "turn.interrupt_requested"]
 
 
+def test_expired_queue_keeps_its_terminal_reason_when_stop_arrives_late(tmp_path: Path) -> None:
+    store = ChatSessionStore(tmp_path)
+    session = store.create_session(
+        goal_id="goal-one", agent_id="codex", executor_endpoint_id="codex",
+        adapter_kind="codex_app_server", upstream_thread_id="thread-one", upstream_mode="chat",
+    )
+    sid = str(session["session_id"])
+    queued, _ = store.create_queued_turn(sid, client_turn_id="expiry-first", message="expire before stop")
+    tid = str(queued["turn_id"])
+    store.update_turn(sid, tid, expires_at="2000-01-01T00:00:00Z")
+    # Exercise the real public claimant, including its expiry prefix.
+    assert store.claim_next_queued_turn(sid, host_claim_id="late-host") is None
+    expired = store.load_turn(sid, tid)
+    assert expired["status"] == "timed_out"
+    assert expired["error_code"] == "session_queue_expired"
+    runtime = ChatRuntimeController(store=store, codex_bin="missing-codex")
+    try:
+        assert runtime.interrupt_turn(session_id=sid, turn_id=tid) == expired
+        assert store.load_turn(sid, tid) == expired
+        assert store.load_session(sid)["active_turn_id"] is None
+        assert [event["kind"] for event in store.events_after(sid, tid, None)] == [
+            "turn.queued", "turn.failed",
+        ]
+    finally:
+        runtime.close()
+
+
 @pytest.mark.parametrize("crash_after_intent", [False, True])
 def test_interrupt_preserves_a_successful_claim_and_durable_stop_intent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_after_intent: bool,
