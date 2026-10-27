@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +55,9 @@ def _spend_action(request: Mapping[str, Any]) -> ScriptedExecToolAction:
     )
 
 
-def _terminal_action(request: Mapping[str, Any]) -> ScriptedExecToolAction:
+def _completion_action(
+    request: Mapping[str, Any], *, kind: str = "terminal_closeout",
+) -> ScriptedExecToolAction:
     packet = _latest_quota_packet(request)
     steps = packet["interaction_contract"]["cli_channel"]["settlement_plan"][
         "ordered_steps"
@@ -62,7 +65,7 @@ def _terminal_action(request: Mapping[str, Any]) -> ScriptedExecToolAction:
     command = next(
         item["command_template"]
         for item in steps
-        if item["kind"] == "terminal_closeout"
+        if item["kind"] == kind
     )
     return ScriptedExecToolAction(
         command=command.replace('"${LOOPX_TURN:?}"', "turn-test-001").replace(
@@ -113,8 +116,9 @@ def _reentry_quota_action(request: Mapping[str, Any]) -> ScriptedExecToolAction:
 
 @pytest.mark.parametrize("cat_options", ["", "-- "])
 @pytest.mark.parametrize("batch_read", [False, True])
+@pytest.mark.parametrize("ordinary_completion", [False, True])
 def test_real_tool_loop_settles_final_todo_after_spend(
-    tmp_path: Path, cat_options: str, batch_read: bool,
+    tmp_path: Path, cat_options: str, batch_read: bool, ordinary_completion: bool,
 ) -> None:
     fixture = _build_fixture(tmp_path / "oracle")
     transport = ScriptedDoubaoExecTransport(
@@ -130,9 +134,10 @@ def test_real_tool_loop_settles_final_todo_after_spend(
                 "fixture/settlement-proof.json"
                 if batch_read else f"cat {cat_options}fixture/settlement-proof.json"
             )),
+            *([partial(_completion_action, kind="validation")] if ordinary_completion else []),
             _writeback_action,
             _spend_action,
-            _terminal_action,
+            _completion_action,
         ]
     )
 
@@ -149,6 +154,7 @@ def test_real_tool_loop_settles_final_todo_after_spend(
     assert receipt["observed_tool_sequence"] == [
         "quota_should_run",
         "delivery_validation",
+        *(["todo_completion"] if ordinary_completion else []),
         "durable_writeback",
         "quota_spend",
         "terminal_closeout",
@@ -178,13 +184,79 @@ def test_real_tool_loop_settles_final_todo_after_spend(
     system_prompt = first["messages"][0]["content"]
     assert QUOTA_FIRST_TOOL_INSTRUCTION in system_prompt
     assert "the host validates that tool result" in system_prompt
-    assert "immediately after the proof read" in system_prompt
+    assert "validation step's command_condition" in system_prompt
+    assert "distinct from the final --no-follow-up closeout after spend" in system_prompt
     assert first["messages"][1] == {"role": "user", "content": fixture.task_body}
     assert TERMINAL_SETTLEMENT_FIXTURE_TODO_ID not in fixture.task_body
     quota_result = _latest_quota_packet(transport.requests[2])
     assert quota_result["selected_todo"]["todo_id"] == (
         TERMINAL_SETTLEMENT_FIXTURE_TODO_ID
     )
+
+
+@pytest.mark.parametrize(
+    ("read_proof", "foreign_actor", "expected_failure"),
+    [(False, False, "completion_before_validation"),
+     (True, True, "completion_identity_mismatch")],
+)
+def test_ordinary_completion_cannot_bypass_validation_or_identity(
+    tmp_path: Path, read_proof: bool, foreign_actor: bool, expected_failure: str,
+) -> None:
+    fixture = _build_fixture(tmp_path / "oracle")
+
+    def completion(request: Mapping[str, Any]) -> ScriptedExecToolAction:
+        command = _completion_action(request, kind="validation").command
+        if foreign_actor:
+            command = command.replace("--agent-id codex-terminal-settlement", "--agent-id foreign-agent")
+        return ScriptedExecToolAction(command=command)
+
+    transport = ScriptedDoubaoExecTransport([
+        ScriptedExecToolAction(command=fixture.quota_guard_command.replace(
+            '"${LOOPX_TURN:?}"', "turn-test-001",
+        )),
+        *([ScriptedExecToolAction(command="cat fixture/settlement-proof.json")] if read_proof else []),
+        completion,
+    ])
+    receipt = DoubaoTerminalSettlementToolBehaviorActor(
+        api_key="test-only-placeholder", transport=transport,
+    ).qualify(qualification_id="ordinary-completion-refusal", fixture_root=tmp_path / "actor")
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == expected_failure
+    assert receipt["settlement_receipt_steps"] == []
+    assert receipt["terminal_order_observed"] is False
+
+
+def test_ordinary_completion_requires_its_actual_validation_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loopx.control_plane.testing import terminal_settlement_tool_behavior as terminal
+
+    fixture = _build_fixture(tmp_path / "oracle")
+    execute = terminal._execute_cli
+
+    def missing_validation_receipt(command, state):
+        payload = execute(command, state)
+        if "todo complete" in command:
+            assert payload["status"] == "done"
+            assert payload["settlement_result"]["receipts"][0]["step_kind"] == "validation"
+            payload["settlement_result"]["receipts"] = []
+        return payload
+
+    monkeypatch.setattr(terminal, "_execute_cli", missing_validation_receipt)
+    transport = ScriptedDoubaoExecTransport([
+        ScriptedExecToolAction(command=fixture.quota_guard_command.replace(
+            '"${LOOPX_TURN:?}"', "turn-test-001",
+        )),
+        ScriptedExecToolAction(command="cat fixture/settlement-proof.json"),
+        partial(_completion_action, kind="validation"),
+    ])
+    receipt = DoubaoTerminalSettlementToolBehaviorActor(
+        api_key="test-only-placeholder", transport=transport,
+    ).qualify(qualification_id="ordinary-completion-missing-receipt", fixture_root=tmp_path / "actor")
+    assert receipt["qualification_passed"] is False
+    assert receipt["failure_code"] == "completion_receipt_mismatch"
+    assert receipt["settlement_receipt_steps"] == []
+    assert receipt["terminal_order_observed"] is False
 
 
 @pytest.mark.parametrize("batch_read", [False, True])
@@ -205,7 +277,7 @@ def test_tool_loop_rejects_terminal_closeout_before_spend(
                 "fixture/settlement-proof.json"
                 if batch_read else "cat fixture/settlement-proof.json"
             )),
-            _terminal_action,
+            _completion_action,
         ]
     )
 

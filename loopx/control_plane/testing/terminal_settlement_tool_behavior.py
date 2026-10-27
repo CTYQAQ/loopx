@@ -893,10 +893,14 @@ class DoubaoTerminalSettlementToolBehaviorActor:
                         "once with `cat`; the host validates that tool result. Do not "
                         "run python, jq, test, echo, another validation command, or "
                         "re-read the workspace afterward. Use one command per tool "
-                        "call. The tool call immediately after the proof read must "
-                        "fill and execute quota-projected next_cli_actions[0] from "
-                        "the proof's typed fields, then follow the ordered settlement "
-                        "plan."
+                        "call. After the proof read, follow the quota-projected "
+                        "settlement plan, including the validation step's "
+                        "command_condition. Ordinary Todo completion validates the "
+                        "deliverable before writeback/spend; it is distinct from "
+                        "the final --no-follow-up closeout after spend. Preserve "
+                        "the projected Goal, Agent, Todo and Turn arguments. Fill "
+                        "the writeback placeholders from the proof's typed fields "
+                        "and choose each later command from the latest tool result."
                     ),
                 },
                 {"role": "user", "content": fixture.task_body},
@@ -975,20 +979,27 @@ class DoubaoTerminalSettlementToolBehaviorActor:
                     kind = "quota_spend"
                     output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
                 elif command_kind == "todo" and command_action == "complete":
-                    if not state.spend_committed:
-                        raise ValueError("terminal_closeout_before_spend")
-                    if (
-                        not tokens
-                        or not _matches_identity(tokens, state)
-                        or "--no-follow-up" not in tokens
-                    ):
-                        raise ValueError("terminal_closeout_contract_mismatch")
+                    terminal = "--no-follow-up" in tokens
+                    if terminal:
+                        if not state.spend_committed:
+                            raise ValueError("terminal_closeout_before_spend")
+                        if not _matches_identity(tokens, state):
+                            raise ValueError("terminal_closeout_contract_mismatch")
+                    else:
+                        if not state.proof_read:
+                            raise ValueError("completion_before_validation")
+                        if state.writeback_committed:
+                            raise ValueError("completion_after_writeback")
+                        if not _matches_identity(tokens, state):
+                            raise ValueError("completion_identity_mismatch")
                     payload = _execute_cli(tool_call.command, state)
                     receipt_steps = _settlement_receipt_steps(payload)
-                    if receipt_steps != _EXPECTED_RECEIPT_STEPS:
-                        raise ValueError("terminal_closeout_receipt_mismatch")
+                    expected_steps = _EXPECTED_RECEIPT_STEPS if terminal else _EXPECTED_RECEIPT_STEPS[:1]
+                    if receipt_steps != expected_steps:
+                        raise ValueError("terminal_closeout_receipt_mismatch" if terminal
+                                         else "completion_receipt_mismatch")
                     state.receipt_steps = receipt_steps
-                    kind = "terminal_closeout"
+                    kind = "terminal_closeout" if terminal else "todo_completion"
                     output = json.dumps(payload, ensure_ascii=False, sort_keys=True)
                 else:
                     output = _execute_workspace_read(tool_call.command, state=state)

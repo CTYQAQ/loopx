@@ -301,6 +301,13 @@ target. The terminal-settlement scenario requires the model to validate a real
 fixture artifact, then follow the quota-projected `durable_writeback ->
 quota_spend -> terminal_closeout` sequence under one stable effect identity; a
 premature no-follow-up or spend-before-writeback fails.
+The plan's conditional ordinary Todo completion may run during validation,
+before writeback and spend. The actor requires the original Goal/Agent/Todo/Turn
+arguments and its committed validation receipt; ordinary completion does not
+qualify terminal closeout. `--no-follow-up` still requires both matching
+writeback and spend receipts. This follows the shared
+[quota-bound completion contract](../canonical-terminal-review.md#quota-bound-cli-completion)
+without changing the portfolio, repeats, contrasts or settlement order.
 
 For selected-Todo and terminal qualification,
 a standalone `cat` may read up to eight workspace-confined files, optionally
