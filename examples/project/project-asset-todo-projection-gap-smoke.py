@@ -70,10 +70,12 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
         + "\n",
         encoding="utf-8",
     )
+    original_display = state_path.read_bytes()
     from loopx.control_plane.testing.canary_harness import import_fixture_authority
 
     for record in json.loads(registry_path.read_text())["goals"]:
         import_fixture_authority(registry_path, record["id"], provider="sqlite")
+    state_path.write_bytes(original_display)
     return registry_path, runtime
 
 
@@ -147,9 +149,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="loopx-project-asset-todo-gap-") as raw_tmp:
         registry_path, runtime = write_fixture(Path(raw_tmp))
         incomplete = run_cli(registry_path, runtime, "status", check=False)
-        assert incomplete["ok"] is False, incomplete
-        assert any("missing required Todo section(s): Agent Todo" in error
-                   for error in incomplete["contract_errors"]), incomplete
+        assert incomplete["ok"] is True, incomplete
+        assert incomplete["contract_errors"] == [], incomplete
+        assert any("state_projection_gap" in warning
+                   for warning in incomplete["contract_warnings"]), incomplete
         before = run_cli(registry_path, runtime, "todo", "list", "--goal-id", GOAL_ID)
         state = registry_path.parent.parent / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
         state.write_text(state.read_text(encoding="utf-8") + "\n## Agent Todo\n",
