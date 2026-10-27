@@ -288,7 +288,7 @@ progress references. This read-only history projection also applies with stride
 及其后续进展。stride 为 `off` 时也保留这一只读历史投影，不会启用 stride 策略或
 其 Explore 上下文。
 
-The projection It uses the existing Goal/Agent/Turn binding and immutable
+The projection uses the existing Goal/Agent/Turn binding and immutable
 history source order; timestamps do not decide causality. The full local index
 supplies append positions. Compact newest-first carriers and the named
 `newest_first_runs` builder reverse those positions without reordering ordinary
