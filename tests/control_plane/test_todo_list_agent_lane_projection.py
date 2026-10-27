@@ -32,7 +32,7 @@ def _todo_line(
     ]
 
 
-def _write_fixture(tmp_path: Path) -> tuple[Path, Path]:
+def _write_fixture(tmp_path: Path, *, initialize: bool = True) -> tuple[Path, Path]:
     project = tmp_path / "project"
     runtime = tmp_path / "runtime"
     state_relative = Path(".local/goals") / GOAL_ID / "ACTIVE_GOAL_STATE.md"
@@ -196,7 +196,8 @@ def _write_fixture(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     from canonical_authority_fixture import initialize_canonical_source_fixture
-    initialize_canonical_source_fixture(runtime, GOAL_ID, state_path=state_file, provider="sqlite")
+    if initialize:
+        initialize_canonical_source_fixture(runtime, GOAL_ID, state_path=state_file, provider="sqlite")
     return registry_path, state_file
 
 
