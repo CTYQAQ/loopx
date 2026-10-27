@@ -131,7 +131,11 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         assert prepared.returncode == 0, prepared.stderr
         native_configuration = json.loads(prepared.stdout)["native_config"]
     automatic_output_budget = host == "benchmark" or native_configuration is not None
-    output_limit = reader_output_bytes or (64000 if automatic_output_budget else 7900)
+    native_guard_output_bytes = (7900 if not automatic_output_budget or (
+        native_history_tokens is not None and native_configuration is not None
+        and native_history_tokens < native_configuration["config_overrides"]["tool_output_token_limit"])
+        else None)
+    output_limit = reader_output_bytes or native_guard_output_bytes or 64000
     hook_command = (native_configuration["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         if native_configuration else shlex.join(cli + ["quota", "context-hook", "--context-delivery", "on", *host_args, context_option, str(lifecycle)]))
     if failed_primary:
@@ -434,21 +438,30 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         return tool(cmd, number)
 
     def tool(cmd, number):
-        def bounded_read(command):
-            if not reader_output_bytes or "context-read" not in shlex.split(command):
+        if native_guard_output_bytes is not None:
+            argv = shlex.split(cmd)
+            if "should-run" in argv or "context-project" in argv:
+                assert "--max-page-output-bytes" not in argv
+                argv.extend(["--max-page-output-bytes", str(native_guard_output_bytes)])
+                cmd = shlex.join(argv)
+
+        def bounded_read(command, *, primary=False):
+            budget = reader_output_bytes or native_guard_output_bytes
+            if not budget or "context-read" not in shlex.split(command):
                 return command
             # Apply the selected public reader budget to every batched read,
             # retaining the original capture, digest and cursor.
             argv = shlex.split(command)
             requested = argv.index("--page-bytes") + 1
-            argv[requested] = str(reader_output_bytes if bounded_pages else
-                                  min(int(argv[requested]), reader_output_bytes // 2))
+            page_limit = budget if bounded_pages else budget // 2
+            argv[requested] = str(page_limit if primary and bounded_pages and reader_output_bytes else
+                                  min(int(argv[requested]), page_limit))
             if "--max-page-output-bytes" in argv:
-                argv[argv.index("--max-page-output-bytes") + 1] = str(reader_output_bytes)
+                argv[argv.index("--max-page-output-bytes") + 1] = str(budget)
             else:
-                argv.extend(["--max-page-output-bytes", str(reader_output_bytes)])
+                argv.extend(["--max-page-output-bytes", str(budget)])
             return shlex.join(argv)
-        cmd = bounded_read(cmd)
+        cmd = bounded_read(cmd, primary=True)
         if host == "code_mode":
             pragma = ('// @exec: {"max_output_tokens":24000}\n' if automatic_output_budget else
                 '// @exec: {"max_output_tokens":12000}\n' if native_pragma else "")
