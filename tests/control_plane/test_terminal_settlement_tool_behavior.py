@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import subprocess
 from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
@@ -459,26 +460,26 @@ def test_nonzero_after_actual_writeback_cannot_advance_to_spend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload_ok: bool,
 ) -> None:
     from loopx.control_plane.quota.settlement import read_heartbeat_settlement
-    from loopx.control_plane.testing import terminal_settlement_tool_behavior as terminal
-    from loopx.control_plane.testing.model_tool_behavior import LoopxCliExecutionError
-
     fixture = _build_fixture(tmp_path / "oracle")
-    execute = terminal.execute_loopx_cli
+    execute = subprocess.run
     committed = {}
 
-    def fail_after_writeback(command, **kwargs):
-        output = execute(command, **kwargs)
-        if "refresh-state" in command:
-            payload = json.loads(output)
+    def fail_after_writeback(argv, *args, **kwargs):
+        completed = execute(argv, *args, **kwargs)
+        if isinstance(argv, list) and "loopx.cli" in argv and "refresh-state" in argv:
+            assert completed.returncode == 0
+            payload = json.loads(completed.stdout)
             assert payload["ok"] is True
             committed.update(payload["settlement_identity"])
             # Inject only a post-effect process failure; the actual CLI above
             # produced the independent writeback and committed receipt.
             payload["ok"] = payload_ok
-            raise LoopxCliExecutionError(1, "synthetic post-effect failure", stdout=json.dumps(payload))
-        return output
+            return subprocess.CompletedProcess(
+                completed.args, 1, json.dumps(payload), "synthetic post-effect failure",
+            )
+        return completed
 
-    monkeypatch.setattr(terminal, "execute_loopx_cli", fail_after_writeback)
+    monkeypatch.setattr(subprocess, "run", fail_after_writeback)
     transport = ScriptedDoubaoExecTransport([
         ScriptedExecToolAction(command=fixture.quota_guard_command),
         ScriptedExecToolAction(command="cat fixture/settlement-proof.json"),
