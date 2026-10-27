@@ -1,4 +1,5 @@
-import { EffectiveAction } from "./effective_action.generated.ts";
+import type { LoopXTurnRouteValue } from "../turn_driver/turn_contract_generated.ts";
+import { EffectiveAction, type QuotaEffectiveActionValue } from "./effective_action.generated.ts";
 import { createHash } from "node:crypto";
 import { ENVELOPED_SHA256_PATTERN } from "../content_digest.ts";
 import {omitUnboundExploreResultWriteback, referenceExploreResultWriteback} from "../capabilities/explore_turn_context.ts";
@@ -1232,6 +1233,88 @@ function bindTurnDecisionCapture(request: JsonObject): JsonObject {
   return bound;
 }
 
+// Explicit coverage of the registered decision/frontier union. New actions
+// require a deliberate classification; unknown historical values retain Host routing.
+export const TURN_ACTION_ROUTES = {
+  [EffectiveAction.AGENT_WORKSPACE_REPAIR]: "repair_required",
+  [EffectiveAction.BOUNDARY_PROJECTION_REPAIR]: "repair_required",
+  [EffectiveAction.CAPABILITY_BRIDGE_REPAIR]: "repair_required",
+  [EffectiveAction.CONTROL_PLANE_HEALTH_REPAIR]: "repair_required",
+  [EffectiveAction.CONTROL_PLANE_PROJECTION_REPAIR]: "repair_required",
+  [EffectiveAction.CONTROL_PLANE_REPAIR]: "repair_required",
+  [EffectiveAction.RUNTIME_USER_GATE_PROJECTION_REPAIR]: "repair_required",
+  [EffectiveAction.STATE_PROJECTION_GAP_REPAIR]: "repair_required",
+  [EffectiveAction.TODO_DECISION_SCOPE_PROJECTION_REPAIR]: "repair_required",
+  [EffectiveAction.AGENT_MONITOR_ONLY]: "ready_for_host",
+  [EffectiveAction.AUTOMATION_PROMPT_UPGRADE_REQUIRED]: "ready_for_host",
+  [EffectiveAction.BLOCKED_HEALTH]: "ready_for_host",
+  [EffectiveAction.BLOCKED_WAIT]: "ready_for_host",
+  [EffectiveAction.COORDINATE_TASK_BUNDLE]: "ready_for_host",
+  [EffectiveAction.EXTERNAL_EVIDENCE_OBSERVE]: "ready_for_host",
+  [EffectiveAction.HEARTBEAT_RECEIPT_WRITE_FAILED]: "ready_for_host",
+  [EffectiveAction.HEARTBEAT_SETTLED_SKIP]: "ready_for_host",
+  [EffectiveAction.LARK_INBOX_REPLY_DUE]: "ready_for_host",
+  [EffectiveAction.MONITOR_DUE]: "ready_for_host",
+  [EffectiveAction.MONITOR_QUIET_SKIP]: "ready_for_host",
+  [EffectiveAction.NORMAL_RUN]: "ready_for_host",
+  [EffectiveAction.OPERATOR_GATE_NOTIFY]: "ready_for_host",
+  [EffectiveAction.OPERATOR_INBOX_MATERIAL_REVIEW_DUE]: "ready_for_host",
+  [EffectiveAction.OUTCOME_FLOOR_RECOVERY]: "ready_for_host",
+  [EffectiveAction.PEER_COORDINATION_BLOCKED]: "ready_for_host",
+  [EffectiveAction.QUOTA_SKIP]: "ready_for_host",
+  [EffectiveAction.SCOPED_USER_GATE_FALLBACK]: "ready_for_host",
+  [EffectiveAction.TERMINAL_NO_FOLLOWUP]: "ready_for_host",
+  [EffectiveAction.THROTTLED_SKIP]: "ready_for_host",
+  [EffectiveAction.UNSETTLED_HOST_TURN_RECOVERY]: "ready_for_host",
+  [EffectiveAction.AUTONOMOUS_REPLAN_REQUIRED]: "replan_required",
+  [EffectiveAction.GOVERNED_CAPABILITY_INTENT]: "capability_action_required",
+  agent_scope_exhausted: "ready_for_host",
+  agent_scope_wait: "ready_for_host",
+  reassignment_required: "ready_for_host",
+  autonomous_replan: "replan_required",
+  successor_replan_required: "replan_required",
+} satisfies Record<QuotaEffectiveActionValue | "autonomous_replan" | "successor_replan_required", LoopXTurnRouteValue>;
+
+/** Route one admitted input, independent of controller continuation/budget policy. */
+export function turnEnvelopeRoute(envelope: JsonObject, historicalText?: JsonObject): LoopXTurnRouteValue {
+  const signature = object(envelope.action_signature);
+  // The historical Python reader treats false/zero/null as an empty hash and
+  // renders scalar booleans with Python spelling. Valid hashes remain strings.
+  const sourceHash = scalarString(historicalText ? historicalText.source_hash : signature.source_hash || "", "route source hash");
+  const envelopeHash = scalarString(historicalText ? historicalText.envelope_hash : signature.envelope_hash || "", "route envelope hash");
+  if (signature.matches !== true || !sourceHash || sourceHash !== envelopeHash) return "contract_error";
+  // Size diagnostics grant no authority and do not veto a valid contract.
+  const action = object(envelope.action);
+  if (envelope.should_run === true) {
+    if (action.must_attempt !== true) return "blocked";
+    const name = scalarString(historicalText ? historicalText.effective_action : envelope.effective_action || "", "route effective action");
+    const route = Object.hasOwn(TURN_ACTION_ROUTES, name)
+      ? TURN_ACTION_ROUTES[name as keyof typeof TURN_ACTION_ROUTES] : "ready_for_host";
+    if (route === "replan_required") {
+      try { turnEnvelopeReplanSettlementIdentity(envelope); }
+      catch (error) {
+        if (!(error instanceof EffectRuntimeRequestError)) throw error;
+        return "contract_error";
+      }
+      return "replan_required";
+    }
+    if (action.delivery_allowed !== true) return "blocked";
+    if (route === "capability_action_required") {
+      const intent = object(action.capability_intent), command = intent.command;
+      // Preserve empty-container falsiness from historical Python inputs.
+      const hasCommand = Array.isArray(command) ? command.length > 0
+        : command !== null && typeof command === "object" ? Object.keys(command).length > 0 : Boolean(command);
+      if (intent.schema_version !== "pending_capability_intent_projection_v0"
+          || (intent.goal_id ?? null) !== (envelope.goal_id ?? null)
+          || (intent.agent_id ?? null) !== (envelope.agent_id ?? null) || !hasCommand) return "contract_error";
+      return "capability_action_required";
+    }
+    return route === "repair_required" ? "repair_required" : "ready_for_host";
+  }
+  if (object(envelope.user).action_required === true) return "user_action_required";
+  return action.quiet_noop_allowed === true ? "wait" : "blocked";
+}
+
 export function evaluateTurnEnvelope(value: unknown): JsonObject {
   const request = requireJsonObject(value, "turn envelope request");
   const operation = request.operation;
@@ -1267,6 +1350,18 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
         work_context: replanWorkContext(payload, object(agent.work_context))}},
       autonomous_replan_obligation: {...obligation, context_read: reads.review},
       replan_action_packet: replanActionPacket(payload)};
+  }
+  if (operation === "driver_route") return {route: turnEnvelopeRoute(requireJsonObject(request.envelope, "Turn route envelope"),
+    request.historical_route_text === undefined ? undefined : requireJsonObject(request.historical_route_text, "historical route text"))};
+  if (operation === "driver_lineage") {
+    const envelope = requireJsonObject(request.envelope, "Turn driver envelope");
+    return {route: turnEnvelopeRoute(envelope, request.historical_route_text === undefined
+      ? undefined : requireJsonObject(request.historical_route_text, "historical route text")),
+      action_signature: turnEnvelopeActionSignatureDocument(envelope)};
+  }
+  if (operation === "build_controller_input") {
+    const envelope = buildTurnEnvelope(request);
+    return {envelope, route: turnEnvelopeRoute(envelope)};
   }
   if (operation === "consumer_version") {
     assertTurnEnvelopeConsumerVersion(requireJsonObject(request.envelope, "turn_envelope"));
