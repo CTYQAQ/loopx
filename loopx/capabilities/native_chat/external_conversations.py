@@ -21,7 +21,7 @@ from ...control_plane.quota.automation_cadence_readback import (
     automation_cadence_readback,
     unavailable_automation_cadence_readback,
 )
-from ...file_lock import exclusive_file_lock
+from ...file_lock import exclusive_file_lock, try_exclusive_file_lock
 from .codex_context import checked_session_home
 
 # Request journals are named by their 24-hex request_ref; lock metadata and
@@ -49,6 +49,7 @@ class ChatExternalConversations:
     def _context_recovery_plan(self, row: dict[str, Any], *,
                                observation: dict[str, Any] | None = None,
                                source_verified: bool = False,
+                               selected_binding: dict[str, Any] | None = None,
                                discovery_only: bool = False) -> dict[str, Any]:
         from ...chat_manager import MANAGER_CONTEXT_VERSION
         from ...control_plane.effect_runtime import effect_runtime_result
@@ -58,7 +59,7 @@ class ChatExternalConversations:
         turn = store.load_turn(str(row.get("session_id") or ""), str(row.get("turn_id") or ""))
         if not session or not turn:
             return {}
-        if discovery_only:
+        if selected_binding is None and discovery_only:
             # A queue hint must not serialize provider identity IO across all
             # historical failures. Reuse the same typed planner with the local
             # enabled binding; admission independently resolves fresh authority.
@@ -66,7 +67,7 @@ class ChatExternalConversations:
                 if item["binding_id"] == row["binding_id"] and item.get("enabled") is True), None)
             if selected_binding is None:
                 return {}
-        else:
+        elif selected_binding is None:
             selected_binding = self.bindings.resolve(binding_id=row["binding_id"], **row["source"])["binding"]
         reservation = row.get("context_recovery") or {}
         admitted = (store.turn_for_client(session["session_id"], reservation["client_turn_id"])
@@ -156,9 +157,22 @@ class ChatExternalConversations:
                 **({"read_only_review": True} if plan.get("read_only_review") else {}),
                 **({"completed_work": True, "work_dir": Path(context["project"])} if plan.get("work_attempt") else {}),
                 thread_ids=plan["native_thread_ids"], turn_id=turn["upstream_turn_id"])
-            with exclusive_file_lock(self.root / "source-fences" / f"{row['binding_id']}.{row['source']['source_ref']}.json", operation="route_external_chat_request"):
-                selected = self.bindings.resolve(binding_id=row["binding_id"], **row["source"], include_observation=True)
-                source = source_observation(selected)
+            selected = self.bindings.resolve(binding_id=row["binding_id"], **row["source"], include_observation=True)
+            source = source_observation(selected)
+            # Identity and original-message reads are fallible provider IO too.
+            # Never hold up newer source input while they wait. If another
+            # route already owns the fence, leave this request unchanged for
+            # the existing worker's next fresh visit, rather than admitting
+            # from an observation that waited behind that route.
+            with try_exclusive_file_lock(self.root / "source-fences" / f"{row['binding_id']}.{row['source']['source_ref']}.json", operation="route_external_chat_request") as acquired:
+                if acquired is None:
+                    return row
+                current = self.bindings.read()
+                if next((item for item in current.get("bindings", [])
+                         if item.get("binding_id") == row["binding_id"]), None) != selected["binding"]:
+                    raise ValueError("conversation binding changed during recovery source verification")
+                selected = self.bindings._resolve_observed(current, selected["binding"],
+                    selected["observation"], row["source"])
                 # Adopting an already admitted Turn only repairs correlation:
                 # its execution and newer input may legitimately have advanced.
                 # The typed planner below must still prove that exact receipt.
@@ -166,7 +180,8 @@ class ChatExternalConversations:
                         or self.controller.store.load_turn(row["session_id"], row["turn_id"]) != turn
                         or source_requests() != requests):
                     return row
-                plan = self._context_recovery_plan(row, observation=proof, source_verified=source is not None)
+                plan = self._context_recovery_plan(row, observation=proof, source_verified=source is not None,
+                    selected_binding=selected["binding"])
                 if not plan.get("recovery_eligible"):
                     return row
                 recovery = row.get("context_recovery")
