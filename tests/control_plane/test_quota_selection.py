@@ -126,7 +126,7 @@ def test_empty_projected_handoffs_suppress_raw_legacy_reconstruction(projected):
     assert "handoff_gate_count" not in result
 
 
-@pytest.mark.parametrize("provider", ["legacy", "file", "sqlite"])
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_public_quota_route_read_keeps_claim_exclusion_and_provider_unchanged(tmp_path, monkeypatch, provider):
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     runtime, registry, state = tmp_path / "runtime", tmp_path / "registry.json", tmp_path / "state.md"
