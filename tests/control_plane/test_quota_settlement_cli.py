@@ -125,11 +125,13 @@ def _write_fixture(
     *,
     required_capability: str | None = None,
     claimed: bool = True,
+    provider: str | None = None,
 ) -> tuple[Path, Path, Path]:
     """Write unmigrated source input; canonical consumers must initialize authority.
 
     Use ``_initialize_fixture_authority`` after source edits for ordinary reads
-    or writes. Claim-authoring scenarios must also opt out of the initial claim.
+    or writes, or select ``provider`` when initial authoring is already complete.
+    Claim-authoring scenarios must also opt out of the initial claim.
     """
     project = root / "project"
     runtime = root / "runtime"
@@ -198,6 +200,8 @@ def _write_fixture(
         + "\n",
         encoding="utf-8",
     )
+    if provider is not None:
+        _initialize_fixture_authority(project, runtime, provider=provider)
     return project, runtime, registry_path
 
 
@@ -522,18 +526,30 @@ def _append_due_monitors(
 
 
 def _append_blocking_user_gate(project: Path) -> None:
+    from loopx.control_plane.todos.active_state_todo_parser import parse_active_state_todos
+    from loopx.control_plane.todos.machine_section_projection import render_canonical_todo_sections
+    from loopx.control_plane.todos.todo_summary import canonical_todo_read_record
+
     state_path = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     state_text = state_path.read_text(encoding="utf-8")
-    state_path.write_text(
-        state_text.rstrip()
-        + "\n\n## User Todo\n\n"
-        + "- [ ] [P0-user] Approve the newly introduced delivery gate.\n"
+    gate = (
+        "- [ ] [P0-user] Approve the newly introduced delivery gate.\n"
         + "  <!-- loopx:todo todo_id=todo_fixture_user_gate status=open "
         + "task_class=user_gate action_kind=approve_delivery "
         + f"blocks_agent={AGENT_ID} "
-        + "decision_scope=direction:action:fixture priority=P0-USER -->\n",
-        encoding="utf-8",
+        + "decision_scope=direction:action:fixture priority=P0-USER -->\n"
     )
+    additions = parse_active_state_todos(
+        "## User Todo\n\n" + gate, state_path=state_path, item_limit=None,
+    )["user_todos"]["items"]
+    # Reuse the section owner for both authored and already materialized input.
+    # This edits fixture source only; callers still initialize or advance CAS.
+    rendered = render_canonical_todo_sections(
+        state_text, [canonical_todo_read_record(row)
+                     for row in [*read_fixture_todos(state_path), *additions]],
+        provider_revision="fixture-user-gate",
+    )
+    state_path.write_text(rendered.markdown, encoding="utf-8")
 
 
 def _heartbeat_receipt_events(
@@ -6313,6 +6329,7 @@ def test_pending_action_selection_does_not_commit_after_new_user_gate(
         "--priority", "P0", "--task-class", "user_gate",
         "--action-kind", "approve_delivery", "--blocks-agent", AGENT_ID,
         "--agent-id", AGENT_ID, "--decision-scope", "direction:action:fixture",
+        "--unblocks-todo-id", ALTERNATIVE_TODO_ID,
     )
     assert added_rc == 0, added
     selected_rc, selected = _run_cli(

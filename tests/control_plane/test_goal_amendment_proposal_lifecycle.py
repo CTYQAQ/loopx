@@ -45,7 +45,7 @@ TURN_ID = "turn-amendment-lifecycle-1"
 
 def _write_fixture(root: Path) -> tuple[Path, Path, Path]:
     """One isolated, healthy synthetic Goal: active, one registered agent,
-    one open Todo, an empty runtime (no event log, no run rows)."""
+    one open canonical Todo and no prior run rows."""
 
     project = root / "project"
     runtime = root / "runtime"
@@ -108,6 +108,10 @@ def _write_fixture(root: Path) -> tuple[Path, Path, Path]:
         )
         + "\n",
         encoding="utf-8",
+    )
+    from canonical_authority_fixture import initialize_canonical_source_fixture
+    initialize_canonical_source_fixture(
+        runtime, GOAL_ID, state_path=state_path, provider="sqlite",
     )
     return project, runtime, registry_path
 
@@ -241,8 +245,8 @@ def test_production_quota_obligation_survives_the_full_amendment_lifecycle(
     assert settlement_identity["turn_instance_id"] == TURN_ID
     assert settlement_identity["todo_id"] == TODO_ID
 
-    # 3. The proposal binds the real Stage 1 basis (markdown goal, so the
-    #    real sequence is 0) and the quota-returned obligation, verbatim.
+    # 3. The proposal binds the real canonical snapshot (no event append
+    #    sequence) and the quota-returned obligation, verbatim.
     align_rc, alignment = _run_cli(
         registry_path,
         runtime,
@@ -256,7 +260,7 @@ def test_production_quota_obligation_survives_the_full_amendment_lifecycle(
     )
     assert align_rc == 0, alignment
     basis = alignment["source_basis"]
-    assert basis["revision_basis"] == "markdown_active_state"
+    assert basis["revision_basis"] == "canonical_todo_snapshot"
     assert basis["state_event_basis_sequence"] == 0
 
     proposal = {
