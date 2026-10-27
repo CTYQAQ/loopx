@@ -243,6 +243,25 @@ machine default, with off when absent. The existing worker environment's explici
 not enable delivery. Benchmark trials keep their existing `context_delivery=on`
 opt-in. Workers propagate the resolved trial choice, including default off, to
 both preflight and solver subprocesses without changing the caller's settings.
+
+Machine consumers that parse `should_run`, selected work or settlement identities
+must explicitly request raw output on internal `quota should-run` calls using
+`--context-delivery off` or the subprocess `LOOPX_CONTEXT_DELIVERY=off` override,
+and retain the exact registry, Goal, Agent and Turn. Enabled native output is a
+presentation/capture envelope, not a raw authority decision; a missing
+`should_run` in that envelope is not a denial. MCP settlement and Claude status
+readers use the existing `LOOPX_CONTEXT_DELIVERY=off` subprocess override, which
+also preserves compatibility with older CLI parsers. This does not change the
+machine preference or disable differential context for the interactive Agent.
+
+机器消费者若解析 `should_run`、选中工作或结算身份，应在内部 `quota should-run`
+调用中通过 `--context-delivery off` 或子进程 `LOOPX_CONTEXT_DELIVERY=off`
+显式请求原始输出，并保留原 registry、Goal、Agent 和 Turn。
+开启差分后的原生输出是展示／快照封装；封装没有 `should_run` 不表示准入拒绝。
+MCP 结算和 Claude 状态读取在子进程内设置已有的 `LOOPX_CONTEXT_DELIVERY=off`，
+兼容旧版 CLI 解析器；不修改机器开关，也不关闭交互
+Agent 的差分上下文。
+
 On accepts the declared native scenarios: Codex App heartbeat (`--codex-app` or its equivalent complete scheduler
 declaration), Codex App SSH Goal (`--runtime-profile codex_app_ssh_goal`), and the existing Codex benchmark heartbeat worker (`generic_cli`
 plus its explicit heartbeat worker environment). Missing, contradictory or
