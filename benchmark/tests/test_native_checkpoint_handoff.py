@@ -128,11 +128,12 @@ def test_real_quota_output_is_held_across_native_fork(tmp_path):
     from benchmark.runtime.checkpoint import held_quota_decision
     from tests.control_plane.test_quota_settlement_cli import (
         AGENT_ID, GOAL_ID, TURN_ID, _write_fixture, _configure_autonomous_replan_fixture,
-        _heartbeat_receipt_count,
+        _heartbeat_receipt_count, _initialize_fixture_authority,
     )
 
     project, runtime, registry = _write_fixture(tmp_path / "authority")
     _configure_autonomous_replan_fixture(project, runtime, registry)
+    _initialize_fixture_authority(project, runtime)
     capture_root = project / "captures"
     capture_root.mkdir(mode=0o700)
     requests = []
@@ -220,11 +221,12 @@ def test_native_cli_interruption_retains_guard_beyond_tool_yield(tmp_path, outco
     from benchmark.runtime.checkpoint import held_quota_decision
     from tests.control_plane.test_quota_settlement_cli import (
         AGENT_ID, GOAL_ID, TURN_ID, _write_fixture, _configure_autonomous_replan_fixture,
-        _heartbeat_receipt_count,
+        _heartbeat_receipt_count, _initialize_fixture_authority,
     )
 
     project, runtime, registry = _write_fixture(tmp_path / "authority")
     _configure_autonomous_replan_fixture(project, runtime, registry)
+    _initialize_fixture_authority(project, runtime)
     capture_root = project / "captures"
     capture_root.mkdir(mode=0o700)
     requests = []
