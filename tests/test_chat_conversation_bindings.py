@@ -17,7 +17,7 @@ def _history_page_brief():
         "inputs": [], "acceptance": ["Return the original conclusion"], "return_requirement": "Return here"}
 
 
-@pytest.mark.parametrize("change", ["status", "new-input", "source-read-input", "revoked", "unknown-native", "unchanged"])
+@pytest.mark.parametrize("change", ["status", "new-input", "source-read-input", "unrelated-source", "revoked", "unknown-native", "unchanged"])
 def test_slow_failed_request_probe_does_not_hold_the_source_route(steward, monkeypatch, change):  # noqa: F811
     import threading
     from concurrent.futures import ThreadPoolExecutor
@@ -70,6 +70,8 @@ def test_slow_failed_request_probe_does_not_hold_the_source_route(steward, monke
             elif change == "new-input":
                 store.create_queued_turn(row["session_id"], client_turn_id="later-correction",
                     message="A later original correction", origin="lark")
+            elif change == "unrelated-source":
+                assert transport.admit("notes-app", provider.event("notes-app", "other-original-source", "/status"))["status"] == "command_recorded"
             elif change == "revoked":
                 transport.bindings.disconnect(binding["binding_id"], expected_revision=transport.bindings.read()["revision"])
         finally:
@@ -77,7 +79,7 @@ def test_slow_failed_request_probe_does_not_hold_the_source_route(steward, monke
         if change == "revoked":
             with pytest.raises(ValueError):
                 recovery.result(timeout=10)
-        elif change == "unchanged":
+        elif change in {"unchanged", "unrelated-source"}:
             continued = recovery.result(timeout=10)
             assert continued["turn_id"] != row["turn_id"]
             assert continued["session_id"] == row["session_id"]
@@ -85,9 +87,9 @@ def test_slow_failed_request_probe_does_not_hold_the_source_route(steward, monke
             assert transport.core.recover_failed_request(ref, source_observation=lambda _: pytest.fail("duplicate recovery"))["turn_id"] == continued["turn_id"]
         else:
             assert recovery.result(timeout=10)["turn_id"] == row["turn_id"]
-    assert bool(transport.core.read_request(ref).get("context_recovery")) is (change == "unchanged")
+    assert bool(transport.core.read_request(ref).get("context_recovery")) is (change in {"unchanged", "unrelated-source"})
     assert store._turn_path(row["session_id"], row["turn_id"]).read_bytes() == original
-    if change != "unchanged":
+    if change not in {"unchanged", "unrelated-source"}:
         assert capture.read_bytes() == before, "Unknown or changed state cannot create or resume model work"
 
 
