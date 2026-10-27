@@ -313,7 +313,9 @@ def assert_lifecycle(provider: str) -> None:
         assert indexed_handoff["handoff_note"]["goal_id"] == GOAL_ID, indexed_handoff
         assert indexed_handoff["handoff_note"]["to_agent"] == "codex-reviewer", indexed_handoff
 
-        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, registry_path=registry_path, runtime=runtime)
+        guard = run_cli("quota", "should-run", "--goal-id", GOAL_ID, "--agent-id", "fixture-agent",
+            "--host-surface", "generic_cli", "--scheduler-owner", "none", "--execution-mode", "interactive",
+            registry_path=registry_path, runtime=runtime)
         assert guard["should_run"] is True, guard
         assert_parseable_agent_todos(guard["agent_todo_summary"], hot_path=True)
         assert "completed_todo_archive_warning" not in guard, guard
