@@ -17,7 +17,7 @@ def _history_page_brief():
         "inputs": [], "acceptance": ["Return the original conclusion"], "return_requirement": "Return here"}
 
 
-@pytest.mark.parametrize("change", ["status", "new-input", "revoked", "unknown-native", "unchanged"])
+@pytest.mark.parametrize("change", ["status", "new-input", "source-read-input", "revoked", "unknown-native", "unchanged"])
 def test_slow_failed_request_probe_does_not_hold_the_source_route(steward, monkeypatch, change):  # noqa: F811
     import threading
     from concurrent.futures import ThreadPoolExecutor
@@ -50,9 +50,16 @@ def test_slow_failed_request_probe_does_not_hold_the_source_route(steward, monke
             "codex_error_info": "contextWindowExceeded"}
 
     monkeypatch.setattr(CodexAppServerAdapter, "failed_request_observation", staticmethod(slow_probe))
+
+    def source_observation(_):
+        if change == "source-read-input":
+            store.create_queued_turn(row["session_id"], client_turn_id="input-during-source-read",
+                message="A correction while reading the provider", origin="web")
+        return {"verified": True}
+
     with ThreadPoolExecutor(max_workers=1) as pool:
         recovery = pool.submit(transport.core.recover_failed_request, ref,
-            source_observation=lambda _: {"verified": True})
+            source_observation=source_observation)
         try:
             assert started.wait(5)
             if change in {"status", "unknown-native"}:

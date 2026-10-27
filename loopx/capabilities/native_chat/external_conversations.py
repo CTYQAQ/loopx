@@ -157,12 +157,12 @@ class ChatExternalConversations:
                 **({"completed_work": True, "work_dir": Path(context["project"])} if plan.get("work_attempt") else {}),
                 thread_ids=plan["native_thread_ids"], turn_id=turn["upstream_turn_id"])
             with exclusive_file_lock(self.root / "source-fences" / f"{row['binding_id']}.{row['source']['source_ref']}.json", operation="route_external_chat_request"):
+                selected = self.bindings.resolve(binding_id=row["binding_id"], **row["source"], include_observation=True)
+                source = source_observation(selected)
                 if (self.controller.store.load_session(row["session_id"]) != session
                         or self.controller.store.load_turn(row["session_id"], row["turn_id"]) != turn
                         or source_requests() != requests):
                     return row
-                selected = self.bindings.resolve(binding_id=row["binding_id"], **row["source"], include_observation=True)
-                source = source_observation(selected)
                 plan = self._context_recovery_plan(row, observation=proof, source_verified=source is not None)
                 if not plan.get("recovery_eligible"):
                     return row
