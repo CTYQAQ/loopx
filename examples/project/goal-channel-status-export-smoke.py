@@ -60,6 +60,7 @@ def write_registry(project: Path, runtime: Path) -> Path:
                         "repo": str(project),
                         "state_file": write_state(project),
                         "adapter": {"kind": "smoke_v0", "status": "connected"},
+                        "coordination": {"registered_agents": ["codex-side-bypass"]},
                         "authority_sources": [],
                     }
                 ],

@@ -94,7 +94,7 @@ def main() -> None:
         runtime = root / "runtime"
         local_project = root / "local-project"
         global_project = root / "global-project"
-        local_registry = write_project_registry(local_project, runtime, "local-only-goal", "Local Only Goal")
+        local_registry = write_project_registry(local_project, root / "local-runtime", "local-only-goal", "Local Only Goal")
         global_source_registry = write_project_registry(global_project, runtime, "global-goal", "Global Goal")
 
         global_registry = runtime / "registry.global.json"
