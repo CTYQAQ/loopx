@@ -1324,38 +1324,60 @@ class ChatSessionStore(ChatIngressStore):
                     self._recover_queued_turn_input(session_id, turn)
                     if host_claim_id:
                         now_text = utc_now()
-                        turn.update(
-                            {
-                                "status": "running",
-                                "host_claim_id": _opaque_id(
-                                    host_claim_id,
-                                    field="host_claim_id",
-                                ),
-                                **(
-                                    {
-                                        "admitted_goal_instance_id": _opaque_id(
-                                            admitted_goal_instance_id,
-                                            field="admitted_goal_instance_id",
-                                        )
-                                    }
-                                    if admitted_goal_instance_id is not None
-                                    else {}
-                                ),
-                                "started_at": turn.get("started_at") or now_text,
-                                "last_activity_at": now_text,
-                            }
-                        )
-                        _atomic_write_json(
-                            self._turn_path(session_id, turn_id),
-                            turn,
-                            preserve_mode=True,
-                        )
-                        self.append_event(
-                            session_id,
-                            turn_id,
-                            kind="turn.claimed_by_attached_host",
-                            payload={"host_claim_id": host_claim_id},
-                        )
+                        turn_path = self._turn_path(session_id, turn_id)
+                        # Share the Turn write lock that `begin_turn_interrupt`
+                        # takes: the claim is the other writer of this Turn's
+                        # status and authority, so the queue scan above is only
+                        # a candidate. Re-reading under the lock means an
+                        # interrupt that already committed wins the transition
+                        # instead of being overwritten by this write, and a
+                        # claim that commits first is never rewritten from a
+                        # snapshot that predates it.
+                        with exclusive_file_lock(
+                            turn_path,
+                            agent_id="loopx-chat",
+                            operation="claim_queued_chat_turn",
+                        ):
+                            claimed = self.load_turn(session_id, turn_id)
+                            if claimed is None or claimed.get("status") != "queued":
+                                # Another writer owns this Turn now (an
+                                # interrupt, or a claim from another surface).
+                                # Starting a different queued Turn here would
+                                # leave the queue head in an unclaimed state.
+                                return None
+                            claimed.update(
+                                {
+                                    "status": "running",
+                                    "host_claim_id": _opaque_id(
+                                        host_claim_id,
+                                        field="host_claim_id",
+                                    ),
+                                    **(
+                                        {
+                                            "admitted_goal_instance_id": _opaque_id(
+                                                admitted_goal_instance_id,
+                                                field="admitted_goal_instance_id",
+                                            )
+                                        }
+                                        if admitted_goal_instance_id is not None
+                                        else {}
+                                    ),
+                                    "started_at": claimed.get("started_at") or now_text,
+                                    "last_activity_at": now_text,
+                                }
+                            )
+                            _atomic_write_json(
+                                turn_path,
+                                claimed,
+                                preserve_mode=True,
+                            )
+                            self.append_event(
+                                session_id,
+                                turn_id,
+                                kind="turn.claimed_by_attached_host",
+                                payload={"host_claim_id": host_claim_id},
+                            )
+                        turn = claimed
                     session.update(
                         {
                             "status": "busy",

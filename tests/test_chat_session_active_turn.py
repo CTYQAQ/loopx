@@ -1314,6 +1314,98 @@ def test_interrupt_does_not_overwrite_a_completed_turn(
     assert (session_id, turn_id) not in runtime.cancelled_turns
 
 
+def test_queued_claim_and_interrupt_share_one_turn_transition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued claim and an interrupt serialize on the same Turn write lock.
+
+    Before the claim took the Turn lock, the two writers could interleave: the
+    interrupt read ``queued``, the claim committed ``running`` with a
+    ``host_claim_id`` and published the Session active pointer, then the
+    interrupt wrote its older snapshot back as ``interrupting`` with no claim
+    id. The Session still named the Turn as active, so the host's successful
+    claim had silently lost its authority.
+    """
+    store = ChatSessionStore(tmp_path)
+    session = store.create_session(
+        goal_id="goal-one",
+        agent_id="codex",
+        executor_endpoint_id="codex",
+        adapter_kind="codex_app_server",
+        upstream_thread_id="thread-one",
+        upstream_mode="chat",
+    )
+    session_id = str(session["session_id"])
+    queued, created = store.create_queued_turn(
+        session_id,
+        client_turn_id="claimed-queued-turn",
+        message="claim me around a stop request",
+    )
+    assert created is True
+    turn_id = str(queued["turn_id"])
+
+    original_load_turn = store.load_turn
+    interrupt_read = threading.Event()
+    resume_interrupt = threading.Event()
+
+    def pause_after_interrupt_read(
+        requested_session_id: str,
+        requested_turn_id: str,
+    ) -> dict[str, object] | None:
+        loaded = original_load_turn(requested_session_id, requested_turn_id)
+        if threading.current_thread().name == "interrupt-turn":
+            interrupt_read.set()
+            resume_interrupt.wait(timeout=2)
+        return loaded
+
+    monkeypatch.setattr(store, "load_turn", pause_after_interrupt_read)
+    interrupted: list[dict[str, object] | None] = []
+    interrupt_thread = threading.Thread(
+        target=lambda: interrupted.append(
+            store.begin_turn_interrupt(
+                session_id,
+                turn_id,
+                expected_statuses={"queued", "starting", "running", "interrupting"},
+            )
+        ),
+        name="interrupt-turn",
+        daemon=True,
+    )
+    interrupt_thread.start()
+    assert interrupt_read.wait(timeout=2)
+
+    claimed: list[dict[str, object] | None] = []
+    claim_thread = threading.Thread(
+        target=lambda: claimed.append(
+            store.claim_next_queued_turn(session_id, host_claim_id="host-claim")
+        ),
+        name="claim-turn",
+        daemon=True,
+    )
+    claim_thread.start()
+    resume_interrupt.set()
+    interrupt_thread.join(timeout=5)
+    claim_thread.join(timeout=5)
+
+    assert not interrupt_thread.is_alive()
+    assert not claim_thread.is_alive()
+    turn = store.load_turn(session_id, turn_id)
+    assert turn is not None
+    assert turn["status"] == "interrupting"
+    assert turn.get("host_claim_id") is None
+    # The claim must not publish a Turn the interrupt already owns as active.
+    assert claimed == [None]
+    current = store.load_session(session_id)
+    assert current is not None
+    assert current["active_turn_id"] is None
+    assert [
+        event["kind"]
+        for event in store.events_after(session_id, turn_id, None)
+        if event["kind"].startswith("turn.")
+    ] == ["turn.queued", "turn.interrupt_requested"]
+
+
 def test_interrupting_a_queued_turn_does_not_touch_the_active_adapter(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
