@@ -1342,7 +1342,7 @@ function readQuotaSettlementFromRequest(
       receiptDetails.should_run === true && receiptDetails.delivery_allowed === false,
     native_child_admission: nativeChildReportAdmission(
       receiptDetails, heartbeatReceipt.status, identity.effect_id, replayPhase,
-      closeoutStarted,
+      closeoutStarted, normalizeReplanObligationId(semanticReplanGuard.selected_obligation_id),
     ),
     ...(request.heartbeat_reentry_guard === null ? {} : {
       heartbeat_reentry_qualification: heartbeatWorkRequalification(heartbeatReceipt,

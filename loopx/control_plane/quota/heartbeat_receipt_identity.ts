@@ -207,13 +207,13 @@ export function heartbeatWorkRequalification(
   if (identity.todo_id !== null && currentDetails.selected_todo_id !== identity.todo_id) return replay;
   // No legacy/status-label compatibility for new qualifications: all modern
   // work facts must be explicit. This reuses the report-admission predicate.
-  if (nativeChildReportAdmission(currentDetails, null, identity.effect_id, phase, false)
-      .report_permission !== "new_operation") return replay;
   const oldDetails = heartbeatReceiptDetails(original);
-  if (nativeChildReportAdmission(oldDetails, original.status, identity.effect_id, phase, false)
-      .report_permission === "new_operation") return replay;
   const originalReplan = normalizeHeartbeatReplanObligationId(oldDetails.semantic_replan_obligation_id);
   const currentReplan = normalizeHeartbeatReplanObligationId(currentDetails.semantic_replan_obligation_id);
+  if (nativeChildReportAdmission(currentDetails, null, identity.effect_id, phase, false, currentReplan)
+      .report_permission !== "new_operation") return replay;
+  if (nativeChildReportAdmission(oldDetails, original.status, identity.effect_id, phase, false, originalReplan)
+      .report_permission === "new_operation") return replay;
   if (currentReplan !== null && currentReplan !== originalReplan) {
     throw receiptIdentityConflict("work requalification cannot replace the original semantic replan guard");
   }
@@ -221,7 +221,7 @@ export function heartbeatWorkRequalification(
   // The first positive work admission owns these facts. A repair-only
   // receipt's earlier selection cannot describe the newly admitted work.
   for (const field of ["ok", "should_run", "must_attempt_work", "delivery_allowed", "quiet_noop_allowed",
-    "admission_resume_when", "admission_resume_ready"]) {
+    "interaction_mode", "admission_resume_when", "admission_resume_ready"]) {
     if (currentDetails[field] !== undefined) qualified[field] = currentDetails[field]!;
     else delete qualified[field];
   }
