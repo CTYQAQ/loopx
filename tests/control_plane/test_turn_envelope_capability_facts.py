@@ -222,7 +222,8 @@ def test_captured_vision_contract_preserves_closeout_and_original_observation(
     read = subprocess.run(shlex.split(detail["full_decision"]), capture_output=True, check=True).stdout
     assert read == original
     assert build_turn_envelope(json.loads(read))["action_signature"]["source_decision_hash"] == authority["action_signature"]["source_decision_hash"]
-    assert "writeback" not in authority and "scheduler" not in authority
+    assert "writeback" not in authority
+    assert authority["scheduler"] == envelope["scheduler"]
     assert "Do not execute its state or scheduler commands" in prompt
     for field, value in (
         ("required_before_closeout", list(reversed(projected["required_before_closeout"]))),

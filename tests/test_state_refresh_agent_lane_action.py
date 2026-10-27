@@ -15,9 +15,15 @@ from tests.control_plane.canonical_authority_fixture import initialize_canonical
 from loopx.state_refresh import (
     RECOMMENDED_ACTION_SOURCE_ACTIVE_NEXT_ACTION,
     RECOMMENDED_ACTION_SOURCE_AGENT_LANE_SELECTED_TODO,
-    derive_recommended_action_with_source,
     refresh_state_run,
 )
+
+def _recommendation(state_text, *, agent_id=None, todo_fields):
+    result = resolve_refresh_recommendation(
+        state_text, agent_id=agent_id, todo_fields=todo_fields,
+    )
+    return result["recommended_action"], result["recommended_action_source"]
+
 
 TWO_AGENT_STATE = """# Active Goal State
 
@@ -37,7 +43,7 @@ TWO_AGENT_STATE = """# Active Goal State
 
 
 def test_agent_scoped_derivation_prefers_own_lane_todo() -> None:
-    action, source = derive_recommended_action_with_source(
+    action, source = _recommendation(
         TWO_AGENT_STATE, agent_id="agent-a"
     , todo_fields=parse_active_state_todos(TWO_AGENT_STATE, item_limit=None))
     assert action == "[P1] continue agent A scheduler coverage fix"
@@ -45,7 +51,7 @@ def test_agent_scoped_derivation_prefers_own_lane_todo() -> None:
 
 
 def test_peer_lane_never_shadows_own_selection() -> None:
-    action, source = derive_recommended_action_with_source(
+    action, source = _recommendation(
         TWO_AGENT_STATE, agent_id="agent-b"
     , todo_fields=parse_active_state_todos(TWO_AGENT_STATE, item_limit=None))
     assert action == "[P1] polish agent B release notes"
@@ -53,7 +59,7 @@ def test_peer_lane_never_shadows_own_selection() -> None:
 
 
 def test_agent_without_claimed_todo_falls_back_to_shared_section() -> None:
-    action, source = derive_recommended_action_with_source(
+    action, source = _recommendation(
         TWO_AGENT_STATE, agent_id="agent-c"
     , todo_fields=parse_active_state_todos(TWO_AGENT_STATE, item_limit=None))
     assert action == "Publish agent B's release checklist"
@@ -61,7 +67,7 @@ def test_agent_without_claimed_todo_falls_back_to_shared_section() -> None:
 
 
 def test_unscoped_derivation_keeps_shared_section_priority() -> None:
-    action, source = derive_recommended_action_with_source(TWO_AGENT_STATE, todo_fields=parse_active_state_todos(TWO_AGENT_STATE, item_limit=None))
+    action, source = _recommendation(TWO_AGENT_STATE, todo_fields=parse_active_state_todos(TWO_AGENT_STATE, item_limit=None))
     assert action == "Publish agent B's release checklist"
     assert source == RECOMMENDED_ACTION_SOURCE_ACTIVE_NEXT_ACTION
 
@@ -81,7 +87,7 @@ def test_blocked_p0_never_shadows_runnable_p1() -> None:
   <!-- loopx:todo status=open task_class=advancement_task claimed_by=agent-a todo_id=todo_runnable_delivery -->
 """
 
-    action, source = derive_recommended_action_with_source(state, agent_id="agent-a", todo_fields=parse_active_state_todos(state, item_limit=None))
+    action, source = _recommendation(state, agent_id="agent-a", todo_fields=parse_active_state_todos(state, item_limit=None))
 
     assert action == "[P1] runnable delivery"
     assert source == RECOMMENDED_ACTION_SOURCE_AGENT_LANE_SELECTED_TODO
@@ -96,7 +102,7 @@ def test_agent_scope_without_own_candidate_never_falls_into_peer_lane() -> None:
   <!-- loopx:todo status=open task_class=advancement_task claimed_by=agent-b todo_id=todo_peer_delivery -->
 """
 
-    action, source = derive_recommended_action_with_source(state, agent_id="agent-a", todo_fields=parse_active_state_todos(state, item_limit=None))
+    action, source = _recommendation(state, agent_id="agent-a", todo_fields=parse_active_state_todos(state, item_limit=None))
 
     assert "peer-only" not in action
     assert source == RECOMMENDED_ACTION_SOURCE_DEFAULT
@@ -184,7 +190,7 @@ def _write_turn_receipt(
     identity: SettlementIdentity,
 ) -> None:
     path = rollout_event_log_path(runtime_root, identity.goal_id)
-    path.parent.mkdir(parents=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
@@ -209,7 +215,7 @@ def test_refresh_state_run_reuses_exact_turn_selection(tmp_path: Path) -> None:
     goal_id = "goal-shared-refresh"
     project = tmp_path / "project"
     state_path = project / ".codex" / "goals" / goal_id / "ACTIVE_GOAL_STATE.md"
-    state_path.parent.mkdir(parents=True)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(TWO_AGENT_STATE, encoding="utf-8")
     registry_path = tmp_path / "registry.json"
     registry_path.write_text(

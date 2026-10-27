@@ -1099,6 +1099,7 @@ def test_real_cli_global_membership_failure_and_recovery(tmp_path):
     )
     global_registry["goals"].append({**global_registry["goals"][0], "id": "goal-b",
                                      "state_file": str(second_state)})
+    initialize_canonical_source_fixture(runtime, "goal-b", state_path=second_state)
 
     def cli(command, registry_path=registry):
         result = subprocess.run(
