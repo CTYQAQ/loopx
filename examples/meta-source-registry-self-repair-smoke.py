@@ -132,6 +132,7 @@ def write_global_registry(
 def queue_item(status_payload: dict, goal_id: str) -> dict:
     items = status_payload.get("attention_queue", {}).get("items") or []
     matches = [item for item in items if isinstance(item, dict) and item.get("goal_id") == goal_id]
+    matches = [item for item in matches if item.get("project_asset")]
     assert len(matches) == 1, items
     return matches[0]
 
@@ -140,6 +141,9 @@ def assert_meta_source_shadow(finding_kind: str) -> None:
     with tempfile.TemporaryDirectory(prefix="loopx-meta-source-shadow-") as tmp:
         root = Path(tmp)
         registry_path, runtime, project = write_global_registry(root, finding_kind=finding_kind)
+        from loopx.control_plane.testing.canary_harness import import_fixture_authority
+        for record in json.loads(registry_path.read_text())["goals"]:
+            import_fixture_authority(registry_path, record["id"], provider="sqlite")
         status_payload = collect_status(
             registry_path=registry_path,
             runtime_root_override=str(runtime),
