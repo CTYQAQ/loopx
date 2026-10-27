@@ -319,6 +319,11 @@ test("scope comparison folds case aliases without rewriting retained or request 
     ["src/[ρ-ς].ts", "src/Σ.ts"],
     ["src/[ρ-ς].ts", "src/σ.ts"],
     ["src/[ß-à].ts", "src/SS.ts"],
+    // Wide intervals keep their original bounds, so the alias is found inside
+    // the interval instead of by walking or widening it.
+    ["src/[ß-\u20df].ts", "src/SS.ts"],
+    ["src/[ß-\u20df].ts", "src/ẞ.ts"],
+    ["src/[\u212a-\u412a].ts", "src/K.ts"],
   ]) {
     assert.equal(evaluateTaskLeaseWriteScopesOverlap({left: [left], right: [right]}).overlap, true, `${left} overlaps ${right}`);
   }
@@ -329,9 +334,25 @@ test("scope comparison folds case aliases without rewriting retained or request 
     ["src/[!ß]S.ts", "src/S.ts"],
     ["src/[ß-ß].ts", "src/S.ts"],
     ["src/[!ρ-ς].ts", "src/Σ.ts"],
+    ["src/[!ß-\u20df].ts", "src/SS.ts"],
+    ["src/[\u212a-\u412a].ts", "src/i.ts"],
   ]) {
     assert.equal(evaluateTaskLeaseWriteScopesOverlap({left: [left], right: [right]}).overlap, false, `${left} excludes ${right}`);
   }
+});
+test("glob matching consumes code points, not UTF-16 code units", () => {
+  assert.equal(evaluateTaskLeaseWriteScopesOverlap({
+    left: ["src/?.ts"],
+    right: ["src/\u{1f600}.ts"],
+  }).overlap, true);
+  assert.equal(evaluateTaskLeaseWriteScopesOverlap({
+    left: ["src/[\u{1f600}].ts"],
+    right: ["src/\u{1f600}.ts"],
+  }).overlap, true);
+  assert.equal(evaluateTaskLeaseWriteScopesOverlap({
+    left: ["src/[\u{10000}-\u{10002}].ts"],
+    right: ["src/\u{10001}.ts"],
+  }).overlap, true);
 });
 test("scope comparison and matching share literal right-bracket character classes", () => {
   for (const [scope, target] of [

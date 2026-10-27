@@ -140,13 +140,44 @@ function optionalInteger(value: unknown, label: string): number | null {
   return value;
 }
 
-/** Host case aliases include Unicode folds whose length changes, such as ß -> ss. */
+/**
+ * Canonical fold for one code point, iterated until it is stable. Host case
+ * aliases are symmetric (Σ/ς, K/KELVIN SIGN) and some change length (ß -> ss),
+ * so one upper/lower pass is not an equivalence relation on its own.
+ */
+function foldCharacter(character: string): string {
+  let folded = character;
+  // Two passes settle every code point in current Unicode data; the bound only
+  // guards against a future mapping that never reaches a fixed point.
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = folded.toUpperCase().toLowerCase();
+    if (next === folded) return folded;
+    folded = next;
+  }
+  return folded;
+}
+
+/**
+ * Folding one code point at a time keeps the fold composable across a path, so a
+ * comparison-only view can fold substrings without changing the retained
+ * spelling or the immutable request identity.
+ */
 function caseFold(value: string): string {
-  return value.toUpperCase().toLowerCase();
+  let folded = "";
+  for (const character of value) folded += foldCharacter(character);
+  return folded;
+}
+
+/** The code point of single-character text, or null for longer text. */
+function singleCodePoint(value: string): string | null {
+  const code = value.codePointAt(0);
+  if (code === undefined) return null;
+  const character = String.fromCodePoint(code);
+  return character.length === value.length ? character : null;
 }
 
 type GlobToken =
-  | {kind: "literal"; literal: string; folded: string}
+  | {kind: "literal"; folded: string}
   | {kind: "star"}
   | {kind: "question"}
   | {kind: "class"; body: string; negated: boolean};
@@ -156,7 +187,7 @@ function globTokens(pattern: string): GlobToken[] {
   let literal = "";
   const flushLiteral = () => {
     if (literal.length === 0) return;
-    tokens.push({kind: "literal", literal, folded: caseFold(literal)});
+    tokens.push({kind: "literal", folded: caseFold(literal)});
     literal = "";
   };
   for (let index = 0; index < pattern.length; index += 1) {
@@ -191,100 +222,118 @@ function globTokens(pattern: string): GlobToken[] {
 
 type CharacterClass = {
   literals: readonly string[];
-  ranges: readonly (readonly [string, string])[];
+  ranges: readonly (readonly [number, number])[];
 };
 
+/** Class members are code points, and a range keeps its original interval bounds. */
 function characterClass(body: string): CharacterClass {
+  const members = [...body];
   const literals: string[] = [];
-  const ranges: Array<readonly [string, string]> = [];
-  for (let index = 0; index < body.length; index += 1) {
-    if (index + 2 < body.length && body[index + 1] === "-") {
-      ranges.push([body[index], body[index + 2]]);
+  const ranges: Array<readonly [number, number]> = [];
+  for (let index = 0; index < members.length; index += 1) {
+    const high = index + 2 < members.length && members[index + 1] === "-"
+      ? members[index + 2].codePointAt(0)
+      : undefined;
+    const low = high === undefined ? undefined : members[index].codePointAt(0);
+    if (low !== undefined && high !== undefined) {
+      ranges.push([low, high]);
       index += 2;
     } else {
-      literals.push(body[index]);
+      literals.push(members[index]);
     }
   }
   return {literals, ranges};
 }
 
-/** Single-character case variants, so a range keeps its original interval. */
-function singleCharacterVariants(value: string): string[] {
-  const variants = new Set<string>();
-  for (const candidate of [value, value.toLowerCase(), value.toUpperCase(), caseFold(value)]) {
-    if ([...candidate].length === 1) variants.add(candidate);
-  }
-  return [...variants];
-}
-
-/** A range wider than this is compared by case variants instead of walked. */
-const RANGE_MEMBER_LIMIT = 4096;
-
-/** Code points a range covers, or null when the interval is too wide to walk. */
-function rangeMembers(low: string, high: string): string[] | null {
-  const start = low.codePointAt(0);
-  const end = high.codePointAt(0);
-  if (start === undefined || end === undefined || start > end) return [];
-  if (end - start + 1 > RANGE_MEMBER_LIMIT) return null;
-  const members: string[] = [];
-  for (let code = start; code <= end; code += 1) {
-    members.push(String.fromCodePoint(code));
-  }
-  return members;
+function classContains(members: CharacterClass, character: string): boolean {
+  const code = character.codePointAt(0);
+  if (code === undefined) return false;
+  return members.literals.includes(character) ||
+    members.ranges.some(([low, high]) => low <= code && code <= high);
 }
 
 /**
- * Class membership is a symmetric fold equivalence: a member and the compared text
- * match when their canonical fold is equal. That covers non-reciprocal Unicode
- * aliases (a class member ς against Σ) and folds that change length (ß against SS).
- * Every range member is compared by its fold, so a general interval keeps its
- * original bounds without losing either kind of alias.
+ * Code points whose canonical fold is not themselves, grouped by fold value.
+ * Class membership needs this inverse: walking an interval is unbounded, while a
+ * fold class holds at most a handful of code points, so an interval of any width
+ * is decided by a few comparisons. The inverse is only discoverable by folding
+ * the code space, so it is built once on first use.
  */
-function classMemberMatches(body: string, candidate: string, foldCase: boolean): boolean {
-  const {literals, ranges} = characterClass(body);
-  const folded = foldCase ? caseFold(candidate) : candidate;
-  for (const literal of literals) {
-    if (literal === candidate || (foldCase && caseFold(literal) === folded)) return true;
-  }
-  for (const [low, high] of ranges) {
-    if (!foldCase) {
-      if ([...candidate].length === 1 && low <= candidate && candidate <= high) return true;
-      continue;
+let foldPreimages: ReadonlyMap<string, readonly string[]> | null = null;
+
+function foldPreimagesByFold(): ReadonlyMap<string, readonly string[]> {
+  const cached = foldPreimages;
+  if (cached !== null) return cached;
+  const preimages = new Map<string, string[]>();
+  for (let start = 0; start <= 0x10ffff; start += 0x400) {
+    const end = Math.min(start + 0x3ff, 0x10ffff);
+    let block = "";
+    for (let code = start; code <= end; code += 1) {
+      if (code < 0xd800 || code > 0xdfff) block += String.fromCodePoint(code);
     }
-    const members = rangeMembers(low, high);
-    if (members === null) {
-      // Walking a very wide interval on every comparison would dominate the
-      // decision, so fall back to the candidate's own case variants. Ordinary
-      // scopes use short intervals, which take the exact path below.
-      if ([...candidate].length !== 1) continue;
-      for (const variant of singleCharacterVariants(candidate)) {
-        if (low <= variant && variant <= high) return true;
-      }
-      continue;
-    }
-    for (const member of members) {
-      if (caseFold(member) === folded) return true;
+    // A block without a case mapping cannot hold a non-identity fold.
+    if (block.toUpperCase() === block && block.toLowerCase() === block) continue;
+    for (let code = start; code <= end; code += 1) {
+      if (code >= 0xd800 && code <= 0xdfff) continue;
+      const character = String.fromCodePoint(code);
+      const folded = foldCharacter(character);
+      if (folded === character) continue;
+      const bucket = preimages.get(folded);
+      if (bucket === undefined) preimages.set(folded, [character]);
+      else bucket.push(character);
     }
   }
-  return false;
+  foldPreimages = preimages;
+  return preimages;
+}
+
+/** Longest fold one class member expands to; derived rather than assumed. */
+let classConsumptionLimit = 0;
+
+function maximumClassConsumption(): number {
+  if (classConsumptionLimit === 0) {
+    let limit = 1;
+    for (const folded of foldPreimagesByFold().keys()) {
+      limit = Math.max(limit, [...folded].length);
+    }
+    classConsumptionLimit = limit;
+  }
+  return classConsumptionLimit;
 }
 
 /**
- * A class consumes one unit by default. Case folding may consume several when the
- * compared text folds to the same string as a member (ß/SS, ﬃ/FFI).
+ * A class member covers the compared text when the two share a fold value, so
+ * `[Σ]` covers ς, `[ß]` covers SS, and `[ß-…]` covers both through its own
+ * bounds. Fold classes are compared instead of walking interval members, so a
+ * wide range costs the same as a narrow one.
  */
-function classMatchLengths(body: string, value: string, start: number, foldCase: boolean): number[] {
+function classMemberMatches(body: string, candidate: string): boolean {
+  const members = characterClass(body);
+  const folded = caseFold(candidate);
+  const preimages = foldPreimagesByFold().get(folded) ?? [];
+  if (preimages.some((character) => classContains(members, character))) return true;
+  // A single code point whose fold is itself is its own preimage.
+  const own = singleCodePoint(folded);
+  return own !== null && classContains(members, own);
+}
+
+/**
+ * A class consumes one code point by default, and several when the compared text
+ * folds to the same value as a member (ß/SS, ﬃ/FFI).
+ */
+function classMatchLengths(body: string, symbols: readonly string[], start: number): number[] {
   const lengths: number[] = [];
-  const maximum = foldCase ? 3 : 1;
-  for (let length = 1; length <= maximum && start + length <= value.length; length += 1) {
-    if (classMemberMatches(body, value.slice(start, start + length), foldCase)) {
+  for (let length = 1; length <= maximumClassConsumption() && start + length <= symbols.length; length += 1) {
+    if (classMemberMatches(body, symbols.slice(start, start + length).join(""))) {
       lengths.push(length);
     }
   }
   return lengths;
 }
 
-function fnmatchcase(value: string, pattern: string, foldCase = false): boolean {
+/** Comparison always folds host case aliases; symbol indexes stay on code points. */
+function fnmatchcase(value: string, pattern: string): boolean {
+  const symbols = [...value];
   const tokens = globTokens(pattern);
   const memo = new Map<string, boolean>();
   const match = (valueIndex: number, tokenIndex: number): boolean => {
@@ -293,19 +342,19 @@ function fnmatchcase(value: string, pattern: string, foldCase = false): boolean 
     if (cached !== undefined) return cached;
     let result: boolean;
     if (tokenIndex === tokens.length) {
-      result = valueIndex === value.length;
+      result = valueIndex === symbols.length;
     } else {
       const token = tokens[tokenIndex];
       if (token.kind === "star") {
         result = match(valueIndex, tokenIndex + 1) ||
-          (valueIndex < value.length && match(valueIndex + 1, tokenIndex));
-      } else if (valueIndex === value.length) {
+          (valueIndex < symbols.length && match(valueIndex + 1, tokenIndex));
+      } else if (valueIndex === symbols.length) {
         result = false;
       } else if (token.kind === "question") {
         result = match(valueIndex + 1, tokenIndex + 1);
       } else if (token.kind === "class") {
-        const lengths = classMatchLengths(token.body, value, valueIndex, foldCase);
-        // Negation only excludes a single character: a longer fold candidate
+        const lengths = classMatchLengths(token.body, symbols, valueIndex);
+        // Negation only excludes a single code point: a longer fold candidate
         // (SS for ß) is two ordinary characters to a class, so it must remain
         // available for the following tokens.
         result = token.negated
@@ -313,14 +362,10 @@ function fnmatchcase(value: string, pattern: string, foldCase = false): boolean 
           : lengths.some((length) => match(valueIndex + length, tokenIndex + 1));
       } else {
         result = false;
-        for (let end = valueIndex + 1; end <= value.length; end += 1) {
-          const candidate = value.slice(valueIndex, end);
-          const folded = caseFold(candidate);
-          if (foldCase ? folded.length > token.folded.length : candidate.length > token.literal.length) {
-            break;
-          }
-          if ((foldCase ? folded === token.folded : candidate === token.literal) &&
-            match(end, tokenIndex + 1)) {
+        for (let end = valueIndex + 1; end <= symbols.length; end += 1) {
+          const folded = caseFold(symbols.slice(valueIndex, end).join(""));
+          if (folded.length > token.folded.length) break;
+          if (folded === token.folded && match(end, tokenIndex + 1)) {
             result = true;
             break;
           }
@@ -351,12 +396,12 @@ function scopePairOverlaps(left: string, right: string): boolean {
   const rightGlob = ["*", "?", "["].some((token) => right.includes(token));
   if (leftGlob && !rightGlob) {
     const prefix = scopeLiteralPrefix(left);
-    return fnmatchcase(right, left, true) ||
+    return fnmatchcase(right, left) ||
       (prefix.endsWith("/") && equal(right.replace(/\/$/u, ""), prefix.replace(/\/$/u, "")));
   }
   if (rightGlob && !leftGlob) {
     const prefix = scopeLiteralPrefix(right);
-    return fnmatchcase(left, right, true) ||
+    return fnmatchcase(left, right) ||
       (prefix.endsWith("/") && equal(left.replace(/\/$/u, ""), prefix.replace(/\/$/u, "")));
   }
   if (leftGlob && rightGlob) {

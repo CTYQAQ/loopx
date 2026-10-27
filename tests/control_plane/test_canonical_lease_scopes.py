@@ -117,6 +117,10 @@ def test_case_aliases_remain_exclusive_write_scopes(scope_goal):
 @pytest.mark.parametrize("first_scope,second_scope", [
     ("src/Σ.ts", "src/ς.ts"),
     ("src/ß.ts", "src/SS.ts"),
+    ("src/[ρ-ς].ts", "src/Σ.ts"),
+    ("src/[ß-\u20df].ts", "src/SS.ts"),
+    ("src/SS.ts", "src/[ß-\u20df].ts"),
+    ("src/[\u212a-\u412a].ts", "src/K.ts"),
 ])
 def test_unicode_case_aliases_remain_exclusive_write_scopes(scope_goal, first_scope, second_scope):
     cli, current = scope_goal
@@ -134,6 +138,9 @@ def test_unicode_case_aliases_remain_exclusive_write_scopes(scope_goal, first_sc
 @pytest.mark.parametrize("first_scope,second_scope", [
     ("src/Σ.ts", "src/ς.ts"),
     ("src/ß.ts", "src/SS.ts"),
+    ("src/[ρ-ς].ts", "src/Σ.ts"),
+    ("src/[ß-\u20df].ts", "src/SS.ts"),
+    ("src/[\u212a-\u412a].ts", "src/K.ts"),
 ])
 def test_unicode_case_aliases_conflict_at_atomic_todo_claim(scope_goal, first_scope, second_scope):
     cli, current = scope_goal
@@ -225,6 +232,8 @@ def test_case_folded_negated_glob_class_excludes_case_variant(scope_goal):
     ("src/[!Σ]x", "src/ςx"),
     ("src/[!ς]x", "src/Σx"),
     ("src/[!ß]x", "src/SSx"),
+    ("src/[!ß-\u20df].ts", "src/SS.ts"),
+    ("src/[\u212a-\u412a].ts", "src/i.ts"),
 ])
 def test_case_folded_negated_glob_class_excludes_unicode_alias(scope_goal, scope, target):
     cli, _ = scope_goal
