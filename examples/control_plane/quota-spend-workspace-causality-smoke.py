@@ -290,6 +290,12 @@ def main() -> None:
             explicit_preview
         )
 
+        invalid_runtime = root / "invalid-runtime"
+        invalid_source = {**split_source, "common_runtime_root": str(invalid_runtime)}
+        invalid_registry = root / "invalid-registry.json"
+        invalid_registry.write_text(json.dumps(invalid_source))
+        import_fixture_authority(invalid_registry, GOAL_ID, provider="sqlite")
+
         # An explicit canonical path cannot bless a peer delivery. Omitting the
         # override retains the existing fail-closed recorded-history behavior.
         with working_directory(delivery):

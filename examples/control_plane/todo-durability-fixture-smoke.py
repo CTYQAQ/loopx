@@ -120,12 +120,15 @@ def write_fixture(root: Path) -> tuple[Path, Path]:
 def assert_parseable_agent_todos(agent_todos: dict, *, hot_path: bool = False) -> None:
     assert agent_todos["schema_version"] == "todo_summary_v0", agent_todos
     assert agent_todos["total_count"] == 5, agent_todos
-    assert agent_todos["open_count"] == 2, agent_todos
+    assert agent_todos["open_count"] == (1 if hot_path else 2), agent_todos
     assert agent_todos["done_count"] == 3, agent_todos
     assert agent_todos["deferred_count"] == 2, agent_todos
     item_lane = "first_executable_items" if hot_path else "first_open_items"
     visible_items = agent_todos[item_lane]
-    assert [item["index"] for item in visible_items] == [1, 5], agent_todos
+    assert [item["index"] for item in visible_items] == ([1] if hot_path else [1, 5]), agent_todos
+    if hot_path:
+        assert agent_todos["claim_scope"]["other_agent_claimed_open_count"] == 1
+        assert agent_todos["claim_scope"]["other_agent_claimed_weight"] == "diagnostic_only"
 
     first_open = visible_items[0]
     assert first_open["schema_version"] == "todo_item_v0", first_open

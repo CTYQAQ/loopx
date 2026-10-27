@@ -209,7 +209,7 @@ def import_fixture_authority(registry_path: Path, goal_id: str, *, provider: str
     runtime.mkdir(parents=True, exist_ok=True)
     backup = execute_state_backup_plan(build_state_backup_plan(
         project=project, runtime_root=runtime,
-        output_dir=runtime.parent / "fixture-backups", backup_id=goal_id,
+        output_dir=runtime.parent / f"{runtime.name}-fixture-backups", backup_id=goal_id,
         include_automations=False, include_skills=False,
         include_registry_projects=False, registry_path=registry_path,
     ))
