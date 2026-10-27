@@ -430,13 +430,16 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
         return tool(cmd, number)
 
     def tool(cmd, number):
-        if reader_output_bytes and "context-read" in shlex.split(cmd):
-            # Exercise the existing public reader with a budget qualified by
-            # this real host fixture, retaining the original capture and cursor.
-            argv = shlex.split(cmd)
+        def bounded_read(command):
+            if not reader_output_bytes or "context-read" not in shlex.split(command):
+                return command
+            # Apply the selected public reader budget to every batched read,
+            # retaining the original capture, digest and cursor.
+            argv = shlex.split(command)
             argv[argv.index("--page-bytes") + 1] = str(reader_output_bytes)
             argv[argv.index("--max-page-output-bytes") + 1] = str(reader_output_bytes)
-            cmd = shlex.join(argv)
+            return shlex.join(argv)
+        cmd = bounded_read(cmd)
         if host == "code_mode":
             pragma = ('// @exec: {"max_output_tokens":24000}\n' if automatic_output_budget else
                 '// @exec: {"max_output_tokens":12000}\n' if native_pragma else "")
@@ -445,7 +448,7 @@ def test_native_cli_capture_delta_and_compact_recovery(tmp_path, monkeypatch, ho
             # unchanged native turn deadline before same-capture recovery ends.
             commands = [cmd]
             while stages["pages"] and len(commands) < native_read_batch:
-                commands.append(stages["pages"].pop(0))
+                commands.append(bounded_read(stages["pages"].pop(0)))
             if adaptive:
                 code = "".join("{const r=await tools.exec_command(" + json.dumps({
                     "cmd": command, "login": False, "max_output_tokens": 22000 if automatic_output_budget and "context-read" in shlex.split(command) else 11000 if reader_output_bytes else 2000 if bounded_pages else 2400})
