@@ -294,7 +294,7 @@ def advance_fixture_authority(
         ["node", "--no-warnings", "--experimental-strip-types", "--input-type=module", "-e", script],
         input=json.dumps({"root": str(runtime_root), "goal": goal_id,
                          "projection": projection, "operation_id": operation_id}),
-        capture_output=True, text=True, check=False, timeout=45,
+        capture_output=True, text=True, encoding="utf-8", check=False, timeout=45,
     )
     assert process.returncode == 0, process.stderr
     result = json.loads(process.stdout)
