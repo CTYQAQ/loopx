@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from loopx import status as status_module  # noqa: E402
+from loopx.control_plane.goals import coordination_observation  # noqa: E402
 from loopx.control_plane.status import collection as collection_read_model  # noqa: E402
 
 
@@ -104,9 +105,15 @@ def assert_wrapper_parity(registry_path: Path, runtime_root: Path) -> None:
         "goal_id": GOAL_ID,
         "available_capabilities": ["network", "material_lifecycle"],
     }
-    # Compare one observation time without hiding freshness or coverage fields.
-    with patch.object(
-        collection_read_model, "now_utc_iso", return_value="2026-01-01T00:00:00Z"
+    # Both adapters sample time independently; keep complete freshness/provider
+    # comparisons deterministic even when the two reads cross a wall-clock second.
+    with (
+        patch.object(
+            collection_read_model, "now_utc_iso", return_value="2026-01-01T00:00:00Z"
+        ),
+        patch.object(
+            coordination_observation, "now_local_iso", return_value="2026-01-01T00:00:00Z"
+        ),
     ):
         wrapper = status_module.collect_status(**kwargs)
         direct = collection_read_model.collect_status(
