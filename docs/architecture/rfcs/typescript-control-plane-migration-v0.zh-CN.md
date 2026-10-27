@@ -2060,3 +2060,5 @@ SQLite 中位数略升，收益不能外推为全面加速。这只资格化本�
 ### settlement 定位的 Turn journal 回读
 
 原生查询统一拥有恢复定位和 completion capability 证据，并共享写入／回读的状态阶段约束。兼容变更、实测代价、验证范围与 facade 退出条件见 [2026-10-02 检查点](ledger/typescript-control-plane-migration-v0/2026-10-02-turn-journal-readback.zh-CN.md)。
+
+- 摘要展示最终 head 验收与历史尾延迟批次：[2026-10-27 后续记录](ledger/typescript-control-plane-migration-v0/2026-10-27-todo-summary-qualification.zh-CN.md)。
