@@ -181,7 +181,7 @@ def test_captured_vision_contract_preserves_closeout_and_original_observation(
     plan = build_loopx_turn_plan(envelope, host="dsh", execution_mode="isolated-headless",
                                  turn_instance_id="vision-contract-turn")
     assert plan["route"]["would_invoke_host"] is True
-    assert envelope["action"]["delivery_allowed"] is True
+    assert envelope["action"]["delivery_allowed"] is (not replan)
     request = {"schema_version": "loopx_turn_host_request_v0", "turn_key": plan["transaction"]["turn_key"],
                "route": "replan_required" if replan else "primary_delivery", "turn_envelope": envelope}
     result = subprocess.run(command, input=json.dumps(request), text=True, capture_output=True, timeout=30)
