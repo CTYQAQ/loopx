@@ -46,3 +46,12 @@ SQLite Todo，不修改活跃 Goal：
 计时期间不并行执行本 Agent 的重型构建/测试。原始私有记录留在 Git 外，只发布合成
 汇总。单个合成负载不能证明持续大 Goal 性能。任何未达标保留 owner-review hold；
 微基准更快不能豁免完整 CLI 失败。
+
+## 同步随后合入的主线
+
+最终集成基线更新为 `17b2a0f9b818dc6e6fe77ccc567b20ff91b3bc40`。主线已包含
+#7459 的 canonical fixture 修复，也改动了真实 quota/context 路径。冲突解决沿用
+共同 fixture 修复，不重复补丁；本 PR 保留 File/SQLite 的 receipt-version 回归。
+此前 `ff8d9932294e9004b9ffeb2fb473d00354397eb8` 对照和
+`e7a54b8f32a648124133b02e11404b75a421fdac` head 保留为历史证据。最终 PR 回复
+记录新基线与新精确 head 的正确性、安装和匹配性能复测，不改写旧批次。

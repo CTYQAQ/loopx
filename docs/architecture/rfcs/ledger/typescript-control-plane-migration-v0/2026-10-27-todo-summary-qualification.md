@@ -59,3 +59,15 @@ Do not overlap owned heavy builds/tests with timed cohorts. Keep private raw
 captures outside Git and publish only synthetic aggregates. A single synthetic
 workload does not establish sustained large-Goal performance. Any miss retains
 an owner-review hold; a faster microbenchmark cannot waive a full-CLI failure.
+
+## Rebase onto the subsequently merged main
+
+The final integration base advances to
+`17b2a0f9b818dc6e6fe77ccc567b20ff91b3bc40`. Main now includes #7459's
+canonical fixture repair and changes to the real quota/context path. The
+conflict resolution keeps that shared fixture repair instead of duplicating it;
+this PR retains the File/SQLite receipt-version regression. The earlier
+`ff8d9932294e9004b9ffeb2fb473d00354397eb8` comparison and
+`e7a54b8f32a648124133b02e11404b75a421fdac` head remain historical evidence.
+The final PR reply records fresh exact-head correctness, package and matched
+performance results for the new base. No earlier cohort is rewritten.
