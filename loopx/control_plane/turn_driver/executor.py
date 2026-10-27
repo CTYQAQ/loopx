@@ -1434,6 +1434,34 @@ def _typed_settlement_stage(
 
 
 @single_executor_per_turn_lane(execution_payload)
+def _prepare_host_decision_capture(
+    plan: Mapping[str, Any],
+    request: Mapping[str, Any],
+    *,
+    journal_path: Path,
+    decision: Mapping[str, Any] | None,
+    journal: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Restore the original captured input without replacing session recovery.
+
+    Capture validation and binding stay with their existing owner. This IO
+    adapter only installs that owner's original context into the Host request.
+    """
+    from .decision_capture import prepare_turn_decision_capture
+
+    original_plan = journal["plan"] if journal is not None else plan
+    captured = prepare_turn_decision_capture(
+        original_plan, journal_path=journal_path,
+        decision=decision, existing_journal=journal is not None,
+    )
+    restored = {**request, "turn_envelope": captured["turn_envelope"]}
+    if isinstance(captured.get("work_contract"), Mapping):
+        restored["work_contract"] = dict(captured["work_contract"])
+    else:
+        restored.pop("work_contract", None)
+    return captured, restored
+
+
 def run_loopx_turn_once(
     plan: Mapping[str, Any],
     *,
