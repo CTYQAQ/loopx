@@ -8,6 +8,45 @@ import type {JsonObject} from "../effect_program.ts";
 import {jsonObject} from "../runtime_decode.ts";
 import {TODO_CANONICAL_READ_RECORD_FIELDS} from "../coordination/coordination_state_contract.ts";
 
+type ProjectionPath = (string | number)[];
+type ProjectionChange = {path: ProjectionPath; value: unknown} |
+  {path: ProjectionPath; from: ProjectionPath} | {path: ProjectionPath; remove: true};
+
+/** Return only display edits, never round-trip unrelated source facts through
+ * JavaScript numbers. References address the immutable input, including bodies
+ * moved into source_projection. Python applies these edits without policy. */
+export function contextProjectionChanges(source: JsonObject, projected: JsonObject): JsonObject {
+  const paths = new WeakMap<object, ProjectionPath>(), changes: ProjectionChange[] = [];
+  const index = (value: unknown, path: ProjectionPath): void => {
+    if (value === null || typeof value !== "object" || paths.has(value)) return;
+    paths.set(value, path);
+    if (Array.isArray(value)) value.forEach((item, i) => index(item, [...path, i]));
+    else Object.entries(value).forEach(([key, item]) => index(item, [...path, key]));
+  };
+  index(source, []);
+  const visit = (before: unknown, after: unknown, path: ProjectionPath): void => {
+    if (Object.is(before, after)) return;
+    const from = after !== null && typeof after === "object" ? paths.get(after) : undefined;
+    if (from) { changes.push({path, from}); return; }
+    if (Array.isArray(after)) {
+      const old = Array.isArray(before) ? before : [];
+      if (!Array.isArray(before)) changes.push({path, value: []});
+      after.forEach((value, i) => visit(old[i], value, [...path, i]));
+      // Remove from the end so earlier indices retain their original meaning.
+      for (let i = old.length - 1; i >= after.length; i--) changes.push({path: [...path, i], remove: true});
+    } else if (jsonObject(after)) {
+      const old = jsonObject(before) ?? {};
+      if (!jsonObject(before)) changes.push({path, value: {}});
+      for (const key of Object.keys(old))
+        if (!Object.hasOwn(after as JsonObject, key)) changes.push({path: [...path, key], remove: true});
+      for (const [key, value] of Object.entries(after as JsonObject))
+        visit(Object.hasOwn(old, key) ? old[key] : undefined, value, [...path, key]);
+    } else changes.push({path, value: after});
+  };
+  visit(source, projected, []);
+  return {changes};
+}
+
 const AGENT_LIMITS: Readonly<Record<string, number>> = {
   first_executable_items: 3, unclaimed_priority_open_items: 3,
   monitor_due_items: 1, monitor_capability_blocked_due_items: 2,
@@ -32,7 +71,9 @@ const DIAGNOSTIC_LANES = new Set([
   "recent_completed_advancement_items", "completed_without_successor_items",
   "other_agent_bound_user_action_items",
 ]);
-const ITEM_FIELDS = new Set<string>([...TODO_CANONICAL_READ_RECORD_FIELDS, "index"]);
+// The read codec adds these display fields to canonical records. Retain them
+// on visible items; they do not make a known diagnostic list a future schema.
+const ITEM_FIELDS = new Set<string>([...TODO_CANONICAL_READ_RECORD_FIELDS, "index", "content_revision"]);
 function knownItems(items: unknown[]): boolean {
   const scalar = (value: unknown) => value === null || ["string", "number", "boolean"].includes(typeof value);
   return items.every(value => {

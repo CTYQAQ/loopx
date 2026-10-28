@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any
 
 from .decision_summary import compact_quota_decision
@@ -554,9 +555,47 @@ def _reference_context(
         return payload
     from .turn_envelope import _turn_envelope_result
 
-    return _turn_envelope_result("reference_context", payload=payload,
+    result = _turn_envelope_result("reference_context", payload=payload,
         task_title=task_title, explore_guidance=explore_guidance,
         **({"diagnostics": diagnostics} if diagnostics is not None else {}))
+    # Existing reference-only callers keep their historical wire contract.
+    return result if diagnostics is None else _apply_context_projection_changes(payload, result)
+
+
+def _apply_context_projection_changes(
+    source: dict[str, Any], result: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply typed display edits to the original Python facts, without policy."""
+    if set(result) != {"changes"} or not isinstance(result["changes"], list):
+        raise RuntimeError("TypeScript context projection must return changes")
+    # JSON transport has no aliasing. Keep Python's exact numeric values while
+    # separating repeated caller-owned objects before applying path edits.
+    projected = json.loads(json.dumps(source, allow_nan=False))
+    try:
+        for change in result["changes"]:
+            path = change["path"]
+            if not isinstance(path, list) or not path:
+                raise ValueError("projection path must be nonempty")
+            parent: Any = projected
+            for key in path[:-1]:
+                parent = parent[key]
+            key = path[-1]
+            if "remove" in change:
+                del parent[key]
+                continue
+            if "from" in change:
+                value: Any = source
+                for part in change["from"]:
+                    value = value[part]
+            else:
+                value = change["value"]
+            if isinstance(parent, list) and key == len(parent):
+                parent.append(deepcopy(value))
+            else:
+                parent[key] = deepcopy(value)
+    except (KeyError, IndexError, TypeError, ValueError) as error:
+        raise RuntimeError("Invalid TypeScript context projection changes") from error
+    return projected
 
 
 def compact_quota_should_run_cli_payload(

@@ -1028,6 +1028,47 @@ def test_readonly_plan_projects_all_rows_in_one_typed_call(monkeypatch):
         assert result["agent_todos"]["payload_compaction"]["full_detail_cold_path"] == "quota plan --include-detail agent-todos"
 
 
+@pytest.mark.parametrize("mode", ["should-run", "status", "plan"])
+@pytest.mark.parametrize("expanded", [None, "agent", "user"])
+def test_diagnostic_transport_preserves_source_number_spelling_and_precision(mode, expanded):
+    from loopx.control_plane.quota.cli_projection import compact_quota_plan_cli_payload
+
+    facts = {"compute": 1.0, "negative_zero": -0.0, "precise": 2**60 + 1,
+        "nested": [None, False, 0, {"value": 3.0, "tail": "Keep this final stop."}]}
+    summary = {"schema_version": "todo_summary_v0", "backlog_items": _items(5, prefix="cold"),
+        "future_items": [facts], "first_open_items": _items(4, prefix="user"),
+        "first_executable_items": _items(4, prefix="agent"),
+        "payload_compaction": {"schema_version": "upstream_v1", "facts": facts}}
+    row = {"quota": facts, "agent_todos": summary, "user_todos": summary}
+    payload = ({"mode": mode, "quota": facts, "agent_todo_summary": summary,
+        "user_todo_summary": summary} if mode == "should-run" else
+        {"mode": mode, "groups": {"eligible": [row]}, "next_automatic_turn": row})
+    encoded = json.dumps(payload, ensure_ascii=False)
+
+    def project(value):
+        if mode == "should-run":
+            return compact_quota_should_run_cli_payload(value,
+                include_todo_summary_detail=expanded == "agent",
+                include_user_todo_summary_detail=expanded == "user")
+        return compact_quota_plan_cli_payload(value,
+            detail_sections=frozenset({f"{expanded}-todos"}) if expanded else frozenset())
+
+    result = project(payload)
+    rows = [result] if mode == "should-run" else [result["groups"]["eligible"][0], result["next_automatic_turn"]]
+    for actual in rows:
+        assert json.dumps(actual["quota"], ensure_ascii=False) == json.dumps(facts, ensure_ascii=False)
+        for role in ("agent", "user"):
+            value = actual[f"{role}_todo_summary" if mode == "should-run" else f"{role}_todos"]
+            assert json.dumps(value["future_items"], ensure_ascii=False) == json.dumps([facts], ensure_ascii=False)
+            if role == expanded:
+                assert json.dumps(value, ensure_ascii=False) == json.dumps(summary, ensure_ascii=False)
+            else:
+                assert "backlog_items" not in value
+                assert json.dumps(value["payload_compaction"]["source_projection"], ensure_ascii=False) == json.dumps(summary["payload_compaction"], ensure_ascii=False)
+    assert json.dumps(payload, ensure_ascii=False) == encoded
+    assert json.dumps(project(result), ensure_ascii=False) == json.dumps(result, ensure_ascii=False)
+
+
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
 @pytest.mark.parametrize("mode", ["status", "plan"])
 def test_public_readonly_projection_preserves_canonical_work_and_detail(tmp_path, monkeypatch, provider, mode):

@@ -548,6 +548,12 @@ original summaries. Upstream compaction remains visible as `source_projection`.
 Status/plan adds one projection request; Agent/vision detail still needs one
 when the User summary remains compact. Explicit full Todo roles bypass that
 diagnostic request. These transport costs must be included in comparisons.
+Diagnostic replies carry only display edits and references to the immutable
+input. The Python adapter applies them to its original facts, preserving float
+spelling, negative zero, large-integer precision and relocated upstream metadata.
+Reference-only callers keep their existing transport; no Python compaction
+decision is reintroduced. The read codec's `content_revision` is recognized as
+known display metadata and remains on retained items.
 The legacy detail command observes current state and cannot recover an earlier
 decision. The scoped native consumer and original-capture reference are a separate
 [controller integration proposal](https://github.com/loopx-project/loopx/pull/7430),
@@ -563,6 +569,10 @@ status/plan 新增一次投影请求；Agent/vision 详情若仍压缩 User 摘�
 显式展开两类 Todo 则跳过诊断投影。这些传输成本须计入比较。scoped 原生
 消费者及同 capture 引用属于单独的 controller 集成提案 #7430，复用同一 owner。
 此处不改准入、claim、lease、结算或原生默认，也不代表完整效率收益通过。
+诊断回复只传展示变更及不可变输入的引用；Python adapter 在原始事实上应用，
+保留浮点表示、负零、大整数精度及迁移后的上游元数据。仅引用的旧调用方保持
+原传输行为，不重新引入 Python 裁剪决定。读取 codec 已有的 `content_revision`
+属于已知展示元数据，在保留条目上仍完整存在。
 
 The selected-Todo display body is display-only and may be bounded; the typed
 owner validates the exact read against selected identity, lifecycle, claim and

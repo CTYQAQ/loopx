@@ -1,4 +1,4 @@
-import {projectQuotaDiagnostics} from "./diagnostic_projection.ts";
+import {contextProjectionChanges, projectQuotaDiagnostics} from "./diagnostic_projection.ts";
 import type { LoopXTurnRouteValue } from "../turn_driver/turn_contract_generated.ts";
 import { EffectiveAction, type QuotaEffectiveActionValue } from "./effective_action.generated.ts";
 import { createHash } from "node:crypto";
@@ -1456,11 +1456,12 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
     return {ok: true};
   }
   if (operation === "reference_context") {
-    let payload = requireJsonObject(request.payload, "quota decision");
+    const source = requireJsonObject(request.payload, "quota decision");
+    let payload = source;
     if (jsonObject(request.diagnostics)) payload = projectQuotaDiagnostics(payload, request.diagnostics as JsonObject);
     if (request.task_title === true) payload = referenceCurrentTaskTitle(payload);
     if (request.explore_guidance === true) payload = referenceExploreGuidance(payload);
-    return payload;
+    return jsonObject(request.diagnostics) ? contextProjectionChanges(source, payload) : payload;
   }
   if (operation === "build") return buildTurnEnvelope(request);
   if (operation === "context_delivery") return prepareContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);
