@@ -136,6 +136,17 @@ export const researchRouteReadingScenario = {
           const question = reader.locator(".research-reader-content > .research-reader-question > summary > span");
           assert.equal(await question.innerText(), fullTitle, "One route activation reveals the complete original question");
           assert(await question.evaluate(element => element.scrollHeight <= element.clientHeight + 1 && element.scrollWidth <= element.clientWidth + 1), "Requested question text is not clipped");
+          if (!endpoint) {
+            const summary = reader.locator(".research-reader-question > summary");
+            await summary.focus();
+            await page.keyboard.press("Enter");
+            await page.waitForFunction(() => document.activeElement?.classList.contains("research-history-detail"));
+            assert.equal(await reader.locator(".research-reader-question").count(), 0, "Closing the question preserves reader focus without a redundant title row");
+            const context = reader.getByRole("button", {name: language === "zh-CN" ? "完整研究问题" : "Full research question", exact: true});
+            await context.tap();
+            assert.equal(await reader.locator(".research-question-text p").first().innerText(), fullTitle, "Touch can recover the complete question after collapse");
+            await page.keyboard.press("Escape");
+          }
           if (endpoint) {
             await reader.locator("select").selectOption("finding-route-0-end");
             const body = reader.getByText("完整观测：局部质量下降，延迟改善；完整成本和独立验证仍未知。", {exact: true}).first();
@@ -145,10 +156,14 @@ export const researchRouteReadingScenario = {
             assert(box.y >= reading.top - 1 && box.y + Math.min(box.height, lineHeight * 2) <= reading.bottom + 1, "The selected finding begins with readable content inside the reading viewport");
             assert(await body.evaluate(element => parseFloat(getComputedStyle(element).fontSize) >= 16), "Density retains readable finding text");
             assert.match(await reader.locator(".research-finding-exceptions").innerText(), /1/);
-            const context = reader.locator(".research-reader-content > .research-reader-question > summary");
-            await context.click();
-            assert(await context.evaluate(element => element.scrollHeight <= element.clientHeight + 1 && element.scrollWidth <= element.clientWidth + 1), "Full parent context remains one optional activation away");
-            await context.click();
+            assert.equal(await reader.locator(".research-reader-question").count(), 0, "Finding reading does not repeat the parent question in a collapsed title row");
+            const context = reader.getByRole("button", {name: language === "zh-CN" ? "完整研究问题" : "Full research question", exact: true});
+            await context.focus();
+            const fullQuestion = reader.locator(".research-question-text p").first();
+            assert.equal(await fullQuestion.innerText(), fullTitle, "Full parent context remains available through keyboard focus");
+            assert(await fullQuestion.evaluate(element => parseFloat(getComputedStyle(element).fontSize) >= 16 && element.scrollWidth <= element.clientWidth + 1), "Original question remains readable without horizontal scrolling");
+            await page.keyboard.press("Escape");
+            assert(await context.evaluate(element => element === document.activeElement), "Dismissing question help keeps focus at its trigger");
           }
           if (endpoint && language === "zh-CN" && width !== 768) await page.screenshot({path: resolve(outputDir, `research-route-reading-detail-${width}.png`), animations: "disabled"});
           await page.keyboard.press("Escape");
@@ -181,7 +196,9 @@ export const researchRouteReadingScenario = {
       await reader.getByRole("button", {name: "Whole graph", exact: true}).click();
       await page.goBack();
       await reader.waitFor();
-      assert.match(await reader.locator(".research-reader-question").innerText(), /末端研究/);
+      await reader.getByRole("button", {name: "Full research question", exact: true}).click();
+      assert.match(await reader.locator(".research-question-text").innerText(), /末端研究/);
+      await page.keyboard.press("Escape");
       // A grouped reading context survives the document/URL boundary, rather
       // than living only in an in-memory opener ref. Navigation is a read.
       for (const locale of ["zh-CN", "en"]) for (const width of [1440, 390]) {
