@@ -57,7 +57,8 @@ narrative is never classified by headings or clipped to a size budget. Read all
 delivered context and remaining reads before dependent work; changed sources need
 a fresh guard. Enabled scoped acceptance does not replace original Goal intent.
 
-Explicitly enabled native context delivery requests complete Goal material before
+The complete Turn writer and explicitly enabled native context delivery request
+complete Goal material before
 capture. For an unmarked or mixed Goal, the registered-source adapter supplies
 the entire original UTF-8 text with its full-file revision and `full_source: true`.
 The existing TypeScript interaction owner checks that digest before fulfilling
@@ -71,6 +72,16 @@ current source witnesses and unknown fields remain literal. Cold delivery and
 context-loss recovery retain the complete original text, including arbitrary
 sections, comments and final stops. This does not establish model retention,
 execution authority, token savings or accepted outcome gains.
+
+The internal `complete_goal_v1` acknowledgement prevents an older runtime from
+silently ignoring this requirement. Automatic complete-contract business-work Host dispatch
+uses `host_dispatch_context`: pending or invalid Goal material rejects before
+loading the Host. The `host_context` metadata read remains available for
+historical interpretation and result finalization. Saved contracts are not
+rewritten; a historical pending Goal read cannot become fulfilled merely by
+restoring its capture. This change neither grants execution permission nor
+establishes enforcement for other pending capability reads. Replan material-reading
+invocations retain their existing staged reader and work restrictions.
 
 The Goal availability adapter still reads and UTF-8-validates the complete file
 and hashes all bytes for its revision. With native context delivery off, only the path and revision of unmarked or mixed sources cross the
