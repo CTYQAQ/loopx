@@ -219,6 +219,92 @@ function canonicalHash(value: unknown): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(canonicalValue(value)), "utf8").digest("hex")}`;
 }
 
+function resolveExploreGuidance(payload: JsonObject, context: JsonObject): JsonObject {
+  if (!Array.isArray(context.sources)) return context;
+  const steps = object(object(object(payload.interaction_contract).cli_channel).settlement_plan).ordered_steps;
+  return {...context, sources: context.sources.map(value => {
+    const source = object(value), content = object(source.content), graph = object(content.graph);
+    if (source.kind !== "explore_turn_context" || !Object.hasOwn(graph, "result_writeback_guidance_ref")) return value;
+    const reference = graph.result_writeback_guidance_ref;
+    const match = typeof reference === "string"
+      ? /^\$\.interaction_contract\.cli_channel\.settlement_plan\.ordered_steps\[(0|[1-9]\d*)\]\.optional_attachments\[(0|[1-9]\d*)\]\.guidance$/.exec(reference) : null;
+    const step = object(match && Array.isArray(steps) ? steps[Number(match[1])] : null);
+    const attachment = object(match && Array.isArray(step.optional_attachments)
+      ? step.optional_attachments[Number(match[2])] : null);
+    if (Object.hasOwn(graph, "result_writeback_guidance") || step.kind !== "durable_writeback" ||
+        attachment.capability_id !== "explore" || Object.hasOwn(attachment, "guidance_ref") ||
+        typeof attachment.guidance !== "string" || !attachment.guidance) {
+      throw new EffectRuntimeRequestError("Explore guidance reference must resolve to one inline durable-writeback Explore attachment");
+    }
+    delete graph.result_writeback_guidance_ref;
+    return {...source, content: {...content, graph: {...graph, result_writeback_guidance: attachment.guidance}}};
+  })};
+}
+
+function referenceExploreGuidance(payload: JsonObject): JsonObject {
+  const interaction = object(payload.interaction_contract), agent = object(interaction.agent_channel);
+  const context = object(agent.work_context);
+  resolveExploreGuidance(payload, context); // Validate existing references, including idempotent reads.
+  if (!Array.isArray(context.sources)) return payload;
+  const steps = object(object(interaction.cli_channel).settlement_plan).ordered_steps;
+  if (!Array.isArray(steps)) return payload;
+  const owners = new Map<string, string>();
+  steps.forEach((value, stepIndex) => {
+    const step = object(value);
+    if (step.kind !== "durable_writeback" || !Array.isArray(step.optional_attachments)) return;
+    step.optional_attachments.forEach((value, attachmentIndex) => {
+      const attachment = object(value), guidance = attachment.guidance;
+      if (attachment.capability_id !== "explore" || Object.hasOwn(attachment, "guidance_ref") ||
+          typeof guidance !== "string" || !guidance || owners.has(guidance)) return;
+      owners.set(guidance, `$.interaction_contract.cli_channel.settlement_plan.ordered_steps[${stepIndex}].optional_attachments[${attachmentIndex}].guidance`);
+    });
+  });
+  const sources = context.sources.map(value => {
+    const source = object(value), content = object(source.content), graph = object(content.graph);
+    const guidance = graph.result_writeback_guidance;
+    const reference = typeof guidance === "string" ? owners.get(guidance) : undefined;
+    if (source.kind !== "explore_turn_context" || typeof guidance !== "string" || !reference ||
+        Buffer.byteLength(JSON.stringify(guidance), "utf8") <= Buffer.byteLength(reference, "utf8") + 8) return value;
+    delete graph.result_writeback_guidance;
+    return {...source, content: {...content, graph: {...graph, result_writeback_guidance_ref: reference}}};
+  });
+  return {...payload, interaction_contract: {...interaction, agent_channel: {...agent,
+    work_context: {...context, sources}}}};
+}
+
+function currentTaskTitleOwner(payload: JsonObject): {index: number; todo: JsonObject} | null {
+  const lane = object(payload.agent_lane_next_action), selected = object(payload.selected_todo);
+  const context = object(object(object(payload.interaction_contract).agent_channel).work_context);
+  if (context.complete !== true || context.selected_todo_text_verified !== true ||
+      typeof lane.todo_id !== "string" || !lane.todo_id || selected.todo_id !== lane.todo_id ||
+      !Array.isArray(context.sources)) return null;
+  const matches = context.sources.map((value, index) => ({source: object(value), index}))
+    .filter(({source}) => source.source === "selected_todo");
+  if (matches.length !== 1) return null;
+  const {source, index} = matches[0], content = object(source.content), todo = object(content.todo);
+  if (content.ok !== true || content.matched !== true || content.ambiguous === true ||
+      content.read_complete === false || typeof todo.text !== "string" ||
+      todo.archive_state === "archive" || todo.status === "done" || todo.todo_id !== lane.todo_id) return null;
+  return {index, todo};
+}
+
+function referenceCurrentTaskTitle(payload: JsonObject): JsonObject {
+  const lane = object(payload.agent_lane_next_action), title = lane.title;
+  // Preserve historical caller-owned references; complete readers validate them
+  // separately. Display-only omission of a title already in a label stays local.
+  if (typeof title !== "string" || Object.hasOwn(lane, "title_ref")) return payload;
+  const owner = currentTaskTitleOwner(payload);
+  if (!owner) return payload;
+  for (const field of ["text", "title"]) {
+    if (owner.todo[field] !== title || Object.hasOwn(owner.todo, `${field}_ref`)) continue;
+    const reference = `$.interaction_contract.agent_channel.work_context.sources[${owner.index}].content.todo.${field}`;
+    if (Array.from(JSON.stringify(title)).length <= reference.length + 8) return payload;
+    delete lane.title;
+    return {...payload, agent_lane_next_action: {...lane, title_ref: reference}};
+  }
+  return payload;
+}
+
 function compactFields(
   value: unknown,
   fields: readonly string[],
@@ -355,6 +441,7 @@ function replanGoalContext(payload: JsonObject, reads: JsonObject | null, coreRe
  * Different revisions, other source fields and unavailable context stay intact.
  */
 function replanWorkContext(payload: JsonObject, context: JsonObject): JsonObject {
+  context = resolveExploreGuidance(payload, context);
   const reads = replanReadCommands(payload);
   const core = object(object(object(payload.autonomous_replan_obligation).replan_context).core_goal);
   const acceptance = object(core.acceptance_contract);
@@ -1271,6 +1358,12 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
   if (operation === "consumer_version") {
     assertTurnEnvelopeConsumerVersion(requireJsonObject(request.envelope, "turn_envelope"));
     return {ok: true};
+  }
+  if (operation === "reference_context") {
+    let payload = requireJsonObject(request.payload, "quota decision");
+    if (request.task_title === true) payload = referenceCurrentTaskTitle(payload);
+    if (request.explore_guidance === true) payload = referenceExploreGuidance(payload);
+    return payload;
   }
   if (operation === "build") return buildTurnEnvelope(request);
   if (operation === "context_delivery") return prepareContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);
