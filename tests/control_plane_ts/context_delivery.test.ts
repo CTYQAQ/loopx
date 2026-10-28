@@ -2,7 +2,7 @@ import {createHash} from "node:crypto";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {JsonObject} from "../../loopx/control_plane/effect_program.ts";
-import {compactTodoContextSource, prepareContextDelivery, restoreContextDelivery} from "../../loopx/control_plane/quota/context_delivery.ts";
+import {compactTodoContextSource, OUTCOME_CONTEXT_PROJECTION_SCHEMA, prepareContextDelivery, restoreContextDelivery} from "../../loopx/control_plane/quota/context_delivery.ts";
 
 import {evaluateTurnEnvelope} from "../../loopx/control_plane/quota/turn_envelope.ts";
 import {updateNativeContextLifecycle} from "../../loopx/control_plane/quota/native_context_lifecycle.ts";
@@ -386,7 +386,7 @@ test("relocated immutable records reuse complete subtrees without hiding fresh d
     current: prepareContextDelivery(request)}).context, request.context);
 });
 
-test("relocated evidence overlays keep current controls literal without repeating reference paths", () => {
+for (const projected of [false, true]) test(`relocated evidence overlays preserve literal controls with scoped projection=${projected}`, () => {
   const requirements = Array.from({length: 24}, (_, i) => ({id: `r${i}`,
     description: `Requirement ${i}: ${long}`, status: "unverified", planning_satisfied: false,
     unknown_control: {may_publish: false},
@@ -397,8 +397,12 @@ test("relocated evidence overlays keep current controls literal without repeatin
   const work = {complete: true, sources: [{source: "goal_acceptance", content: {
     provider_revision: "current", goal_acceptance_contract: acceptance}}]};
   // Actual callers relocate acceptance from planning into the admitted source.
-  const original = {planning_horizon: {core_goal: {objective: long, acceptance_contract: acceptance}}};
-  const current = {interaction_contract: {agent_channel: {work_context: work}}};
+  const wrap = (value: JsonObject): JsonObject => projected ? {
+    schema_version: OUTCOME_CONTEXT_PROJECTION_SCHEMA, context: value,
+    unknown_scope_control: {may_publish: false},
+  } : value;
+  const original = wrap({planning_horizon: {core_goal: {objective: long, acceptance_contract: acceptance}}});
+  const current = wrap({interaction_contract: {agent_channel: {work_context: work}}});
   const initial = prepareContextDelivery({context: original, scope, capture_id: "a", surface: "quota_packet"});
   const args = {context: current, scope, capture_id: "b", surface: "quota_packet"};
   const delta = prepareContextDelivery({...args, baseline: initial, retained: {complete: true, target: initial.target}});
@@ -412,7 +416,8 @@ test("relocated evidence overlays keep current controls literal without repeatin
   };
   walk(delta.changes);
   assert.ok(overlays.length > 0, "relocated evidence should share a base with literal current overrides");
-  const path = ["interaction_contract", "agent_channel", "work_context", "sources", 0, "content",
+  if (projected) assert.deepEqual(inline(delta, ["unknown_scope_control"]), {may_publish: false});
+  const path = [...(projected ? ["context"] : []), "interaction_contract", "agent_channel", "work_context", "sources", 0, "content",
     "goal_acceptance_contract", "outcome_requirements"];
   assert.equal(inline(delta, [...path, "revision"]), 1);
   requirements.forEach((row, i) => {

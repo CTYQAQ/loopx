@@ -180,3 +180,67 @@ without losing obligations, then qualify remaining consumers and writer cutover.
 No positive complete-cost diff, default SQLite performance, installed App/model
 retention, token/cache/billing, accepted-outcome or long-horizon benefit is claimed.
 C1 and the separate C2/controller experiment remain open.
+
+## Relocated-context integration
+
+Runtime `167b31e5d078193b9fd73ad6609804e268390972`, rebased onto main
+`f205c02a37d5a668c956733a721af911dcac7fab`, adopts the existing
+[#7528](https://github.com/loopx-project/loopx/pull/7528) codec change at
+`759c16a9cf430bb7442b47dd3a5c3336ffb93666`. The integration keeps main's scoped
+preference binding, native checkpoint fixtures and intelligent-mediation design.
+It does not create another encoder. One exact baseline subtree plus literal
+current overrides replaces repeated paths to unchanged evidence. Unknown and
+current controls remain inline; original capture, identity and recovery stay
+unchanged. A scoped-wrapper regression exercises the same implementation.
+
+A 24-row synthetic relocation compares that runtime with its immutable parent
+`87e216f24f966671d35e035df7ba285248b48bad`. Complete ordinary delta bytes fall
+13,199 → 6,090; the C1 scoped-wrapper delta falls 13,809 → 6,230. Cold/current
+full encodings remain 20,060/20,188 bytes and 20,167/20,295 bytes respectively.
+Both reconstruct exactly; the actual old decoder recovers the same full current
+capture for the new overlay. The original missing-overlay case fails before
+adoption. These are codec observations, excluding model retention, tokens,
+framing, billing and task outcomes.
+
+The unchanged packaged harness is rerun in a new matched cohort against original
+quota `843be494266774b63b3de61d0adf5dd7f4f877a2`. Both arms use the same fixture
+and equal path lengths; their 1,884/1,885 product members match their sources.
+These results belong to this runtime and cohort; the earlier tables remain
+historical observations of their own sources.
+
+| Backend / phase | Context bytes, original → candidate | Stdout bytes | Logical requests | Elapsed ms |
+| --- | ---: | ---: | ---: | ---: |
+| File / cold full | 75,211 → 69,934 | 94,432 → 89,286 | 103 → 102 | 5,961.28 → 5,183.22 |
+| File / warm delta | 40,817 → 43,575 | 57,861 → 60,624 | 99 → 98 | 3,981.29 → 3,592.23 |
+| File / loss recovery | 74,445 → 69,164 | 89,603 → 84,374 | 6 → 6 | 5,052.05 → 5,156.02 |
+| SQLite / cold full | 75,311 → 70,044 | 94,550 → 89,414 | 103 → 102 | 5,205.45 → 6,393.69 |
+| SQLite / warm delta | 40,913 → 43,683 | 57,971 → 60,746 | 99 → 98 | 3,482.77 → 4,216.01 |
+| SQLite / loss recovery | 74,541 → 69,272 | 89,709 → 84,492 | 6 → 6 | 4,649.12 → 5,590.37 |
+
+CLI counts remain 13/9/13. All-five-peer expansion still adds 13,940 context
+bytes, 17,620 stdout bytes and ten CLI/logical requests per candidate phase;
+observed optional-read time ranges from 4,046 to 9,431 ms. Seven negative,
+settlement and readback calls retain 226 logical requests and equal per-backend
+stdout in both arms. Tamper/early-spend rejection, all 24 clauses, same-capture
+recovery, one effect/debit and the open task pass. Four source comparisons keep
+selected work, boundary, horizon, capability gate and portfolio complete; a new
+mutated QA wheel dropping the capability gate is rejected by the real guard and
+reader. No other owned build or test overlaps the timed cohort; host background
+load remains uncontrolled. One observation does not qualify latency or p95.
+
+The final typed selection passes 147 cases and typecheck. The affected Python
+run records 299 passes, 51 optional native/SDK skips and two recovery-text size
+failures in a long temporary namespace. A controlled identical-path comparison
+on immutable main and this runtime reproduces both failures at 2,015 characters;
+neither hook embeds the requirement body, and both retain the original recovery
+command. The normal-path lifecycle suite separately passes all 145 cases. No limit,
+assertion or fixture body was relaxed, and the original failing run is retained.
+The new wheel required rebuilding main's stale frontend bundle before successful
+packaging. The unchanged v4 probe still fails at 27,934 > 13,000 characters.
+
+Relocation redundancy is reduced, while ordinary warm input still grows about
+2.8 KB and all-peer reading remains more expensive. The latter is a different
+remaining C1 composition/metadata gap. Default SQLite performance, installed App
+and model retention, token/cache/billing, accepted outcomes and full long-horizon
+benefit remain unqualified. Continue the existing C1 on that gap and remaining
+consumers; this adoption does not close C1, C2 or the controller experiment.

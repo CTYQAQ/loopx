@@ -213,6 +213,12 @@ Continue C1 on warm composition cost and remaining real consumers with full
 unknown-field/obligation preservation. This is no default promotion or positive
 complete-cost qualification; controller-model and outcome acceptance stay open.
 
+The same integration codec now adopts [#7528](https://github.com/loopx-project/loopx/pull/7528)
+for exact relocated evidence with literal current overrides, including scoped
+context. The ledger records smaller relocation-only deltas alongside the still
+negative ordinary-warm byte comparison; this is shared-owner adoption, not a
+second encoder or default promotion.
+
 Use that RFC’s C1–C9 task/deletion map within the existing work streams: first
 qualify unified single-session inputs, then role binding and shared lifecycle,
 replan/result authoring, executor exchange, benchmark reuse, packaged App
