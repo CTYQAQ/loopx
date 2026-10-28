@@ -257,6 +257,10 @@ operation. Monitoring requires the separate explicit setting below.
 If the host restarts before a native watch observes anything, the original
 idle pump can create one separately correlated Chat continuation. It preserves
 the failed request and uses the same native observation identity and deadline.
+For a bound steward, this also covers a portfolio read explicitly refused
+because its authorization snapshot changed. The exact original failure and a
+single empty `external_authorization_changed` context must both be present;
+other runtime errors or missing, conflicting or unreadable context do not qualify.
 The shared typed admission requires an untouched observation-only request, an
 available original worker lock, complete event/history reads and no pending or
 committed native poll receipt. It rechecks current authority, lease generation
@@ -475,6 +479,15 @@ source. An older Session in the same chat cannot mask an eligible route, and
 a retained report route cannot fall back to another Session or audience.
 Provider, owner and original-message verification still apply. Owner Todo
 notifications retain their existing private-chat route selection.
+
+Worker conclusions from an already recovered original conversation use the
+recorded Core continuation when resolving their private return route. A client
+suffix alone is insufficient: the transport and Core journals must agree on
+the current Session, Turn, source and recovery record. Quota, routing and
+unfinished-work continuations retain the same audience and existing saved-send
+verification; this lookup neither retries model work nor resends an unknown
+provider effect. Missing records, changed identity or revoked grants still
+block delivery.
 
 Portfolio evidence collection finishes before the governed driver captures its
 launch authority. A long read can then observe legitimate registry rewrites
@@ -965,6 +978,15 @@ Core answer must all read back before that period is acknowledged. This Task
 completion receipt is distinct from report/provider publication; it never
 claims an external message was sent. Source and previous-period Tasks may be
 read from canonical completed history after archival.
+
+Completion reconciliation requires one native result matching the complete
+stored Turn result and a strictly readable original message journal. Duplicate
+or conflicting result events, malformed JSON and non-object message records
+leave completion unconfirmed. The calendar retains its window and configuration;
+settings cannot clear that uncertainty as a successful or known failed task.
+Once the original records are readable and unambiguous again, a restarted host
+can acknowledge that same result without another model execution or answer,
+then admit a later independent period. This path does not repair journal bytes.
 
 Before the first deadline, while the Session has accepted user work, or while
 the schedule is disabled, this path starts no task model. Ordinary calendar

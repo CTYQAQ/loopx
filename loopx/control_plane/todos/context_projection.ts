@@ -11,6 +11,7 @@ import { requireBoolean, requireInteger, requireJsonObject } from "../runtime_de
 import { canonicalAuthorityJson } from "../coordination/authority_store_codec.ts";
 import {compactThinTodoRead, compactTodoReadSummary, compactThinTodoReadSummary} from "./read_presentation.ts";
 import {TODO_DECISION_SCOPE_OUTCOME_SCHEMA_VERSION} from "./user_completion_types.ts";
+import {removedTodoContinuationPolicy} from "./legacy_continuation_policy_migration.ts";
 
 // A read lens over canonical records, shared by global and Goal conversations.
 // These are existing Todo facts, not dependency evaluation or execution grants.
@@ -222,7 +223,7 @@ function compactSummaryRecord(item: JsonObject, body: unknown): JsonObject {
     decision_scope: readScope(row.decision_scope), required_decision_scopes: readScopes(row.required_decision_scopes),
     decision_outcome: outcome(token("decision_outcome")), decision_scope_outcomes: outcomes,
     excluded_agents: readExcludedAgents(row.excluded_agents),
-    removed_continuation_policy: ["primary_review", "review_handoff"].includes(token("removed_continuation_policy").toLowerCase()) ? token("removed_continuation_policy").toLowerCase() : null,
+    removed_continuation_policy: removedTodoContinuationPolicy(token("removed_continuation_policy")),
     replan_obligation_id: /^replan-[a-f0-9]{16}$/.test(token("replan_obligation_id")) ? token("replan_obligation_id") : null};
   for (const [key, value] of Object.entries(normalized)) {
     if (value !== null && (!Array.isArray(value) || value.length)) row[key] = value; else delete row[key];

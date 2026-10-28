@@ -187,6 +187,17 @@ conclusion, basis currency, independent verification, revisions and unknown fiel
 remain literal current input. Changed, removed or reordered evidence reconstructs
 the complete current source; failed or incomplete sources retain full delivery.
 
+The registered preference owner permits exact reuse of its complete instructions,
+statements, source quotes and source references. Each read still supplies the
+current revision, membership, keys, lifecycle state, expiry, operation lineage
+and unknown fields literally; an empty view replaces earlier preferences.
+The existing scope-less preference hook uses the validated capture's exact
+Goal/Agent binding, without adding fields to ordinary/default-off producer output
+or parsing its read command. Explore retains its explicit scoped hook identity.
+Unknown, failed, incompatible or ambiguous hook views stay complete. A changed
+scope or lost baseline still selects full delivery; reuse never makes a retired
+or expired preference actionable or grants authority.
+
 Object edits may group complete current fields in `values`, alongside recursive
 `changed` edits and `removed` keys. Array edits use exact indices in `items` and
 `values`, with `length` for resizing. These literals are present in the current
@@ -199,8 +210,17 @@ object keys or exact array indices in the immutable base capture. This avoids
 resending identical authoring and evidence records when task binding or source
 ordering moves them to another field. The reference copies the complete exact
 value, never a similar value or one from the current patch. A subtree containing
-any field required as current input cannot use a whole-subtree reference. The
-codec chooses a reference only when smaller than its literal or recursive edit.
+any field required as current input cannot use a bare whole-subtree reference.
+It may instead pair `from` with `edit`: copy the exact base value, then apply
+the edit to that copy. Every current and unknown control still appears literally
+in the edit. Nested `from` paths remain rooted in the original immutable base,
+never the edited copy. This avoids repeating a long reference path for each
+unchanged requirement when an admitted reader relocates a complete source.
+The codec chooses this overlay only when smaller than the ordinary recursive
+edit or complete current literal; its instructions appear only when used.
+Readers validate the exact current change tree and complete reconstructed digest;
+removing a required current override therefore recovers the current full capture.
+Older readers recover the same full capture for an unsupported overlay.
 Current and unknown controls remain inline. Older string-only readers recover
 the current full capture for an unsupported structured reference. Missing,
 malformed or incompatible references recover the same full current capture;
@@ -287,8 +307,12 @@ recovery without another admission. Inline and continuation pages use the same
 64000-byte output budget, including recovery, instructions, escaping, commands
 and newline. Content shrinks at UTF-8 boundaries to fit that complete stdout;
 captures that fit finish inline. This default does not depend on a shell output
-declaration. Explicit smaller reader budgets remain available to recover a
-truncated range of the same capture. Consume the inline
+declaration. An explicit `--max-page-output-bytes` also bounds the initial enabled
+`should-run` or `context-project` frame, its continuations and full-recovery
+command. For example, append `--max-page-output-bytes 7900` to the existing guard
+command for a smaller tool-output budget. This does not change host history
+limits; a batch must fit their aggregate budget too. Explicit smaller reader
+budgets remain available to recover a truncated range of the same capture. Consume the inline
 page before following next_command; when the retained-history limit is unknown,
 read one bounded output at a time. This is not a guarantee of model retention.
 Forward exec stdout directly in code mode. Repeating the packet in
@@ -626,7 +650,8 @@ arguments also defaults to 64000 content bytes under a 64000-byte output cap.
 Markdown retains its 4096-byte content default. Explicit page/output arguments
 retain their prior semantics; a page above 8192 bytes still requires a sufficient
 output cap, within the existing capture limit. The JSON-only
-`--max-page-output-bytes` shrinks content at UTF-8 boundaries and persists in
+`--max-page-output-bytes` also bounds the initial enabled native guard/projection
+frame; it shrinks content at UTF-8 boundaries and persists in
 `next_command`, including for explicitly smaller same-capture recovery. An
 insufficient cap returns an error without a zero-progress page; increase it for
 the same capture. Error messages are not subject to an impossible page limit.
@@ -659,7 +684,10 @@ input retention.
 请求 64000 字节正文；Markdown 保留 4096 字节正文默认值。显式分页/输出参数保留
 原有语义：超过 8192 字节的页仍须足够的输出上限，且不超过既有 capture 限制。
 JSON 专用参数 `--max-page-output-bytes` 按 UTF-8 边界缩减正文，并在 `next_command`
-中保留，显式更小的同捕获恢复也一样。上限不足时返回错误，不返回无进展分页；
+中保留，也约束开启原生投递的 `should-run`／`context-project` 首次输出及完整恢复命令。
+例如在已有 guard 命令后追加 `--max-page-output-bytes 7900`；省略时仍为 64000 字节。
+该上限不修改宿主历史容量，批量输出还须满足总预算。显式更小的同捕获恢复也一样。
+上限不足时返回错误，不返回无进展分页；
 增大上限后重读同一捕获。错误消息不受无法满足的分页上限限制。
 读取器不修改宿主或保留历史设置。历史 Codex 0.162.1 定向验证采用 10,000 token 历史
 设置和 12,000 token code-mode 输出预算，每次直接转发一份 stdout；该观察不证明
