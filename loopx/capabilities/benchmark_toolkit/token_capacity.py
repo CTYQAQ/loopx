@@ -463,12 +463,13 @@ def configure_benchmark_token_capacity(
     observed_at: str | None = None,
 ) -> dict[str, Any]:
     target = Path(path).expanduser()
-    timestamp = _timestamp(observed_at or _now_iso(), field="observed_at")
     compact_policy = normalize_benchmark_token_capacity_policy(policy)
 
     def build(
         current: Mapping[str, Any] | None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        # Executed builds sample implicit time only after acquiring the state lock.
+        timestamp = _timestamp(observed_at or _now_iso(), field="observed_at")
         if current is None:
             configured_at = timestamp
             samples: list[dict[str, Any]] = []
@@ -528,11 +529,11 @@ def observe_benchmark_token_usage(
 ) -> dict[str, Any]:
     target = Path(path).expanduser()
     compact_sample = normalize_benchmark_token_usage_sample(sample)
-    timestamp = _timestamp(recorded_at or _now_iso(), field="recorded_at")
 
     def build(
         current: Mapping[str, Any] | None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        timestamp = _timestamp(recorded_at or _now_iso(), field="recorded_at")
         if current is None:
             return (
                 {
@@ -629,7 +630,6 @@ def record_benchmark_token_capacity_rejection(
     observed_at: str | None = None,
 ) -> dict[str, Any]:
     target = Path(path).expanduser()
-    timestamp = _timestamp(observed_at or _now_iso(), field="observed_at")
     if retry_after_seconds is not None:
         retry_after_seconds = _bounded_token_int(
             retry_after_seconds,
@@ -641,6 +641,7 @@ def record_benchmark_token_capacity_rejection(
     def build(
         current: Mapping[str, Any] | None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        timestamp = _timestamp(observed_at or _now_iso(), field="observed_at")
         if current is None:
             return (
                 {
@@ -853,11 +854,11 @@ def admit_benchmark_token_capacity(
     admitted_at: str | None = None,
 ) -> dict[str, Any]:
     target = Path(path).expanduser()
-    timestamp = _timestamp(admitted_at or _now_iso(), field="admitted_at")
 
     def build(
         current: Mapping[str, Any] | None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        timestamp = _timestamp(admitted_at or _now_iso(), field="admitted_at")
         decision, next_state = _token_admission(
             current,
             run_id=run_id,
@@ -891,11 +892,11 @@ def release_benchmark_token_capacity(
 ) -> dict[str, Any]:
     target = Path(path).expanduser()
     compact_run_id = _token(run_id, field="run_id")
-    timestamp = _timestamp(released_at or _now_iso(), field="released_at")
 
     def build(
         current: Mapping[str, Any] | None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        timestamp = _timestamp(released_at or _now_iso(), field="released_at")
         if current is None:
             return (
                 {

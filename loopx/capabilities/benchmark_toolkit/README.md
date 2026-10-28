@@ -805,11 +805,13 @@ A countable experiment uses the toolkit in this order:
    task-goal hashes before preregistration.
 2. Read the project experiment board before selecting or launching another case.
 3. Read or configure the concurrency envelope and, when provider throughput is
-   shared, the token-capacity envelope; reconcile both reservations with exact
+   shared, the token-capacity envelope; reconcile configured reservations with exact
    runner liveness.
 4. Declare a `run_permission_policy_v0` and preflight the runner boundary.
-5. Atomically reserve token capacity, pass its fresh provider-capacity receipt to
-   case-slot admission, and launch only after both admissions succeed.
+5. Atomically admit a case slot immediately before the independently authorized
+   runner launch. When a token envelope is configured, first record token usage,
+   reserve token capacity, and pass its fresh provider-capacity receipt to case-slot
+   admission; launch only after both admissions succeed.
 6. Upsert the planned or running row, then launch one frozen case/arm; do not expose
    evaluator sources or official feedback.
 7. Capture ATIF tool evidence and a runner-owned runtime attestation.
@@ -822,8 +824,8 @@ A countable experiment uses the toolkit in this order:
 11. Run the independent verifier only after the agent phase.
 12. Reduce the official result through the benchmark-owned scoring path.
 13. Upsert terminal score, countability, effort, treatment fidelity, and insight
-    status; release its case and token reservations; then read the matched-comparison
-    projection.
+    status; release its case reservation and, when configured, its token reservation;
+    then read the matched-comparison projection.
 14. Apply attempt-countability, treatment-fidelity, and matched-pair gates before any
     comparison claim.
 
@@ -906,8 +908,11 @@ envelope, and the receipt does not grant launch authority.
 
 ### Token capacity
 
-When a provider quota is expressed in tokens per minute, configure the goal-scoped
-token envelope as a second admission dimension. The target is an integer fraction
+Token capacity is optional. Campaigns without a configured token envelope retain
+case-slot admission without token observation, reservation, cooldown reporting, or
+release. For a provider quota expressed in tokens per minute, configure the
+goal-scoped token envelope as a second admission dimension; the following token
+steps apply to that configured campaign. The target is an integer fraction
 of the hard quota. Cold-start reserve absorbs short request bursts, and evaluator
 reserve prevents solver backfill from consuming capacity needed to close completed
 runs:

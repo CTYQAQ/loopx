@@ -461,9 +461,9 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "backfill_when_concurrency_status_reports_underfilled",
             "qualify_source_revision_before_each_new_run_admission",
             "qualify_resource_headroom_when_the_envelope_requires_a_receipt",
-            "record_complete_or_explicitly_unmetered_token_usage",
+            "record_complete_or_explicitly_unmetered_token_usage_when_token_capacity_is_configured",
             "tune_target_occupancy_from_fresh_runner_feedback_when_opted_in",
-            "atomically_reserve_token_capacity_before_case_slot_admission",
+            "atomically_reserve_token_capacity_before_case_slot_admission_when_token_capacity_is_configured",
             "atomically_admit_case_slot_before_runner_launch",
             "upsert_preregistered_or_running_row_when_a_run_starts",
             "classify_exact_runtime_observation_during_active_monitor_cycles",
@@ -471,7 +471,7 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             "adjudicate_restricted_access_suspicion_after_solver_and_score_terminal",
             "upsert_terminal_score_countability_effort_and_insight_status",
             "release_case_slot_after_terminal_or_runner_invalid_transition",
-            "release_token_capacity_after_terminal_or_runner_invalid_transition",
+            "release_token_capacity_after_terminal_or_runner_invalid_transition_when_token_capacity_is_configured",
             "read_matched_comparisons_before_selecting_the_next_arm",
         ],
         "board_commands": {
@@ -558,6 +558,9 @@ BENCHMARK_TOOLKIT_CATALOG_ENTRY: dict[str, Any] = {
             ),
         },
         "token_capacity_boundary": (
+            "Only campaigns with a configured token envelope require token usage "
+            "observation, reservation, cooldown reporting, and release; other "
+            "campaigns retain case-slot admission without token configuration. "
             "The token envelope owns aggregate metering, forecast reservations, and "
             "provider cooldown only. The runner owns provider adaptation, complete "
             "coverage, job discovery, launch, rollback, liveness, and termination."
