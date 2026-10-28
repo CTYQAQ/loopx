@@ -212,3 +212,24 @@ capture 恢复、拒绝及一次结算。本次功能验证与其他检查并行
 现有 staged-capture owner，保留恢复绑定与发布顺序。其 1,885 个产品成员与来源一致，
 54 项 Host-capture 及未改动的维护性 ratchet 均通过。原失败保留，没有新增例外或改
 阈值；本次 owner 收敛不把历史温态输入及 v4 预算失败改判通过。
+
+
+下一次集成将保留的 C1 历史 rebase 到 main
+`6f8f476388645fcea2269329d32974b559d490e6`，采用
+[#7557](https://github.com/loopx-project/loopx/pull/7557) 的修复版本
+`eb4e9b970aeb1ffb83e46705d6386cc3a4679ead`。该独立切片原先把整个 Python 输入经
+JavaScript JSON 往返，展示字段之外的 `1.0`、负零及安全整数范围外的值可能改变。
+九项独立的原数值案例在修复前失败。现在共享 typed owner 仅返回展示变更及不可变
+来源引用，Python 在原值上应用，不拥有裁剪规则。独立切片通过 305 项 Python、99 项
+typed、typecheck、Ruff 及其标准 premerge；这些是源码及真实 File/SQLite CLI 检查，
+不是安装或独立验收。
+
+C1 runtime `7f35454b392e09ae574c5065c473ee27b5eee853` 使用逐字节相同的共享诊断
+模块。其验收共享阶段原先克隆所有来源对象，导致搬移数值事实无法沿用来源引用；现在
+只复制发生变化的已注册 carrier 路径。首次集成保留 253 通过、五项失败：三项暴露
+上述克隆问题，两项旧边界夹具不满足完整 Goal 的 dispatch 要求，后两项在前一 C1 head
+也失败。夹具现在将任务保留于规范 provider，完整交付非 Todo 的 Goal 内容，同时
+验证当前原始契约 Host 输入与历史作用域别名及拒绝，没有放宽 dispatch。最终受影响
+集合 258 项 Python 全过；110 项 typed、typecheck 和 Ruff 通过。旧 wheel 与匹配计时
+cohort 仍绑定各自实际版本。本次源码接续不认证新的打包 cohort，不消除温态输入或 v4
+预算失败，也不结清剩余消费者、reader 退役及实际模型／成果的完整成本。

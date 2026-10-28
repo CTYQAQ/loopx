@@ -280,3 +280,31 @@ publication ordering. Its source-matching 1,885-member wheel, all 54 Host-captur
 cases and the unchanged maintainability ratchet pass. The original failure is
 retained; no exception or threshold is added. This owner consolidation does not
 turn the historical warm-input or v4 budget failures into passes.
+
+
+The next integration rebases the retained C1 history onto main
+`6f8f476388645fcea2269329d32974b559d490e6` and adopts the repaired diagnostic
+slice [#7557](https://github.com/loopx-project/loopx/pull/7557) at
+`eb4e9b970aeb1ffb83e46705d6386cc3a4679ead`. That slice originally transported
+the whole Python input through JavaScript JSON: `1.0`, negative zero and integers
+above the safe range could change outside the display fields. Nine independent
+source-number cases fail before repair. The shared typed owner now returns only
+display edits and immutable source references; Python applies them to its original
+values without owning compaction policy. The standalone slice passes 305 Python
+cases, 99 typed cases, typecheck, Ruff and its standard premerge. These are source
+and real File/SQLite CLI checks, not installation or independent acceptance.
+
+C1 runtime `7f35454b392e09ae574c5065c473ee27b5eee853` uses the byte-identical
+shared diagnostic module. Its acceptance-sharing stage formerly cloned every
+source object, defeating references for relocated numeric facts. It now copies
+only changed registered carrier paths. The first integration selection retains
+253 passes and five failures: three expose that clone and two old boundary
+fixtures fail the complete-Goal dispatch requirement, also on the previous C1
+head. The boundary fixtures now keep work in its canonical provider and deliver
+complete non-Todo Goal material; they check both the current original-contract
+Host input and historical scope aliases, including rejection, without relaxing
+dispatch. The final affected selection passes all 258 Python cases; the 110-case
+typed selection, typecheck and Ruff pass. The older wheel and matched timing
+cohorts remain attached to their actual versions. This source follow-through
+does not qualify a new packaged cohort, cure the warm-input or v4 budget failures,
+or close remaining consumers, reader retirement or actual model/outcome costs.
