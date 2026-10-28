@@ -435,6 +435,81 @@ def test_completed_task_and_original_body_reconcile_after_runtime_restart(stewar
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("fault", ["malformed-message", "non-object-message", "conflicting-result", "duplicate-result", "none"])
+def test_calendar_completion_requires_complete_unambiguous_original_return(
+        steward, tmp_path, monkeypatch, provider, fault):
+    from loopx.chat_runtime import ChatRuntimeController
+    from loopx.chat_store import ChatSessionStore
+
+    session, actor, _, capture, workspace, config = setup_task(steward, tmp_path, monkeypatch, provider)
+    point = fixed_clock(monkeypatch)
+    store, runtime, bot, *_ = steward
+    sid = session["session_id"]
+    with settings_server(steward) as request:
+        apply_configuration(request, actor["goal_id"], config)
+        completed = finish(runtime, pump_steward_monitors(runtime)[0])
+        assert completed["response"]["native_loopx"]["status"] == "committed"
+        before = read_cadence_journal(runtime_root=runtime.coordination_runtime_root, goal_id=actor["goal_id"])
+        assert not before.get("task_completion")
+        messages = store._session_dir(sid) / "messages.jsonl"
+        events = store._event_path(sid, completed["turn_id"])
+        originals = {path: path.read_bytes() for path in (messages, events)}
+        if fault.endswith("message"):
+            # The existing body remains readable, but a partial/corrupt journal
+            # cannot establish that it is the complete, unique original reply.
+            messages.write_bytes(originals[messages] + (
+                b'{"message_id":' if fault == "malformed-message" else b'[]\n'))
+        elif fault in {"conflicting-result", "duplicate-result"}:
+            payload = dict(completed["response"]["native_loopx"])
+            if fault == "conflicting-result":
+                payload["summary"] = "A conflicting native result, still labelled committed."
+            store.append_event(sid, completed["turn_id"], kind="native_loopx.result", payload=payload)
+        damaged = {path: path.read_bytes() for path in originals}
+        calls, writes = capture.read_bytes(), list(bot.writes)
+        service = SessionCalendarTasks(runtime)
+        health = service.health(sid)
+        if fault == "none":
+            assert health["completion_verified"]
+        else:
+            assert not health.get("completion_verified"), health
+            assert request("/api/chat/goal-configuration/preview", {
+                "goal_id": actor["goal_id"], "capability_id": "periodic_report", "configuration": None})[0] == 400
+            point[0] += timedelta(days=1)
+            runtime._steward_monitor_next_check.clear()
+            assert not pump_steward_monitors(runtime)
+            assert read_cadence_journal(runtime_root=runtime.coordination_runtime_root, goal_id=actor["goal_id"]) == before
+            assert load_goal_from_registry(runtime.registry_path, actor["goal_id"])["control_plane"]["periodic_report"] == config
+            assert {path: path.read_bytes() for path in originals} == damaged
+            point[0] -= timedelta(days=1)
+        assert capture.read_bytes() == calls and bot.writes == writes
+        assert store.load_turn(sid, completed["turn_id"]) == completed
+        # Restore only disposable fixture bytes, then restart the real adapter.
+        # Product code must neither repair these logs nor replay the old task.
+        for path, content in originals.items():
+            path.write_bytes(content)
+    runtime.close()
+    recovered = ChatRuntimeController(store=ChatSessionStore(store.root.parent), codex_bin=runtime.codex_bin,
+        project_contexts=runtime.project_contexts, registry_path=runtime.registry_path)
+    try:
+        service = SessionCalendarTasks(recovered)
+        assert service.frontier(sid) == (None, False)
+        receipt = read_cadence_journal(runtime_root=recovered.coordination_runtime_root,
+            goal_id=actor["goal_id"])["task_completion"]
+        assert receipt["message_id"] == "managed." + completed["turn_id"] + ".completed"
+        assert capture.read_bytes() == calls and bot.writes == writes
+        assert recovered.store.load_turn(sid, completed["turn_id"]) == completed
+        (workspace / "total.json").write_text('{"total": -1}')
+        point[0] += timedelta(days=1)
+        turn, created = service.frontier(sid)
+        assert created and turn["turn_id"] != completed["turn_id"]
+        assert finish(recovered, turn)["response"]["native_loopx"]["status"] == "committed"
+        assert json.loads((workspace / "total.json").read_text()) == {"total": 42}
+        assert bot.writes == writes
+    finally:
+        recovered.close()
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
 def test_archived_source_and_completed_period_remain_usable_without_replay(steward, tmp_path, monkeypatch, provider):
     session, actor, _, capture, _, config = setup_task(steward, tmp_path, monkeypatch, provider)
     point = fixed_clock(monkeypatch)

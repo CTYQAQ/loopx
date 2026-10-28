@@ -979,6 +979,15 @@ completion receipt is distinct from report/provider publication; it never
 claims an external message was sent. Source and previous-period Tasks may be
 read from canonical completed history after archival.
 
+Completion reconciliation requires one native result matching the complete
+stored Turn result and a strictly readable original message journal. Duplicate
+or conflicting result events, malformed JSON and non-object message records
+leave completion unconfirmed. The calendar retains its window and configuration;
+settings cannot clear that uncertainty as a successful or known failed task.
+Once the original records are readable and unambiguous again, a restarted host
+can acknowledge that same result without another model execution or answer,
+then admit a later independent period. This path does not repair journal bytes.
+
 Before the first deadline, while the Session has accepted user work, or while
 the schedule is disabled, this path starts no task model. Ordinary calendar
 and source reads still have local IO costs. Each actual execution uses native
