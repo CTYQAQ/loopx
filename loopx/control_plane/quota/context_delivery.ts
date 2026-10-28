@@ -1,4 +1,3 @@
-import {completeGoalNarrative} from "../work_items/goal_context_source.ts";
 /** Presentation of immutable quota, Turn and work-context captures. No admission or state writes.
  * Confirmed final input and explicit native-hook continuity assumptions remain
  * distinct; successful capture handoff alone is never retained-input proof. */
