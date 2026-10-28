@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -189,3 +190,142 @@ TestRecoverySequences = RecoverySequences.TestCase
 TestRecoverySequences.settings = settings(
     max_examples=30, stateful_step_count=12, deadline=None, derandomize=True
 )
+
+
+def _writeback_prepare_environment(tmp_path: Path):
+    """Build a reusable single-Turn environment with a SQLite effect provider.
+
+    The writeback provider records every call but never resolves readback, so
+    a crash after ``prepare(DURABLE_WRITEBACK)`` leaves the journal with a
+    prepared effect whose outcome the controller cannot determine.
+    """
+    registry = tmp_path / "project/.loopx/registry.json"
+    _write_source_registry(registry, INSTANCE_A)
+    plan = _source_plan()
+    admission = FirstPartyHostGoalAdmission.for_plan(
+        registry_path=registry,
+        goal_id="fixture-goal",
+        planned_goal_ref=plan["goal_ref"],
+    )
+    db = tmp_path / "provider.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE operations(sequence INTEGER PRIMARY KEY, kind TEXT, ref TEXT, payload TEXT)"
+        )
+    return registry, plan, admission, db
+
+
+def _record(db: Path, kind: str, ref: str = "") -> dict[str, object]:
+    payload = {"ok": True, "appended": True}
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO operations(kind,ref,payload) VALUES(?,?,?)",
+            (kind, ref, json.dumps(payload)),
+        )
+    return payload
+
+
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="crash injection uses SystemExit after a durable write",
+)
+def test_failed_writeback_prepare_blocks_recovery_without_resolver(tmp_path):
+    """A failed settlement with an unresolved prepared effect must block, not loop.
+
+    When ``prepare(DURABLE_WRITEBACK)`` is persisted and the process faults before
+    the provider result is checkpointed, the journal lands in
+    ``failed/writeback_failed`` with ``effect_attempts`` still present. Without a
+    writeback resolver the outcome is unknown, so the next ``retry_failed`` call
+    must raise ``TurnRecoveryBlockedError(reason="host_outcome_unknown")`` instead
+    of re-entering settlement and looping forever.
+    """
+    registry, plan, admission, db = _writeback_prepare_environment(tmp_path)
+
+    def host(_request):
+        _record(db, "host")
+        return _host_result(plan)
+
+    # Crash once the journal records a prepared writeback effect (completed_phases
+    # stops at validation and effect_attempts gains a durable_writeback entry).
+    original = executor._write_journal
+
+    def crash_after_prepare(path, snapshot, **kwargs):
+        phases = snapshot.get("completed_phases", [])
+        attempts = snapshot.get("effect_attempts")
+        original(path, snapshot, **kwargs)
+        if (
+            phases == ["host_execute", "typed_result", "validation"]
+            and isinstance(attempts, dict)
+            and "durable_writeback" in attempts
+        ):
+            raise SystemExit("controlled writeback-prepare fault")
+
+    with patch.object(executor, "_write_journal", crash_after_prepare):
+        with pytest.raises(SystemExit, match="controlled"):
+            run_loopx_turn_once(
+                plan,
+                host_runner=host,
+                project=tmp_path,
+                runtime_root=registry.parent,
+                goal_id="fixture-goal",
+                timeout_seconds=5,
+                execute=True,
+                retry_failed=True,
+                goal_admission=admission,
+                task_validator=_passing_validator,
+                writeback=lambda _result, effect_ref: _record(db, "writeback", effect_ref),
+                spend=lambda effect_ref: _record(db, "spend", effect_ref),
+                scheduler=lambda _spend: {"completed": True, "acknowledged": True},
+            )
+
+    # The first recovery re-enters settlement, calls resolve_prepared, and because
+    # no resolver is wired the provider observation is "unknown"; settlement fails
+    # and the journal transitions to failed/writeback_failed with effect_attempts
+    # still present. The host must not be re-invoked.
+    first_recovery = run_loopx_turn_once(
+        plan,
+        host_runner=host,
+        project=tmp_path,
+        runtime_root=registry.parent,
+        goal_id="fixture-goal",
+        timeout_seconds=5,
+        execute=True,
+        retry_failed=True,
+        goal_admission=admission,
+        task_validator=_passing_validator,
+        writeback=lambda _result, effect_ref: _record(db, "writeback", effect_ref),
+        spend=lambda effect_ref: _record(db, "spend", effect_ref),
+        scheduler=lambda _spend: {"completed": True, "acknowledged": True},
+    )
+    assert first_recovery["status"] == "failed"
+    assert first_recovery["result_kind"] == "writeback_failed"
+
+    # The second recovery must block, not loop back into settlement. Without the
+    # fix TypeScript returns continue(resolve_prepared_effect) for the
+    # failed+effect_attempts state and the call returns another failed result.
+    with pytest.raises(TurnRecoveryBlockedError) as blocked:
+        run_loopx_turn_once(
+            plan,
+            host_runner=host,
+            project=tmp_path,
+            runtime_root=registry.parent,
+            goal_id="fixture-goal",
+            timeout_seconds=5,
+            execute=True,
+            retry_failed=True,
+            goal_admission=admission,
+            task_validator=_passing_validator,
+            writeback=lambda _result, effect_ref: _record(db, "writeback", effect_ref),
+            spend=lambda effect_ref: _record(db, "spend", effect_ref),
+            scheduler=lambda _spend: {"completed": True, "acknowledged": True},
+        )
+    assert blocked.value.decision["reason"] == "host_outcome_unknown"
+
+    # The host was invoked exactly once; the writeback was prepared (journal-entry
+    # persisted) but the provider was never called because resolve_prepared returned
+    # unknown immediately; quota was never debited.
+    with sqlite3.connect(db) as conn:
+        kinds = dict(conn.execute("SELECT kind,count(*) FROM operations GROUP BY kind"))
+    assert kinds.get("host", 0) == 1
+    assert kinds.get("writeback", 0) == 0  # provider was never invoked
+    assert kinds.get("spend", 0) == 0

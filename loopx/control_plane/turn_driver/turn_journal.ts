@@ -530,6 +530,20 @@ function recoveryDecision(
   }
   const preparedCheck = preparedEffectCheck(journal, resumeFrom);
   if (preparedCheck) checks.push(preparedCheck);
+  // A failed settlement with a prepared effect means resolve_prepared already
+  // returned unknown and the outcome cannot be determined without external
+  // reconciliation. Block rather than loop on successive retries; the
+  // in_progress path above still returns continue for the initial recovery.
+  if (preparedCheck && journalStatus === "failed") {
+    return {
+      ...base,
+      action: "blocked",
+      can_continue: false,
+      resume_from: resumeFrom,
+      reinvoke_host: false,
+      reason: "host_outcome_unknown",
+    };
+  }
   return {
     ...base,
     action: "continue",
