@@ -210,3 +210,22 @@ def test_ordinary_claim_progress_completion_need_no_lease_flags(claim_cli):
     replay = run([*prefix, "todo", "complete", *common, "--evidence", "evidence:validated-output"])
     assert replay["ok"] is True
     assert snapshot() == before
+
+
+@pytest.mark.parametrize("command", ["update", "complete"])
+def test_empty_managed_reference_is_rejected_without_mutation(claim_cli, command):
+    _, run, snapshot, prefix, claim, _, _, _ = claim_cli
+    accepted = run([*prefix, *claim, "--claimed-by", "peer-a",
+        "--claim-operation-id", "valid-managed-reference"])
+    assert accepted["ok"] and accepted["execution_managed"]
+    before = snapshot()
+    arguments = [*prefix, "todo", command, "--goal-id", GOAL, "--todo-id", TODO,
+        "--agent-id", "peer-a", "--claim-operation-id", ""]
+    arguments += (["--note", "Only a valid original execution may update this task."]
+        if command == "update" else ["--evidence", "evidence:validated-output"])
+    rejected = run(arguments, expected_exit=1)
+    assert rejected["error_code"] == (
+        "invalid_local_coordination_todo_update_request" if command == "update"
+        else "invalid_local_coordination_todo_terminal_lifecycle_request")
+    assert rejected["error"] == "claim_operation_id must be a non-empty trimmed string"
+    assert snapshot() == before
