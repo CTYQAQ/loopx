@@ -244,7 +244,7 @@ test("same explicit grant contract applies to a coordinator and an ordinary memb
 
 test("malformed operator binding fails before launch", () => {
   for (const patch of [{timeout_seconds: 0}, {timeout_seconds: 5000}, {output_refs: ["../secret"]},
-    {output_refs: ["/secret"]}, {host_args: []}, {todo_id: null}]) {
+    {output_refs: ["/secret"]}, {host_args: []}, {todo_id: ""}]) {
     assert.throws(() => selectDelegationBinding({...params,
       config: {...params.config, bindings: [{...binding, ...patch}]}}));
   }
