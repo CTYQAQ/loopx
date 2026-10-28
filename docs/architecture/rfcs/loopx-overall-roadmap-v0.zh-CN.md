@@ -158,10 +158,13 @@ C1 的[消费链切换表](controller-executor-unified-contract-v0.zh-CN.md#c1-�
 [C1 打包 heartbeat 检查点](ledger/controller-executor-unified-contract-v0/2026-10-28-packaged-heartbeat.zh-CN.md)
 在隔离 File/SQLite 保留必读来源及同 capture 结算语义。后续诊断投影复用同一 typed
 owner 并删除 Python 重复算法；[#7557](https://github.com/loopx-project/loopx/pull/7557)
-提案可独立使用的旧读取方切片，#7430 原样复用相同模块。重跑原 quota 基线对照后
-冷态／恢复字节下降，但温态输入仍增长，全部 peer 补读另增成本，集成原有 v4 预算
-失败仍保留。原 C1 继续诊断温态组合成本及剩余真实消费者，保留未知字段和完整义务；
-这不是默认提升或完整成本正向资格，controller 模型与成果验收保持开放。
+已合并，#7430 复用修复后的模块。后续完整 Goal 与作用域指令复用，在两组均计入全部
+必读内容后，相比原 quota 基线减少冷态、温态和恢复 stdout。历史温态负向 cohort 与
+集成原有 v4 预算失败仍保留，可选全部 peer 补读仍另增成本。
+[#7575](https://github.com/loopx-project/loopx/pull/7575) 提案可独立使用的原生完整 Goal／
+复用切片：温态输入改善，冷态与恢复则增加开销。原 C1 继续剩余真实消费者、writer
+切换与 reader 退役，保留未知字段和完整义务。这些工程观察不提升默认，也不认证模型
+token、完整成本或实际决策／成果收益。
 
 同一集成 codec 现采用已合入的 [#7528](https://github.com/loopx-project/loopx/pull/7528)，在精确
 搬移证据上叠加字面当前控制，覆盖 scoped context。Ledger 同时记录局部搬移差分变小

@@ -325,3 +325,68 @@ independent review or protected-action receipt. The C1 qualification above
 remains bound to its frozen main base; later main changes are not implicitly
 qualified. C1 stays an unfinished author integration with its existing cost,
 consumer and retirement gaps.
+
+## Complete Goal reuse and independently usable native slice
+
+C1 is subsequently rebased onto main
+`f5e9be3671c1b5c80eba5c62fe4d617bfefd66d6`. Runtime
+`a0cc4c14b` reuses the exact unchanged scoped-reading instruction and objective,
+while keeping every other wrapper field current. It also reuses complete Goal
+text only after the existing source-integrity predicate succeeds. That predicate
+moves unchanged into `goal_context_source.ts`, shared by fulfillment and the
+codec. Changed text, control fields, scope, indexes, ownership, revisions and
+unknown fields stay literal; malformed witnesses and missing baselines cannot
+hide required reads. This removes repeated interpretation rather than adding
+another context or decision owner.
+
+Source `ebdce8a49b4faa584571cfb688aa2c2a238a5860` retains this behavior and
+native complete-Goal regression coverage. Its rebuilt wheel has 1,889 product
+members matching source, with no packaged-only or mismatched member. The same
+unchanged private harness compares it with the original quota baseline
+`843be494266774b63b3de61d0adf5dd7f4f877a2`, using equal-length namespaces and
+the same six outcomes, 24 clauses, work, stops and backends. Both arms include
+mandatory supplementary Goal-file reads; recovery also includes the two
+invalidation/startup hook outputs and reads the original capture without a new
+admission. Optional peer expansion is separate.
+
+| Backend / phase | Original quota stdout bytes | C1 stdout bytes | Calls, quota → C1 | RPCs, quota → C1 |
+| --- | ---: | ---: | ---: | ---: |
+| File / cold | 94,892 | 90,918 | 13 → 14 | 103 → 103 |
+| File / warm | 58,289 | 52,474 | 9 → 8 | 99 → 98 |
+| File / loss recovery | 92,068 | 87,418 | 15 → 14 | 8 → 8 |
+| SQLite / cold | 95,002 | 91,048 | 13 → 14 | 103 → 103 |
+| SQLite / warm | 58,401 | 52,598 | 9 → 8 | 99 → 98 |
+| SQLite / loss recovery | 92,178 | 87,540 | 15 → 14 | 8 → 8 |
+
+Calls count native CLI/hooks and any mandatory Goal-file read, separately from
+RPCs. Capture/delta bytes alone are larger than quota in this cohort; the
+complete-input comparison improves because quota separately requires 7,952 Goal
+bytes. C1's optional expansion of all five independent peer outcomes still adds
+13,940 content bytes and ten CLI/hook calls per phase. Complete clauses, exact
+reconstruction, compaction recovery, tamper/early-spend rejection, one durable
+writeback/debit and replay pass on both backends. These are deterministic
+packaged-consumer checks, not actual model retention or outcome acceptance.
+The single cohort ran alongside background work; it does not qualify latency,
+model tokens/cache, billing, human cost or complete long-horizon benefit.
+Historical negative warm observations remain attached to their earlier source.
+
+The final affected integration selection passes 205 Python cases, 112 typed
+cases, typecheck, configured mypy and scoped Ruff. The packaged source
+still fails the unchanged historical v4 oracle (digest `d12a8843834aea84…`) at
+27,934 > 13,000 characters; the earlier 26,253-character observation used a
+different current-source oracle (`1b5d010a30e608c6…`) and remains separate.
+Neither failure is waived or relabeled by the positive paged-input comparison.
+
+The independently usable [#7575](https://github.com/loopx-project/loopx/pull/7575)
+at `d980d621219b10353fdaeb058a1a0fd5714f4389`, based on main
+`2cdff65d886d13121ffd78dccd96dd7413ab9d01`, supplies complete Goal material
+through the existing opt-in native path and exact warm reuse. It has no dependency
+on unmerged C1. Its main-baseline complete-Goal oracle fails on File and SQLite,
+then passes with the change. Its 175 Python cases, 57 typed cases, typecheck,
+configured mypy, scoped Ruff and packaged real-backend recovery/settlement pass.
+Matched native stdout improves about 7.7 KB warm, but cold and loss recovery each
+add about 1.2 KB and one RPC. That tradeoff stays explicit; this normal author PR
+does not certify complete C1 or promote the default. C1 reuses the same predicate
+and native source behavior, with scoped-wrapper reuse remaining in C1. Remaining
+callers, writer cutover, historical-reader retirement and actual decision/outcome
+qualification continue in the original work stream.

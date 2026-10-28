@@ -205,13 +205,17 @@ input; new-admission cutover stays separate from historical receipt replay.
 The [packaged C1 heartbeat checkpoint](ledger/controller-executor-unified-contract-v0/2026-10-28-packaged-heartbeat.md)
 preserves required source and same-capture settlement semantics on isolated
 File/SQLite. Its diagnostic follow-through reuses one typed owner and removes the
-Python duplicates; [#7557](https://github.com/loopx-project/loopx/pull/7557) proposes
-the independently usable legacy-reader slice, shared unchanged by #7430. Repeated
-quota-baseline measurements reduce cold/recovery bytes but still grow warm input
-and add all-peer read cost; the integration's existing v4 budget failure remains.
-Continue C1 on warm composition cost and remaining real consumers with full
-unknown-field/obligation preservation. This is no default promotion or positive
-complete-cost qualification; controller-model and outcome acceptance stay open.
+Python duplicates; [#7557](https://github.com/loopx-project/loopx/pull/7557) is merged,
+and #7430 reuses its repaired module. Later complete-Goal and scoped-prose reuse
+improves cold, warm and recovery stdout against the original quota baseline when
+both arms include all mandatory reads. Earlier negative warm cohorts and the
+integration's existing v4 budget failure remain recorded; optional all-peer reads
+still add cost. [#7575](https://github.com/loopx-project/loopx/pull/7575) proposes the
+independently usable native complete-Goal/reuse slice: warm input improves, while
+cold and recovery incur extra overhead. Continue C1 on remaining real consumers,
+writer cutover and reader retirement with complete unknown-field/obligation
+preservation. These engineering observations do not promote defaults or qualify
+model-token, complete-cost or actual decision/outcome benefit.
 
 The same integration codec now adopts merged [#7528](https://github.com/loopx-project/loopx/pull/7528)
 for exact relocated evidence with literal current overrides, including scoped
