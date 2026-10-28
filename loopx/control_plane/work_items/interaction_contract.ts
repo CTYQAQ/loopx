@@ -1,3 +1,4 @@
+import {OBJECTIVE_READ_GUIDANCE, outcomeReadGuidance} from "./outcome_read_guidance.ts";
 import {actionSelectionNeedsRecovery} from "./action_selection_admission.ts";
 import {configuredGoalChecks} from "../goals/acceptance_contract.ts";
 import { EffectRuntimeRequestError } from "../effect_runtime_errors.ts";
@@ -813,9 +814,9 @@ function interactionRequiredReads(request: JsonObject): JsonObject {
   if (stateFile) add(`cat -- ${shellQuote(stateFile)}`, "goal_state",
     "Read full Goal intent, acceptance, stops. No summaries; failed/changed sources need a fresh guard.");
   if (request.goal_objective_present === true) add(`${prefix} --format json goal-acceptance inspect --goal-id ${goalArg}`,
-    "goal_acceptance", "Use the canonical goal_objective before the older source text. Only if your adoption is missing/stale, review your own work, reconcile Todo/Vision changes, then use adopt-objective with your Agent id, exact revision/digest, own objective_work_digest and review_summary. New execution is held until your adoption. Other peers adopt independently; existing Turn settlement/release remains available. Preserve root acceptance, permissions and stops. Adopt once per objective revision, never per Turn or work/peer update. Reuse complete inline context without extra reads/writes.");
+    "goal_acceptance", OBJECTIVE_READ_GUIDANCE);
   if (checksPresent || request.goal_outcomes_present === true) add(`${prefix} --format json goal-acceptance inspect --goal-id ${goalArg}`,
-    "goal_acceptance", request.goal_outcomes_present === true ? "Read the full acceptance basis and any supporting outcomes with cumulative requirements, work links and sources. Preserve the original Goal and earlier requirements when applying direct user refinements. Before switching work or declaring completion, reconcile unmet outcome requirements with subsequent work; batch changed requirements/evidence reviews through refresh-state --goal-outcome-update-json or goal-acceptance refine. Reuse complete inline context; unchanged work needs no extra inspect/write. Agent review is distinct from independent checks. Scoped acceptance never replaces Goal intent. Changed requirements need a fresh guard." : "Read full configured objective, non-goals and criteria with scope/revision. Scoped acceptance does not replace Goal intent or prove completion; Removed or changed checks require a fresh guard.");
+    "goal_acceptance", request.goal_outcomes_present === true ? outcomeReadGuidance() : "Read full configured objective, non-goals and criteria with scope/revision. Scoped acceptance does not replace Goal intent or prove completion; Removed or changed checks require a fresh guard.");
   const todoId = hasReplan ? null : selectedWorkTodoId(request);
   if (todoId) add(`${prefix} --format json todo list --goal-id ${goalArg} --todo-id ${shellQuote(todoId)}`,
     "selected_todo", "Read full current requirements and status/claim. Require one matching active Todo; missing, ambiguous or changed work requires a fresh guard. A summary cannot replace this read.");

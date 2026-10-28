@@ -20,7 +20,7 @@ from ..scheduler.monitor_batch_receipts import is_monitor_receipt_line
 from ..todos.summary_item import todo_text_content_revision
 
 
-def _source_content(read, *, registry_path, runtime_root, goal_id, todo_id):
+def _source_content(read, *, registry_path, runtime_root, goal_id, todo_id, agent_id=None):
     source = read.get("source")
     if source == "goal_state":
         _goal, _project, state_file = resolve_goal_state(
@@ -70,7 +70,7 @@ def _source_content(read, *, registry_path, runtime_root, goal_id, todo_id):
         # selected-Todo read owns its body; do not transport it a second time
         # through the bounded acceptance RPC before discarding it here.
         return inspect_goal_acceptance(registry_path=registry_path, goal_id=goal_id,
-            runtime_root=str(runtime_root), todo_id=todo_id, include_work_details=False)
+            runtime_root=str(runtime_root), todo_id=todo_id, context_agent_id=agent_id, include_work_details=False)
     if source == "selected_todo":
         if not todo_id:
             raise ValueError("selected Todo identity is unavailable")
@@ -127,7 +127,8 @@ def _user_context(*, registry_path, runtime_root, goal_id, agent_id):
 
 
 def attach_work_context(payload: dict[str, Any], *, registry_path: Path,
-                        runtime_root: Path, hook_dispatch: dict[str, Any] | None) -> None:
+                        runtime_root: Path, hook_dispatch: dict[str, Any] | None,
+                        context_read_scope: bool = False) -> None:
     packet_selected = payload.get("selected_todo")
     selected_text_snapshot = None
     if isinstance(packet_selected, dict):
@@ -152,7 +153,7 @@ def attach_work_context(payload: dict[str, Any], *, registry_path: Path,
         result = {"command": read["command"]}
         try:
             result["content"] = _source_content(read, registry_path=registry_path,
-                runtime_root=runtime_root, goal_id=goal_id, todo_id=plan.get("todo_id"))
+                runtime_root=runtime_root, goal_id=goal_id, todo_id=plan.get("todo_id"), agent_id=agent_id if context_read_scope else None)
         except (OSError, ValueError, RuntimeError):
             result["error_code"] = "context_source_unavailable"
         results.append(result)

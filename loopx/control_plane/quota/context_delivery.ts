@@ -8,6 +8,7 @@ import {reusableTurnContextPaths} from "../capability_hooks.ts";
 import {COORDINATION_STATE_CONTRACT} from "../coordination/coordination_state_contract.generated.ts";
 
 const VERSION = "context_delivery_v1";
+export const OUTCOME_CONTEXT_PROJECTION_SCHEMA = "outcome_context_projection_v0";
 const MAX_ANCESTRY = 32;
 type Path = (string | number)[];
 type Split = {fresh: JsonObject; valid: boolean};
@@ -190,6 +191,15 @@ const REUSABLE_PACKET_FIELDS = new Set([
  * duplicating them in both a fresh frame and a patch. Static authoring guidance
  * remains binding via exact reuse; commands, conditions and identity stay fresh. */
 function freshPaths(context: JsonObject, surface: Surface, legacyQuotaFields: readonly string[]): {paths: Path[]; valid: boolean} {
+  if (context.schema_version === OUTCOME_CONTEXT_PROJECTION_SCHEMA) {
+    const inner = jsonObject(context.context);
+    if (!inner) return {paths: [[]], valid: false};
+    const projected = freshPaths(inner, surface, legacyQuotaFields);
+    return {valid: projected.valid, paths: [
+      ...Object.keys(context).filter(key => key !== "context").map(key => [key]),
+      ...projected.paths.map(path => ["context", ...path]),
+    ]};
+  }
   const paths: Path[] = [];
   let valid = true;
   const leaves = (value: unknown, path: Path) => {

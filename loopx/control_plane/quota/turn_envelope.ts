@@ -1,3 +1,4 @@
+import {capturedOutcomeRead, nativeContextDelivery} from "./outcome_context.ts";
 import type { LoopXTurnRouteValue } from "../turn_driver/turn_contract_generated.ts";
 import { EffectiveAction, type QuotaEffectiveActionValue } from "./effective_action.generated.ts";
 import { createHash } from "node:crypto";
@@ -1461,6 +1462,8 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
     return payload;
   }
   if (operation === "build") return buildTurnEnvelope(request);
+  if (operation === "captured_outcome") return capturedOutcomeRead(request);
+  if (operation === "native_context_delivery") return nativeContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);
   if (operation === "context_delivery") return prepareContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);
   if (operation === "native_context_lifecycle") return updateNativeContextLifecycle(request);
   if (operation === "context_recovery") return restoreContextDelivery(request, LEGACY_QUOTA_CONTEXT_FIELDS);

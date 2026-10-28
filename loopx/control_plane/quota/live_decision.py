@@ -545,6 +545,7 @@ def build_live_quota_should_run_decision(
     interaction_projection_hooks: Sequence[InteractionProjectionHookRegistration]
     | None = None,
     turn_start_hook_dispatch: Mapping[str, Any] | None = None,
+    context_read_scope: bool = False,
     workspace_path: Path | None = None,
     goal_ref: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
@@ -824,5 +825,5 @@ def build_live_quota_should_run_decision(
     from ..work_items.context_readback import attach_work_context
 
     attach_work_context(payload, registry_path=registry_path, runtime_root=runtime_root,
-        hook_dispatch=turn_start_hook_dispatch)
+        hook_dispatch=turn_start_hook_dispatch, context_read_scope=context_read_scope)
     return payload
