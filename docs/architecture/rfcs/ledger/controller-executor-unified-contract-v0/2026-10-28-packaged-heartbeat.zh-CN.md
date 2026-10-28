@@ -187,3 +187,22 @@ native／SDK 跳过，以及长临时 namespace 下两项恢复文本尺寸失�
 组合／元数据的另一未解缺口。默认 SQLite 性能、正式 App／模型保留、token/cache/
 账单、验收成果和完整长程净收益均未资格。沿原 C1 继续该缺口及剩余消费者，不以采用
 本修复结清 C1、C2 或 controller 实验。
+
+随后集成 rebase 到 main `0cfbf11dcea4ba7bc8fb13f06f1c915b63ce8fad`，其中已含 #7528，
+重复 commit 因而退出。[#7547](https://github.com/loopx-project/loopx/pull/7547) 两项 Goal
+来源提交保留原作者，12 个贡献的产品／测试 blob 与已接收的集成 head 完全相同。
+主干 capture owner 仍在准入前 stage、准入后发布，发布后才安装原完整契约。删除未用
+capture helper 后，进程级 fence 重新包住实际 Turn executor；既有占用 lane 用例在
+修复前失败、修复后通过。
+
+Runtime `6f30cc454f2dea7e77f0821a14a1deaf268efe2e` 的 wheel 含 1,885 个与来源一致的
+产品成员。重基后的 typed 集合 148 项及 typecheck 通过。集成 Python 首次记录
+185 通过、两项明确的 live-host 跳过及 12 失败：八项新增 staged 回读断言把 adapter
+元数据与实际模型投影混比，四项 observer 仍记录 #7547 之前的 metadata-only 操作。
+保留对真实 Host 输入的完整比较，观测更严格的 dispatch 操作后，54 项 Host-capture
+全部通过，没有放宽产品门；前次失败和其余已通过案例分别保留。
+
+该 wheel 再通过打包 File/SQLite bootstrap、完整 Goal 交付、全部条款／详情读取、同
+capture 恢复、拒绝及一次结算。本次功能验证与其他检查并行，不是新的匹配计时 cohort；
+旧成本表仍绑定 `167b31e5d`，不改称后续源码的测量。当前版本完整成本与成果资格保持
+开放。

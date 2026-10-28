@@ -244,3 +244,30 @@ remaining C1 composition/metadata gap. Default SQLite performance, installed App
 and model retention, token/cache/billing, accepted outcomes and full long-horizon
 benefit remain unqualified. Continue the existing C1 on that gap and remaining
 consumers; this adoption does not close C1, C2 or the controller experiment.
+
+Subsequent integration is rebased onto main
+`0cfbf11dcea4ba7bc8fb13f06f1c915b63ce8fad`, which contains #7528; its duplicate
+commit drops out. Both Goal-source commits from [#7547](https://github.com/loopx-project/loopx/pull/7547)
+retain their authorship and all 12 contributed product/test blobs match the
+accepted integration head. Main's capture owner still stages before admission
+and publishes afterward. The original complete contract is installed only after
+publication. Removing an unused capture helper restores the process-level fence
+around the actual Turn executor; the existing held-lane test fails before this
+repair and passes afterward.
+
+Runtime `6f30cc454f2dea7e77f0821a14a1deaf268efe2e` has a source-matching
+1,885-member wheel. The post-rebase typed selection passes 148 cases and
+typecheck. The integration Python selection initially records 185 passes, two
+explicit live-host skips and 12 failures: eight new staged-readback assertions
+compare adapter metadata with the actual model projection, and four observers
+still name the pre-#7547 metadata-only operation. Retaining their complete
+comparisons against the real Host input and observing the stricter dispatch
+operation makes all 54 Host-capture cases pass; no product gate is relaxed.
+The earlier run and its other passed cases remain recorded separately.
+
+The packaged File/SQLite bootstrap, complete Goal delivery, all clause/detail
+reads, same-capture recovery, rejection and once-only settlement pass again on
+this wheel. This functional run overlaps other validation and is not a new
+matched timing cohort. The older cost tables remain attached to runtime
+`167b31e5d`, not relabeled as this later source. Current-version complete-cost
+and outcome qualification remain open.

@@ -163,7 +163,7 @@ owner 并删除 Python 重复算法；[#7557](https://github.com/loopx-project/l
 失败仍保留。原 C1 继续诊断温态组合成本及剩余真实消费者，保留未知字段和完整义务；
 这不是默认提升或完整成本正向资格，controller 模型与成果验收保持开放。
 
-同一集成 codec 现采用 [#7528](https://github.com/loopx-project/loopx/pull/7528)，在精确
+同一集成 codec 现采用已合入的 [#7528](https://github.com/loopx-project/loopx/pull/7528)，在精确
 搬移证据上叠加字面当前控制，覆盖 scoped context。Ledger 同时记录局部搬移差分变小
 和普通温态字节对照仍负向；这是采用共享 owner，没有新增第二编码器或提升默认。
 

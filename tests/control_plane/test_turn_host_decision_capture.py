@@ -242,7 +242,7 @@ def test_real_host_reads_original_capture_after_source_change(
             staged.publish()
         assert path.read_bytes() == changed
     path.write_text(json.dumps(dict(reversed(source_a.items()))))
-    assert staged.publish()["turn_envelope"]["detail_ref"] == detail
+    assert complete_host_input(staged.publish())["detail_ref"] == detail
     path.write_bytes(original)
     path.write_text(json.dumps({**source_a, "reason": "changed during admission"}))
     changed = path.read_bytes()
@@ -254,7 +254,7 @@ def test_real_host_reads_original_capture_after_source_change(
         staged.publish()
     assert not path.exists()
     path.write_bytes(original)
-    assert staged.publish()["turn_envelope"]["detail_ref"] == detail
+    assert complete_host_input(staged.publish())["detail_ref"] == detail
     assert path.read_bytes() == original
     # Corrupt/missing evidence cannot be replaced by the caller's new guard.
     path.write_text(json.dumps({**source_a, "reason": "wrong original"}))
@@ -655,7 +655,7 @@ def test_complete_codex_launch_shares_input_check_only_within_attempt(
     original = turn_envelope.effect_runtime_result
 
     def observe(method, arguments, **kwargs):
-        if arguments.get("operation") in {"host_context", "validate_complete"}:
+        if arguments.get("operation") in {"host_context", "host_dispatch_context", "validate_complete"}:
             observed.append(arguments["operation"])
         return original(method, arguments, **kwargs)
 
@@ -678,7 +678,7 @@ def test_complete_codex_launch_shares_input_check_only_within_attempt(
         assert json.loads(schema_file.read_text()) == expected_schema
         # A fresh attempt checks again; preparing its prompt and schema shares
         # the one check. Result validation and outer settlement remain separate.
-        assert observed == ["host_context"]
+        assert observed == ["host_dispatch_context"]
     changed = deepcopy(request)
     changed["work_contract"]["reason"] = "source changed after a successful launch"
     before = prompt_file.read_bytes(), schema_file.read_bytes()

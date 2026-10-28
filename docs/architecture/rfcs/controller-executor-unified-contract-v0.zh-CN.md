@@ -1187,7 +1187,7 @@ capture 前验证失败。工作契约形成前的错误则在两种 CLI flag �
 继续在原 C1 诊断温态重建／元数据成本及剩余消费者，不提升默认，也不验收独立的
 controller 实验。
 
-集成版本也在相同 context codec 内采用现有
+集成版本也在相同 context codec 内采用已合入的
 [#7528](https://github.com/loopx-project/loopx/pull/7528) overlay：搬移的精确证据可共用
 一份基线子树，当前及未知控制仍字面交付，包含 C1 scoped wrapper。Ledger 将局部
 搬移的正向字节结果与重跑的打包对照分开：普通温态输入仍多约 2.8 KB，v4 预算仍失败。

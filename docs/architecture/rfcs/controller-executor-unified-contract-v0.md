@@ -1615,7 +1615,7 @@ complete-cost diff, default performance or model benefit is qualified. Continue
 within C1 on warm reconstruction/metadata cost and remaining consumers; this does
 not promote the candidate by default or qualify the separate controller experiment.
 
-The integration also adopts the existing [#7528](https://github.com/loopx-project/loopx/pull/7528)
+The integration also adopts the merged [#7528](https://github.com/loopx-project/loopx/pull/7528)
 overlay in that same context codec. Relocated exact evidence can share one base
 subtree while current and unknown controls remain literal, including through the
 scoped C1 wrapper. The ledger separates the positive relocation-only byte result
