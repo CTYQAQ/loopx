@@ -671,10 +671,9 @@ def test_complete_codex_launch_shares_input_check_only_within_attempt(
         observed.clear()
         result = run(request, **options)
         assert result["turn_key"] == request["turn_key"]
-        # The existing app-server client folds prompt whitespace before send;
-        # CLI stdin retains the original bytes. Neither adapter changes here.
-        assert prompt_file.read_text().startswith(
-            " ".join(expected_prompt.split()) if operation_tools else expected_prompt)
+        # Both transports preserve the original complete input. Native operation
+        # guidance may follow it, but must not fold its whitespace or JSON prose.
+        assert prompt_file.read_text().startswith(expected_prompt)
         assert json.loads(schema_file.read_text()) == expected_schema
         # A fresh attempt checks again; preparing its prompt and schema shares
         # the one check. Result validation and outer settlement remain separate.
