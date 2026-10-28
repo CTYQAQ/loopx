@@ -8,7 +8,7 @@ import {omitUnboundExploreResultWriteback, referenceExploreResultWriteback} from
 import {prepareContextDelivery, restoreContextDelivery, OUTCOME_CONTEXT_PROJECTION_SCHEMA} from "./context_delivery.ts";
 import {updateNativeContextLifecycle} from "./native_context_lifecycle.ts";
 import {OUTCOME_CONTEXT_READ_PLAN_SCHEMA} from "../goals/outcome_requirements.ts";
-import {projectQuotaDiagnostics} from "./diagnostic_projection.ts";
+import {contextProjectionChanges, projectQuotaDiagnostics} from "./diagnostic_projection.ts";
 import {canonicalAuthoritySha256} from "../coordination/authority_store_codec.ts";
 
 import {
