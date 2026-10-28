@@ -177,6 +177,7 @@ def test_explicit_replacement_holds_the_real_ingress_fence_through_stop(managed_
 
 
 def test_managed_service_pid_requires_one_exact_native_pid_field(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_activation.os, "getuid", lambda: 501, raising=False)
     args = "arguments = {\n loopx\n chat\n}\n"
     outputs = iter([args + "pid = 4321", args + "other_pid = 4321", args + "pid = 4321\npid = 4321",
         "arguments = {\n loopx\n other\n}\npid = 4321"])
