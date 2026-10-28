@@ -104,6 +104,27 @@ def test_complete_source_rejects_tampering_and_binding_substitution():
         compose_turn_decision({**source, "schema_version": "unknown"})
 
 
+@pytest.mark.parametrize("reference", [None, False, [], "$.user_todo_summary.first_executable_items",
+    "$.agent_todo_summary.missing", "$.agent_todo_summary.backlog_items"])
+def test_complete_readers_refuse_invalid_diagnostic_references_with_valid_hashes(reference):
+    from loopx.control_plane.quota.turn_envelope import build_turn_envelope
+    from tests.control_plane.test_replan_host_context_projection import _quota_payload
+
+    source = _quota_payload()
+    lane = [{"todo_id": "task", "text": "Preserve the complete requirement. " * 80}]
+    source["agent_todo_summary"] = {"schema_version": "todo_summary_v0",
+        "first_executable_items": lane, "backlog_items": copy.deepcopy(lane)}
+    contract = compose_turn_decision(source)
+    assert contract["agent_todo_summary"]["backlog_items_ref"] == "$.agent_todo_summary.first_executable_items"
+    contract["agent_todo_summary"]["backlog_items_ref"] = reference
+    contract, _ = _resign_contract(contract)
+    for read in (lambda: compose_turn_decision(contract), lambda: build_turn_envelope(contract),
+        lambda: _turn_envelope_result("replan_view", payload=contract,
+            source_hash=_canonical_digest(contract), stage="review")):
+        with pytest.raises(RuntimeError, match="summary lane reference"):
+            read()
+
+
 def test_pending_goal_capture_remains_readable_but_cannot_dispatch_business_work():
     from loopx.control_plane.quota.turn_envelope import build_turn_controller_input
     from loopx.control_plane.turn_driver.codex_cli import prepare_codex_cli_input
@@ -341,6 +362,10 @@ def test_real_quota_complete_capture_and_differential_recovery(tmp_path, monkeyp
     original = (capture / "decision.json").read_bytes()
     contract = json.loads(original)
     assert contract["schema_version"] == "loopx_turn_envelope_v1"
+    summary = contract["agent_todo_summary"]
+    assert summary["first_open_items_ref"] == "$.agent_todo_summary.first_executable_items"
+    assert summary["first_executable_items"][0]["todo_id"] == TODO_ID
+    assert summary["first_executable_items"][0]["status"] == "open"
     assert output["interaction_contract"] == contract["interaction_contract"]
     assert output["contract_binding"] == contract["contract_binding"]
     assert output == contract  # Every original fact and instruction survives rendering.

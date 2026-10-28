@@ -20,6 +20,78 @@ import { EffectRuntimeRequestError } from "../../loopx/control_plane/effect_runt
 import type { JsonObject } from "../../loopx/control_plane/effect_program.ts";
 import { TURN_ENVELOPE_SECTION_TARGETS } from "../../loopx/control_plane/quota/turn_envelope_budget.ts";
 import { projectPeerOrchestration } from "../../loopx/control_plane/quota/peer_orchestration.ts";
+import {projectQuotaDiagnostics, referenceQuotaSummaryLanes, resolveQuotaSummaryLanes}
+  from "../../loopx/control_plane/quota/diagnostic_projection.ts";
+
+test("complete diagnostic lanes share exact arrays without losing distinct facts or future fields", () => {
+  const item = {todo_id: "task", text: "Original requirements and final stop. ".repeat(80),
+    status: "blocked", future: {may_publish: false, value: null}};
+  const lane = [item, {...item, todo_id: "dependency", status: "open"}];
+  const source: JsonObject = {agent_todo_summary: {schema_version: "todo_summary_v0", open_count: 2,
+    first_open_items: structuredClone(lane), first_executable_items: lane,
+    backlog_items: structuredClone(lane), claimed_open_items: [...lane].reverse(),
+    deferred_items: [{...item, future: {may_publish: 0, value: null}}, lane[1]],
+    future_items: structuredClone(lane), future_control: {requires_stop: true}},
+    user_todo_summary: {first_open_items: lane, gate_open_items: structuredClone(lane)},
+    action_portfolio: {suggested_actions: lane}, future: {items: lane}};
+  const before = structuredClone(source), shared = referenceQuotaSummaryLanes(source);
+  const summary = shared.agent_todo_summary as JsonObject;
+  for (const key of ["first_open_items", "backlog_items"]) {
+    assert.equal(summary[key], undefined);
+    assert.equal(summary[`${key}_ref`], "$.agent_todo_summary.first_executable_items");
+  }
+  for (const key of ["first_executable_items", "claimed_open_items", "deferred_items", "future_items", "future_control", "open_count"])
+    assert.deepEqual(summary[key], (source.agent_todo_summary as JsonObject)[key]);
+  assert.deepEqual(resolveQuotaSummaryLanes(shared), source);
+  assert.deepEqual(referenceQuotaSummaryLanes(shared), shared);
+  assert.deepEqual(projectQuotaDiagnostics(resolveQuotaSummaryLanes(shared), {capture_ref: "$.source_capture"}),
+    projectQuotaDiagnostics(source, {capture_ref: "$.source_capture"}));
+  assert.deepEqual(source, before);
+  assert.deepEqual(referenceQuotaSummaryLanes({agent_todo_summary: {...source.agent_todo_summary as JsonObject,
+    schema_version: "future_summary"}}).agent_todo_summary,
+    {...source.agent_todo_summary as JsonObject, schema_version: "future_summary"});
+  assert.deepEqual(referenceQuotaSummaryLanes({agent_todo_summary: {first_open_items: [1], first_executable_items: [true]}}),
+    {agent_todo_summary: {first_open_items: [1], first_executable_items: [true]}});
+});
+
+test("diagnostic references reject ambiguity, chains, wrong roots and missing literal owners", () => {
+  const lane = [{todo_id: "task", text: "Complete source. ".repeat(40)}];
+  const valid = {agent_todo_summary: {first_executable_items: lane,
+    backlog_items_ref: "$.agent_todo_summary.first_executable_items"}};
+  for (const patch of [{backlog_items: lane}, {backlog_items_ref: null}, {backlog_items_ref: []},
+    {backlog_items_ref: "$.user_todo_summary.first_executable_items"},
+    {backlog_items_ref: "$.agent_todo_summary.future_items", future_items: lane},
+    {backlog_items_ref: "$.agent_todo_summary.backlog_items"},
+    {first_executable_items: null}, {first_executable_items_ref: "$.agent_todo_summary.items", items: lane}]) {
+    const invalid = {agent_todo_summary: {...valid.agent_todo_summary, ...patch}};
+    const before = structuredClone(invalid);
+    assert.throws(() => resolveQuotaSummaryLanes(invalid), /summary lane reference/);
+    assert.deepEqual(invalid, before);
+  }
+});
+
+test("complete producer and Host preserve action semantics when diagnostic lanes share a source", () => {
+  const source = payload();
+  const lane = [{todo_id: "todo-1", text: "Keep complete requirements and stops. ".repeat(80),
+    status: "open", priority: "P0", claimed_by: "agent-ts"}];
+  source.agent_todo_summary = {schema_version: "todo_summary_v0", first_open_items: lane,
+    first_executable_items: structuredClone(lane), backlog_items: structuredClone(lane), open_count: 1};
+  const before = structuredClone(source);
+  const complete = evaluateTurnEnvelope({operation: "compose_complete", payload: source, scheduler_execution_args: ""});
+  assert.equal((complete.agent_todo_summary as JsonObject).backlog_items_ref, "$.agent_todo_summary.first_executable_items");
+  const restored = resolveQuotaSummaryLanes(complete);
+  delete restored.schema_version; delete restored.contract_binding;
+  assert.deepEqual(restored, source);
+  const legacy = buildTurnEnvelope({payload: source, scheduler_execution_args: ""});
+  const current = buildTurnEnvelope({payload: complete, scheduler_execution_args: ""});
+  assert.deepEqual(turnEnvelopeActionSignatureDocument(current), turnEnvelopeActionSignatureDocument(legacy));
+  assert.deepEqual(evaluateTurnEnvelope({operation: "compose_complete", payload: complete, scheduler_execution_args: ""}), complete);
+  const host = evaluateTurnEnvelope({operation: "host_dispatch_context", payload: complete, envelope: current});
+  assert.equal(host.primary_action, (source.interaction_contract as JsonObject).agent_channel.primary_action);
+  assert.equal(evaluateTurnEnvelope({operation: "complete_host_lineage", payload: complete, envelope: current}).goal_id,
+    source.goal_id);
+  assert.deepEqual(source, before);
+});
 
 test("captured outcome lookup shares exact content across registered carriers and retains revisions", () => {
   const one = {id: "shared", owner_agent_id: "peer", objective: "Original", revision: 1,

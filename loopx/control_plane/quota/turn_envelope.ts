@@ -7,7 +7,8 @@ import {omitUnboundExploreResultWriteback, referenceExploreResultWriteback} from
 import {prepareContextDelivery, restoreContextDelivery, OUTCOME_CONTEXT_PROJECTION_SCHEMA} from "./context_delivery.ts";
 import {updateNativeContextLifecycle} from "./native_context_lifecycle.ts";
 import {OUTCOME_CONTEXT_READ_PLAN_SCHEMA} from "../goals/outcome_requirements.ts";
-import {contextProjectionChanges, projectQuotaDiagnostics} from "./diagnostic_projection.ts";
+import {contextProjectionChanges, projectQuotaDiagnostics, referenceQuotaSummaryLanes,
+  resolveQuotaSummaryLanes} from "./diagnostic_projection.ts";
 import {canonicalAuthoritySha256} from "../coordination/authority_store_codec.ts";
 
 import {
@@ -469,7 +470,8 @@ function capturedOutcomeContext(request: JsonObject): JsonObject {
   requireNonEmptyString(source.path, "original capture path");
   if (typeof source.sha256 !== "string" || !BARE_SHA256_PATTERN.test(source.sha256))
     throw new EffectRuntimeRequestError("outcome context needs the original file digest");
-  const context = projectQuotaDiagnostics(structuredClone(payload), {capture_ref: "$.source_capture"});
+  const context = projectQuotaDiagnostics(structuredClone(payload.schema_version === COMPLETE_TURN_DECISION_VERSION
+    ? resolveQuotaSummaryLanes(payload) : payload), {capture_ref: "$.source_capture"});
   const carriers = acceptanceCarriers(context);
   const channel = jsonObject(jsonObject(context.interaction_contract)?.agent_channel);
   if (!channel || !scopeInteractionOutcomeReadGuidance(channel)) return payload;
@@ -1504,6 +1506,7 @@ function compactPeerActivation(contract: JsonObject, detailRef: string): JsonObj
 }
 
 function turnActionProjection(payload: JsonObject): JsonObject {
+  if (payload.schema_version === COMPLETE_TURN_DECISION_VERSION) payload = resolveQuotaSummaryLanes(payload);
   const projection = actionProjection(payload);
   const orchestration = object(projection.task_orchestration_contract);
   if (Object.keys(orchestration).length > 0) {
@@ -1709,6 +1712,7 @@ function requireCompleteDecisionSource(source: JsonObject): void {
   replanAuthoringContract(source);
   requireVisionAuditReferences(source);
   requireCurrentTaskTitleReference(source);
+  resolveQuotaSummaryLanes(source);
   resolveExploreGuidance(source, object(object(object(source.interaction_contract).agent_channel).work_context));
   // This root field selects execution, unlike optional evidence carried intact
   // in the source. Reuse both registered owners; do not inherit the historical
@@ -1850,6 +1854,7 @@ export function composeCompleteTurnDecision(value: unknown): JsonObject {
   source = referenceExploreGuidance(source);
   source = referenceCurrentTaskTitle(source);
   source = referenceVisionContinuation(source);
+  source = referenceQuotaSummaryLanes(source);
   requireCompleteDecisionSource(source);
   const result: JsonObject = {...source, schema_version: COMPLETE_TURN_DECISION_VERSION,
     contract_binding: {scheduler_execution_args: request.scheduler_execution_args,
