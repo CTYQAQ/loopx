@@ -247,6 +247,7 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
   const selected = value?.nodes.find(node => node.id === selectedId);
   const selectedFinding = selected?.findings.find(finding => finding.result_id === selection.finding)
     ?? (!selection.finding ? selected?.findings.at(-1) : undefined);
+  const hasSeparateQuestion = Boolean(selected?.findings.length && selectedFinding?.title !== selected.latest.title);
   const selectedGroup = selection.day !== null ? grouped.groups.find(group => group.day === selection.day) : undefined;
   const selectedMembers = selectedGroup?.nodes ?? (selection.nodes.length > 1 ? value?.nodes.filter(node => selection.nodes.includes(node.id)) : undefined);
   const requestedCollection = selection.collection;
@@ -501,8 +502,9 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
 
       {selected ? <div className="research-history-detail" ref={detail} role="region" aria-label={selected.latest.title} tabIndex={-1} onKeyDown={event => {if (event.key === "Escape") {event.stopPropagation(); closeReader();}}}>
         <div className="research-reader-content">
-        <div className="research-reader-location"><button type="button" className="research-reader-back" onClick={closeReader}><ArrowLeft size={14} aria-hidden/>{collection ? (zh ? "返回问题列表" : "Back to questions") : copy.all}</button>
-        <div className="research-reader-states">
+        <div className="research-reader-location"><div className="research-reader-return"><button type="button" className="research-reader-back" onClick={closeReader}><ArrowLeft size={14} aria-hidden/>{collection ? (zh ? "返回问题列表" : "Back to questions") : copy.all}</button>
+          {!hasQuestionNavigation && hasSeparateQuestion && !questionExpanded ? <ContextHelp icon={CircleHelp} label={zh ? "完整研究问题" : "Full research question"}><div className="research-question-text"><p>{selected.latest.title}</p>{selected.latest.summary ? <p>{selected.latest.summary}</p> : null}</div></ContextHelp> : null}
+        </div><div className="research-reader-states">
           <div className="research-detail-kind"><GitBranch size={14} aria-hidden/>{kindLabel(selected.latest.node_kind)} · {stateLabel(selected.latest.status)} <ContextHelp label={findingCopy.help}><p>{findingCopy.meaning}</p></ContextHelp></div>
           {selected.findings.length > 1 && findingExceptions ? <p className="research-finding-exceptions">{findingExceptions}</p> : null}
         </div></div>
@@ -520,7 +522,11 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
             })}
           </div>
         </nav> : null}
-        {!hasQuestionNavigation ? selected.findings.length ? selectedFinding?.title !== selected.latest.title ? <details className="research-reader-question" key={`question:${selected.id}`} open={questionExpanded} onToggle={event => setQuestionExpanded(event.currentTarget.open)}>
+        {!hasQuestionNavigation ? selected.findings.length ? hasSeparateQuestion && questionExpanded ? <details className="research-reader-question" key={`question:${selected.id}`} open onToggle={event => {
+          if (event.currentTarget.open) return;
+          if (event.currentTarget.contains(document.activeElement)) detail.current?.focus({preventScroll: true});
+          setQuestionExpanded(false);
+        }}>
           <summary><span>{selected.latest.title}</span></summary>
           {selected.latest.summary ? <p>{selected.latest.summary}</p> : null}
         </details> : null : <h3>{selected.latest.title}</h3> : null}{displayControl}
