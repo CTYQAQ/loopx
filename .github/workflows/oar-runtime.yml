@@ -41,9 +41,10 @@ jobs:
     timeout-minutes: 20
     env:
       LOOPX_USAGE_PING: "0"
-      LOOPX_OAR_HOME: ${{ runner.temp }}/loopx-oar
     steps:
       - uses: actions/checkout@v7
+      - name: Set OAR runtime cache
+        run: echo "LOOPX_OAR_HOME=$RUNNER_TEMP/loopx-oar" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
