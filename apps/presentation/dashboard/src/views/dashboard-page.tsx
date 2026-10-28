@@ -3705,8 +3705,13 @@ export function DashboardPage() {
       // A history entry restores source and root together, so the route's
       // restored source outranks the source that is still loaded. Only when
       // the route names no source does the loaded source act as the fallback.
-      const target = requestedStatusUrl
-        ?? (search.statusUrl.trim() || (source.kind === "url" ? source.label : ""));
+      // The app commits the route only from a loaded source, so a route naming
+      // another source came from Back/Forward; it also outranks a re-scope of
+      // the loaded source that is still in flight.
+      const routeUrl = search.statusUrl.trim();
+      const routeRestoresSource = source.kind === "url" && routeUrl !== "" && routeUrl !== source.label;
+      const target = routeRestoresSource ? routeUrl : requestedStatusUrl
+        ?? (routeUrl || (source.kind === "url" ? source.label : ""));
       void loadFromUrl(target || defaultGlobalStatusUrl);
       return;
     }
