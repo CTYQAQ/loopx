@@ -161,8 +161,9 @@ owner 并删除 Python 重复算法；[#7557](https://github.com/loopx-project/l
 已合并，#7430 复用修复后的模块。后续完整 Goal 与作用域指令复用，在两组均计入全部
 必读内容后，相比原 quota 基线减少冷态、温态和恢复 stdout。历史温态负向 cohort 与
 集成原有 v4 预算失败仍保留，可选全部 peer 补读仍另增成本。
-[#7575](https://github.com/loopx-project/loopx/pull/7575) 提案可独立使用的原生完整 Goal／
-复用切片：温态输入改善，冷态与恢复则增加开销。原 C1 继续剩余真实消费者、writer
+[#7575](https://github.com/loopx-project/loopx/pull/7575) 已合并，提供可独立使用的原生完整
+Goal／复用切片：温态输入改善，冷态与恢复则增加开销。C1 采用该共享实现，并在同一
+完整 capture 中引用相同的 Todo 摘要列表；原 v4 预算仍失败。原 C1 继续剩余真实消费者、writer
 切换与 reader 退役，保留未知字段和完整义务。这些工程观察不提升默认，也不认证模型
 token、完整成本或实际决策／成果收益。
 

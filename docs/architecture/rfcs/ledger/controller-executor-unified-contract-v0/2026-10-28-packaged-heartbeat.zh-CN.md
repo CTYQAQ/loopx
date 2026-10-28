@@ -294,3 +294,44 @@ Ruff 通过。打包源码在未改动的历史 v4 oracle
 各增约 1.2 KB 和一次 RPC。该取舍明确保留；这个正常作者 PR 不认证完整 C1 或提升默认。
 C1 复用相同判定与原生来源行为，作用域 wrapper 复用仍留在 C1。剩余调用方、writer
 切换、历史 reader 退役及实际决策／成果资格，沿原工作流继续。
+
+## 同 capture 的 Todo 摘要列表复用
+
+C1 随后 rebase 到 main `ffc90182bc2a896aa9980cf24dcf23a0e3276e3d`，其中 #7575
+已合入为 `a6283d923e3c951443fea65ba1a855c4f7c6c335`。原生 Goal producer 和完整性
+owner 直接采用，不复制。Runtime `4604ee479` 在既有 typed 诊断 owner 中加入精确
+列表复用：相等且非空的已注册数组仅保留一份字面正文，在更小时用同摘要内的
+`<lane>_ref` 引用。相等比较保留顺序、JSON 类型和未知条目字段；其他字段与候选集合
+不变。完整 composer、action projection 和 native 展示共用此 owner，应用展示上限
+前先展开引用。不新增状态读取、capture、准入或结算 owner。正文／引用歧义、引用链、
+目标缺失和跨摘要目标均拒绝，包括内部契约 hash 有效的情况。旧 capture 仍可读取。
+
+同一源码工作负载从修改前 27,934 字符降到修改后 25,862，少 2,072（7.4%），全部来自
+agent summary；其他根字段长度不变。重建 wheel 的 1,889 个产品成员与源码一致，
+独立运行未改动的 `d12a8843834aea84…` v4 oracle，仍为 **25,862 > 13,000** 而失败。
+这是 opt-in 完整契约变体，不是默认 quota 输出预算；两项上限均未提高，也不称通过。
+相同真实 File／SQLite producer oracle 在不可变修改前 `87c14a5aa` 失败，加入引用后
+通过。集成通过 333 项 Python；五项须显式 native Codex 环境的用例仍跳过。125 项
+typed、control-plane typecheck、配置内 mypy 和限定 Ruff 通过。另行纠正过期 bridge
+测试：display edits 与 edits 比较，展开后的文档保留原语义断言。
+
+同一未改动的打包 harness，再以等长 namespace 和全部必读 Goal 内容，对照原 quota
+`843be494…` 与当前集成候选。此新 cohort 测量完整集成，其差异不能把列表修改与
+rebase、先前 C1 工作分离归因。
+
+| 后端／阶段 | 原 quota stdout 字节 | C1 stdout 字节 | 调用，quota → C1 | RPC，quota → C1 |
+| --- | ---: | ---: | ---: | ---: |
+| File／冷态 | 94,510 | 89,911 | 13 → 12 | 103 → 102 |
+| File／温态 | 57,931 | 52,094 | 9 → 8 | 99 → 98 |
+| File／上下文丢失恢复 | 91,720 | 87,048 | 15 → 14 | 8 → 8 |
+| SQLite／冷态 | 94,622 | 90,638 | 13 → 14 | 103 → 103 |
+| SQLite／温态 | 58,043 | 52,218 | 9 → 8 | 99 → 98 |
+| SQLite／上下文丢失恢复 | 91,830 | 87,170 | 15 → 14 | 8 → 8 |
+
+两后端保留全部 24 条要求、全量／差分重建、无需新准入的原 capture 丢失恢复、精确
+可选 peer 补读、篡改及提前扣额拒绝、一次写回／扣额和重放，工作保持 open。完整
+capture／delta 自身字节仍大于 quota；原 quota 另读 7,952 字节必需 Goal。可选五项
+peer 成果每阶段仍另增 13,940 正文字节和十次 CLI／hook 调用。温态 RPC 响应字节与
+丢失恢复的请求／响应字节增长。一次非受控 cohort 不认证延迟、模型保留／token／
+cache、账单、人工或验收成果。剩余调用方替换、writer 切换、历史 reader 退役及实际
+单会话决策／成果资格仍未完成；controller 模型比较另作后续实验。

@@ -132,6 +132,17 @@ retains its complete body and declaration. Todo-less reads and the explicit
 reduces repeated binding observations without treating a shorter context as
 acceptance, authority or a measured model benefit.
 
+The complete Turn contract stores equal, nonempty registered Todo-summary lanes
+once when a local reference is smaller. A `<lane>_ref` names a literal array in
+the same signed summary, for example
+`$.agent_todo_summary.first_executable_items`; it requires no additional read.
+Equality includes array order, JSON types and unknown item fields. Resolve these
+references before applying display caps. Literal/reference ambiguity, missing
+targets, reference chains and references outside that summary are rejected.
+Counts, candidate collections and unknown summary fields keep their original
+values. The original capture remains complete; this encoding changes no work
+selection, authority, recovery or settlement rule.
+
 Within the opt-in native context transport, a verified same-capture reading plan
 now produces `outcome_context_projection_v0`: an explicit model presentation,
 with the current Agent's and related outcomes expanded and other independent
@@ -526,6 +537,13 @@ Goal adapter 仍完整读取文件、校验 UTF-8，并以全部字节计算修�
 全部保留，包括其他 owner 的要求。选定 Todo 的完整正文与声明仍由独立来源携带。
 没有选定工作的读取及显式 `goal-acceptance inspect` 保留完整列表；正文减少不等于
 验收、执行权限或已经测得模型收益。
+
+完整 Turn 契约在本地引用更小时，仅存一份相等且非空的已注册 Todo 摘要列表。
+`<lane>_ref` 指向同一签名摘要中的字面数组，例如
+`$.agent_todo_summary.first_executable_items`，不需要额外读取。相等比较包含数组
+顺序、JSON 类型和未知条目字段；应用展示上限前须先展开引用。正文与引用并存、目标
+缺失、引用链或跨摘要引用均拒绝。计数、候选集合及未知摘要字段保留原值。原 capture
+仍完整；编码不改变工作选择、权限、恢复或结算规则。
 
 可选 native context transport 在同 capture 读取计划完整匹配时生成显式模型展示
 `outcome_context_projection_v0`：展开当前 Agent 及相关成果，其他独立成果保留当前

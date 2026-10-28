@@ -210,9 +210,11 @@ and #7430 reuses its repaired module. Later complete-Goal and scoped-prose reuse
 improves cold, warm and recovery stdout against the original quota baseline when
 both arms include all mandatory reads. Earlier negative warm cohorts and the
 integration's existing v4 budget failure remain recorded; optional all-peer reads
-still add cost. [#7575](https://github.com/loopx-project/loopx/pull/7575) proposes the
-independently usable native complete-Goal/reuse slice: warm input improves, while
-cold and recovery incur extra overhead. Continue C1 on remaining real consumers,
+still add cost. [#7575](https://github.com/loopx-project/loopx/pull/7575) is merged
+as an independently usable native complete-Goal/reuse slice: warm input improves,
+while cold and recovery incur extra overhead. C1 adopts that shared implementation
+and now references identical Todo-summary lanes within the same complete capture;
+the original v4 budget still fails. Continue C1 on remaining real consumers,
 writer cutover and reader retirement with complete unknown-field/obligation
 preservation. These engineering observations do not promote defaults or qualify
 model-token, complete-cost or actual decision/outcome benefit.

@@ -390,3 +390,57 @@ does not certify complete C1 or promote the default. C1 reuses the same predicat
 and native source behavior, with scoped-wrapper reuse remaining in C1. Remaining
 callers, writer cutover, historical-reader retirement and actual decision/outcome
 qualification continue in the original work stream.
+
+## Same-capture Todo-summary lane reuse
+
+C1 subsequently rebases onto main `ffc90182bc2a896aa9980cf24dcf23a0e3276e3d`,
+which includes #7575 merged as `a6283d923e3c951443fea65ba1a855c4f7c6c335`.
+Its native Goal producer and integrity owner are adopted rather than copied.
+Runtime `4604ee479` adds exact lane sharing in the existing typed diagnostic
+owner. Equal nonempty registered arrays retain one literal owner and use
+same-summary `<lane>_ref` references where smaller. Equality preserves order,
+JSON types and unknown item fields; other fields and candidate collections stay
+unchanged. The complete composer, action projection and native presentation use
+this owner, resolving references before display caps. No extra state read,
+capture, admission or settlement owner is introduced. Ambiguous, chained,
+missing and cross-summary targets are rejected, including with valid inner
+contract hashes. Older captures remain readable.
+
+The same source-checkout workload emits 27,934 characters before this change
+and 25,862 afterward: 2,072 fewer (7.4%), entirely in the agent summary. All other
+root-section lengths are unchanged. The rebuilt wheel, with 1,889 source-matching
+product members, independently fails the unchanged `d12a8843834aea84…` v4 oracle
+at **25,862 > 13,000**. This is the opt-in complete-contract variant, not the
+default quota output budget. Neither ceiling is raised or claimed passed.
+An identical real File/SQLite producer oracle fails on immutable pre-change
+`87c14a5aa` and passes with the references. The integration passes 333 Python
+cases; five explicit native-Codex environment cases remain skipped. The 125 typed
+cases, control-plane typecheck, configured mypy and scoped Ruff pass. A stale
+bridge test is corrected separately: display edits are compared with edits,
+and the resolved document retains its original semantic assertions.
+
+The unchanged packaged harness again compares original quota `843be494…` with
+this integrated candidate, in equal-length namespaces and with all mandatory
+Goal reads. This new cohort measures the complete integration; its difference
+does not isolate the lane change from the rebase and preceding C1 work.
+
+| Backend / phase | Original quota stdout bytes | C1 stdout bytes | Calls, quota → C1 | RPCs, quota → C1 |
+| --- | ---: | ---: | ---: | ---: |
+| File / cold | 94,510 | 89,911 | 13 → 12 | 103 → 102 |
+| File / warm | 57,931 | 52,094 | 9 → 8 | 99 → 98 |
+| File / loss recovery | 91,720 | 87,048 | 15 → 14 | 8 → 8 |
+| SQLite / cold | 94,622 | 90,638 | 13 → 14 | 103 → 103 |
+| SQLite / warm | 58,043 | 52,218 | 9 → 8 | 99 → 98 |
+| SQLite / loss recovery | 91,830 | 87,170 | 15 → 14 | 8 → 8 |
+
+Both backends preserve all 24 clauses, full/delta reconstruction, original-capture
+loss recovery without new admission, exact optional peer reads, tamper and early
+spend refusal, and one writeback/debit under replay; work stays open. Complete
+capture/delta bytes alone remain larger than quota, which separately reads
+7,952 mandatory Goal bytes. Five optional peer outcomes still add 13,940 content
+bytes and ten CLI/hook calls per phase. Warm RPC response bytes and loss-recovery
+request/response bytes grow. One uncontrolled cohort does not qualify latency,
+model retention/tokens/cache, billing, human cost or accepted outcomes. Remaining
+caller replacement, writer cutover, historical-reader retirement and actual
+single-session decision/outcome qualification stay open; the controller-model
+comparison remains a separate later experiment.
