@@ -271,3 +271,12 @@ this wheel. This functional run overlaps other validation and is not a new
 matched timing cohort. The older cost tables remain attached to runtime
 `167b31e5d`, not relabeled as this later source. Current-version complete-cost
 and outcome qualification remain open.
+
+The committed premerge then exposes a maintainability failure: the executor
+contains 94 statements against the existing 90-statement limit. Runtime
+`82f93ab76a403c2633efedb2f8bf02f85be8e3c6` moves published-input installation
+into the existing staged-capture owner, preserving recovery bindings and
+publication ordering. Its source-matching 1,885-member wheel, all 54 Host-capture
+cases and the unchanged maintainability ratchet pass. The original failure is
+retained; no exception or threshold is added. This owner consolidation does not
+turn the historical warm-input or v4 budget failures into passes.

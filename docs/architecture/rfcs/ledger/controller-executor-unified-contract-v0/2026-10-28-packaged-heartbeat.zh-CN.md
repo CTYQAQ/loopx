@@ -206,3 +206,9 @@ Runtime `6f30cc454f2dea7e77f0821a14a1deaf268efe2e` 的 wheel 含 1,885 个与来
 capture 恢复、拒绝及一次结算。本次功能验证与其他检查并行，不是新的匹配计时 cohort；
 旧成本表仍绑定 `167b31e5d`，不改称后续源码的测量。当前版本完整成本与成果资格保持
 开放。
+
+随后已提交版本的 premerge 暴露维护性失败：executor 有 94 条语句，超过既有 90 条
+限制。Runtime `82f93ab76a403c2633efedb2f8bf02f85be8e3c6` 将已发布输入的安装收回
+现有 staged-capture owner，保留恢复绑定与发布顺序。其 1,885 个产品成员与来源一致，
+54 项 Host-capture 及未改动的维护性 ratchet 均通过。原失败保留，没有新增例外或改
+阈值；本次 owner 收敛不把历史温态输入及 v4 预算失败改判通过。
