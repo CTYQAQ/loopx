@@ -5,6 +5,8 @@ import argparse
 import json
 from pathlib import Path
 
+import pytest
+
 from canonical_authority_fixture import initialize_canonical_authority
 from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
 from loopx.control_plane.testing.canary_harness import run_json_cli_result, write_fixture_registry
@@ -13,7 +15,8 @@ from loopx.control_plane.turn_driver.codex_context import codex_context_hook
 from loopx.cli_commands.quota_capture import read_context_capture
 
 
-def test_file_quota_scope_is_opt_in_and_original_capture_remains_complete(tmp_path, monkeypatch):
+@pytest.mark.parametrize("marked_goal", [True, False])
+def test_file_quota_scope_is_opt_in_and_original_capture_remains_complete(tmp_path, monkeypatch, marked_goal):
     goal, agent = "scope-cli", "author"
     runtime, registry, state = tmp_path / "runtime", tmp_path / "registry.json", tmp_path / "state.md"
     todos = [{"schema_version": "todo_item_v0", "todo_id": f"todo_{owner}", "role": "agent",
@@ -22,7 +25,8 @@ def test_file_quota_scope_is_opt_in_and_original_capture_remains_complete(tmp_pa
         "source_section": "Agent Todo", "archive_state": "active", "claimed_by": owner}
         for i, owner in enumerate((agent, "peer"))]
     body = "---\nstatus: active\n---\n# Goal\n## Objective\nDeliver compatible exports. Never publish.\n## Agent Todo\n\n## User Todo\n\n## Completed Work Archive\n"
-    state.write_text(render_canonical_todo_sections(body, todos, provider_revision="fixture-source").markdown)
+    state.write_text(render_canonical_todo_sections(body, todos, provider_revision="fixture-source").markdown
+        if marked_goal else body)
     write_fixture_registry(project=tmp_path, runtime_root=runtime, registry_path=registry, goal_id=goal,
         domain="software", adapter_kind="generic_project_goal_v0", state_file=str(state),
         registered_agents=[agent, "peer"], quota_allowed_slots=None)
@@ -72,6 +76,11 @@ def test_file_quota_scope_is_opt_in_and_original_capture_remains_complete(tmp_pa
             offset=page["next_offset"], page_bytes=64000, max_page_output_bytes=64000, format="json"))
     presentation = json.loads("".join(parts))
     assert presentation["schema_version"] == "outcome_context_projection_v0"
+    if not marked_goal:
+        goal_source = next(row["content"] for row in
+            presentation["context"]["interaction_contract"]["agent_channel"]["work_context"]["sources"]
+            if row.get("source") == "goal_state")
+        assert goal_source["full_source"] is True and goal_source["text"] == body
     observed = next(row["content"] for row in presentation["context"]["interaction_contract"]["agent_channel"]["work_context"]["sources"]
         if row.get("source") == "goal_acceptance")
     assert observed["outcome_context"]["required_outcome_ids"] == [agent]
