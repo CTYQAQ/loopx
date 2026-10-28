@@ -308,3 +308,20 @@ typed selection, typecheck and Ruff pass. The older wheel and matched timing
 cohorts remain attached to their actual versions. This source follow-through
 does not qualify a new packaged cohort, cure the warm-input or v4 budget failures,
 or close remaining consumers, reader retirement or actual model/outcome costs.
+
+
+The additional complete-Host selection retains 200 passes and two failures
+against the later main integration: its operation-host oracle still expected
+whitespace folding, removed by main's [#7549](https://github.com/loopx-project/loopx/pull/7549).
+The actual `chat_agent.py` blob equals the verified main base. Checking original
+prompt bytes on both transports, while retaining schema, retry and tamper
+assertions, makes all 54 Host-capture cases pass. This changes the test oracle,
+not the production transport. The initial failure remains recorded.
+
+GitHub subsequently reports #7557 merged as
+`4b2b97b7b726d902a20969e3911fd15d15b4bb2e`; all seven contributed files match
+its repaired head. Merge occurrence does not supply a missing new-head
+independent review or protected-action receipt. The C1 qualification above
+remains bound to its frozen main base; later main changes are not implicitly
+qualified. C1 stays an unfinished author integration with its existing cost,
+consumer and retirement gaps.

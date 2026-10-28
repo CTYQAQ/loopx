@@ -233,3 +233,15 @@ C1 runtime `7f35454b392e09ae574c5065c473ee27b5eee853` 使用逐字节相同的�
 集合 258 项 Python 全过；110 项 typed、typecheck 和 Ruff 通过。旧 wheel 与匹配计时
 cohort 仍绑定各自实际版本。本次源码接续不认证新的打包 cohort，不消除温态输入或 v4
 预算失败，也不结清剩余消费者、reader 退役及实际模型／成果的完整成本。
+
+
+额外的完整 Host 集合在后续 main 集成上保留 200 通过、两项失败：operation-host
+oracle 仍预期折叠空白，而主干 [#7549](https://github.com/loopx-project/loopx/pull/7549)
+已经去掉该行为。实际 `chat_agent.py` blob 与已核 main 基线完全相同。两类 transport
+都检查原 prompt 字节，并保留 schema、重试和篡改断言后，54 项 Host-capture 全过。
+此处修正测试 oracle，没有改变生产 transport，首次失败记录保留。
+
+GitHub 随后报告 #7557 已合并为 `4b2b97b7b726d902a20969e3911fd15d15b4bb2e`，七个
+贡献文件均与修复 head 相同。发生合并不能补足尚缺的新 head 独立评审或受保护操作
+回执。上述 C1 资格仍绑定冻结的 main 基线，不隐含认证后续 main 变化；C1 仍是尚未
+完成的作者集成，原有成本、消费者及退役缺口保持。
