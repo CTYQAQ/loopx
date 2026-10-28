@@ -58,20 +58,12 @@ delivered context and remaining reads before dependent work; changed sources nee
 a fresh guard. Enabled scoped acceptance does not replace original Goal intent.
 
 The complete Turn writer and explicitly enabled native context delivery request
-complete Goal material before
-capture. For an unmarked or mixed Goal, the registered-source adapter supplies
-the entire original UTF-8 text with its full-file revision and `full_source: true`.
-The existing TypeScript interaction owner checks that digest before fulfilling
-the read; `complete_goal_v1` acknowledges support so an older runtime cannot
-silently retain a pending Goal read. Missing or invalid sources still reject.
-Marked sources retain their generated-region lineage and canonical Todo authority.
-
-Native delta delivery and source fulfillment share the same integrity predicate.
-Only exact verified Goal text can be inherited from the retained baseline;
-current source witnesses and unknown fields remain literal. Cold delivery and
-context-loss recovery retain the complete original text, including arbitrary
-sections, comments and final stops. This does not establish model retention,
-execution authority, token savings or accepted outcome gains.
+complete Goal material before capture. For an unmarked or mixed Goal, the
+registered-source adapter supplies the entire original UTF-8 text with its
+full-file revision and `full_source: true`. The existing TypeScript context owner
+checks that revision before fulfilling the Goal read. Marked sources retain
+their existing excluded-region lineage and canonical Todo authority. Ordinary
+quota with context delivery off retains the progressive behavior above.
 
 The internal `complete_goal_v1` acknowledgement prevents an older runtime from
 silently ignoring this requirement. Automatic complete-contract business-work Host dispatch
@@ -84,9 +76,10 @@ establishes enforcement for other pending capability reads. Replan material-read
 invocations retain their existing staged reader and work restrictions.
 
 The Goal availability adapter still reads and UTF-8-validates the complete file
-and hashes all bytes for its revision. With native context delivery off, only the path and revision of unmarked or mixed sources cross the
-internal context-projection bridge, preserving the complete progressive read
-without an unused body copy. Explicitly owned sources send the complete
+and hashes all bytes for its revision. In ordinary progressive delivery with
+context delivery off, unmarked or mixed sources send only their path and revision
+across the internal context-projection bridge, without an unused body copy.
+Explicitly owned sources send the complete
 non-generated narrative and region lineage to the typed consumer. Missing files
 and invalid UTF-8 still block dependent delivery. Byte reduction alone does not
 establish model-token, latency or outcome gains.
@@ -149,6 +142,17 @@ complete optional detail before relying on it, and recover the complete original
 source for unknown relevance or Goal-wide acceptance. Unknown optional fields,
 unsupported guidance or a pending acceptance read keep full delivery. The
 canonical decision and ordinary inspection still retain all requirements.
+
+Warm native delivery may reuse the wrapper's exact reading instruction and
+outcome titles. Current source references, scope, owners, revisions, requirement
+states and unknown controls remain literal on every input, including reordered
+indexes. Changed prose is delivered exactly; cold delivery and context-loss
+recovery retain the complete current presentation.
+
+The complete-file Goal source uses the same integrity predicate for dispatch
+and native reuse: exact text digest, explicit full-source marker, no conflicting
+exclusions and no incomplete-read flag. Its text may be inherited from the
+exact baseline; current source witnesses and unknown fields remain inline.
 
 Native full/delta baselines and compaction recovery bind the exact required
 presentation, including its original-source digest. A newly required outcome
@@ -504,20 +508,8 @@ Todo 区域相交的区间均拒绝。
 普通注释、代码块中的示例、损坏或未知回执、其他 Goal 的回执和附带其他文字的行均原样
 保留。这样首轮全文读取不再携带累积的恢复日志；不改变回执重放校验，也不据此宣称
 模型输入或 token 成本已经降低。
-显式开启的 native context delivery 在捕获前请求完整 Goal。未标记或混合归属的来源
-由原 registered-source adapter 提供全部原始 UTF-8 正文、完整修订与 `full_source: true`。
-既有 TypeScript interaction owner 核对正文 digest 后才履行读取；`complete_goal_v1`
-确认 runtime 支持，防止旧版静默保留未完成 Goal 读取。来源缺失或无效仍拒绝；已有标记
-来源保留生成区域血缘和 canonical Todo 权限。
-
-native 差分与来源履行共享同一完整性判断；只有精确核验的 Goal 正文可从保留的
-baseline 继承，当前来源凭据和未知字段仍明文提供。冷态及上下文丢失恢复保留完整
-原文，包括任意章节、注释和末尾停止条件。不据此证明模型保留、执行权限、token 节省
-或已验收成果收益。
-
-Goal adapter 仍完整读取文件、校验 UTF-8，并以全部字节计算修订摘要；关闭 native
-context delivery 时，未标记或混合归属仅在内部桥接传路径与修订，避免未被消费的正文
-副本，Agent 仍须渐进式全文读取。显式
+Goal adapter 仍完整读取文件、校验 UTF-8，并以全部字节计算修订摘要；未标记或混合归属
+仅在内部桥接传路径与修订，避免未被消费的正文副本，Agent 仍须渐进式全文读取。显式
 归属的来源才向 typed owner 传完整非生成正文和区域血缘。字节减少不能证明模型费用、
 延迟或任务效果改善。
 已附带的内容不要求重复读取；未提供的 provider 内容继续保留精确命令与顺序。
@@ -541,6 +533,14 @@ context delivery 时，未标记或混合归属仅在内部桥接传路径与修
 interaction owner 仅调整自己的已履行成果读取指导。依赖可选成果前先读完整正文，
 相关性未知或 Goal 整体验收时读原完整来源。未知可选字段、不支持的指导或尚未完成的
 acceptance read 均保留全量交付；canonical decision 和普通 inspect 不删减要求。
+
+温态 native 交付可复用 wrapper 中完全相同的阅读说明和成果标题。当前来源引用、
+范围、owner、修订、要求状态及未知控制字段每轮仍明文提供，包括索引重排；变化后的
+正文精确交付。冷态及上下文丢失恢复仍保留当前完整展示。
+
+完整文件 Goal 来源的派发和 native 复用共享同一完整性判断：正文 digest 精确匹配、
+明确标记 full source、无矛盾的排除区域且读取完整。正文可继承精确 baseline；当前
+来源凭据与未知字段每轮仍明文提供。
 
 native 全量/差分 baseline 与压缩恢复绑定真正交付的必读展示及其原来源 digest。
 新增必读成果须先交付正文，机器保存可选文字不代表模型已读。
