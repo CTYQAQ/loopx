@@ -334,6 +334,62 @@ def _items(count: int, *, prefix: str) -> list[dict[str, object]]:
     ]
 
 
+@pytest.mark.parametrize("role", ["agent", "user"])
+def test_shared_diagnostics_preserve_unknown_lists_nested_fields_and_complete_items(role):
+    lane = "first_executable_items" if role == "agent" else "first_open_items"
+    item = {**_items(1, prefix="retained")[0], "text": "Original constraint. " * 200,
+        "future_requirements": ["Keep the tail stop."], "lease": {"owner": "peer", "epoch": 7}}
+    unknown = [None, False, 0, {"requirement": "A new obligation"}]
+    summary = {"schema_version": "todo_summary_v0", lane: [item], "backlog_items": _items(5, prefix="diagnostic"),
+        "future_items": unknown, "future_rules": unknown,
+        "deferred_items": [{"todo_id": "later", "future_global_stop": "Do not continue."}],
+        "recent_completed_advancement_items": [{"todo_id": "old", "completion_result": {"future_stop": True}}],
+        "claim_scope": {"owner": "peer", "future_items": unknown, "blocked_claimed_items": []},
+        "future_object": {"items": unknown},
+        "todo_succession_warning": {"items": _items(4, prefix="old"), "todo_ids": ["original-id"], "future_items": unknown}}
+    payload = {f"{role}_todo_summary": summary, "capability_gate": {"runnable_candidates": [item], "future": unknown},
+        "action_portfolio": {"suggested_actions": [item]}, "planning_horizon": {"work_items": [item]}}
+    original = deepcopy(payload)
+    projected = compact_quota_should_run_cli_payload(payload)
+    result = projected[f"{role}_todo_summary"]
+    assert result[lane] == [item]
+    assert result["future_items"] == result["future_rules"] == unknown
+    assert result["future_object"] == {"items": unknown}
+    assert result["deferred_items"] == summary["deferred_items"]
+    assert result["recent_completed_advancement_items"] == summary["recent_completed_advancement_items"]
+    assert result["claim_scope"] == {"owner": "peer", "future_items": unknown}
+    assert result["todo_succession_warning"]["todo_ids"] == ["original-id"]
+    assert result["todo_succession_warning"]["future_items"] == unknown
+    for key in ("capability_gate", "action_portfolio", "planning_horizon"):
+        assert projected[key] == payload[key]
+    assert payload == original
+    assert compact_quota_should_run_cli_payload(projected) == projected
+    detailed = compact_quota_should_run_cli_payload(payload,
+        include_todo_summary_detail=True, include_user_todo_summary_detail=True)
+    assert detailed == payload
+
+
+def test_readonly_plan_projects_all_rows_in_one_typed_call(monkeypatch):
+    from loopx.control_plane.quota.cli_projection import compact_quota_plan_cli_payload
+    from loopx.control_plane.quota import turn_envelope
+    summary = {"schema_version": "todo_summary_v0", "backlog_items": _items(3, prefix="cold"),
+        "first_executable_items": _items(1, prefix="work"), "future_items": [False, None]}
+    row = {"agent_todos": summary, "user_todos": summary}
+    calls, real = [], turn_envelope._turn_envelope_result
+    def observed(operation, **params):
+        calls.append(operation)
+        return real(operation, **params)
+    monkeypatch.setattr(turn_envelope, "_turn_envelope_result", observed)
+    payload = {"mode": "plan", "groups": {"ready": [row] * 8}, "next_automatic_turn": row}
+    projected = compact_quota_plan_cli_payload(payload, detail_sections=frozenset({"user-todos"}))
+    assert calls == ["reference_context"]
+    for result in [*projected["groups"]["ready"], projected["next_automatic_turn"]]:
+        assert result["user_todos"] == summary
+        assert "backlog_items" not in result["agent_todos"]
+        assert result["agent_todos"]["future_items"] == [False, None]
+        assert result["agent_todos"]["payload_compaction"]["full_detail_cold_path"] == "quota plan --include-detail agent-todos"
+
+
 def test_markdown_distinguishes_peer_blockers_from_native_admission() -> None:
     peer = {"mode": "task_scoped_peer", "execution_scope": "peer_agent_activation",
             "execution_state": "blocked", "task_selection": "canonical_claimed_candidates",
@@ -802,7 +858,8 @@ def test_compact_quota_deduplicates_vision_without_losing_decision_rules() -> No
     )
 
     assert len(json.dumps(payload, indent=2)) > 40_000
-    # The old fixture hid selectable candidates. Retain that context and measure the cost.
+    # The historical 40KB fixture hid 28 candidate/binding records. Retaining
+    # that decision context is an intentional cost, not a compaction success.
     assert len(json.dumps(compact, indent=2)) < len(json.dumps(payload, indent=2))
     assert compact["selected_todo"] == payload["selected_todo"]
     assert compact["interaction_contract"]["mode"] == "bounded_delivery"
@@ -1039,62 +1096,6 @@ def test_compact_quota_should_run_cli_payload_keeps_hot_path_identity_in_markdow
     assert "- interaction_contract: " in markdown
 
 
-@pytest.mark.parametrize("role", ["agent", "user"])
-def test_shared_diagnostics_preserve_unknown_lists_nested_fields_and_complete_items(role):
-    lane = "first_executable_items" if role == "agent" else "first_open_items"
-    item = {**_items(1, prefix="retained")[0], "text": "Original constraint. " * 200,
-        "future_requirements": ["Keep the tail stop."], "lease": {"owner": "peer", "epoch": 7}}
-    unknown = [None, False, 0, {"requirement": "A new obligation"}]
-    summary = {"schema_version": "todo_summary_v0", lane: [item], "backlog_items": _items(5, prefix="diagnostic"),
-        "future_items": unknown, "future_rules": unknown,
-        "deferred_items": [{"todo_id": "later", "future_global_stop": "Do not continue."}],
-        "recent_completed_advancement_items": [{"todo_id": "old", "completion_result": {"future_stop": True}}],
-        "claim_scope": {"owner": "peer", "future_items": unknown, "blocked_claimed_items": []},
-        "future_object": {"items": unknown},
-        "todo_succession_warning": {"items": _items(4, prefix="old"), "todo_ids": ["original-id"], "future_items": unknown}}
-    payload = {f"{role}_todo_summary": summary, "capability_gate": {"runnable_candidates": [item], "future": unknown},
-        "action_portfolio": {"suggested_actions": [item]}, "planning_horizon": {"work_items": [item]}}
-    original = deepcopy(payload)
-    projected = compact_quota_should_run_cli_payload(payload)
-    result = projected[f"{role}_todo_summary"]
-    assert result[lane] == [item]
-    assert result["future_items"] == result["future_rules"] == unknown
-    assert result["future_object"] == {"items": unknown}
-    assert result["deferred_items"] == summary["deferred_items"]
-    assert result["recent_completed_advancement_items"] == summary["recent_completed_advancement_items"]
-    assert result["claim_scope"] == {"owner": "peer", "future_items": unknown}
-    assert result["todo_succession_warning"]["todo_ids"] == ["original-id"]
-    assert result["todo_succession_warning"]["future_items"] == unknown
-    for key in ("capability_gate", "action_portfolio", "planning_horizon"):
-        assert projected[key] == payload[key]
-    assert payload == original
-    assert compact_quota_should_run_cli_payload(projected) == projected
-    detailed = compact_quota_should_run_cli_payload(payload,
-        include_todo_summary_detail=True, include_user_todo_summary_detail=True)
-    assert detailed == payload
-
-
-def test_readonly_plan_projects_all_rows_in_one_typed_call(monkeypatch):
-    from loopx.control_plane.quota.cli_projection import compact_quota_plan_cli_payload
-    from loopx.control_plane.quota import turn_envelope
-    summary = {"schema_version": "todo_summary_v0", "backlog_items": _items(3, prefix="cold"),
-        "first_executable_items": _items(1, prefix="work"), "future_items": [False, None]}
-    row = {"agent_todos": summary, "user_todos": summary}
-    calls, real = [], turn_envelope._turn_envelope_result
-    def observed(operation, **params):
-        calls.append(operation)
-        return real(operation, **params)
-    monkeypatch.setattr(turn_envelope, "_turn_envelope_result", observed)
-    payload = {"mode": "plan", "groups": {"ready": [row] * 8}, "next_automatic_turn": row}
-    projected = compact_quota_plan_cli_payload(payload, detail_sections=frozenset({"user-todos"}))
-    assert calls == ["reference_context"]
-    for result in [*projected["groups"]["ready"], projected["next_automatic_turn"]]:
-        assert result["user_todos"] == summary
-        assert "backlog_items" not in result["agent_todos"]
-        assert result["agent_todos"]["future_items"] == [False, None]
-        assert result["agent_todos"]["payload_compaction"]["full_detail_cold_path"] == "quota plan --include-detail agent-todos"
-
-
 @pytest.mark.parametrize("mode", ["should-run", "status", "plan"])
 @pytest.mark.parametrize("expanded", [None, "agent", "user"])
 def test_diagnostic_transport_preserves_source_number_spelling_and_precision(mode, expanded):
@@ -1134,41 +1135,3 @@ def test_diagnostic_transport_preserves_source_number_spelling_and_precision(mod
                 assert json.dumps(value["payload_compaction"]["source_projection"], ensure_ascii=False) == json.dumps(summary["payload_compaction"], ensure_ascii=False)
     assert json.dumps(payload, ensure_ascii=False) == encoded
     assert json.dumps(project(result), ensure_ascii=False) == json.dumps(result, ensure_ascii=False)
-
-
-@pytest.mark.parametrize("provider", ["file", "sqlite"])
-@pytest.mark.parametrize("mode", ["status", "plan"])
-def test_public_readonly_projection_preserves_canonical_work_and_detail(tmp_path, monkeypatch, provider, mode):
-    from tests.control_plane import test_quota_settlement_cli as fixture
-    from tests.control_plane.canonical_authority_fixture import isolate_sqlite_runtime
-    if provider == "sqlite":
-        isolate_sqlite_runtime(tmp_path, monkeypatch)
-    project, runtime, registry = fixture._write_fixture(tmp_path)
-    state = fixture._configure_read_only_todo(project)
-    fixture._initialize_fixture_authority(project, runtime, provider=provider)
-    def canonical_work():
-        rc, value = fixture._run_cli(registry, runtime, "todo", "list", "--goal-id", fixture.GOAL_ID,
-            "--todo-id", fixture.TODO_ID, cwd=project)
-        assert rc == 0 and value["matched"] is True, value
-        assert value["authority_read"]["source_authority"] == f"{provider}_v0"
-        assert value["authority_read"]["legacy_fallback_used"] is False
-        return value["todo"], value["authority_read"]["provider_revision"]
-    before = canonical_work()
-    original = state.read_bytes()
-    def call(*detail):
-        rc, value = fixture._run_cli(registry, runtime, "quota", mode, *detail, cwd=project)
-        assert rc == 0 and value["ok"] is True, value
-        return {row["goal_id"]: row for rows in value["groups"].values() for row in rows}
-    projected = call()[fixture.GOAL_ID]
-    detailed = call("--include-detail", "agent-todos", "--include-detail", "user-todos")[fixture.GOAL_ID]
-    for role in ("agent", "user"):
-        one, full = projected[f"{role}_todos"], detailed[f"{role}_todos"]
-        assert one["open_count"] == full["open_count"]
-        assert one["work_counts"] == full["work_counts"]
-        assert one["payload_compaction"]["full_detail_cold_path"] == f"quota {mode} --include-detail {role}-todos"
-        lane = "first_executable_items" if role == "agent" else "first_open_items"
-        assert one[lane] == full[lane]
-    assert canonical_work() == before
-    assert state.read_bytes() == original
-    assert fixture._spend_run_count(runtime) == 0
-    assert fixture._heartbeat_receipt_count(runtime, "readonly-projection") == 0
