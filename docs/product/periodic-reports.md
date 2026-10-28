@@ -499,6 +499,10 @@ does not authorize replay of a historical attempt with unknown host effects.
 The original pump can resume one retained report after the first-party launch
 owner's exact `stale_goal_authority` refusal. That owner rejects before publishing
 `turn/start`; a missing answer or missing events alone is insufficient. The
+host adapter records this guard-entry refusal through the native executor's
+existing `contract_rejected` host-failure contract. The durable attempt remains
+recorded; an exception after publication is not converted into that proof.
+Older in-progress journals with unknown host effects remain blocked. The
 typed admission checks the original Chat request, canonical native transaction,
 one recorded attempt, no generation or settlement, and the current original
 subscription and grant. A separately correlated Chat attempt resumes the same

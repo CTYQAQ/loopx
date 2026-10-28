@@ -1079,7 +1079,10 @@ def test_original_pump_resumes_exact_prelaunch_rejection_once_without_replaying_
         first = pump_steward_monitors(runtime)[0]
         rejected = finish(runtime, first)
     failure = rejected["response"]["native_loopx"]
-    assert failure["error_code"] == "stale_goal_authority", rejected
+    assert failure["status"] == "failed" and failure["result_kind"] == "host_failure", rejected
+    assert failure["host_failure"] == {"schema_version": "loopx_turn_host_failure_v0",
+        "kind": "contract_rejected", "attempt": 1, "retryable": False}
+    assert failure["reason"] == "first-party Host runtime rejected: stale_goal_authority"
     assert rejected["delta_count"] == 0 and rejected["upstream_turn_id"] is None
     native = turn_journal_path(reports.root, goal_id=actor["goal_id"], turn_key=failure["resume_turn_key"])
     assert json.loads(native.read_text())["host_attempt_count"] == 1
@@ -1100,7 +1103,8 @@ def test_original_pump_resumes_exact_prelaunch_rejection_once_without_replaying_
         completed = finish(runtime, retry)
     assert completed["status"] == "completed", {key: completed.get(key) for key in ("status", "error", "error_code", "response")}
     if reject_recovery:
-        assert completed["response"]["native_loopx"]["error_code"] == "stale_goal_authority"
+        assert completed["response"]["native_loopx"]["host_failure"]["kind"] == "contract_rejected"
+        assert completed["response"]["native_loopx"]["host_failure"]["attempt"] == 2
         before = capture.read_bytes(), list(bot.writes), native.read_bytes()
         for _ in range(2):
             runtime._steward_monitor_next_check.clear()
@@ -1128,6 +1132,51 @@ def test_original_pump_resumes_exact_prelaunch_rejection_once_without_replaying_
         assert not pump_steward_monitors(runtime)
         assert transport.steward_reports.reconcile() == 0
     assert bot.writes == sent and capture.read_bytes() == calls
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("stage", ["unknown_before_publication", "after_publication"])
+def test_report_launch_recovery_never_reclassifies_unknown_or_published_work(steward, tmp_path, monkeypatch, provider, stage):
+    from loopx.chat_agent import CodexChatAgentSession
+    from loopx.control_plane.goals.first_party_host_admission import FirstPartyHostRuntimeRejected
+    from loopx.control_plane.turn_driver.journal_store import turn_journal_path
+
+    store, runtime, bot, transport, _, capture, _ = steward
+    sid, actor, reports, _ = configured(steward, tmp_path, monkeypatch, provider)
+    install_model(steward, tmp_path, sid)
+    calls = capture.read_bytes()
+    write = CodexChatAgentSession._write
+
+    def uncertain_write(self, payload, **kwargs):
+        if payload.get("method") != "turn/start":
+            return write(self, payload, **kwargs)
+        if stage == "unknown_before_publication":
+            raise OSError("publication outcome unavailable")
+        write(self, payload, **kwargs)
+        # The same exception after the guarded publication is deliberately not
+        # evidence that this host invocation did nothing.
+        raise FirstPartyHostRuntimeRejected("stale_goal_authority")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(CodexChatAgentSession, "_write", uncertain_write)
+        first = pump_steward_monitors(runtime)[0]
+        done = finish(runtime, first)
+    result = done["response"]["native_loopx"]
+    if stage == "unknown_before_publication":
+        assert result["host_failure"]["kind"] == "unknown"
+    else:
+        assert result["error_code"] == "stale_goal_authority"
+        assert "host_failure" not in result
+    native = turn_journal_path(reports.root, goal_id=actor["goal_id"], turn_key=result["resume_turn_key"])
+    starts = [json.loads(line) for line in capture.read_bytes()[len(calls):].splitlines()
+        if json.loads(line).get("method") == "turn/start"]
+    assert len(starts) == (1 if stage == "after_publication" else 0)
+    before = native.read_bytes(), store.load_turn(sid, first["turn_id"]), capture.read_bytes(), list(bot.writes)
+    for _ in range(2):
+        runtime._steward_monitor_next_check.clear()
+        assert not pump_steward_monitors(runtime)
+        assert transport.steward_reports.reconcile() == 0
+    assert (native.read_bytes(), store.load_turn(sid, first["turn_id"]), capture.read_bytes(), bot.writes) == before
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
