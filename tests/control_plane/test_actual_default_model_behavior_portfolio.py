@@ -1754,7 +1754,7 @@ def test_portfolio_contrast_rejects_noisy_gate_semantic_collapse(
         capability_gate = packet.get("capability_gate") or {}
         if (
             capability_gate.get("action") == "operator_gate"
-            and "payload_compaction" in capability_gate
+            and capability_gate.get("runnable_candidates")
         ):
             result["decision"] = {
                 **result["decision"],
