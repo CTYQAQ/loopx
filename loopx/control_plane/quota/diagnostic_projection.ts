@@ -122,6 +122,27 @@ function compactSummary(summary: JsonObject, role: "agent" | "user", detail: str
     retained_item_lanes: Object.keys(limits).filter(key => key !== "current_agent_blocker_items" ||
       (Array.isArray(summary[key]) && (summary[key] as unknown[]).length > 0)).sort(),
     omitted_lanes: omitted};
+  // A removed lane has zero visible rows. Fold its known upstream truncation
+  // into one total instead of describing an intermediate list no longer shown.
+  // Retained lanes still need the source's text/row truncation evidence. Unknown
+  // schemas, fields or inconsistent counts remain verbatim for diagnosis.
+  if (!owned && previous?.schema_version === "quota_todo_summary_payload_compaction_v0") {
+    const lanes = jsonObject(previous.compacted_lanes);
+    if (lanes) {
+      const remaining = {...lanes};
+      for (const [key, value] of Object.entries(lanes)) {
+        const counts = jsonObject(value), rows = summary[key];
+        if (Object.hasOwn(compact, key) || !Array.isArray(rows) || !counts ||
+            Object.keys(counts).some(field => field !== "shown" && field !== "total") ||
+            !Number.isSafeInteger(counts.shown) || !Number.isSafeInteger(counts.total) ||
+            counts.shown !== rows.length || (counts.total as number) < rows.length ||
+            omitted[key] !== rows.length) continue;
+        omitted[key] = counts.total;
+        delete remaining[key];
+      }
+      metadata.source_projection = {...previous, compacted_lanes: remaining};
+    }
+  }
   delete metadata.full_detail_cold_path;
   delete metadata.full_detail_capture_ref;
   metadata[captured ? "full_detail_capture_ref" : "full_detail_cold_path"] = detail;

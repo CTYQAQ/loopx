@@ -17,6 +17,44 @@ from loopx.presentation.renderers.quota_markdown import (
 )
 
 
+@pytest.mark.parametrize("variant", ["known", "future-schema", "future-field", "mismatch", "negative", "unsafe"])
+def test_hidden_diagnostic_lane_counts_all_source_rows_once(variant):
+    counts = {"shown": 2, "total": 8}
+    source = {"schema_version": "quota_todo_summary_payload_compaction_v0",
+        "item_text_limit": 180,
+        "compacted_lanes": {"backlog_items": counts,
+            "first_executable_items": {"shown": 2, "total": 9}},
+        "future_fact": {"value": 2**60 + 1}}
+    if variant == "future-schema":
+        source["schema_version"] = "future_v1"
+    if variant == "future-field":
+        counts["pending"] = 3
+    if variant == "mismatch":
+        counts["shown"] = 1
+    if variant == "negative":
+        counts["total"] = -1
+    if variant == "unsafe":
+        counts["total"] = 2**60 + 1
+    summary = {"schema_version": "todo_summary_v0", "payload_compaction": source,
+        "backlog_items": _items(2, prefix="cold"),
+        "first_executable_items": _items(2, prefix="work")}
+    payload = {"agent_todo_summary": summary}
+    original = deepcopy(payload)
+    result = compact_quota_should_run_cli_payload(payload)
+    actual = result["agent_todo_summary"]
+    metadata = actual["payload_compaction"]
+    assert "backlog_items" not in actual
+    assert actual["first_executable_items"] == summary["first_executable_items"]
+    assert metadata["omitted_lanes"]["backlog_items"] == (8 if variant == "known" else 2)
+    expected = deepcopy(source)
+    if variant == "known":
+        del expected["compacted_lanes"]["backlog_items"]
+    assert metadata["source_projection"] == expected
+    assert compact_quota_should_run_cli_payload(result) == result
+    assert compact_quota_should_run_cli_payload(payload, include_todo_summary_detail=True) == payload
+    assert payload == original
+
+
 @pytest.mark.parametrize("variant", ["text", "title", "different", "short", "incomplete", "unverified",
     "unmatched", "ambiguous", "partial", "failed", "wrong-id", "wrong-selection", "duplicate", "existing-ref",
     "archived", "done", "boolean-id"])
