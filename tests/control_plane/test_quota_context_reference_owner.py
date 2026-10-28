@@ -158,7 +158,9 @@ def test_context_sharing_uses_one_boundary_and_keeps_explicit_detail(monkeypatch
     task_detail, vision_detail = detail in {"task", "both"}, detail in {"vision", "both"}
     result = compact_quota_should_run_cli_payload(source,
         include_todo_summary_detail=task_detail, include_vision_detail=vision_detail)
-    assert len(calls) == (0 if detail == "both" else 1)
+    # Agent/vision detail leaves the User summary on its default compact path.
+    # That formerly local Python work now shares this single typed request.
+    assert calls == ["reference_context"]
     if task_detail:
         assert result["agent_lane_next_action"]["title"] == title
     else:
@@ -169,6 +171,18 @@ def test_context_sharing_uses_one_boundary_and_keeps_explicit_detail(monkeypatch
         assert graph(result)["result_writeback_guidance_ref"].endswith("optional_attachments[0].guidance")
     assert result["interaction_contract"]["agent_channel"]["work_context"]["sources"][1]["content"]["todo"]["text"] == title
     assert result["interaction_contract"]["cli_channel"] == source["interaction_contract"]["cli_channel"]
+
+
+def test_all_explicit_details_need_no_diagnostic_transport(monkeypatch):
+    from loopx.control_plane.quota.cli_projection import compact_quota_should_run_cli_payload
+    from loopx.control_plane.quota import turn_envelope
+    source, _ = packet()
+    def unavailable(*args, **kwargs):
+        raise AssertionError("explicit full summaries and guidance need no projection")
+    monkeypatch.setattr(turn_envelope, "_turn_envelope_result", unavailable)
+    result = compact_quota_should_run_cli_payload(source, include_todo_summary_detail=True,
+        include_user_todo_summary_detail=True, include_vision_detail=True)
+    assert result == source
 
 
 def test_no_context_sources_needs_no_transport(monkeypatch):
