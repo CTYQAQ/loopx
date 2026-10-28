@@ -124,7 +124,7 @@ def test_real_cli_boundary_clauses_reach_shared_host_without_loss(tmp_path, monk
     from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
     from loopx.control_plane.turn_driver.host_candidate import extract_turn_authority, render_prompt
     from tests.control_plane.canonical_authority_fixture import (
-        initialize_canonical_authority, isolate_sqlite_runtime,
+        empty_todo_display, initialize_canonical_authority, isolate_sqlite_runtime,
     )
     from tests.control_plane.test_quota_settlement_cli import _spend_run_count
 
@@ -145,6 +145,9 @@ def test_real_cli_boundary_clauses_reach_shared_host_without_loss(tmp_path, monk
     projection = build_todo_runtime_shadow_projection(
         goal_id=GOAL_ID, handoff_mode='soft_claim', todos=read_fixture_todos(state),
     )
+    # Keep work in its canonical provider and the full non-Todo Goal readable
+    # through the ordinary source reader before strict Host dispatch.
+    empty_todo_display(state)
     initialize_canonical_authority(runtime, GOAL_ID, projection, state_path=state, provider=provider)
     args = ['quota', 'should-run', '--goal-id', GOAL_ID, '--agent-id', AGENT_ID,
             '--todo-id', TODO_ID, '--turn-instance-id', TURN_ID, '--codex-app',
@@ -163,17 +166,23 @@ def test_real_cli_boundary_clauses_reach_shared_host_without_loss(tmp_path, monk
     for field in ('write_scope', 'guards', 'requires_parent_approval'):
         assert envelope['boundary'][field] == full['goal_boundary'][field], field
     authority = extract_turn_authority({'work_contract': full, 'turn_envelope': envelope})
-    assert authority['write_scope'] == scopes
-    assert authority['boundary']['guards'] == guards
-    assert authority['boundary']['requires_parent_approval'] == ['publish', 'production-action']
-    assert 'write_scope' not in authority['boundary']  # Existing aliases carry these facts once.
+    assert authority['goal_boundary'] == full['goal_boundary']
+    # Historical requests still decode their scope aliases, while new requests
+    # transport the original complete contract without deriving a second view.
+    historical = extract_turn_authority({'turn_envelope': envelope})
+    assert historical['write_scope'] == scopes
+    assert historical['boundary']['guards'] == guards
+    assert historical['boundary']['requires_parent_approval'] == ['publish', 'production-action']
+    assert 'write_scope' not in historical['boundary']
     prompt = render_prompt(authority)
     transported, _ = json.JSONDecoder().raw_decode(prompt.split('Turn request:\n', 1)[1])
     assert transported == {'work_contract': full}
     altered = json.loads(json.dumps(envelope))
     altered['boundary']['guards'][-1] = 'Continue without the final restriction.'
-    with pytest.raises(ValueError, match='action signature'):
+    with pytest.raises(ValueError, match='complete Turn contract rejected'):
         extract_turn_authority({'work_contract': full, 'turn_envelope': altered})
+    with pytest.raises(ValueError, match='action signature'):
+        extract_turn_authority({'turn_envelope': altered})
     before = _heartbeat_receipt_count(runtime, TURN_ID)
     code, replay = _run_cli(registry, runtime, *args)
     assert code == 0, replay
