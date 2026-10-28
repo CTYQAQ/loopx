@@ -2028,9 +2028,6 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
   if (operation === "reference_replan_authoring") {
     return referenceReplanAuthoring(requireJsonObject(request.payload, "authoring sharing source"));
   }
-  if (operation === "reference_goal_acceptance") {
-    return referenceGoalAcceptance(requireJsonObject(request.payload, "acceptance sharing source"));
-  }
   if (operation === "replan_view") return replanView(request);
   if (operation === "replan_cli_view") {
     const payload = requireJsonObject(request.payload, "replan CLI payload");
@@ -2138,10 +2135,6 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
     return {sha256: capturedTodoTextSha256(object(action.selected_todo), envelope.work_context,
       action.recommended_action, request.todo_id)};
   }
-  if (operation === "build_controller_input") {
-    const envelope = buildTurnEnvelope(request);
-    return {envelope, route: turnEnvelopeRoute(envelope)};
-  }
   if (operation === "consumer_version") {
     assertTurnEnvelopeConsumerVersion(requireJsonObject(request.envelope, "turn_envelope"));
     return {ok: true};
@@ -2150,6 +2143,7 @@ export function evaluateTurnEnvelope(value: unknown): JsonObject {
     const source = requireJsonObject(request.payload, "quota decision");
     let payload = source;
     if (jsonObject(request.diagnostics)) payload = projectQuotaDiagnostics(payload, request.diagnostics as JsonObject);
+    if (request.goal_acceptance === true) payload = referenceGoalAcceptance(payload);
     if (request.task_title === true) payload = referenceCurrentTaskTitle(payload);
     if (request.explore_guidance === true) payload = referenceExploreGuidance(payload);
     return jsonObject(request.diagnostics) ? contextProjectionChanges(source, payload) : payload;
