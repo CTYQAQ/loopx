@@ -16,6 +16,7 @@ import {projectReplanSemantics} from "../../loopx/control_plane/work_items/repla
 import {evaluateTurnEnvelope} from "../../loopx/control_plane/quota/turn_envelope.ts";
 import {canonicalAuthoritySha256} from "../../loopx/control_plane/coordination/authority_store_codec.ts";
 import {projectInteractionRequiredReads} from "../../loopx/control_plane/work_items/interaction_contract.ts";
+import {contextProjectionChanges, projectQuotaDiagnostics} from "../../loopx/control_plane/quota/diagnostic_projection.ts";
 
 const goal = "tour-goal";
 const goalRef = {goal_id: goal, goal_instance_id: "ginst_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"};
@@ -210,7 +211,11 @@ test("native and legacy diagnostics share one owner without hiding decision cont
   const before = structuredClone(payload), source_capture = {path: "/capture/one ' quoted.json", sha256: "a".repeat(64)};
   const native = nativeProjection(payload, source_capture);
   const scoped = native.context as JsonObject;
-  const legacy = evaluateTurnEnvelope({operation: "reference_context", payload, diagnostics: {}});
+  const legacy = projectQuotaDiagnostics(payload);
+  // The bridge returns display edits so Python keeps untouched numeric facts.
+  // Compare that wire separately from the complete projected document.
+  assert.deepEqual(evaluateTurnEnvelope({operation: "reference_context", payload, diagnostics: {}}),
+    contextProjectionChanges(payload, legacy));
   const one = scoped.agent_todo_summary as JsonObject, two = legacy.agent_todo_summary as JsonObject;
   assert.equal(one.backlog_items, undefined);
   assert.deepEqual(one.first_executable_items, [task]);
@@ -228,7 +233,7 @@ test("native and legacy diagnostics share one owner without hiding decision cont
   }
   const detail = evaluateTurnEnvelope({operation: "reference_context", payload,
     diagnostics: {agent_detail: true, user_detail: true}});
-  assert.deepEqual(detail, payload);
+  assert.deepEqual(detail, {changes: []});
   assert.deepEqual(payload, before);
   // The derived wrapper must still be checked against the exact original.
   evaluateTurnEnvelope({operation: "captured_outcome", payload: native, source_payload: payload, outcome_ref: ""});
