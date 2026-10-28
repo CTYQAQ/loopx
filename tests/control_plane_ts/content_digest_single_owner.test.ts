@@ -164,6 +164,7 @@ const CANONICAL_CONSUMERS = [
   "control_plane/todos/read_transport.ts",
   "control_plane/turn_driver/chat_turn_acceptance.ts",
   "control_plane/work_items/operation_agent_handoff.ts",
+  "control_plane/work_items/goal_context_source.ts",
   "control_plane/work_items/interaction_contract.ts",
   "control_plane/work_items/pending_capability_intent.ts",
   "control_plane/work_items/progress_review_evidence.ts",
