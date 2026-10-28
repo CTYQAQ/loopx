@@ -78,15 +78,24 @@ def test_local_report_rejects_source_substitution_before_original_model(steward,
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_local_agent_calendar_report_uses_original_worker_and_verified_core_return(steward, tmp_path, monkeypatch, provider):
+@pytest.mark.parametrize("recorded_reference", [None, "https://example.org/review/42"])
+def test_local_agent_calendar_report_uses_original_worker_and_verified_core_return(steward, tmp_path, monkeypatch, provider, recorded_reference):
     from loopx.capabilities.native_chat.steward_monitor import StewardMonitor
     from loopx.capabilities.native_chat.steward_managed_mode import ManagedSessionTurn
     session, reports, _, task_id = configured_local_report(steward, tmp_path, monkeypatch, provider)
     store, runtime, bot, _, _, capture, _ = steward
     sid = session["session_id"]
+    if recorded_reference:
+        from test_native_steward_turn_host import cli
+        cli(runtime, "todo", "update", "--goal-id", session["goal_id"], "--todo-id", task_id,
+            "--agent-id", session["managed_agent_id"], "--evidence", recorded_reference)
     with monkeypatch.context() as changed_source:
         changed_source.setattr(inspect, "getsource", lambda *_: "not the imported model callable")
         install_model(steward, tmp_path, sid)
+    if recorded_reference:
+        helper = tmp_path / "report_model.py"
+        helper.write_text(helper.read_text().replace('ref = request["facts"][0]["source_ref"]',
+            "ref = " + repr(recorded_reference)))
     # A host's default codec must not decide how frozen Chinese artifacts read.
     real_read_text = Path.read_text
     def host_codec_read_text(path, *args, **kwargs):
@@ -111,9 +120,16 @@ def test_local_agent_calendar_report_uses_original_worker_and_verified_core_retu
     assert frozen["destination"] == "original_managed_session_full_body"
     assert source["goal_id"] == session["goal_id"] and source["complete_native_task_read"]
     assert task_id in {row["todo_id"] for row in source["rows"]}
+    if recorded_reference:
+        citation = next(fact for fact in frozen["facts"] if fact["source_ref"] == recorded_reference)
+        assert citation["status"] == "unverified" and "todo:" + task_id in citation["summary"]
     assert frozen["actual_work_window"]["end_at"] == window["due_at"]
     assert datetime.fromisoformat(window["due_at"]) - datetime.fromisoformat(window["start_at"]) == timedelta(days=1)
     body = (folder / "report.md").read_text(encoding="utf-8")
+    if recorded_reference:
+        assert f"]({recorded_reference})" in body
+        bundle = json.loads((folder / "generation-bundle.json").read_text(encoding="utf-8"))
+        assert all(recorded_reference in artifact["content"] for artifact in bundle["artifacts"])
     messages = store.messages(sid)
     assert messages[:len(before)] == before
     returned = [row for row in messages if row["role"] == "agent" and row["text"] == body]

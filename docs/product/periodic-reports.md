@@ -25,7 +25,23 @@ the source reader never fetches a URL. A recorded address proves neither public
 access nor permission to publish to a different audience. The original scope,
 source gaps and unread-artifact status remain authoritative; an opaque digest
 does not supply a missing URL. Existing v1 frozen inputs retain their original
-fact set and bytes. Ordinary managed Session inputs retain their existing scope.
+fact set and bytes. New ordinary managed Session inputs use the same frozen
+citation format for a native Task whose evidence field is one eligible HTTP(S)
+reference. The original Task reference and complete source remain available;
+the address is explicitly unread and unverified. Prose, notes and compound
+evidence strings are not searched for links. This adds no source read, fetch,
+publication route or audience, and existing local v1 windows remain unchanged.
+
+The packaged local-Session journey below uses a disposable SQLite backend and
+synthetic model response: normal configuration preview/apply, one native report
+Turn, its complete original conversation return, then the existing answer
+reader. The six source links retain the recorded Task address in both formats.
+The fixed synthetic prose qualifies transport and reading mechanics, not live
+editorial quality or the address's availability. No layout or editor changed.
+
+| Packaged answer reader | Narrow answer reader |
+| --- | --- |
+| ![A recorded Task address in the full report](../assets/personal-workspace/steward-reports/local-citations/packaged-reader-desktop.png) | ![The same source link and report at 390 pixels](../assets/personal-workspace/steward-reports/local-citations/packaged-reader-narrow.png) |
 
 Text reports include the same authored overview values, labels and details as
 the HTML artifact. When that overview is present, it replaces the generated
