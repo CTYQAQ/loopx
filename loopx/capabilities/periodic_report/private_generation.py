@@ -33,6 +33,8 @@ def _read(path: Path) -> dict[str, Any]:
 
 def _source_facts(source: dict[str, Any], *, local: bool) -> list[dict[str, Any]]:
     """Derive editorial references from the same frozen source on every read."""
+    from ...chat_manager_history import _recorded_web_references
+
     facts = [{"fact_id": "local_coverage" if local else "portfolio_coverage",
         "title": "本期来源范围" if local else "本期来源覆盖",
         "summary": ("当前原 Goal 的完整原生任务读取；任务状态在收集时观察，按完成时间区分本期成果和历史记录。来源声明及任务完成不证明外部业务已独立验收。"
@@ -49,13 +51,20 @@ def _source_facts(source: dict[str, Any], *, local: bool) -> list[dict[str, Any]
             "status": "recorded" if local else "unknown" if row["kind"] == "coverage_gap" else "recorded",
             "source_ref": "todo:" + row["todo_id"] if local else row["source_ref"],
             "content_kind": "coverage"})
-        if not local and source.get("source_fact_binding") == "frozen_source_v2":
-            for citation_index, citation in enumerate(
-                    row["evidence"].get("recorded_details", {}).get("recorded_source_refs", [])):
-                facts.append({"fact_id": f"portfolio_{index}_source_{citation_index}",
-                    "title": f"{row.get('goal_id') or 'portfolio'} / 原记录出处（未读取）"[:240],
-                    "summary": f"原记录 {row['evidence'].get('source_ref', row['source_ref'])} 提供的出处；"
-                        f"冻结记录 {row['source_ref']}；标识 {citation['evidence_ref']}。"
+        if source.get("source_fact_binding") == "frozen_source_v2":
+            # A native Task evidence field can itself be one exact reference.
+            # Do not extract links from prose, notes or compound references.
+            citations = (_recorded_web_references([row.get("evidence")]) if local else
+                row["evidence"].get("recorded_details", {}).get("recorded_source_refs", []))
+            record_ref = "todo:" + row["todo_id"] if local else row["evidence"].get("source_ref", row["source_ref"])
+            frozen_ref = "todo:" + row["todo_id"] if local else row["source_ref"]
+            for citation_index, citation in enumerate(citations):
+                facts.append({"fact_id": (f"local_{index}_source_{citation_index}" if local else
+                        f"portfolio_{index}_source_{citation_index}"),
+                    "title": ("原任务出处（未读取）" if local else
+                        f"{row.get('goal_id') or 'portfolio'} / 原记录出处（未读取）")[:240],
+                    "summary": f"原记录 {record_ref} 提供的出处；"
+                        f"冻结记录 {frozen_ref}；标识 {citation['evidence_ref']}。"
                         "仅限本次原授权受众；未读取引用产物，可达性和公开许可均未核验，不证明业务完成。",
                     "status": "unverified", "source_ref": citation["source_ref"],
                     "content_kind": "coverage"})
@@ -187,7 +196,7 @@ def prepare_session_report(*, root: Path, window: dict[str, Any], actor: dict[st
         rows = source["rows"]
         if len(rows) > 4000 or len(json.dumps(source, ensure_ascii=False).encode()) > 4 * 1024 * 1024:
             raise ValueError("the complete local report source exceeds its existing evidence bound")
-        source = {**source, "source_fact_binding": "frozen_source_v1"}
+        source = {**source, "source_fact_binding": "frozen_source_v2"}
         request = _build_editorial_request(intent=cadence_intent(window), runtime_root=root,
             goal_id=window["goal_id"], agent_id=window["agent_id"], completed_at=window["due_at"],
             facts=_source_facts(source, local=True))
@@ -195,7 +204,7 @@ def prepare_session_report(*, root: Path, window: dict[str, Any], actor: dict[st
         request.update(managed_session_actor=actor, reporting=reporting, window=window,
             source_artifact=str(folder / "source.json"), source_revision=source["source_revision"],
             source_artifact_sha256=_canonical_digest(source), destination="original_managed_session_full_body",
-            source_fact_binding="frozen_source_v1")
+            source_fact_binding="frozen_source_v2")
         request["narrative_contract"]["requirements"] += [
             "Use only this original Goal's frozen evidence and permitted artifacts; no portfolio or other Goal access is granted.",
             "Current Task status is observed at collection time, not reconstructed as of the period end.",

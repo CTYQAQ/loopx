@@ -163,10 +163,12 @@ def _prepared_report(tmp_path: Path):
     return root, window, response
 
 
-def _source_prepared_report(tmp_path: Path, *, local: bool):
+def _source_prepared_report(tmp_path: Path, *, local: bool, evidence=None):
     _, window, response = _prepared_report(tmp_path / "template")
     root = tmp_path / "bound-runtime"
     source = {"rows": [{"todo_id": "todo_source", "text": "保留原始证据与未完成工作", "status": "open"}]}
+    if evidence is not None:
+        source["rows"][0]["evidence"] = evidence
     source["source_revision"] = _canonical_digest(source)
 
     def read(arguments):
@@ -191,6 +193,55 @@ def _source_prepared_report(tmp_path: Path, *, local: bool):
         for item in section["items"]:
             item["source_ref"] = request["facts"][0]["source_ref"]
     return root, window, response, prepare
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_local_task_citation_reaches_frozen_artifacts_without_rewriting_legacy(tmp_path, legacy):
+    reference = "https://example.org/results/42"
+    root, window, response, prepare = _source_prepared_report(tmp_path, local=True, evidence=reference)
+    folder = attempt_directory(root, window)
+    request = json.loads((folder / "editorial-request.json").read_text())
+    if legacy:
+        source = json.loads((folder / "source.json").read_text())
+        source["source_fact_binding"] = request["source_fact_binding"] = "frozen_source_v1"
+        request["facts"] = [fact for fact in request["facts"] if fact["source_ref"] != reference]
+        request["source_artifact_sha256"] = _canonical_digest(source)
+        request["request_digest"] = _canonical_digest({k: v for k, v in request.items() if k != "request_digest"})
+        atomic_write_json(folder / "source.json", source)
+        atomic_write_json(folder / "editorial-request.json", request)
+    citations = [fact for fact in request["facts"] if fact["source_ref"] == reference]
+    assert len(citations) == (0 if legacy else 1)
+    if not legacy:
+        assert citations[0]["status"] == "unverified"
+        assert "todo:todo_source" in citations[0]["summary"]
+        assert "可达性和公开许可均未核验" in citations[0]["summary"]
+    response["request_digest"] = request["request_digest"]
+    for section in response["sections"]:
+        for item in section["items"]:
+            item["source_ref"] = request["facts"][0]["source_ref"] if legacy else reference
+    receipt = freeze_private_report(root=root, window=window, response=response)
+    before = {path.name: path.read_bytes() for path in folder.iterdir() if path.suffix in {".json", ".md"}}
+    assert validate_private_generation(folder) == receipt
+    assert prepare() == request
+    assert {name: (folder / name).read_bytes() for name in before} == before
+    bundle = json.loads((folder / "generation-bundle.json").read_text())
+    assert all((reference in artifact["content"]) != legacy for artifact in bundle["artifacts"])
+
+
+@pytest.mark.parametrize("reference", [
+    "/Users/fixture/private.txt", "file:///tmp/private", "../.local/private.json",
+    "https://user:pass@example.org/file", "https://example.org/file?key=hidden",
+    "https://docs" + ".internal/design", "javascript:alert", "https://example.org/\nprivate",
+    "https://example.org:invalid/file", "https://#missing-host",
+    "See https://example.org/results/42", "https://example.org/one | https://example.org/two",
+])
+def test_local_task_citation_does_not_guess_or_promote_unsafe_evidence(tmp_path, reference):
+    root, window, response, prepare = _source_prepared_report(tmp_path, local=True, evidence=reference)
+    request = prepare()
+    assert {fact["source_ref"] for fact in request["facts"]} == {
+        request["source_revision"], "todo:todo_source"}
+    receipt = freeze_private_report(root=root, window=window, response=response)
+    assert validate_private_generation(attempt_directory(root, window)) == receipt
 
 
 @pytest.mark.parametrize("local", [False, True])
