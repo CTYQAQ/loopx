@@ -632,6 +632,26 @@ def test_checkpoint_request_is_explicit_and_reaches_the_existing_worker_env(tmp_
             BenchmarkCodex(logs_dir=tmp_path / "invalid", model_name="openai/fixture", **settings)
 
 
+@pytest.mark.parametrize("destination", [
+    "/opt/loopx-benchmark/checkpoints", "/logs/checkpoints", "relative/checkpoints",
+])
+def test_fresh_replan_destination_rejected_before_native_setup(tmp_path, monkeypatch, destination):
+    pytest.importorskip("harbor")
+    from benchmark.runtime.harbor import BenchmarkCodex, CodexOffline
+
+    def unexpected_setup(*args, **kwargs):
+        pytest.fail("Invalid capture configuration reached native setup")
+
+    monkeypatch.setattr(CodexOffline, "__init__", unexpected_setup)
+    request = {"destination": destination,
+        "components": [{"id": "workspace", "source_path": "/task"}],
+        "point_metadata": {}, "trigger": "fresh_replan"}
+    with pytest.raises(ValueError, match="fresh_replan destination"):
+        BenchmarkCodex(logs_dir=tmp_path, model_name="fixture",
+            checkpoint_request_path="/control/request.json",
+            checkpoint_request=json.dumps(request).encode())
+
+
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("settings,field,value", [
     ({}, "replan_after_effective_turns", 6),
@@ -806,6 +826,7 @@ def test_harbor_install_receipt_keeps_capture_independent_from_display(tmp_path,
     from benchmark.runtime.checkpoint_wake import CheckpointWake
     wake_root = tmp_path / "wakes"
     wake_root.mkdir()
+    monkeypatch.setattr("benchmark.runtime.harbor._WAKE_LOG_DIR", str(wake_root))
     request = tmp_path / "request.json"
     checkpoint_args = {}
     if trigger is not None:
@@ -1123,6 +1144,29 @@ def test_native_context_opt_in_is_only_a_heartbeat_treatment(mode):
         Execution(mode=mode, context_delivery="on")
     with pytest.raises(ValueError, match="context_delivery"):
         Execution(context_delivery="1")
+
+
+@pytest.mark.parametrize("declared_mode", [None, "heartbeat"])
+def test_context_preflight_accepts_the_resolved_heartbeat_mode(tmp_path, monkeypatch, declared_mode):
+    from benchmark.tests.test_resume_sessions import resume_env
+    from loopx.control_plane.turn_driver.codex_context import context_delivery_activation
+
+    env = resume_env(tmp_path, monkeypatch)
+    if declared_mode is None:
+        env.pop("LOOPX_EXECUTION_MODE")
+    env["LOOPX_CONTEXT_DELIVERY"] = "on"
+    monkeypatch.setattr("benchmark.runtime.context_delivery.prepare_context_delivery", lambda *args: None)
+
+    def preflight(current, *_args, **_kwargs):
+        activation = context_delivery_activation("on", runtime_profile="generic_cli",
+            benchmark_mode=current.get("LOOPX_EXECUTION_MODE"))
+        assert activation["scenario"] == "codex_benchmark_heartbeat"
+        return "Current Todo input."
+
+    monkeypatch.setattr("benchmark.runtime.worker.heartbeat_body", preflight)
+    result = run_once(env)
+    assert result["ok"] and result["session"]["session_id"]
+    assert env.get("LOOPX_EXECUTION_MODE") == declared_mode
 
 
 def test_context_transport_unavailable_preserves_ordinary_worker(tmp_path, monkeypatch):

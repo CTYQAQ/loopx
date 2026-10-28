@@ -885,12 +885,20 @@ class LarkPrivateConversations:
         saved = session["steward_context"]
         selected = self.bindings.session_context(saved)
         client = str(turn.get("client_turn_id") or "")
-        match = re.fullmatch(r"external-([a-f0-9]{24})(?:-recovery-[1-9][0-9]*)?", client)
+        match = re.fullmatch(r"external-([a-f0-9]{24})(?:-.+)?", client)
         if match is None:
             raise ValueError("original private request unavailable")
         request = match[1]
         record = _read_json(self.root / f"{request}.json")
         native = self.core.read_request(request)
+        if client != f"external-{request}":
+            # A suffix locates the journal, but proves no continuation. Reuse
+            # Core's recorded recovery identity instead of maintaining another
+            # grammar that can strand quota/routing/work continuations.
+            recovery = self.core.recovery_context(session, turn)
+            if (recovery is None or recovery.get("request_ref") != request
+                    or record.get("context_recovery") != native.get("context_recovery")):
+                raise ValueError("original private recovery unavailable")
         message_id = str(record.get("event", {}).get("message_id") or "")
         if (route["source_id"] not in (request, f"lark:{message_id}")
                 or identity_ref(selected["binding"]["provider_ref"], message_id) != request

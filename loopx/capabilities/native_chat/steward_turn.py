@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ...control_plane.goals.activation import goal_is_stopped
+from ...control_plane.goals.first_party_host_admission import FirstPartyHostRuntimeRejected
 from ...file_lock import exclusive_file_lock
 from .steward_managed_mode import ManagedSessionTurn, ManagedTaskValidationUnavailable, StewardManagedMode
 
@@ -262,7 +263,7 @@ class StewardTurnHost:
         the typed conversation owner checks it with the current journal.
         """
         result = (original.get("response") or {}).get("native_loopx") or {}
-        if result.get("error_code") != "stale_goal_authority":
+        if (result.get("host_failure") or {}).get("kind") != "contract_rejected":
             return None
         from ...control_plane.turn_driver import inspect_loopx_turn_journal
         from ...control_plane.turn_driver.journal_store import (
@@ -281,7 +282,7 @@ class StewardTurnHost:
             agent_id=actor["agent_id"], turn_key=key, retry_failed=True)
         journal = load_turn_journal(turn_journal_path(root, goal_id=actor["goal_id"], turn_key=key))
         _, window = StewardReports(self.controller).current_window(actor["goal_id"].removeprefix("steward-agent-"))
-        return {"original": original, "inspection": inspection, "turn_key": key,
+        return {"original": original, "inspection": inspection, "journal": journal, "turn_key": key,
             "host_attempt_count": (journal or {}).get("host_attempt_count"),
             "generation_present": window is None or (attempt_directory(root, window) / "private-generation.json").exists()}
 
@@ -644,13 +645,22 @@ class StewardTurnHost:
                 # The existing app-server request owner holds this fence only
                 # through turn/start publication, never through model waiting.
                 with ExitStack() as stack:
-                    if previous_guard is not None:
-                        stack.enter_context(previous_guard())
-                    stack.enter_context(launch_scope())
-                    with (nullcontext() if actor.get("schema_version") == "loopx_managed_session_actor_v0"
-                          else exclusive_file_lock(self.bindings.path, operation="native_steward_launch")):
+                    try:
+                        if previous_guard is not None:
+                            stack.enter_context(previous_guard())
+                        stack.enter_context(launch_scope())
+                        stack.enter_context(nullcontext() if actor.get("schema_version") == "loopx_managed_session_actor_v0"
+                            else exclusive_file_lock(self.bindings.path, operation="native_steward_launch"))
                         current()
-                        yield
+                    except FirstPartyHostRuntimeRejected as exc:
+                        if not report_work or exc.code != "stale_goal_authority":
+                            raise
+                        # Only guard entry is before publication. Let the
+                        # existing native executor durably record its typed
+                        # failure; exceptions after yield remain unknown.
+                        from ...control_plane.turn_driver.host_failure import BuiltInHostError
+                        raise BuiltInHostError(str(exc), failure_kind="contract_rejected") from exc
+                    yield
 
             adapter.session._launch_guard = launch
             try:

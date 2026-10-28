@@ -50,7 +50,8 @@ def test_file_quota_scope_is_opt_in_and_original_capture_remains_complete(tmp_pa
         if row.get("source") == "goal_acceptance")
     assert "outcome_context" not in source
     assert len(source["goal_acceptance_contract"]["outcome_requirements"]["outcomes"]) == 2
-    native = tmp_path / "native"; native.mkdir(mode=0o700)
+    native = tmp_path / "native"
+    native.mkdir(mode=0o700)
     (tmp_path / "captures").mkdir(mode=0o700)
     monkeypatch.setenv("CODEX_THREAD_ID", "scope-session")
     monkeypatch.setenv("LOOPX_CONTEXT_DELIVERY", "on")
@@ -60,7 +61,8 @@ def test_file_quota_scope_is_opt_in_and_original_capture_remains_complete(tmp_pa
     first = cli("quota", "should-run", "--goal-id", goal, "--agent-id", agent, "--context-delivery", "on",
         "--runtime-profile", "generic_cli", "--codex-context-dir", str(native),
         "--decision-output-root", str(tmp_path / "captures"), "--turn-instance-id", "scope-turn")
-    page = first; parts = []
+    page = first
+    parts = []
     while True:
         assert page["ok"], page
         parts.append(page["content"])

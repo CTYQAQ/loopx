@@ -14,7 +14,8 @@ import "./goal-research-history.css";
 import {ExploreMeasurements, formatExploreMeasurementValue} from "./explore-measurements";
 import {projectTrajectoryDisplay, trajectoryDisplaySnapshotText} from "../../../../../../loopx/control_plane/capabilities/trajectory_assessment_display.js";
 
-type Selection = {nodes: string[]; day: string | null; finding?: string};
+type CollectionSelection = {nodes: string[]; day: string | null};
+type Selection = CollectionSelection & {finding?: string; collection?: CollectionSelection};
 type Lens = "timeline" | "graph";
 type Read = {events: ExploreHistoryEvent[]; total: number | null; complete: boolean};
 const selectedFromUrl = (goal: string): Selection => {
@@ -23,10 +24,17 @@ const selectedFromUrl = (goal: string): Selection => {
   const day = query.get("research_group");
   // Reuse the router's array encoding so a grouped selection also survives
   // canonicalization on reload. Existing scalar node links remain valid.
-  const search = defaultParseSearch(window.location.search);
-  const decoded = "research_node" in search ? search.research_node : undefined;
-  const nodes = Array.isArray(decoded) && decoded.every(id => typeof id === "string") ? decoded : query.getAll("research_node");
-  return {nodes: day === null ? [...new Set(nodes.filter(Boolean))] : [], day, finding: query.get("research_finding") || undefined};
+  const search = defaultParseSearch(window.location.search) as Record<string, unknown>;
+  const ids = (name: string) => {
+    const decoded = search[name];
+    const values = Array.isArray(decoded) && decoded.every(id => typeof id === "string") ? decoded : query.getAll(name);
+    return [...new Set(values.filter(Boolean))];
+  };
+  const nodes = day === null ? ids("research_node") : [];
+  const parentDay = query.get("research_parent_group"), parentNodes = ids("research_parent_node");
+  const collection = nodes.length === 1 && (parentDay !== null || (parentNodes.length > 1 && parentNodes.includes(nodes[0]!)))
+    ? {nodes: parentDay === null ? parentNodes : [], day: parentDay} : undefined;
+  return {nodes, day, finding: query.get("research_finding") || undefined, collection};
 };
 
 const viewFromUrl = (goal: string) => {
@@ -85,24 +93,24 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
   const detail = useRef<HTMLDivElement>(null);
   const graph = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const readerParent = useRef<{selection: Selection; nodeId: string; opener: HTMLElement | null} | null>(null);
+  const collectionOpener = useRef<HTMLElement | null>(null);
   const focusPending = useRef(Boolean(selection.nodes.length || selection.day !== null));
-  const focusReturn = useRef<{nodeId?: string; eventId?: string; element: HTMLElement | null} | null>(null);
+  const focusReturn = useRef<{nodeId?: string; eventId?: string; collection?: CollectionSelection; element: HTMLElement | null} | null>(null);
   const copy = zh ? {
     title: "研究历程", loading: "正在读取完整记录", reading: "读取中", refresh: "刷新记录",
     all: "回到全图", scope: "Explore 已记录历史", coverage: "其他来源覆盖、尝试发生时序尚未核验",
     partial: "历史尚未完整载入", failure: "无法继续读取历史。已读记录保留；请重试。",
-    time: "记录时间（本地）", unknown: "时间未记录", records: "条记录", evidence: "已记录依据",
+    time: "记录时间（本地）", unknown: "时间未记录", record: "条记录", records: "条记录", evidence: "已记录依据",
     interpretation: "独立检查与实际采用尚未核验", versions: "来源与版本引用", updates: "历史记录",
-    changes: "次记录", findings: "条结论", links: "显式关联", missing: "部分关联的来源节点尚未记录",
+    changes: "次记录", question: "个问题", questions: "个问题", links: "显式关联", missing: "部分关联的来源节点尚未记录",
     group: "来源分组", lost: "当前记录中找不到所选节点，其他历史仍可浏览。",
   } : {
     title: "Research history", loading: "Reading the full recorded history", reading: "Reading", refresh: "Refresh history",
     all: "Whole graph", scope: "Recorded Explore history", coverage: "Other-source coverage and attempt-time coverage are unverified",
     partial: "History is not fully loaded", failure: "Cannot continue reading history. Loaded records remain; retry.",
-    time: "Recorded time (local)", unknown: "Time not recorded", records: "records", evidence: "Recorded evidence",
+    time: "Recorded time (local)", unknown: "Time not recorded", record: "record", records: "records", evidence: "Recorded evidence",
     interpretation: "Independent checking and actual adoption are unverified", versions: "Source and version references", updates: "History",
-    changes: "records", findings: "findings", links: "Explicit relationships", missing: "Some linked source nodes are not recorded",
+    changes: "records", question: "question", questions: "questions", links: "Explicit relationships", missing: "Some linked source nodes are not recorded",
     group: "Source grouping", lost: "The selected node is absent from this snapshot. Other history remains readable.",
   };
   // Labels reuse Explore's existing vocabulary; they confer no verification state.
@@ -239,14 +247,26 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
   const selected = value?.nodes.find(node => node.id === selectedId);
   const selectedFinding = selected?.findings.find(finding => finding.result_id === selection.finding)
     ?? (!selection.finding ? selected?.findings.at(-1) : undefined);
+  const hasSeparateQuestion = Boolean(selected?.findings.length && selectedFinding?.title !== selected.latest.title);
   const selectedGroup = selection.day !== null ? grouped.groups.find(group => group.day === selection.day) : undefined;
   const selectedMembers = selectedGroup?.nodes ?? (selection.nodes.length > 1 ? value?.nodes.filter(node => selection.nodes.includes(node.id)) : undefined);
+  const requestedCollection = selection.collection;
+  const collectionMembers = requestedCollection?.day !== null && requestedCollection?.day !== undefined
+    ? grouped.groups.find(group => group.day === requestedCollection.day)?.nodes
+    : requestedCollection ? value?.nodes.filter(node => requestedCollection.nodes.includes(node.id)) : undefined;
+  const questionIndex = collectionMembers?.findIndex(node => node.id === selectedId) ?? -1;
+  const collection = questionIndex >= 0 ? requestedCollection : undefined;
+  const hasQuestionNavigation = Boolean(collection && collectionMembers && collectionMembers.length > 1);
   useEffect(() => {
     const pop = () => {
-      readerParent.current = null;
+      collectionOpener.current = null;
       const next = selectedFromUrl(goalId);
-      const returning = !next.nodes.length && next.day === null && Boolean(selection.nodes.length || selection.day !== null);
-      focusReturn.current = returning ? {eventId: selectedFinding?.event_id, element: opener.current} : null;
+      const returningToCollection = collection && next.day === collection.day && JSON.stringify(next.nodes) === JSON.stringify(collection.nodes);
+      const returningToGraph = !next.nodes.length && next.day === null && Boolean(selection.nodes.length || selection.day !== null);
+      const returning = returningToCollection || returningToGraph;
+      focusReturn.current = returning ? {nodeId: returningToCollection ? selectedId : undefined,
+        collection: returningToGraph ? {nodes: selection.nodes, day: selection.day} : undefined,
+        eventId: selectedFinding?.event_id, element: opener.current} : null;
       focusPending.current = !returning;
       setSelection(next);
       setQuestionExpanded(!next.finding);
@@ -254,11 +274,11 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
     };
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
-  }, [goalId, selection, selectedFinding?.event_id]);
+  }, [goalId, selection, selectedFinding?.event_id, selectedId, collection]);
   useLayoutEffect(() => {
     if (!active) return;
     if (focusReturn.current) {
-      const {nodeId, eventId, element} = focusReturn.current;
+      const {nodeId, eventId, collection, element} = focusReturn.current;
       // The full-history view moves while reading. Resolve its remounted
       // control by the local return key rather than losing keyboard position.
       const origin = !element?.dataset.researchDecision || element.dataset.researchDecision === eventId ? element : null;
@@ -266,7 +286,10 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
       const target = nodeId ? detail.current?.querySelector<HTMLButtonElement>(`[data-research-node="${CSS.escape(nodeId)}"] button`)
         : (origin?.isConnected ? origin : null)
           ?? (returnKey ? graph.current?.querySelector<HTMLButtonElement>(`[data-research-return="${CSS.escape(returnKey)}"]`) : null)
-          ?? (eventId ? graph.current?.querySelector<HTMLButtonElement>(`[data-research-decision="${CSS.escape(eventId)}"]`) : null);
+          ?? (eventId ? graph.current?.querySelector<HTMLButtonElement>(`[data-research-decision="${CSS.escape(eventId)}"]`) : null)
+          ?? (collection?.day !== null && collection?.day !== undefined ? graph.current?.querySelector<HTMLButtonElement>(`[data-research-day="${CSS.escape(collection.day)}"]`) : null)
+          ?? (collection?.nodes.length ? [...(graph.current?.querySelectorAll<HTMLButtonElement>("[data-research-nodes]") ?? [])]
+            .find(button => button.dataset.researchNodes?.split(" ").every(id => collection.nodes.includes(id)) && button.dataset.researchNodes?.split(" ").length === collection.nodes.length) : null);
       focusReturn.current = null;
       if (target?.isConnected) {target.focus({preventScroll: true}); target.scrollIntoView({block: "center"});}
       else graph.current?.focus();
@@ -290,23 +313,29 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
     setQuestionExpanded(!next.finding);
     const url = new URL(window.location.href);
     url.searchParams.delete("research_node"); url.searchParams.delete("research_group"); url.searchParams.delete("research_finding");
+    url.searchParams.delete("research_parent_node"); url.searchParams.delete("research_parent_group");
     if (next.nodes.length || next.day !== null) {
       if (next.day !== null) url.searchParams.set("research_group", next.day);
       else url.searchParams.set("research_node", next.nodes.length === 1 ? next.nodes[0]! : JSON.stringify(next.nodes));
       if (next.finding) url.searchParams.set("research_finding", next.finding);
+      if (next.collection?.day !== null && next.collection?.day !== undefined) url.searchParams.set("research_parent_group", next.collection.day);
+      else if (next.collection?.nodes.length) url.searchParams.set("research_parent_node", JSON.stringify(next.collection.nodes));
       url.searchParams.set("research_goal", goalId);
     }
     else url.searchParams.set("research_goal", goalId);
     if (selection.finding !== next.finding || selection.day !== next.day || selection.nodes.length !== next.nodes.length || selection.nodes.some((id, index) => id !== next.nodes[index])) window.history.pushState(null, "", url);
   };
-  const choose = (id: string, focus = true, finding?: string) => {readerParent.current = null; select({nodes: id ? [id] : [], day: null, finding}, focus);};
+  const choose = (id: string, focus = true, finding?: string) => {collectionOpener.current = null; select({nodes: id ? [id] : [], day: null, finding}, focus);};
   const closeReader = () => {
-    const parent = readerParent.current;
-    readerParent.current = null;
     focusPending.current = false;
-    focusReturn.current = {nodeId: parent?.nodeId, eventId: selectedFinding?.event_id, element: opener.current};
-    if (parent) opener.current = parent.opener;
-    select(parent?.selection ?? {nodes: [], day: null}, false);
+    focusReturn.current = {nodeId: collection ? selectedId : undefined, eventId: selectedFinding?.event_id,
+      collection: !collection ? {nodes: selection.nodes, day: selection.day} : undefined, element: opener.current};
+    if (collection) opener.current = collectionOpener.current;
+    collectionOpener.current = null;
+    select(collection ?? {nodes: [], day: null}, false);
+  };
+  const chooseQuestion = (node: NonNullable<typeof value>["nodes"][number], parent: CollectionSelection) => {
+    select({nodes: [node.id], day: null, finding: node.findings.at(-1)?.result_id, collection: parent});
   };
   const resultsAnchor = useRef<HTMLDivElement>(null), reportAnchor = useRef<HTMLDivElement>(null), historyAnchor = useRef<HTMLElement>(null);
   const reportEntries = useRef(new Set<string>());
@@ -387,12 +416,12 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
             <span className="research-node-meta">{node.latest.node_kind === "experiment" ? <FlaskConical size={13} aria-hidden/> : <Circle size={12} aria-hidden/>}{kindLabel(node.latest.node_kind)}<small>{stateLabel(node.latest.status)}</small></span>
             <strong>{node.latest.title}</strong>{measured ? <span className="research-node-count" title={`${measured.metric} (${measured.unit}) · ${measured.comparison_scope} · ${measured.evaluation_ref}`}>
               {measured.metric} {formatExploreMeasurementValue(measured.latest.measurement.value, zh)} · best {formatExploreMeasurementValue(measured.best?.value ?? null, zh)} {measured.higher_is_better ? "↑" : "↓"}
-            </span> : <span className="research-node-count"><time>{timeLabel(node.updates[0]?.recorded_at)}</time>{node.updates.length > 1 ? ` · ${node.updates.length} ${copy.changes}` : ""}{node.findings.length ? ` · ${node.findings.length} ${copy.findings}` : ""}</span>}
+            </span> : <span className="research-node-count"><time>{timeLabel(node.updates[0]?.recorded_at)}</time>{node.updates.length > 1 ? ` · ${node.updates.length} ${copy.changes}` : ""}{node.findings.length ? ` · ${findingCopy.count(node.findings.length)}` : ""}</span>}
           </button>})}
           {grouped.groups.map((group, index) => <button type="button" key={`day:${group.day}`} className={`research-history-node research-history-group${selectedGroup === group ? " is-selected" : ""}`} style={{left: (index % 4) * 230 + 24, top: clusterY + Math.floor(index / 4) * 124}}
-            aria-pressed={selectedGroup === group} onClick={() => select({nodes: [], day: group.day})}>
+            data-research-day={group.day} aria-pressed={selectedGroup === group} onClick={() => select({nodes: [], day: group.day})}>
             <span className="research-node-meta"><Circle size={12} aria-hidden/>{zh ? "未关联问题" : "Unlinked questions"}</span>
-            <strong>{group.day ? `${group.day} UTC` : copy.unknown}</strong><span className="research-node-count">{group.nodes.length} {zh ? "个问题 · 展开全部" : "questions · read all"}</span>
+            <strong>{group.day ? `${group.day} UTC` : copy.unknown}</strong><span className="research-node-count">{group.nodes.length} {group.nodes.length === 1 ? copy.question : copy.questions} · {zh ? "展开全部" : "read all"}</span>
           </button>)}
         </div>
       </div>;
@@ -413,14 +442,16 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
   return <section className="research-history" aria-label={copy.title} aria-busy={busy}>
     {progressiveOverview ? <>
       <nav className="research-reading-order" aria-label={zh ? "研究阅读" : "Research reading"}>
-        <button type="button" onClick={() => jump(resultsAnchor.current)}>{zh ? "指标" : "Results"}</button><span aria-hidden>→</span>
         <button type="button" onClick={() => jump(reportAnchor.current)}>{zh ? "汇报" : "Report"}</button><span aria-hidden>→</span>
+        <button type="button" onClick={() => jump(resultsAnchor.current)}>{zh ? "指标" : "Results"}</button><span aria-hidden>→</span>
         <button type="button" onClick={showHistory}>{zh ? "研究历程" : "Research history"}</button>
       </nav>
       <ResearchAnalysisStatus analysis={analysis}/>
-      <div ref={resultsAnchor} tabIndex={-1} className="research-reading-layer"><ResearchProgressSummary analysis={analysis} includeReport={false}/></div>
-      <div ref={reportAnchor} tabIndex={-1} className="research-reading-layer"><ResearchReportSummary analysis={analysis}/><ResearchAnalysisPanel analysis={analysis} onHistory={showHistory}/></div>
-      <ResearchCitationPanel analysis={analysis}/>
+      <div className={`research-reading-overview${analysis.location.open ? " is-expanded" : ""}`}>
+        <div ref={reportAnchor} tabIndex={-1} className="research-reading-layer"><ResearchReportSummary analysis={analysis}/><ResearchAnalysisPanel analysis={analysis} onHistory={showHistory}/>{analysis.location.open ? <ResearchCitationPanel analysis={analysis}/> : null}</div>
+        <div ref={resultsAnchor} tabIndex={-1} className="research-reading-layer"><ResearchProgressSummary analysis={analysis} includeReport={false}/></div>
+      </div>
+      {!analysis.location.open ? <ResearchCitationPanel analysis={analysis}/> : null}
     </> : null}
     <header className="research-history-heading" ref={historyAnchor} tabIndex={-1}><div><div className="research-history-title"><h2>{copy.title}</h2><ContextHelp label={zh ? "历史范围与读图说明" : "History scope and reading guide"}>
       <p>{copy.scope} · {copy.time}{zh ? "。" : ". "}{copy.coverage}{zh ? "。" : "."}</p><p>{copy.interpretation}{zh ? "。" : "."}</p>
@@ -445,7 +476,7 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
     <div className="research-history-meta">
       <p className="research-history-coverage" role="status">{copy.time}{value?.startAt ? <> · <time>{timeLabel(value.startAt)}</time> — <time>{timeLabel(value.endAt)}</time></> : null} · {busy ? `${copy.reading} ${loaded}${read.total ? ` / ${read.total}` : ""}`
         : read.total === null ? (zh ? "来源尚未读到" : "Source has not been read")
-          : `${read.events.length} / ${read.total} ${copy.records}${read.complete ? "" : ` · ${copy.partial}`}`}</p>
+          : `${read.events.length} / ${read.total} ${read.total === 1 ? copy.record : copy.records}${read.complete ? "" : ` · ${copy.partial}`}`}</p>
       {!readingSelection ? displayControl : null}
     </div>
     {readFailure ? <div className="research-history-read-error" role="alert">
@@ -471,19 +502,38 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
 
       {selected ? <div className="research-history-detail" ref={detail} role="region" aria-label={selected.latest.title} tabIndex={-1} onKeyDown={event => {if (event.key === "Escape") {event.stopPropagation(); closeReader();}}}>
         <div className="research-reader-content">
-        <div className="research-reader-location"><button type="button" className="research-reader-back" onClick={closeReader}><ArrowLeft size={14} aria-hidden/>{readerParent.current ? (zh ? "返回问题列表" : "Back to questions") : copy.all}</button>
-        <div className="research-reader-states">
+        <div className="research-reader-location"><div className="research-reader-return"><button type="button" className="research-reader-back" onClick={closeReader}><ArrowLeft size={14} aria-hidden/>{collection ? (zh ? "返回问题列表" : "Back to questions") : copy.all}</button>
+          {!hasQuestionNavigation && hasSeparateQuestion && !questionExpanded ? <ContextHelp icon={CircleHelp} label={zh ? "完整研究问题" : "Full research question"}><div className="research-question-text"><p>{selected.latest.title}</p>{selected.latest.summary ? <p>{selected.latest.summary}</p> : null}</div></ContextHelp> : null}
+        </div><div className="research-reader-states">
           <div className="research-detail-kind"><GitBranch size={14} aria-hidden/>{kindLabel(selected.latest.node_kind)} · {stateLabel(selected.latest.status)} <ContextHelp label={findingCopy.help}><p>{findingCopy.meaning}</p></ContextHelp></div>
           {selected.findings.length > 1 && findingExceptions ? <p className="research-finding-exceptions">{findingExceptions}</p> : null}
         </div></div>
-        {selected.findings.length ? selectedFinding?.title !== selected.latest.title ? <details className="research-reader-question" key={selected.id} open={questionExpanded} onToggle={event => setQuestionExpanded(event.currentTarget.open)}>
+        {collection && collectionMembers && questionIndex >= 0 && collectionMembers.length > 1 ? <nav className="research-question-navigation" aria-label={zh ? "同组研究问题" : "Questions in this group"}>
+          <span className="research-question-label"><label htmlFor={`${presentationId}-question`}>{zh ? "问题" : "Question"}</label>
+            <ContextHelp label={zh ? "完整研究问题" : "Full research question"}><div className="research-question-text"><p>{selected.latest.title}</p>{selected.latest.summary ? <p>{selected.latest.summary}</p> : null}</div></ContextHelp>
+          </span><select id={`${presentationId}-question`} aria-label={zh ? "选择同组研究问题" : "Choose a question in this group"} value={selectedId}
+            onChange={event => {const node = collectionMembers.find(node => node.id === event.target.value); if (node) chooseQuestion(node, collection);}}>
+            {collectionMembers.map(node => <option key={node.id} value={node.id}>{node.latest.title}</option>)}
+          </select>
+          <div className="research-finding-steps"><span>{questionIndex + 1} / {collectionMembers.length}</span>
+            {([-1, 1] as const).map(step => {const next = collectionMembers[questionIndex + step];
+              return <button key={step} type="button" disabled={!next} aria-label={step < 0 ? (zh ? "上一个问题" : "Previous question") : (zh ? "下一个问题" : "Next question")}
+                onClick={() => {if (next) chooseQuestion(next, collection);}}>{step < 0 ? <ArrowLeft size={16} aria-hidden/> : <ArrowRight size={16} aria-hidden/>}</button>;
+            })}
+          </div>
+        </nav> : null}
+        {!hasQuestionNavigation ? selected.findings.length ? hasSeparateQuestion && questionExpanded ? <details className="research-reader-question" key={`question:${selected.id}`} open onToggle={event => {
+          if (event.currentTarget.open) return;
+          if (event.currentTarget.contains(document.activeElement)) detail.current?.focus({preventScroll: true});
+          setQuestionExpanded(false);
+        }}>
           <summary><span>{selected.latest.title}</span></summary>
           {selected.latest.summary ? <p>{selected.latest.summary}</p> : null}
-        </details> : null : <h3>{selected.latest.title}</h3>}{displayControl}
+        </details> : null : <h3>{selected.latest.title}</h3> : null}{displayControl}
         {selected.latest.blocked_reason ? <p className="research-history-error">{selected.latest.blocked_reason}</p> : null}
         {selected.findings.length ? <>
           {selected.findings.length > 1 ? <nav className="research-finding-navigation" aria-label={zh ? "问题结论" : "Question findings"}>
-            <label><select aria-label={zh ? "选择问题结论" : "Choose a question finding"} value={selectedFinding?.result_id ?? ""}
+            <label><span>{zh ? "结论" : "Finding"}</span><select aria-label={zh ? "选择问题结论" : "Choose a question finding"} value={selectedFinding?.result_id ?? ""}
                 onChange={event => select({...selection, finding: event.target.value}, false)}>
                 {!selectedFinding ? <option value="" disabled>{zh ? "所选结论未找到" : "Selected finding not found"}</option> : null}
                 {selected.findings.map((finding, index) => <option key={finding.result_id} value={finding.result_id}>
@@ -504,7 +554,7 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
           </nav> : null}
           {selectedFinding ? findingElement(selectedFinding) : <p role="status">{zh ? "此记录中找不到所选结论；可从列表选择其他结论。" : "The selected finding is absent from this snapshot. Other findings remain available."}</p>}
         </> : <>{selected.latest.summary ? <p>{selected.latest.summary}</p> : null}<ContextHelp label={zh ? "暂无附属结论" : "No attached findings"} icon={CircleHelp}><p className="research-history-note">{zh ? "此节点没有附属结论记录。" : "No finding is attached to this node."}</p></ContextHelp></>}
-        <details className="research-node-provenance" key={selected.id}><summary>{zh ? "来源与历史" : "Sources and history"}</summary>
+        <details className="research-node-provenance" key={`sources:${selected.id}`}><summary>{zh ? "来源与历史" : "Sources and history"}</summary>
         {selectedContextCitations.length ? <><h4>{zh ? "译文依据" : "Translation context"}</h4>
           <div className="analysis-citations">{selectedContextCitations.map(citation => <button type="button" key={JSON.stringify(citation)}
             onClick={event => {void analysis.readCitation(citation, event.currentTarget);}}>
@@ -525,8 +575,8 @@ export function GoalResearchHistory({goalId, active, zh, refreshRevision = 0, re
         <h3>{selectedGroup ? `${selectedGroup.day || copy.unknown} · ${zh ? "未关联问题" : "Unlinked questions"}` : (zh ? `相邻研究项 · ${selectedMembers.length}` : `Nearby research items · ${selectedMembers.length}`)}</h3>
         {displayControl}
         <ol className="research-question-index">{selectedMembers.map(node => <li key={node.id} data-research-node={node.id}>
-          <button type="button" onClick={() => {readerParent.current = {selection, nodeId: node.id, opener: opener.current}; select({nodes: [node.id], day: null});}}>
-            <strong>{node.latest.title}</strong><span>{stateLabel(node.findings.at(-1)?.status ?? node.latest.status)}{node.latest.status === "blocked" && node.findings.length ? ` · ${stateLabel(node.latest.status)}` : ""}{node.findings.length ? ` · ${node.findings.length} ${copy.findings}` : ""}</span>
+          <button type="button" onClick={() => {collectionOpener.current = opener.current; chooseQuestion(node, {nodes: selection.nodes, day: selection.day});}}>
+            <strong>{node.latest.title}</strong><span>{stateLabel(node.findings.at(-1)?.status ?? node.latest.status)}{node.latest.status === "blocked" && node.findings.length ? ` · ${stateLabel(node.latest.status)}` : ""}{node.findings.length ? ` · ${findingCopy.count(node.findings.length)}` : ""}</span>
             {node.latest.blocked_reason ? <span className="research-history-error">{node.latest.blocked_reason}</span> : null}
           </button>
         </li>)}</ol>

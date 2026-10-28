@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#fafafa">
 <title>LoopX 2.0：两个月的 TypeScript 控制面重构 · LoopX</title>
-<meta name="description" content="从最初的渐进迁移方案，到完整事务、共享权威、语义约束和旧路径退役。记录方案怎样被真实调用与反例修正。">
+<meta name="description" content="从完整事务、共享权威到强模型参与的语义修复：用真实调用、反例与完整成本解释 LoopX TypeScript 控制面的重构。">
 <link rel="canonical" href="https://loopx-project.github.io/loopx/blog/zh/typescript-control-plane-refactor/">
 <link rel="alternate" hreflang="en" href="https://loopx-project.github.io/loopx/blog/typescript-control-plane-refactor/"><link rel="alternate" hreflang="zh-CN" href="https://loopx-project.github.io/loopx/blog/zh/typescript-control-plane-refactor/"><link rel="alternate" hreflang="x-default" href="https://loopx-project.github.io/loopx/blog/typescript-control-plane-refactor/">
-<meta property="og:type" content="article"><meta property="og:site_name" content="LoopX"><meta property="og:locale" content="zh_CN"><meta property="og:title" content="LoopX 2.0：两个月的 TypeScript 控制面重构"><meta property="og:description" content="从最初的渐进迁移方案，到完整事务、共享权威、语义约束和旧路径退役。记录方案怎样被真实调用与反例修正。"><meta property="og:url" content="https://loopx-project.github.io/loopx/blog/zh/typescript-control-plane-refactor/"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="LoopX 2.0：两个月的 TypeScript 控制面重构"><meta name="twitter:description" content="从最初的渐进迁移方案，到完整事务、共享权威、语义约束和旧路径退役。记录方案怎样被真实调用与反例修正。"><link rel="icon" href="data:,">
+<meta property="og:type" content="article"><meta property="og:site_name" content="LoopX"><meta property="og:locale" content="zh_CN"><meta property="og:title" content="LoopX 2.0：两个月的 TypeScript 控制面重构"><meta property="og:description" content="从完整事务、共享权威到强模型参与的语义修复：用真实调用、反例与完整成本解释 LoopX TypeScript 控制面的重构。"><meta property="og:url" content="https://loopx-project.github.io/loopx/blog/zh/typescript-control-plane-refactor/"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="LoopX 2.0：两个月的 TypeScript 控制面重构"><meta name="twitter:description" content="从完整事务、共享权威到强模型参与的语义修复：用真实调用、反例与完整成本解释 LoopX TypeScript 控制面的重构。"><link rel="icon" href="data:,">
 <link rel="stylesheet" href="../../blog.css"><link rel="stylesheet" href="../../images/typescript-control-plane-refactor/article.css">
 </head>
 <body class="ts-migration">
 <a class="skip-link" href="#main">跳至正文</a>
 <header class="site-header"><a class="brand" href="../../../?lang=zh"><span class="product-mark" aria-hidden="true"><i></i><i></i></span>LoopX</a><nav aria-label="主导航"><a href="../">Blog</a><a href="../../../docs/book/">文档</a></nav><div class="header-actions"><a class="language" href="../../../blog/typescript-control-plane-refactor/" lang="en" hreflang="en">EN</a><a class="github" href="https://github.com/loopx-project/loopx">GitHub ↗</a></div></header>
-<main id="main"><div class="article-heading"><a class="back" href="../">← 全部文章</a><p class="eyebrow">LoopX 2.0 · Engineering</p><h1>LoopX 2.0：两个月的 TypeScript 控制面重构</h1><p class="lead">从最初的渐进迁移方案，到完整事务、共享权威、语义约束和旧路径退役。记录方案怎样被真实调用与反例修正。</p><div class="byline"><a href="https://github.com/huangruiteng">Ruiteng Huang</a><span>·</span><time datetime="2026-10-16">2026 年 10 月 16 日</time><span>·</span><span>LoopX creator</span></div></div>
-<div class="article-layout"><aside class="toc"><div class="desktop-contents"><p class="toc-caption">本文目录</p><nav aria-label="文章目录"><a href="#section-1">1. 先还原历史：迁移方案本身也在变化</a><a href="#section-2">2. 只统计核心 control plane：研发规模与代码变化</a><a href="#section-3">3. Effect Program 先行：先统一“做过什么”</a><a href="#section-4">4. 迁移完整事务：一次少到两次，也可能是正确答案</a><a href="#section-5">5. 共享权威：领域规则和存储原语分别归属</a><a href="#section-6">6. SQLite 之后：长程历史也要有成本模型</a><a href="#section-7">7. Song 的 Semantics：定义、生产、解释要接起来</a><a href="#section-8">8. 调用方和默认值，决定迁移能否到用户手上</a><a href="#section-9">9. 恢复原结果，同时保护当前执行权</a><a href="#section-10">10. CLI 输出约束：压缩前先保护决策语义</a><a href="#section-11">11. 最后退役：保留贡献，核对删除的究竟是什么</a><a href="#section-12">12. 社区贡献与下一步</a></nav></div><details class="mobile-contents"><summary>本文目录</summary><nav aria-label="文章目录"><a href="#section-1">1. 先还原历史：迁移方案本身也在变化</a><a href="#section-2">2. 只统计核心 control plane：研发规模与代码变化</a><a href="#section-3">3. Effect Program 先行：先统一“做过什么”</a><a href="#section-4">4. 迁移完整事务：一次少到两次，也可能是正确答案</a><a href="#section-5">5. 共享权威：领域规则和存储原语分别归属</a><a href="#section-6">6. SQLite 之后：长程历史也要有成本模型</a><a href="#section-7">7. Song 的 Semantics：定义、生产、解释要接起来</a><a href="#section-8">8. 调用方和默认值，决定迁移能否到用户手上</a><a href="#section-9">9. 恢复原结果，同时保护当前执行权</a><a href="#section-10">10. CLI 输出约束：压缩前先保护决策语义</a><a href="#section-11">11. 最后退役：保留贡献，核对删除的究竟是什么</a><a href="#section-12">12. 社区贡献与下一步</a></nav></details></aside><article class="prose">
+<main id="main"><div class="article-heading"><a class="back" href="../">← 全部文章</a><p class="eyebrow">LoopX 2.0 · Engineering</p><h1>LoopX 2.0：两个月的 TypeScript 控制面重构</h1><p class="lead">从完整事务、共享权威到强模型参与的语义修复：用真实调用、反例与完整成本解释 LoopX TypeScript 控制面的重构。</p><div class="byline"><a href="https://github.com/huangruiteng">Ruiteng Huang</a><span>·</span><time datetime="2026-10-16">2026 年 10 月 16 日</time><span>·</span><span>LoopX creator</span><span>·</span><time datetime="2026-10-28">2026 年 10 月 28 日补记</time></div></div>
+<div class="article-layout"><aside class="toc"><div class="desktop-contents"><p class="toc-caption">本文目录</p><nav aria-label="文章目录"><a href="#section-1">1. 先还原历史：迁移方案本身也在变化</a><a href="#section-2">2. 只统计核心 control plane：研发规模与代码变化</a><a href="#section-3">3. Effect Program 先行：先统一“做过什么”</a><a href="#section-4">4. 迁移完整事务：一次少到两次，也可能是正确答案</a><a href="#section-5">5. 共享权威：领域规则和存储原语分别归属</a><a href="#section-6">6. SQLite 之后：长程历史也要有成本模型</a><a href="#section-7">7. Song 的 Semantics：定义、生产、解释要接起来</a><a href="#model-assisted-semantics">8. 强模型怎样修复语义</a><a href="#section-8">9. 调用方和默认值，决定迁移能否到用户手上</a><a href="#section-9">10. 恢复原结果，同时保护当前执行权</a><a href="#section-10">11. CLI 输出约束：压缩前先保护决策语义</a><a href="#section-11">12. 最后退役：保留贡献，核对删除的究竟是什么</a><a href="#section-12">13. 社区贡献与下一步</a></nav></div><details class="mobile-contents"><summary>本文目录</summary><nav aria-label="文章目录"><a href="#section-1">1. 先还原历史：迁移方案本身也在变化</a><a href="#section-2">2. 只统计核心 control plane：研发规模与代码变化</a><a href="#section-3">3. Effect Program 先行：先统一“做过什么”</a><a href="#section-4">4. 迁移完整事务：一次少到两次，也可能是正确答案</a><a href="#section-5">5. 共享权威：领域规则和存储原语分别归属</a><a href="#section-6">6. SQLite 之后：长程历史也要有成本模型</a><a href="#section-7">7. Song 的 Semantics：定义、生产、解释要接起来</a><a href="#model-assisted-semantics">8. 强模型怎样修复语义</a><a href="#section-8">9. 调用方和默认值，决定迁移能否到用户手上</a><a href="#section-9">10. 恢复原结果，同时保护当前执行权</a><a href="#section-10">11. CLI 输出约束：压缩前先保护决策语义</a><a href="#section-11">12. 最后退役：保留贡献，核对删除的究竟是什么</a><a href="#section-12">13. 社区贡献与下一步</a></nav></details></aside><article class="prose">
 <p>LoopX 2.0 发布了。借这个节点，我想把 TypeScript 重构的历史和技术细节整理出来。</p>
 <p>正式迁移 RFC 在 8 月 15 日合入。到 10 月中旬集中清理普通旧 writer，这项工程已经跨了差不多两个月。它有多条并行线：事务规则迁移、调用方收敛、共享权威、存储与历史成本、Semantics，以及后续兼容与退役。</p>
 <p>最后 3 位开发者与各自 Agent 接力的 <a href="https://github.com/loopx-project/loopx/pull/6396">#6396</a>，是这些工作累积后的一次集中收尾。前面的选择和转折，决定了最后能删什么，以及删掉以后还能恢复什么。</p>
@@ -324,7 +324,16 @@
 <p>这里误报与漏报的代价不同。保守扩大候选值可能多报一个问题；漏掉真实生产值，会让未登记输出通过检查。没有把握的动态形式应留下 unknown。</p>
 <p>检查还要有扫描覆盖下限，不能靠少扫文件过线。后来删除持续膨胀的已提交 inventory，改成按需计算全树清单，也没有取消这个义务。当前支持形式之外仍有缺口，<a href="https://github.com/loopx-project/loopx/issues/4447">跟踪 issue</a> 继续保留。</p>
 <p>这项工作让我很认同一个实践：自动生成和自动检查，可以减少同步错误；它们自己的前提、覆盖和错误方向，也需要被审查。</p>
-<h2 id="section-8">8. 调用方和默认值，决定迁移能否到用户手上</h2>
+<h2 id="model-assisted-semantics">8. 用强模型修复控制面语义</h2>
+<p>迁移之后，我们继续借助强能力模型做设计、实现和评审，沿生产者、规则、调用方与恢复路径核对同一个状态的含义。模型适合帮助追踪跨文件、跨 runtime 的隐含假设；它提出的解释仍要接受真实入口和反例检验。下面两项修复晚于 10 月 16 日，不计入前文两个月的历史统计。</p>
+<h3>参数全对，恢复命令仍可能跑错程序</h3>
+<p><a href="https://github.com/loopx-project/loopx/pull/7145">#7145</a> 的错误假设是：Goal、Agent、Turn 参数保持不变，就仍在恢复同一次工作。实际从指定 runtime 进入后，选择失败返回的命令可能重新调用 PATH 上的全局 <code>loopx</code>。参数身份保留了，解释规则的可执行程序却变了；它可能加载另一版本，甚至另一条运行路径。</p>
+<p>修复复用原 CLI entrypoint builder，把运行时入口与工作身份一起带到恢复命令。回归把一个故意失败的全局 CLI 放在 PATH 前面，随后<strong>原样执行返回的 argv</strong>。真实 File / SQLite 路径检查原入口保留、拒绝先于业务副作用、原结果只结算一次。只断言命令中存在某几个参数，会漏掉这个缺陷。</p>
+<h3>必须处理本轮，不等于可以执行任何工作</h3>
+<p><a href="https://github.com/loopx-project/loopx/pull/7269">#7269</a> 进一步区分推进义务、普通执行许可和原 Turn 收尾。需要重规划时 <code>must_attempt</code> 可以成立，普通 <code>delivery_allowed</code> 仍关闭；创建 successor 是新的路线事实，不能把旧复盘结算到新任务名下。共享 TS replan / settlement owner 保留原绑定，让同轮重读先返回原结算步骤，后继再走新准入。</p>
+<p><a href="https://github.com/loopx-project/loopx/blob/10e5fa57a4e7dad399d59bfa04d5b28dc04919f3/tests/control_plane/test_replan_successor_guard_reentry.py#L237">原生 CLI 回归</a>执行实际返回的写回、结算与重放；<a href="https://github.com/loopx-project/loopx/blob/10e5fa57a4e7dad399d59bfa04d5b28dc04919f3/tests/control_plane/test_replan_successor_guard_reentry.py#L334">失效后继负例</a>确认换归属、延后或撤 claim 都不能借旧回执结算。模型少一次身份协商是否带来更有价值的后续工作，要继续追踪真实成果与完整成本；<a href="../edgebench-feedback-and-memory/#repair-cases">内核效率与效果一文</a>展开了这条链，也保留上下文压缩的负成本。</p>
+<p>这延续了前文 <a href="https://github.com/loopx-project/loopx/pull/3464">#3464</a> 的经验：减少调用也要保留副作用之前的 preflight。我们让强模型参与的工作落到<strong>错误假设 → 共享语义 owner → 旧版失败的反例 → 真实调用、拒绝与恢复</strong>，检验的是被修复的含义。PR 数量、生成的 TypeScript 和测试数量都不能独立证明模型收益；目前也没有逐 PR 的型号对照，不能把这些修复归因为某个模型的独立因果效果。</p>
+<h2 id="section-8">9. 调用方和默认值，决定迁移能否到用户手上</h2>
 <p>完整事务需要真实 producer 接入。9 月的 <a href="https://github.com/loopx-project/loopx/pull/4178">#4178</a> 将非终态规划更新收敛到一个权威快照与 TS transaction，删除 Python 合成 Markdown、再解析和事务前 target 读取的绕路。</p>
 <p>省略、<code>null</code>、空值、<code>false</code> 在这一层都有含义。dry-run 要准确模拟，不能因为选定 provider 不可用就回退别处。随后 <a href="https://github.com/loopx-project/loopx/pull/4279">#4279</a> 也收敛了读取分类与投影交付语义；部分 Python read owner 被有意保留。一个 owner 是否清楚，比为了语言纯度再造一份解释更重要。</p>
 <p>新建默认值是另一个例子。当前 priority 回归保护以下区别：</p>
@@ -363,7 +372,7 @@
 <p>这些区别由 <a href="https://github.com/loopx-project/loopx/blob/488e4438e0e51eca023ac3f5e690603120851b0c/tests/control_plane_ts/todo_priority.test.ts">File/SQLite 回归</a> 保护。把“新建默认值”放在原回执恢复之后，才能避免升级替历史做决定。</p>
 <p>最后一轮评审还发现：TS 核心的 metadata-only completion repair 可以通过直接测试，普通 Python producer 却会自动带上 completion policy 和 auto-acquire 等默认参数，被核心视为混入了新工作，导致 File/SQLite、dry-run/执行的实际入口都失败。<a href="https://github.com/loopx-project/loopx/pull/6396#pullrequestreview-5516847052">公开反例</a> 记录了这一点。</p>
 <p>这个恢复缺口在基线也存在，不能全部归因给最后的贡献者。修复要走到普通调用方，同时继续拒绝真正的新正文、continuation、所有权或验证修改。直接构造正确 typed request，仅证明内层会处理它。</p>
-<h2 id="section-9">9. 恢复原结果，同时保护当前执行权</h2>
+<h2 id="section-9">10. 恢复原结果，同时保护当前执行权</h2>
 <p>恢复最容易混淆两个时间点：原操作当时合法，现在的执行者是否还能继续改状态。</p>
 <p>设想一次 team-plan 已经提交，响应丢了。升级后，调用者拿原 operation ID 重试，新准入规则却变严了。若先按新操作拒绝，就会把原成功结果挡住。最后的 <a href="https://github.com/loopx-project/loopx/pull/6396#pullrequestreview-5514510958">恢复评审</a> 抓到了这个问题。</p>
 <figure><div class="figure-scroll" tabindex="0" role="region" aria-label="原回执恢复与当前执行权的分离"><a href="../../images/typescript-control-plane-refactor/replay-zh.svg" target="_blank" rel="noopener"><img src="../../images/typescript-control-plane-refactor/replay-zh.svg" alt="原回执恢复与当前执行权的分离" width="1100" height="640" loading="lazy"></a></div><figcaption>原回执恢复与当前执行权的分离 窄屏可横向滚动；点击查看原图。</figcaption></figure>
@@ -371,7 +380,7 @@
 <p>返回原结果不会续租，不会覆盖后来提交，也不会复活旧 writer。租约转交、epoch 改变和后续状态，都有自己的保护。</p>
 <p>类型也表达这种区别：历史解码仍认识 <code>legacy</code>，当前新执行的 handoff 配置只接受 <code>soft_claim</code> 与 <code>hard_lease</code>。旧记录可读、原操作可恢复、当前执行获准，各自有独立条件。</p>
 <p>内部回执保护的范围也有限。一次外部远端 effect 若没有可核验的幂等身份与回读，不能只凭控制面只结算一次，就宣称远端恰好执行一次。unknown 应在它实际发生的边界上保留。</p>
-<h2 id="section-10">10. CLI 输出约束：压缩前先保护决策语义</h2>
+<h2 id="section-10">11. CLI 输出约束：压缩前先保护决策语义</h2>
 <p>对 Agent 来说，CLI 的文字会参与决策。这项工程约束早于最后的 writer 退役，在迁移中继续作为验证边界。</p>
 <p><a href="https://github.com/loopx-project/loopx/blob/488e4438e0e51eca023ac3f5e690603120851b0c/docs/reference/contracts/interface-budget-contract.md">接口预算合同</a> 关注：</p>
 <ul>
@@ -384,7 +393,7 @@
 <p>自然语言还需要逐条看：义务、顺序、证据来源、权限限定、适用范围、继续和停止条件。删除一句“仅在原证明成立时”可能比改一个字段更影响行为。</p>
 <p>一个有界实例是去掉 JSON 缩进与分隔空白。在同一历史 fixture 的 36 个 Todo、12 条 run 上，输出从 48,418 降到 39,726 字符，完整 payload 解码保持一致，字符数减少约 18%。它证明展示体积变化；token、费用和 Agent 效果需要另测。</p>
 <p>预算保护的是消费者能用的接口。新增指导确实有用，可以带同条件证据提高预算；为了变绿而删掉决定所需的条件，反而损坏接口。</p>
-<h2 id="section-11">11. 最后退役：保留贡献，核对删除的究竟是什么</h2>
+<h2 id="section-11">12. 最后退役：保留贡献，核对删除的究竟是什么</h2>
 <p>9 月下旬已经删除了未使用的 authority prototype，以及实验性 Todo event overlay、dual-writer 和 backfill；其中有数据的旧来源有显式保留或拒绝处理。这里没有删除所有 event logging，也没有取消新 authority 的原子事件与回执。</p>
 <p>10 月继续隔离普通 Markdown writer，验证模块不在时真实后续写入仍走正确 owner。等 consumer 路由与替代路径接上，才具备集中删除的条件。</p>
 <p><a href="https://github.com/loopx-project/loopx/pull/6396">#6396</a> 由 <strong>Duang777</strong> 主导，<strong>Song</strong> 和维护侧 Agent 接力补恢复、producer 与集成，沿原分支保留贡献历史。这一轮 3 位开发者与 Agent 的接力，是整个两个月工程的收尾阶段。</p>
@@ -424,7 +433,7 @@
 </tr>
 </tbody></table></div>
 <p>大部分删除也包括旧测试。不能把被删测试行当成业务能力；应继续核对原来保护的 invariant 是否由现有入口和独立反例接住。这里的数字用于说明收尾范围，不能替代整个迁移的结果验证。</p>
-<h2 id="section-12">12. 社区贡献与下一步</h2>
+<h2 id="section-12">13. 社区贡献与下一步</h2>
 <p>这项工程有多位贡献者逐步推进。下面按具体边界列出代表工作，便于继续读历史。</p>
 <div class="table-scroll" role="region" tabindex="0" aria-label="可横向滚动的技术对照表"><table>
 <thead>

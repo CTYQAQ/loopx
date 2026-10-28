@@ -56,11 +56,13 @@ def read_args(path, sha, **changes):
 
 
 def project(packet, tmp_path, monkeypatch):
-    directory = tmp_path / "native"; directory.mkdir(mode=0o700)
+    directory = tmp_path / "native"
+    directory.mkdir(mode=0o700)
     monkeypatch.setenv("CODEX_THREAD_ID", "native-session")
     codex_context_hook(str(directory), {"hook_event_name": "SessionStart", "session_id": "native-session",
         "cwd": str(tmp_path), "source": "startup"})
-    capture = tmp_path / "capture"; capture.mkdir(mode=0o700)
+    capture = tmp_path / "capture"
+    capture.mkdir(mode=0o700)
     result = project_codex_context(packet, directory=str(directory), capture_directory=capture,
         goal_id=GOAL, agent_id=AGENT, surface="quota_packet", capture_id="capture")
     assert result["mode"] == "full"
@@ -149,11 +151,13 @@ def test_failed_optional_scope_transport_keeps_original_full_recovery(tmp_path, 
             raise ValueError("Synthetic projection failure")
         return original(operation, **params)
 
-    directory = tmp_path / "native"; directory.mkdir(mode=0o700)
+    directory = tmp_path / "native"
+    directory.mkdir(mode=0o700)
     monkeypatch.setenv("CODEX_THREAD_ID", "native-session")
     codex_context_hook(str(directory), {"hook_event_name": "SessionStart", "session_id": "native-session",
         "cwd": str(tmp_path), "source": "startup"})
-    capture = tmp_path / "capture"; capture.mkdir(mode=0o700)
+    capture = tmp_path / "capture"
+    capture.mkdir(mode=0o700)
     monkeypatch.setattr(turn_envelope, "_turn_envelope_result", unavailable)
     result = project_codex_context(packet, directory=str(directory), capture_directory=capture,
         goal_id=GOAL, agent_id=AGENT, surface="quota_packet", capture_id="capture")
@@ -171,11 +175,13 @@ def test_failed_scoped_capture_write_returns_original_not_unrecoverable_scope(tm
             raise OSError("Synthetic scoped publication failure")
         return write(*args, **kwargs)
 
-    directory = tmp_path / "native"; directory.mkdir(mode=0o700)
+    directory = tmp_path / "native"
+    directory.mkdir(mode=0o700)
     monkeypatch.setenv("CODEX_THREAD_ID", "native-session")
     codex_context_hook(str(directory), {"hook_event_name": "SessionStart", "session_id": "native-session",
         "cwd": str(tmp_path), "source": "startup"})
-    capture = tmp_path / "capture"; capture.mkdir(mode=0o700)
+    capture = tmp_path / "capture"
+    capture.mkdir(mode=0o700)
     monkeypatch.setattr(codex_context, "capture_context_projection", fail_scoped)
     result = project_codex_context(packet, directory=str(directory), capture_directory=capture,
         goal_id=GOAL, agent_id=AGENT, surface="quota_packet", capture_id="capture")

@@ -132,6 +132,39 @@ test("warm delta reconstructs precisely the required presentation, not hidden op
   assert.deepEqual(projected(fresh), expected);
 });
 
+test("scoped capability prose keeps capture bindings through delta and recovery", () => {
+  const p = packet(), statement = "Keep the explicitly requested review constraint. ".repeat(80);
+  p.interaction_contract.agent_channel.work_context.sources.push({source: "turn_start_capability_hook",
+    hook_id: "semantic_preference.agent_context", capability_id: "semantic-preference", kind: "agent_preferences",
+    content: {ok: true, status: "read", current: {schema_version: "agent_preferences_v1",
+      authority: "advisory_only", instructions: "Preferences do not grant execution authority.",
+      items: [{key: "review-constraint", state: "active", statement, source_ref: "owner:explicit-message"}]}}});
+  const baseline = prepare(p).delivery as JsonObject;
+  assert.equal(baseline.context.schema_version, "outcome_context_projection_v0");
+  const retained = {complete: true, target: baseline.target};
+  const next = structuredClone(p); next.goal_boundary = {stop: "Stop before publication."};
+  const current = prepare(next, {capture_id: "next"}).delivery as JsonObject;
+  const delta = prepare(next, {capture_id: "next", baseline, retained}).delivery as JsonObject;
+  assert.equal(delta.mode, "delta");
+  assert.equal(JSON.stringify(delta).includes(statement), false, "bound unchanged prose can reuse the baseline");
+  assert.deepEqual(restoreContextDelivery({current, delivery: delta, baseline}).context, current.context);
+
+  for (const field of ["goal_id", "agent_id"]) {
+    const foreign = structuredClone(next);
+    foreign.interaction_contract.agent_channel.work_context.sources[1].content[field] = "other";
+    const full = prepare(foreign, {capture_id: "next"}).delivery as JsonObject;
+    const wire = prepare(foreign, {capture_id: "next", baseline, retained}).delivery as JsonObject;
+    assert.equal(JSON.stringify(wire).includes(statement), true, `${field} mismatch keeps the complete prose inline`);
+    assert.deepEqual(wire.mode === "full" ? wire.context
+      : restoreContextDelivery({current: full, delivery: wire, baseline}).context, full.context);
+  }
+  for (const field of ["goal_id", "agent_id", "session_id"]) {
+    const wire = prepare(next, {scope: {...scope, [field]: "other"}, baseline, retained}).delivery as JsonObject;
+    assert.equal(wire.mode, "full", `${field} changes invalidate the capture baseline`);
+    assert.equal(JSON.stringify(wire).includes(statement), true);
+  }
+});
+
 test("edited scoped wrapper and foreign detail references are rejected", () => {
   const p = packet(), view = projected(prepare(p));
   const edited = structuredClone(view); edited.context.goal_boundary = {stop: "Never stop."};

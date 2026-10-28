@@ -258,6 +258,10 @@ guard, changes no binding and performs no Todo completion. Failed validation,
 unsatisfied checkpoints, dry runs and no-spend closeout cannot debit quota.
 An ambiguous response is reconciled through the original receipts; exact retry
 cannot debit twice. Ordinary refresh without the option retains its behavior.
+When `--delivery-workspace-path` names the producing worktree, the combined
+operation also runs the owed command there, using the originating CLI's
+implementation. The normal workspace and settlement guards still apply; a
+missing or incompatible workspace leaves the original owed command recoverable.
 
 An in-flight recommendation does not require keeping a completed Todo open.
 Validate its original declaration, use ordinary completion when satisfied, and
@@ -277,6 +281,9 @@ writeback 读取，避免重复交付；当前准入、选择与停止事实仍�
 Todo 或 obligation/Turn 的 canonical 待结算命令并验证回执；不重新 guard、换绑或
 完成 Todo。验证失败、检查点未满足、dry-run 与无扣额收尾不能扣额；响应不确定时
 按原回执恢复，精确重试不会重复扣额。不传此选项保持原 refresh 行为。
+指定 `--delivery-workspace-path` 后，组合操作也在该交付工作区执行待结算命令，
+继续使用原调用方的 CLI 实现。原工作区和结算校验保持；目录缺失或不兼容时保留
+原待结算命令以便恢复。
 
 执行中续跑建议不要求把已完成的 Todo 保持开放。原声明验收满足后可正常完成，并
 在原 Turn 上按语义收尾写入有证据的 vision；未完成的阶段进展仍可保留开放状态。
@@ -530,6 +537,42 @@ work context 中已加载的来源，其次保留 planning horizon 或第一份�
 详情选项同样复用；权威状态和完整决策捕获不改。TurnEnvelope 将已知引用移到自己
 签名覆盖的 work context，拒绝缺失或不可用来源。这只证明展示成本下降，尚不证明
 上游读取减少、模型采用或完整任务效率提升。
+
+Known Todo diagnostic lanes share `quota/diagnostic_projection.ts` through the
+existing coarse context call. Read-only status/plan projects all rows in one
+call, rather than a call per Goal or lane. Unknown lists, fields, versions and
+complex nested item content remain full; field recognition reuses the canonical
+Todo contract. Retained items, capability candidates, portfolio text, planning
+horizon and selected-work sources are not shortened. Explicit detail returns the
+original summaries. Upstream compaction remains visible as `source_projection`.
+Status/plan adds one projection request; Agent/vision detail still needs one
+when the User summary remains compact. Explicit full Todo roles bypass that
+diagnostic request. These transport costs must be included in comparisons.
+Diagnostic replies carry only display edits and references to the immutable
+input. The Python adapter applies them to its original facts, preserving float
+spelling, negative zero, large-integer precision and relocated upstream metadata.
+Reference-only callers keep their existing transport; no Python compaction
+decision is reintroduced. The read codec's `content_revision` is recognized as
+known display metadata and remains on retained items.
+The legacy detail command observes current state and cannot recover an earlier
+decision. The scoped native consumer and original-capture reference are a separate
+[controller integration proposal](https://github.com/loopx-project/loopx/pull/7430),
+which reuses this same owner. This does not change admission, claims, leases,
+settlement or native context defaults; it does not qualify net efficiency gains.
+
+中文：已知 Todo 诊断列表通过既有粗粒度上下文调用复用同一 typed owner；只读
+status/plan 整批行只调用一次，不逐 Goal 或列表调用。未知列表、字段、版本和
+复杂嵌套条目保留全文，字段识别复用规范 Todo 契约；保留条目、候选、portfolio
+正文、规划视野和当前工作来源不截短，详情返回原摘要，上游压缩信息保留于
+`source_projection`。旧详情命令读取当前状态，不能恢复历史决定。
+status/plan 新增一次投影请求；Agent/vision 详情若仍压缩 User 摘要，也需一次；
+显式展开两类 Todo 则跳过诊断投影。这些传输成本须计入比较。scoped 原生
+消费者及同 capture 引用属于单独的 controller 集成提案 #7430，复用同一 owner。
+此处不改准入、claim、lease、结算或原生默认，也不代表完整效率收益通过。
+诊断回复只传展示变更及不可变输入的引用；Python adapter 在原始事实上应用，
+保留浮点表示、负零、大整数精度及迁移后的上游元数据。仅引用的旧调用方保持
+原传输行为，不重新引入 Python 裁剪决定。读取 codec 已有的 `content_revision`
+属于已知展示元数据，在保留条目上仍完整存在。
 
 The selected-Todo display body is display-only and may be bounded; the typed
 owner validates the exact read against selected identity, lifecycle, claim and

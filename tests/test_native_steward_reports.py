@@ -78,15 +78,24 @@ def test_local_report_rejects_source_substitution_before_original_model(steward,
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])
-def test_local_agent_calendar_report_uses_original_worker_and_verified_core_return(steward, tmp_path, monkeypatch, provider):
+@pytest.mark.parametrize("recorded_reference", [None, "https://example.org/review/42"])
+def test_local_agent_calendar_report_uses_original_worker_and_verified_core_return(steward, tmp_path, monkeypatch, provider, recorded_reference):
     from loopx.capabilities.native_chat.steward_monitor import StewardMonitor
     from loopx.capabilities.native_chat.steward_managed_mode import ManagedSessionTurn
     session, reports, _, task_id = configured_local_report(steward, tmp_path, monkeypatch, provider)
     store, runtime, bot, _, _, capture, _ = steward
     sid = session["session_id"]
+    if recorded_reference:
+        from test_native_steward_turn_host import cli
+        cli(runtime, "todo", "update", "--goal-id", session["goal_id"], "--todo-id", task_id,
+            "--agent-id", session["managed_agent_id"], "--evidence", recorded_reference)
     with monkeypatch.context() as changed_source:
         changed_source.setattr(inspect, "getsource", lambda *_: "not the imported model callable")
         install_model(steward, tmp_path, sid)
+    if recorded_reference:
+        helper = tmp_path / "report_model.py"
+        helper.write_text(helper.read_text().replace('ref = request["facts"][0]["source_ref"]',
+            "ref = " + repr(recorded_reference)))
     # A host's default codec must not decide how frozen Chinese artifacts read.
     real_read_text = Path.read_text
     def host_codec_read_text(path, *args, **kwargs):
@@ -111,9 +120,16 @@ def test_local_agent_calendar_report_uses_original_worker_and_verified_core_retu
     assert frozen["destination"] == "original_managed_session_full_body"
     assert source["goal_id"] == session["goal_id"] and source["complete_native_task_read"]
     assert task_id in {row["todo_id"] for row in source["rows"]}
+    if recorded_reference:
+        citation = next(fact for fact in frozen["facts"] if fact["source_ref"] == recorded_reference)
+        assert citation["status"] == "unverified" and "todo:" + task_id in citation["summary"]
     assert frozen["actual_work_window"]["end_at"] == window["due_at"]
     assert datetime.fromisoformat(window["due_at"]) - datetime.fromisoformat(window["start_at"]) == timedelta(days=1)
     body = (folder / "report.md").read_text(encoding="utf-8")
+    if recorded_reference:
+        assert f"]({recorded_reference})" in body
+        bundle = json.loads((folder / "generation-bundle.json").read_text(encoding="utf-8"))
+        assert all(recorded_reference in artifact["content"] for artifact in bundle["artifacts"])
     messages = store.messages(sid)
     assert messages[:len(before)] == before
     returned = [row for row in messages if row["role"] == "agent" and row["text"] == body]
@@ -1079,7 +1095,10 @@ def test_original_pump_resumes_exact_prelaunch_rejection_once_without_replaying_
         first = pump_steward_monitors(runtime)[0]
         rejected = finish(runtime, first)
     failure = rejected["response"]["native_loopx"]
-    assert failure["error_code"] == "stale_goal_authority", rejected
+    assert failure["status"] == "failed" and failure["result_kind"] == "host_failure", rejected
+    assert failure["host_failure"] == {"schema_version": "loopx_turn_host_failure_v0",
+        "kind": "contract_rejected", "attempt": 1, "retryable": False}
+    assert failure["reason"] == "first-party Host runtime rejected: stale_goal_authority"
     assert rejected["delta_count"] == 0 and rejected["upstream_turn_id"] is None
     native = turn_journal_path(reports.root, goal_id=actor["goal_id"], turn_key=failure["resume_turn_key"])
     assert json.loads(native.read_text())["host_attempt_count"] == 1
@@ -1100,7 +1119,8 @@ def test_original_pump_resumes_exact_prelaunch_rejection_once_without_replaying_
         completed = finish(runtime, retry)
     assert completed["status"] == "completed", {key: completed.get(key) for key in ("status", "error", "error_code", "response")}
     if reject_recovery:
-        assert completed["response"]["native_loopx"]["error_code"] == "stale_goal_authority"
+        assert completed["response"]["native_loopx"]["host_failure"]["kind"] == "contract_rejected"
+        assert completed["response"]["native_loopx"]["host_failure"]["attempt"] == 2
         before = capture.read_bytes(), list(bot.writes), native.read_bytes()
         for _ in range(2):
             runtime._steward_monitor_next_check.clear()
@@ -1128,6 +1148,51 @@ def test_original_pump_resumes_exact_prelaunch_rejection_once_without_replaying_
         assert not pump_steward_monitors(runtime)
         assert transport.steward_reports.reconcile() == 0
     assert bot.writes == sent and capture.read_bytes() == calls
+
+
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("stage", ["unknown_before_publication", "after_publication"])
+def test_report_launch_recovery_never_reclassifies_unknown_or_published_work(steward, tmp_path, monkeypatch, provider, stage):
+    from loopx.chat_agent import CodexChatAgentSession
+    from loopx.control_plane.goals.first_party_host_admission import FirstPartyHostRuntimeRejected
+    from loopx.control_plane.turn_driver.journal_store import turn_journal_path
+
+    store, runtime, bot, transport, _, capture, _ = steward
+    sid, actor, reports, _ = configured(steward, tmp_path, monkeypatch, provider)
+    install_model(steward, tmp_path, sid)
+    calls = capture.read_bytes()
+    write = CodexChatAgentSession._write
+
+    def uncertain_write(self, payload, **kwargs):
+        if payload.get("method") != "turn/start":
+            return write(self, payload, **kwargs)
+        if stage == "unknown_before_publication":
+            raise OSError("publication outcome unavailable")
+        write(self, payload, **kwargs)
+        # The same exception after the guarded publication is deliberately not
+        # evidence that this host invocation did nothing.
+        raise FirstPartyHostRuntimeRejected("stale_goal_authority")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(CodexChatAgentSession, "_write", uncertain_write)
+        first = pump_steward_monitors(runtime)[0]
+        done = finish(runtime, first)
+    result = done["response"]["native_loopx"]
+    if stage == "unknown_before_publication":
+        assert result["host_failure"]["kind"] == "unknown"
+    else:
+        assert result["error_code"] == "stale_goal_authority"
+        assert "host_failure" not in result
+    native = turn_journal_path(reports.root, goal_id=actor["goal_id"], turn_key=result["resume_turn_key"])
+    starts = [json.loads(line) for line in capture.read_bytes()[len(calls):].splitlines()
+        if json.loads(line).get("method") == "turn/start"]
+    assert len(starts) == (1 if stage == "after_publication" else 0)
+    before = native.read_bytes(), store.load_turn(sid, first["turn_id"]), capture.read_bytes(), list(bot.writes)
+    for _ in range(2):
+        runtime._steward_monitor_next_check.clear()
+        assert not pump_steward_monitors(runtime)
+        assert transport.steward_reports.reconcile() == 0
+    assert (native.read_bytes(), store.load_turn(sid, first["turn_id"]), capture.read_bytes(), bot.writes) == before
 
 
 @pytest.mark.parametrize("provider", ["file", "sqlite"])

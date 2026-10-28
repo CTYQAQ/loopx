@@ -425,15 +425,21 @@ export const researchHistoryScenario = {
       assert.match(await processJudgments.locator('[data-metric="goal_alignment"]').getAttribute('aria-label'), /不适用/);
       await processJudgments.locator(':scope > summary').click();
       assert.equal(await synthesisPage.locator('.research-effect-metrics:visible').count(), 0);
+      await synthesisPage.evaluate(() => {for (const e of document.querySelectorAll('*')) if (e.scrollTop) e.scrollTop = 0;});
+      assert(await synthesisPage.evaluate(() => {
+        const summary = document.querySelector('.research-synthesis-summary').getBoundingClientRect();
+        const viewport = document.querySelector('.personal-channel-scroll').getBoundingClientRect();
+        return summary.top >= viewport.top && summary.bottom <= viewport.bottom;
+      }), 'The first viewport answers what the study found, including its unknowns');
       await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-ordinary-desktop.png'), animations: 'disabled'});
       assert(await synthesisPage.evaluate(() => {
         const results = document.querySelector('.research-progress');
         const report = document.querySelector('.research-synthesis');
         const history = document.querySelector('.research-history-heading');
         return Boolean(results && report && history
-          && (results.compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING)
-          && (report.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING));
-      }), 'The complete overview reads results, report, then research history');
+          && (report.compareDocumentPosition(results) & Node.DOCUMENT_POSITION_FOLLOWING)
+          && (results.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING));
+      }), 'The report answers the research question before readers inspect measurements and history');
       const reading = synthesisPage.getByRole('navigation', {name: '研究阅读', exact: true});
       await reading.getByRole('button', {name: '汇报', exact: true}).click();
       assert(await synthesisPage.evaluate(() => document.activeElement?.contains(document.querySelector('.research-synthesis'))));
@@ -466,6 +472,11 @@ export const researchHistoryScenario = {
       await synthesis.locator('.research-synthesis-finding > summary').first().click();
       await synthesisPage.evaluate(() => {for (const e of document.querySelectorAll('*')) if (e.scrollTop) e.scrollTop = 0;});
       assert(await synthesisPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      assert(await synthesisPage.evaluate(() => {
+        const summary = document.querySelector('.research-synthesis-summary').getBoundingClientRect();
+        const viewport = document.querySelector('.personal-channel-scroll').getBoundingClientRect();
+        return summary.top >= viewport.top && summary.bottom <= viewport.bottom;
+      }), 'A narrow first viewport retains the substantive report instead of only metric labels');
       await synthesisPage.screenshot({path: resolve(outputDir, 'research-synthesis-ordinary-mobile.png'), animations: 'disabled'});
       await reading.getByRole('button', {name: '汇报', exact: true}).click();
       await synthesisPage.mouse.move(1, 1);
@@ -1123,22 +1134,30 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       assert.equal(await gapLegend.locator('i').evaluate(e => getComputedStyle(e).backgroundColor),
         await history.locator('.research-density .is-gap').first().evaluate(e => getComputedStyle(e).backgroundColor),
         'The visible key identifies the actual recording-gap marks');
-      const barLegend = history.getByText('柱高=事件数', {exact: true});
-      assert(await barLegend.isVisible(), 'The bar-height meaning must be visible without opening optional help');
+      const timelineHelp = history.getByRole('button', {name:'时间线读法', exact:true});
+      await timelineHelp.focus();
+      const barLegend = page.locator('.context-help-popover:popover-open .research-density-help');
+      await barLegend.waitFor();
+      assert.match(await barLegend.innerText(), /柱高为事件数/);
       assert.equal(await barLegend.locator('i').evaluate(e => getComputedStyle(e).borderTopColor),
         await history.locator('.research-density span:not(.is-gap)').first().evaluate(e => getComputedStyle(e).borderTopColor),
-        'The visible bar key matches the real density bars');
+        'The on-demand bar key matches the real density bars');
+      await page.keyboard.press('Escape');
+      assert(await timelineHelp.evaluate(e => e === document.activeElement));
       // The default reading must survive a locale switch, not only the zh copy.
       await page.evaluate(key => localStorage.setItem(key, 'en'), 'loopx-pw-locale');
       await page.reload({waitUntil: 'networkidle'});
       const englishHistory = page.getByRole('region', {name: 'Research history', exact: true});
-      await englishHistory.getByText('Bar height = events', {exact: true}).waitFor()
-        .catch(error => {throw new Error(`The English reading keeps the bar-height key: ${error.message}`);});
+      await englishHistory.getByRole('button', {name:'Reading the timeline', exact:true}).focus();
+      const englishBarLegend = page.locator('.context-help-popover:popover-open .research-density-help');
+      await englishBarLegend.waitFor();
+      assert.match(await englishBarLegend.innerText(), /Bar height is events/);
+      await page.keyboard.press('Escape');
       await englishHistory.getByText('No records', {exact: true}).waitFor()
         .catch(error => {throw new Error(`The English reading keeps the recording-gap key: ${error.message}`);});
       await page.evaluate(key => localStorage.setItem(key, 'zh-CN'), 'loopx-pw-locale');
       await page.reload({waitUntil: 'networkidle'});
-      await history.getByText('柱高=事件数', {exact: true}).waitFor();
+      await history.getByRole('button', {name:'时间线读法', exact:true}).waitFor();
       const target = await history.locator(".research-timeline-marker").first().evaluate(button => {
         const box = button.getBoundingClientRect(), dot = getComputedStyle(button, "::after");
         const count=button.querySelector('span');
@@ -1155,7 +1174,11 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
       for (const viewport of [{width: 1280, height: 900}, {width: 390, height: 844}]) {
         await page.setViewportSize(viewport);
         assert(await gapLegend.isVisible(), 'The recording-gap key remains visible on desktop and narrow layouts');
-        assert(await barLegend.isVisible(), 'The bar-height key remains visible on desktop and narrow layouts');
+        await timelineHelp.focus();
+        await barLegend.waitFor();
+        assert.match(await barLegend.innerText(), /柱高为事件数/);
+        await page.keyboard.press('Escape');
+        assert(await timelineHelp.evaluate(e => e === document.activeElement), 'On-demand reading help returns focus at both widths');
         const target = history.locator('.research-route-track [data-research-nodes~="hit-6"]');
         await target.scrollIntoViewIfNeeded();
         await page.screenshot({path: resolve(outputDir, `research-history-targets-${viewport.width}.png`), animations:'disabled'});
@@ -1190,7 +1213,9 @@ Path(sys.argv[1]).write_text(json.dumps({'goal_id':goal,'display_name':'Syntheti
         assert(await detail.getByText('0.2 / 30', {exact:true}).isVisible());
         await page.screenshot({path:resolve(outputDir, `research-execution-${viewport.width}.png`), animations:'disabled'});
         assert.deepEqual(selectedNodes(),['hit-6']);
-        await detail.getByText('Synthetic hit target 6',{exact:true}).waitFor();
+        await detail.getByRole('button',{name:'完整研究问题',exact:true}).focus();
+        await page.locator('.context-help-popover:popover-open').getByText('Synthetic hit target 6',{exact:true}).waitFor();
+        await page.keyboard.press('Escape');
         await detail.press('Escape');
         assert.deepEqual(selectedNodes(),ids,'Escape returns to the original group');
         assert(await detail.locator('[data-research-node="hit-6"] button').evaluate(e=>e===document.activeElement));

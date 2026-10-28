@@ -295,4 +295,3 @@ export function nativeContextDelivery(request: JsonObject, legacyQuotaFields: re
     return {projection};
   }
 }
-

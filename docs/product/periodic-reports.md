@@ -25,7 +25,23 @@ the source reader never fetches a URL. A recorded address proves neither public
 access nor permission to publish to a different audience. The original scope,
 source gaps and unread-artifact status remain authoritative; an opaque digest
 does not supply a missing URL. Existing v1 frozen inputs retain their original
-fact set and bytes. Ordinary managed Session inputs retain their existing scope.
+fact set and bytes. New ordinary managed Session inputs use the same frozen
+citation format for a native Task whose evidence field is one eligible HTTP(S)
+reference. The original Task reference and complete source remain available;
+the address is explicitly unread and unverified. Prose, notes and compound
+evidence strings are not searched for links. This adds no source read, fetch,
+publication route or audience, and existing local v1 windows remain unchanged.
+
+The packaged local-Session journey below uses a disposable SQLite backend and
+synthetic model response: normal configuration preview/apply, one native report
+Turn, its complete original conversation return, then the existing answer
+reader. The six source links retain the recorded Task address in both formats.
+The fixed synthetic prose qualifies transport and reading mechanics, not live
+editorial quality or the address's availability. No layout or editor changed.
+
+| Packaged answer reader | Narrow answer reader |
+| --- | --- |
+| ![A recorded Task address in the full report](../assets/personal-workspace/steward-reports/local-citations/packaged-reader-desktop.png) | ![The same source link and report at 390 pixels](../assets/personal-workspace/steward-reports/local-citations/packaged-reader-narrow.png) |
 
 Text reports include the same authored overview values, labels and details as
 the HTML artifact. When that overview is present, it replaces the generated
@@ -480,6 +496,15 @@ a retained report route cannot fall back to another Session or audience.
 Provider, owner and original-message verification still apply. Owner Todo
 notifications retain their existing private-chat route selection.
 
+Worker conclusions from an already recovered original conversation use the
+recorded Core continuation when resolving their private return route. A client
+suffix alone is insufficient: the transport and Core journals must agree on
+the current Session, Turn, source and recovery record. Quota, routing and
+unfinished-work continuations retain the same audience and existing saved-send
+verification; this lookup neither retries model work nor resends an unknown
+provider effect. Missing records, changed identity or revoked grants still
+block delivery.
+
 Portfolio evidence collection finishes before the governed driver captures its
 launch authority. A long read can then observe legitimate registry rewrites
 without immediately invalidating an earlier launch witness. The original
@@ -490,6 +515,10 @@ does not authorize replay of a historical attempt with unknown host effects.
 The original pump can resume one retained report after the first-party launch
 owner's exact `stale_goal_authority` refusal. That owner rejects before publishing
 `turn/start`; a missing answer or missing events alone is insufficient. The
+host adapter records this guard-entry refusal through the native executor's
+existing `contract_rejected` host-failure contract. The durable attempt remains
+recorded; an exception after publication is not converted into that proof.
+Older in-progress journals with unknown host effects remain blocked. The
 typed admission checks the original Chat request, canonical native transaction,
 one recorded attempt, no generation or settlement, and the current original
 subscription and grant. A separately correlated Chat attempt resumes the same
@@ -969,6 +998,15 @@ Core answer must all read back before that period is acknowledged. This Task
 completion receipt is distinct from report/provider publication; it never
 claims an external message was sent. Source and previous-period Tasks may be
 read from canonical completed history after archival.
+
+Completion reconciliation requires one native result matching the complete
+stored Turn result and a strictly readable original message journal. Duplicate
+or conflicting result events, malformed JSON and non-object message records
+leave completion unconfirmed. The calendar retains its window and configuration;
+settings cannot clear that uncertainty as a successful or known failed task.
+Once the original records are readable and unambiguous again, a restarted host
+can acknowledge that same result without another model execution or answer,
+then admit a later independent period. This path does not repair journal bytes.
 
 Before the first deadline, while the Session has accepted user work, or while
 the schedule is disabled, this path starts no task model. Ordinary calendar

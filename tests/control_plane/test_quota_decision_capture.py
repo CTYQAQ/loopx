@@ -388,6 +388,43 @@ def test_handoff_requires_explicit_capture_before_guard(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("root_source", ["saved", "explicit", "fallback"])
+@pytest.mark.parametrize("output_limit", [None, 32000])
+def test_saved_selection_transport_preserves_identity_and_rebinds_once(tmp_path, root_source, output_limit):
+    from loopx.cli import build_parser
+    from loopx.cli_commands.quota_capture import bind_capture_selection_transport
+
+    saved, explicit, fallback, native = (tmp_path / name for name in
+        ("saved captures", "explicit captures", "private cache", "native session"))
+    words = ["quota", "should-run", "--goal-id", "goal", "--agent-id", "agent",
+        "--todo-id", "{todo_id}", "--turn-instance-id", "original-turn", "--codex-app",
+        "--context-delivery", "on", "--codex-context-root", str(tmp_path / "old native"), "--turn-envelope",
+        "--max-page-output-bytes", "64000"]
+    if root_source != "fallback":
+        words += ["--decision-output-root", str(saved)]
+    selection = {"command_args_template": shlex.join(words)}
+    payload = {"interaction_contract": {"cli_channel": {"selection_command": selection}}}
+    args = request(None, decision_output_root=explicit if root_source == "explicit" else None,
+        context_delivery="on", codex_context_dir=str(native), turn_envelope=True,
+        max_page_output_bytes=output_limit)
+    bind_capture_selection_transport(payload, args, capture_root=fallback)
+    first = selection["command_args_template"]
+    bind_capture_selection_transport(payload, args, capture_root=fallback)
+    assert selection["command_args_template"] == first
+    argv = shlex.split(first)
+    parsed = build_parser().parse_args(argv)
+    assert (parsed.goal_id, parsed.agent_id, parsed.todo_id, parsed.turn_instance_id) == (
+        "goal", "agent", "{todo_id}", "original-turn")
+    assert parsed.decision_output_root == str({"saved": saved, "explicit": explicit, "fallback": fallback}[root_source])
+    assert parsed.context_delivery == "on" and parsed.codex_context_dir == str(native)
+    assert parsed.codex_context_root is None and parsed.turn_envelope
+    assert parsed.max_page_output_bytes == (output_limit or 64000)
+    assert all(argv.count(option) == 1 for option in
+        ("--decision-output-root", "--context-delivery", "--codex-context-dir", "--turn-envelope",
+         "--max-page-output-bytes"))
+    assert not list(tmp_path.iterdir())
+
+
 @pytest.mark.skipif(os.name != 'posix', reason='Unix local Host transport')
 def test_handoff_rejects_shared_or_symlink_endpoint_and_preserves_selection(tmp_path):
     import socket
