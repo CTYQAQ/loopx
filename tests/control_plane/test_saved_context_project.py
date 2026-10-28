@@ -313,6 +313,109 @@ def test_preflight_instruction_pins_both_projection_and_full_fallback(tmp_path):
     assert "--decision-output-root" not in commands[0]
 
 
+@pytest.mark.parametrize("provider", ["file", "sqlite"])
+@pytest.mark.parametrize("enabled,compacted", [(False, False), (True, False), (True, True)],
+    ids=["off", "on", "on-after-compaction"])
+def test_checkpoint_preflight_selection_inherits_native_transport(tmp_path, monkeypatch, provider, enabled, compacted):
+    """The saved guard is presented after SessionStart, then really bound once."""
+    from benchmark.runtime.checkpoint import capture_before_replan
+    from canonical_authority_fixture import initialize_canonical_authority, isolate_sqlite_runtime, read_fixture_todos
+    from loopx.control_plane.coordination.runtime_shadow import build_todo_runtime_shadow_projection
+    from loopx.control_plane.turn_driver.codex_context import codex_context_hook
+    from tests.control_plane.test_quota_settlement_cli import (
+        AGENT_ID, GOAL_ID, TODO_ID, _configure_selectable_alternative,
+        _heartbeat_receipt_count, _spend_run_count, _write_fixture,
+    )
+
+    isolate_sqlite_runtime(tmp_path, monkeypatch)
+    project, runtime, registry = _write_fixture(tmp_path / "authority")
+    _configure_selectable_alternative(project)
+    state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
+    initialize_canonical_authority(runtime, GOAL_ID,
+        build_todo_runtime_shadow_projection(goal_id=GOAL_ID, todos=read_fixture_todos(state), handoff_mode="soft_claim"),
+        state_path=state, provider=provider)
+    original_state = state.read_bytes()
+    native = tmp_path / "private native"
+    native.mkdir(mode=0o700)
+    turn = "preflight-transport"
+    wake = tmp_path / "wakes" / turn
+    wake.mkdir(parents=True)
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({"trigger": "fresh_replan", "destination": str(tmp_path / "checkpoints"),
+        "components": [{"id": "task", "source_path": str(state)}], "point_metadata": {}}))
+    cli = tmp_path / "loopx-cli"
+    cli.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' -m loopx.entrypoint "$@"\n')
+    cli.chmod(0o700)
+    monkeypatch.setenv("LOOPX_EXECUTION_MODE", "heartbeat")
+    monkeypatch.setenv("LOOPX_CONTEXT_DELIVERY", "on" if enabled else "off")
+    env = {**os.environ, "LOOPX_CLI": str(cli), "LOOPX_PROJECT": str(project),
+        "LOOPX_REGISTRY": str(registry), "LOOPX_RUNTIME_ROOT": str(runtime),
+        "LOOPX_GOAL_ID": GOAL_ID, "LOOPX_AGENT_ID": AGENT_ID,
+        "LOOPX_WAKE_LOG_DIR": str(wake.parent), "LOOPX_CHECKPOINT_REQUEST": str(request),
+        "LOOPX_CONTEXT_DELIVERY": "on" if enabled else "off", "LOOPX_CODEX_CONTEXT_DIR": str(native)}
+    env.pop("CODEX_THREAD_ID", None)
+    receipt = {"turn_id": turn, "mode": "heartbeat", "stage": "execute"}
+    body = capture_before_replan(env, receipt, "Current work.")
+    source = wake / "checkpoint-start-view.json"
+    raw = source.read_bytes()
+    original_guard = (wake / "checkpoint-start-guard.json").read_bytes()
+    assert _heartbeat_receipt_count(runtime, turn) == 1 and _spend_run_count(runtime) == 0
+    assert not list(native.iterdir())  # Host preflight must not publish before native SessionStart.
+
+    event = {"session_id": "native-session", "cwd": str(project), "hook_event_name": "SessionStart", "source": "startup"}
+    monkeypatch.setenv("CODEX_THREAD_ID", event["session_id"])
+    monkeypatch.chdir(project)
+    if enabled:
+        codex_context_hook(str(native), event)
+
+    def consume(wire):
+        data = bytearray()
+        page = wire
+        while True:
+            assert page["ok"] and page["offset"] == len(data)
+            data.extend(page["content"].encode())
+            codex_context_hook(str(native), {**event, "hook_event_name": "PostToolUse", "tool_response": json.dumps(page)})
+            if page["eof"]:
+                assert hashlib.sha256(data).hexdigest() == wire["sha256"]
+                return json.loads(data)
+            argv = shlex.split(page["next_command"])
+            rc, page = _run_cli(registry, runtime, *argv[argv.index("quota"):], cwd=project)
+            assert rc == 0, page
+
+    if enabled:
+        command = shlex.split(body.split("```sh\n", 1)[1].split("\n```", 1)[0])
+        command.extend(("--max-page-output-bytes", "32000"))
+        rc, cold = _run_cli(registry, runtime, *command[command.index("quota"):], cwd=project)
+        assert rc == 0 and cold["mode"] == "full", cold
+        assert len(json.dumps(cold, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 32000
+        presented = consume(cold)
+        if compacted:
+            codex_context_hook(str(native), {**event, "hook_event_name": "PreCompact"})
+    else:
+        presented = json.loads(raw)
+    selection = presented["interaction_contract"]["cli_channel"]["selection_command"]
+    argv = shlex.split(selection["route_prefix"] + " " + selection["command_args_template"].format(todo_id=TODO_ID))
+    from loopx.cli import build_parser
+    parsed = build_parser().parse_args(argv[1:])
+    assert (parsed.context_delivery == "on") is enabled
+    assert parsed.codex_context_dir == (str(native) if enabled else None)
+    assert parsed.max_page_output_bytes == (32000 if enabled else None)
+    assert argv.count("--decision-output-root") == 1
+    rc, bound = _run_cli(registry, runtime, *argv[1:], cwd=project)
+    assert rc == 0, bound
+    if enabled:
+        assert bound["mode"] == ("full" if compacted else "delta"), bound
+        assert len(json.dumps(bound, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 32000
+        delivered = consume(bound)
+        if not compacted:
+            assert delivered["base"]["capture_id"] == cold["target"]["capture_id"]
+    else:
+        assert bound["mode"] == "should-run" and not list(native.iterdir())
+    assert _heartbeat_receipt_count(runtime, turn) == 2 and _spend_run_count(runtime) == 0
+    assert source.read_bytes() == raw and (wake / "checkpoint-start-guard.json").read_bytes() == original_guard
+    assert state.read_bytes() == original_state
+
+
 @pytest.mark.skipif(not os.environ.get("LOOPX_NATIVE_CHECKPOINT_BIN"), reason="Explicit native Codex; loopback inference only")
 @pytest.mark.parametrize("host", ["app_server", "benchmark", "app_machine", "app_code_mode"])
 def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, monkeypatch, host):
@@ -322,13 +425,18 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
     from tests.control_plane.codex_checkpoint_fixture import local_inference_provider
     from tests.control_plane.test_codex_context_boundary import _app_server, _configure_provider, _native_fixture, _input_text
     from tests.control_plane.test_codex_context_capture import _delivered
-    from tests.control_plane.test_quota_settlement_cli import AGENT_ID, GOAL_ID, TODO_ID, _write_fixture, _spend_run_count, _heartbeat_receipt_count
+    from tests.control_plane.test_quota_settlement_cli import (
+        AGENT_ID, GOAL_ID, TODO_ID, _configure_selectable_alternative,
+        _write_fixture, _spend_run_count, _heartbeat_receipt_count,
+    )
 
     isolate_sqlite_runtime(tmp_path, monkeypatch)
     binary, env, workspace, home = _native_fixture(tmp_path)
     env.update(NODE_OPTIONS="--experimental-sqlite", LOOPX_USAGE_PING="0")
     env.pop("CODEX_ROLLOUT_TRACE_ROOT", None)
     project, runtime, registry = _write_fixture(workspace)
+    if host == "benchmark":
+        _configure_selectable_alternative(project)
     state = project / f".codex/goals/{GOAL_ID}/ACTIVE_GOAL_STATE.md"
     todos = read_fixture_todos(state)
     todos[0]["text"] = todos[0]["title"] = "Exact requirement with retained provenance.\n" * 240
@@ -378,6 +486,7 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
                     sources.append((source, source.read_bytes()))
                     receipts = _heartbeat_receipt_count(runtime, actual_turn)
                     assert hashlib.sha256(source.read_bytes()).hexdigest() == argv[argv.index("--capture-sha256") + 1]
+                    command += " --max-page-output-bytes 32000"
                 else:
                     source, raw = sources[0 if phase == "cold" else 1]
                     command = shlex.join([*cli, "--format", "json", "quota", "context-project",
@@ -387,13 +496,15 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
                             "--context-delivery", "on", "--codex-context-dir", str(context), "--decision-output-root", str(cache)])])
                 phase += "_ready"
             elif phase.endswith("_ready"):
-                name = phase.split("_")[0]
+                name = phase.removesuffix("_ready")
                 output = [item["output"] for item in request["input"]
                     if item.get("type") in ("function_call_output", "custom_tool_call_output")][-1]
                 if isinstance(output, list):
                     output = [part["text"] for part in output if part.get("type") == "input_text"][-1]
                 descriptor = json.loads(output.split("\nOutput:\n", 1)[-1])
                 assert descriptor["ok"] and descriptor["mode"] == ("full" if name == "cold" else "delta")
+                if host == "benchmark":
+                    assert len(json.dumps(descriptor, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 32000
                 wire = json.loads((Path(descriptor["path"]).parent / "delivery.json").read_text())
                 assert descriptor["target"] == wire["target"]
                 observed[name] = (wire, descriptor)
@@ -411,17 +522,30 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
                     return response(request, number, message)
                 command = queue.pop(0)
             else:
-                name = phase.split("_")[0]
+                name = phase.removesuffix("_read")
                 descriptor = observed[name][1]
                 assert _delivered(request, descriptor["sha256"]) == Path(descriptor["path"]).read_text().rstrip("\n")
-                if name == "warm":
+                if host == "benchmark" and name in ("cold", "warm"):
+                    # Consume the command actually delivered to the native
+                    # worker, rather than manually supplying missing flags.
+                    presented = json.loads(Path(observed[name][0]["recovery"]["path"]).read_text())
+                    selection = presented["interaction_contract"]["cli_channel"]["selection_command"]
+                    command = selection["route_prefix"] + " " + selection["command_args_template"].replace("{todo_id}", TODO_ID)
+                    argv = shlex.split(command)
+                    assert argv[argv.index("--context-delivery") + 1] == "on"
+                    assert argv[argv.index("--codex-context-dir") + 1] == str(home / "loopx-context")
+                    assert argv.count("--decision-output-root") == 1
+                    assert argv[argv.index("--max-page-output-bytes") + 1] == "32000"
+                    phase = name + "_bound_ready"
+                elif name in ("warm", "warm_bound"):
                     phase = "done"
                     return message
-                # Full wire context is observed exactly, then reuse in the next call.
-                phase = "warm"
-                if host == "benchmark":
-                    return message  # A new worker wake owns its own original guard.
-                return response(request, number, message)
+                else:
+                    # A new worker wake owns its own original guard.
+                    phase = "warm"
+                    if host == "benchmark":
+                        return message
+                    return response(request, number, message)
             if host == "app_code_mode":
                 return {"type": "custom_tool_call", "id": f"fc_{number}", "call_id": f"call_{number}",
                     "name": "exec", "input": '// @exec: {"max_output_tokens":24000}\ntext((await tools.exec_command('
@@ -485,17 +609,40 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
     if host == "benchmark":
         turns = [json.loads(raw)["heartbeat_receipt"]["turn_instance_id"] for _, raw in sources]
         assert len(set(turns)) == 2
-        assert all(_heartbeat_receipt_count(runtime, turn) == 1 for turn in turns)
+        assert all(_heartbeat_receipt_count(runtime, turn) == 2 for turn in turns)  # original guard + selection
         assert _spend_run_count(runtime) == 1  # only the explicit inter-wake settlement above
     else:
         assert _heartbeat_receipt_count(runtime, "saved-native-turn") == receipts and _spend_run_count(runtime) == 0
-    cold, warm = observed["cold"][0], observed["warm"][0]
-    assert cold["context"] == json.loads(sources[0][1])
-    original = json.loads(sources[1][1])
-    current = prepare_context_delivery(original,
-        scope={key: warm["target"][key] for key in ("goal_id", "agent_id", "session_id", "context_epoch")},
-        capture_id=warm["target"]["capture_id"], surface="quota_packet")
-    assert restore_context_delivery(warm, baseline=cold, current=current)["context"] == original
+    cold = observed["cold"][0]
+    baseline = None
+    for wire, _ in observed.values():
+        projected = json.loads(Path(wire["recovery"]["path"]).read_text())
+        current = prepare_context_delivery(projected,
+            scope={key: wire["target"][key] for key in
+                ("goal_id", "agent_id", "session_id", "context_epoch", "continuity_generation") if key in wire["target"]},
+            capture_id=wire["target"]["capture_id"], surface="quota_packet")
+        restored = restore_context_delivery(wire, baseline=baseline, current=current)
+        assert restored["context"] == projected
+        if wire["mode"] == "delta":
+            assert restored["mode"] == "delta"  # A fallback would hide a broken baseline chain.
+        # Match the native journal's exact prior full capture and depth. The
+        # reconstructed mapping need not preserve that capture's field order.
+        baseline = {**current, "ancestry": wire["ancestry"]}
+    if host == "benchmark":
+        for name, (_, raw) in zip(("cold", "warm"), sources):
+            presentation = json.loads(Path(observed[name][0]["recovery"]["path"]).read_text())
+            original = json.loads(raw)
+            selected = presentation["interaction_contract"]["cli_channel"]["selection_command"]
+            original_command = original["interaction_contract"]["cli_channel"]["selection_command"]["command_args_template"]
+            words = shlex.split(selected["command_args_template"])
+            for option in ("--context-delivery", "--codex-context-dir", "--max-page-output-bytes"):
+                index = words.index(option)
+                del words[index:index + 2]
+            assert words == shlex.split(original_command)
+            selected["command_args_template"] = original_command
+            assert presentation == original  # only presentation transport differs
+    else:
+        assert cold["context"] == json.loads(sources[0][1]) and projected == json.loads(sources[1][1])
     assert all(path.read_bytes() == raw for path, raw in sources)
 
 

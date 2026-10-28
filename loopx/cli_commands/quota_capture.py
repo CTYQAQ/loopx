@@ -258,6 +258,11 @@ def project_saved_context_capture(args: argparse.Namespace) -> dict[str, Any]:
         if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_mode & 0o077:
             raise ValueError("saved projection needs a private physical capture root owned by this user")
         cache = Path(tempfile.mkdtemp(prefix="context-", dir=root))
+        # The Host may have captured this guard before native SessionStart.
+        # Carry the now-active transport into its selection presentation, not
+        # into the immutable source or a second admission. Native lifecycle
+        # still owns when the following full/delta view can be published.
+        bind_capture_selection_transport(payload, args, capture_root=root)
         projected = project_codex_context(payload, directory=directory, capture_directory=cache,
             goal_id=args.goal_id, agent_id=args.agent_id, surface="quota_packet",
             capture_id=hashlib.sha256(raw).hexdigest(),
@@ -376,14 +381,15 @@ def capture_decision(directory: Path | None, payload: dict[str, object]) -> None
         ) from exc
 
 
-def bind_capture_selection_transport(payload: dict[str, Any], args: argparse.Namespace) -> None:
+def bind_capture_selection_transport(payload: dict[str, Any], args: argparse.Namespace, *,
+                                     capture_root: Path | None = None) -> None:
     """Retain caller display/capture options in the existing selection command.
 
-    Only transport argv is added here; the typed quota owner still selects the
+    Only transport argv is composed here; the typed quota owner still selects the
     action and owns admission. Each selection invocation allocates a new capture.
     """
     root = getattr(args, "decision_output_root", None)
-    if root is None:
+    if root is None and capture_root is None:
         return
     interaction = payload.get("interaction_contract")
     cli = interaction.get("cli_channel") if isinstance(interaction, dict) else None
@@ -393,18 +399,35 @@ def bind_capture_selection_transport(payload: dict[str, Any], args: argparse.Nam
     template = selection.get("command_args_template")
     if not isinstance(template, str):
         return
-    suffix = " --decision-output-root " + shlex.quote(str(Path(root).expanduser().absolute()))
+    words = shlex.split(template)
+    options: dict[str, str] = {}
+    # A saved guard already carries its capture root. Preserve it unless this
+    # caller explicitly selects another; otherwise use the validated cache.
+    if root is not None or "--decision-output-root" not in words:
+        selected_root = root if root is not None else capture_root
+        options["--decision-output-root"] = str(Path(selected_root).expanduser().absolute())
     if getattr(args, "decision_handoff_socket", None):
-        suffix += " --decision-handoff-socket " + shlex.quote(args.decision_handoff_socket)
-    if getattr(args, "turn_envelope", False):
-        suffix += " --turn-envelope"
+        options["--decision-handoff-socket"] = args.decision_handoff_socket
     if getattr(args, "context_delivery", "off") != "off":
-        suffix += " --context-delivery " + shlex.quote(args.context_delivery)
+        options["--context-delivery"] = args.context_delivery
     if getattr(args, "codex_context_dir", None):
-        suffix += " --codex-context-dir " + shlex.quote(args.codex_context_dir)
+        options["--codex-context-dir"] = args.codex_context_dir
     if getattr(args, "codex_context_root", None):
-        suffix += " --codex-context-root " + shlex.quote(args.codex_context_root)
-    selection["command_args_template"] = template + suffix
+        options["--codex-context-root"] = args.codex_context_root
+    if getattr(args, "max_page_output_bytes", None) is not None:
+        options["--max-page-output-bytes"] = str(args.max_page_output_bytes)
+    replaced = set(options)
+    if replaced & {"--codex-context-dir", "--codex-context-root"}:
+        replaced.update(("--codex-context-dir", "--codex-context-root"))
+    for option in replaced:
+        while option in words:
+            index = words.index(option)
+            del words[index:index + 2]
+    for option, value in options.items():
+        words.extend((option, value))
+    if getattr(args, "turn_envelope", False) and "--turn-envelope" not in words:
+        words.append("--turn-envelope")
+    selection["command_args_template"] = shlex.join(words)
 
 
 def handoff_decision(directory: Path | None, socket_path: str | None,
