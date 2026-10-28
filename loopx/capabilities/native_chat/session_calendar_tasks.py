@@ -135,11 +135,14 @@ class SessionCalendarTasks(ManagedSessionReports):
                 or todo.get("completion_turn_key") != request.get("turn_instance_id")
                 or (response.get("native_loopx") or {}).get("status") != "committed"):
             return None
-        if not any(row["kind"] == "native_loopx.result" and row["payload"].get("status") == "committed"
-                for row in self.controller.store.events_after(actor["session_id"], turn["turn_id"], None)):
+        results = [row["payload"] for row in self.controller.store.events_after(actor["session_id"], turn["turn_id"], None)
+            if row["kind"] == "native_loopx.result"]
+        if results != [response["native_loopx"]]:
             return None
         body = response.get("message")
-        rows = [row for row in self.controller.store.messages(actor["session_id"])
+        # Tolerant transcript rendering cannot establish a unique complete
+        # return: an unreadable record could contain a conflicting reply.
+        rows = [row for row in self.controller.store.messages(actor["session_id"], strict=True)
             if row["message_id"] == "managed." + turn["turn_id"] + ".completed"]
         if (not isinstance(body, str) or not body.strip() or len(rows) != 1
                 or rows[0]["role"] != "agent" or rows[0]["turn_id"] != turn["turn_id"] or rows[0]["text"] != body):
