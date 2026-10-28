@@ -1647,12 +1647,7 @@ def run_loopx_turn_once(
                     plan, waiting, execute=True, replayed=False, effects=empty_effects
                 )
         if capture is not None:
-            plan = capture.publish()
-            request = {**request, "turn_envelope": plan["turn_envelope"]}
-            if isinstance(plan.get("work_contract"), Mapping):
-                request["work_contract"] = dict(plan["work_contract"])
-            else:
-                request.pop("work_contract", None)
+            plan, request = capture.publish_for_host(request)
         if journal is not None and recovery_decision is not None:
             journal["recovery_audit"] = build_turn_recovery_audit(
                 recovery_decision,

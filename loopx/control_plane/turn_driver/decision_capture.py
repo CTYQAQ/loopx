@@ -60,6 +60,18 @@ class StagedTurnDecisionCapture:
             write_decision_capture(self.path, self.observation)
         return self.plan
 
+    def publish_for_host(
+        self, request: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Install the published original input without changing recovery bindings."""
+        plan = self.publish()
+        bound_request = {**request, "turn_envelope": plan["turn_envelope"]}
+        if isinstance(plan.get("work_contract"), Mapping):
+            bound_request["work_contract"] = dict(plan["work_contract"])
+        else:
+            bound_request.pop("work_contract", None)
+        return plan, bound_request
+
 
 def stage_turn_decision_capture(
     plan: Mapping[str, Any], *, journal_path: Path,
