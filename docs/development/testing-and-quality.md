@@ -1267,6 +1267,26 @@ TS RFC 管语义 owner 与跨语言成本，shared-authority RFC 管后端容量
 
 ### Budget Failure Decisions
 
+The actual-default model portfolio retains the complete capability candidate
+context required by the shared diagnostic projection. On the unchanged three
+noisy fixtures, `74b3d526ab1c1fd3d5f96308bef2482fcad7e636` emitted 4,944 /
+4,858 / 3,089 pretty-JSON UTF-8 bytes; `53dcb03082985bf894b1fca8813ab9f6e92503c5`
+emits 86,172 / 86,086 / 84,276. The sources remain 120,963 / 121,008 / 118,935
+bytes with the same decision semantics. The new projection preserves all 24
+runnable, 16 blocked and 16 resolution-binding candidates, including their full
+text; the old projection removed those bodies. Calibrate only this synthetic
+fixture allowance from 40,000 to 90,000 bytes, preserving the over-budget source,
+selected-Todo/human-gate invariance, cold diagnostic checks, 22 scenarios, two
+repeats and six contrasts. Candidate removal or text loss now fails preflight
+before any model call. The original 40,000-byte failures remain failures; this
+does not change production transport limits, execution/tool budgets or frozen
+performance criteria, and does not qualify a model by itself.
+
+真实模型组合门的同一组三个 noisy fixture 现保留完整的 56 个 capability 候选及其
+正文。仅按上述实测把该合成 fixture 的 pretty-JSON UTF-8 字节预算从 40,000 调整到
+90,000；原超限失败保留。新增候选丢失/正文缩短的零模型调用负例，原选择、人工门禁、
+结算、重复次数、对照及生产硬边界不变；本次预算修正不等于真实模型通过。
+
 Complete registry routes exposed an existing brief heartbeat regression on the
 unchanged 128-character-root fixture. Commit
 `fb20c153ba2c2a7376efe68091a76ca470effbde` added those routes: its immediate parent
