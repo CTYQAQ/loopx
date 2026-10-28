@@ -1,3 +1,4 @@
+import {completeGoalNarrative} from "../work_items/goal_context_source.ts";
 /** Presentation of immutable quota, Turn and work-context captures. No admission or state writes.
  * Confirmed final input and explicit native-hook continuity assumptions remain
  * distinct; successful capture handoff alone is never retained-input proof. */
@@ -84,7 +85,8 @@ function splitContext(context: JsonObject, binding: JsonObject): Split {
         && readModel.contract_fields.every(field => typeof field === "string"))
       add(`todo_contract_fields:${i}`, [...prefix, "authority_read", "todo_read_model", "contract_fields"], true);
     if (kind === "goal_state" && typeof content.state_file === "string"
-        && typeof content.text === "string" && Array.isArray(content.excluded_todo_regions)) {
+        && typeof content.text === "string" && (Array.isArray(content.excluded_todo_regions)
+          || content.full_source === true && completeGoalNarrative(content))) {
       const id = JSON.stringify([kind, content.state_file]);
       if (sourceIds.has(id)) { valid = false; continue; }
       sourceIds.add(id);
