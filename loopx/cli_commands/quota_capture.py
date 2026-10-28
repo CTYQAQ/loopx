@@ -414,6 +414,8 @@ def bind_capture_selection_transport(payload: dict[str, Any], args: argparse.Nam
         options["--codex-context-dir"] = args.codex_context_dir
     if getattr(args, "codex_context_root", None):
         options["--codex-context-root"] = args.codex_context_root
+    if getattr(args, "max_page_output_bytes", None) is not None:
+        options["--max-page-output-bytes"] = str(args.max_page_output_bytes)
     replaced = set(options)
     if replaced & {"--codex-context-dir", "--codex-context-root"}:
         replaced.update(("--codex-context-dir", "--codex-context-root"))

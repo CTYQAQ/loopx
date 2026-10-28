@@ -384,8 +384,10 @@ def test_checkpoint_preflight_selection_inherits_native_transport(tmp_path, monk
 
     if enabled:
         command = shlex.split(body.split("```sh\n", 1)[1].split("\n```", 1)[0])
+        command.extend(("--max-page-output-bytes", "32000"))
         rc, cold = _run_cli(registry, runtime, *command[command.index("quota"):], cwd=project)
         assert rc == 0 and cold["mode"] == "full", cold
+        assert len(json.dumps(cold, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 32000
         presented = consume(cold)
         if compacted:
             codex_context_hook(str(native), {**event, "hook_event_name": "PreCompact"})
@@ -397,11 +399,13 @@ def test_checkpoint_preflight_selection_inherits_native_transport(tmp_path, monk
     parsed = build_parser().parse_args(argv[1:])
     assert (parsed.context_delivery == "on") is enabled
     assert parsed.codex_context_dir == (str(native) if enabled else None)
+    assert parsed.max_page_output_bytes == (32000 if enabled else None)
     assert argv.count("--decision-output-root") == 1
     rc, bound = _run_cli(registry, runtime, *argv[1:], cwd=project)
     assert rc == 0, bound
     if enabled:
         assert bound["mode"] == ("full" if compacted else "delta"), bound
+        assert len(json.dumps(bound, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 32000
         delivered = consume(bound)
         if not compacted:
             assert delivered["base"]["capture_id"] == cold["target"]["capture_id"]
@@ -482,6 +486,7 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
                     sources.append((source, source.read_bytes()))
                     receipts = _heartbeat_receipt_count(runtime, actual_turn)
                     assert hashlib.sha256(source.read_bytes()).hexdigest() == argv[argv.index("--capture-sha256") + 1]
+                    command += " --max-page-output-bytes 32000"
                 else:
                     source, raw = sources[0 if phase == "cold" else 1]
                     command = shlex.join([*cli, "--format", "json", "quota", "context-project",
@@ -498,6 +503,8 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
                     output = [part["text"] for part in output if part.get("type") == "input_text"][-1]
                 descriptor = json.loads(output.split("\nOutput:\n", 1)[-1])
                 assert descriptor["ok"] and descriptor["mode"] == ("full" if name == "cold" else "delta")
+                if host == "benchmark":
+                    assert len(json.dumps(descriptor, ensure_ascii=False, separators=(",", ":")).encode()) + 1 <= 32000
                 wire = json.loads((Path(descriptor["path"]).parent / "delivery.json").read_text())
                 assert descriptor["target"] == wire["target"]
                 observed[name] = (wire, descriptor)
@@ -528,6 +535,7 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
                     assert argv[argv.index("--context-delivery") + 1] == "on"
                     assert argv[argv.index("--codex-context-dir") + 1] == str(home / "loopx-context")
                     assert argv.count("--decision-output-root") == 1
+                    assert argv[argv.index("--max-page-output-bytes") + 1] == "32000"
                     phase = name + "_bound_ready"
                 elif name in ("warm", "warm_bound"):
                     phase = "done"
@@ -605,7 +613,7 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
         assert _spend_run_count(runtime) == 1  # only the explicit inter-wake settlement above
     else:
         assert _heartbeat_receipt_count(runtime, "saved-native-turn") == receipts and _spend_run_count(runtime) == 0
-    cold, warm = observed["cold"][0], observed["warm"][0]
+    cold = observed["cold"][0]
     baseline = None
     for wire, _ in observed.values():
         projected = json.loads(Path(wire["recovery"]["path"]).read_text())
@@ -627,7 +635,7 @@ def test_native_saved_preflight_uses_lifecycle_without_guard_replay(tmp_path, mo
             selected = presentation["interaction_contract"]["cli_channel"]["selection_command"]
             original_command = original["interaction_contract"]["cli_channel"]["selection_command"]["command_args_template"]
             words = shlex.split(selected["command_args_template"])
-            for option in ("--context-delivery", "--codex-context-dir"):
+            for option in ("--context-delivery", "--codex-context-dir", "--max-page-output-bytes"):
                 index = words.index(option)
                 del words[index:index + 2]
             assert words == shlex.split(original_command)

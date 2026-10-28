@@ -389,7 +389,8 @@ def test_handoff_requires_explicit_capture_before_guard(tmp_path):
 
 
 @pytest.mark.parametrize("root_source", ["saved", "explicit", "fallback"])
-def test_saved_selection_transport_preserves_identity_and_rebinds_once(tmp_path, root_source):
+@pytest.mark.parametrize("output_limit", [None, 32000])
+def test_saved_selection_transport_preserves_identity_and_rebinds_once(tmp_path, root_source, output_limit):
     from loopx.cli import build_parser
     from loopx.cli_commands.quota_capture import bind_capture_selection_transport
 
@@ -397,13 +398,15 @@ def test_saved_selection_transport_preserves_identity_and_rebinds_once(tmp_path,
         ("saved captures", "explicit captures", "private cache", "native session"))
     words = ["quota", "should-run", "--goal-id", "goal", "--agent-id", "agent",
         "--todo-id", "{todo_id}", "--turn-instance-id", "original-turn", "--codex-app",
-        "--context-delivery", "on", "--codex-context-root", str(tmp_path / "old native"), "--turn-envelope"]
+        "--context-delivery", "on", "--codex-context-root", str(tmp_path / "old native"), "--turn-envelope",
+        "--max-page-output-bytes", "64000"]
     if root_source != "fallback":
         words += ["--decision-output-root", str(saved)]
     selection = {"command_args_template": shlex.join(words)}
     payload = {"interaction_contract": {"cli_channel": {"selection_command": selection}}}
     args = request(None, decision_output_root=explicit if root_source == "explicit" else None,
-        context_delivery="on", codex_context_dir=str(native), turn_envelope=True)
+        context_delivery="on", codex_context_dir=str(native), turn_envelope=True,
+        max_page_output_bytes=output_limit)
     bind_capture_selection_transport(payload, args, capture_root=fallback)
     first = selection["command_args_template"]
     bind_capture_selection_transport(payload, args, capture_root=fallback)
@@ -415,8 +418,10 @@ def test_saved_selection_transport_preserves_identity_and_rebinds_once(tmp_path,
     assert parsed.decision_output_root == str({"saved": saved, "explicit": explicit, "fallback": fallback}[root_source])
     assert parsed.context_delivery == "on" and parsed.codex_context_dir == str(native)
     assert parsed.codex_context_root is None and parsed.turn_envelope
+    assert parsed.max_page_output_bytes == (output_limit or 64000)
     assert all(argv.count(option) == 1 for option in
-        ("--decision-output-root", "--context-delivery", "--codex-context-dir", "--turn-envelope"))
+        ("--decision-output-root", "--context-delivery", "--codex-context-dir", "--turn-envelope",
+         "--max-page-output-bytes"))
     assert not list(tmp_path.iterdir())
 
 
