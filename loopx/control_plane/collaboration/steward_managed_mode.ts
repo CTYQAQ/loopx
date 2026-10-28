@@ -508,6 +508,9 @@ export function admitStewardManagedTurn(params: JsonObject): JsonObject {
         const prior = requireJsonObject(original.loopx_request, "original rejected request");
         const result = requireJsonObject(requireJsonObject(original.response, "original response").native_loopx, "native rejection");
         const journal = requireJsonObject(proof.inspection, "canonical original Turn inspection");
+        const retained = requireJsonObject(proof.journal, "canonical rejected native Turn");
+        const failure = requireJsonObject(retained.host_failure, "recorded pre-publication rejection");
+        const receipt = requireJsonObject(retained.receipt, "recorded host failure receipt");
         const decision = requireJsonObject(journal.recovery_decision, "original native recovery decision");
         const effects = requireJsonObject(journal.recorded_effects, "original native effects");
         const invocation = requireJsonObject(result.effects, "original invocation effects");
@@ -518,14 +521,22 @@ export function admitStewardManagedTurn(params: JsonObject): JsonObject {
             || Object.keys(prior).length !== keys.length
             || keys.some(key => JSON.stringify(prior[key]) !== JSON.stringify(request[key]))
             || result.schema_version !== "loopx_turn_execution_v0" || result.ok !== false
-            || result.mode !== "run_once" || result.effects_scope !== "current_invocation"
-            || result.error_code !== "stale_goal_authority"
-            || result.error !== "first-party Host runtime rejected: stale_goal_authority"
+            || result.mode !== "run_once" || result.status !== "failed" || result.result_kind !== "host_failure"
+            || result.reason !== "first-party Host runtime rejected: stale_goal_authority"
             || result.resume_turn_key !== request.resume_turn_key
-            || proof.turn_key !== request.resume_turn_key || Object.values(invocation).some(value => value === true)
+            || proof.turn_key !== request.resume_turn_key || retained.turn_key !== request.resume_turn_key
+            || retained.status !== "failed" || retained.result_kind !== "host_failure"
+            || retained.reason !== result.reason || retained.host_result != null
+            || retained.host_attempt_count !== 1 || failure.kind !== "contract_rejected"
+            || failure.schema_version !== "loopx_turn_host_failure_v0" || failure.attempt !== 1 || failure.retryable !== false
+            || JSON.stringify(result.host_failure) !== JSON.stringify(retained.host_failure)
+            || receipt.failed_phase !== "host_execute"
+            || !Array.isArray(retained.completed_phases) || retained.completed_phases.length !== 0
+            || invocation.host_invoked !== true || invocation.state_written !== false
+            || invocation.quota_spent !== false || invocation.scheduler_acknowledged !== false
             || journal.schema_version !== "loopx_turn_journal_inspection_v1" || journal.ok !== true
             || journal.goal_matches !== true || journal.owner_matches !== true || journal.turn_key_matches !== true
-            || journal.journal_consistent !== true || journal.journal_status !== "in_progress"
+            || journal.journal_consistent !== true || journal.journal_status !== "failed"
             || !Array.isArray(journal.completed_phases) || journal.completed_phases.length !== 0
             || proof.host_attempt_count !== 1 || proof.generation_present !== false
             || effects.host_invoked !== null || effects.state_written !== false
