@@ -372,6 +372,11 @@ def test_acceptance_observation_does_not_transport_the_large_selected_body(tmp_p
 def test_captured_acceptance_does_not_replace_current_work_admission(acceptance_goal, tmp_path, change):
     project, document, acceptance_cli, run = acceptance_goal
     goal, agent, selected = "goal-acceptance", "agent-a", "todo_export"
+    from canonical_authority_fixture import empty_todo_display
+
+    # Dispatch needs the complete non-Todo Goal, while the canonical provider
+    # retains this work. The old unmarked display left a pending Goal read.
+    empty_todo_display(project / "state.md")
 
     def cli(*arguments):
         code, result = run(*arguments)
@@ -408,6 +413,8 @@ def test_captured_acceptance_does_not_replace_current_work_admission(acceptance_
 
     first = build_turn_envelope(full, captured_decision_path=str(capture / "decision.json"),
         scheduler_execution_context=scheduler_execution_context_for_runtime_profile("codex_app_heartbeat"))
+    assert not any(row.get("source") == "goal_state" for row in full["interaction_contract"]["agent_channel"]["required_reads"])
+    assert any(row.get("source") == "goal_state" for row in first["work_context"]["sources"])
     basis = next(row["content"] for row in first["work_context"]["sources"]
         if row.get("source") == "goal_acceptance")
     assert first["action"]["delivery_allowed"] is True

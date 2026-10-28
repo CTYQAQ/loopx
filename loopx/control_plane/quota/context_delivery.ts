@@ -7,6 +7,7 @@ import {jsonObject, requireJsonObject, requireNonEmptyString} from "../runtime_d
 import {canonicalAuthorityJson, canonicalAuthoritySha256} from "../coordination/authority_store_codec.ts";
 import {reusableTurnContext} from "../capability_hooks.ts";
 import {COORDINATION_STATE_CONTRACT} from "../coordination/coordination_state_contract.generated.ts";
+import {completeGoalNarrative} from "../work_items/goal_context_source.ts";
 
 const VERSION = "context_delivery_v1";
 export const OUTCOME_CONTEXT_PROJECTION_SCHEMA = "outcome_context_projection_v0";
@@ -196,8 +197,22 @@ function freshPaths(context: JsonObject, surface: Surface, legacyQuotaFields: re
     const inner = jsonObject(context.context);
     if (!inner) return {paths: [[]], valid: false};
     const projected = freshPaths(inner, surface, legacyQuotaFields, binding);
+    const wrapper: Path[] = [];
+    for (const [key, value] of Object.entries(context)) {
+      if (key === "context" || key === "instruction" && typeof value === "string") continue;
+      // Reuse only exact explanatory prose. Scope, identities, current
+      // verdicts and unknown controls remain literal, including after reorder.
+      if (key === "outcome_index" && Array.isArray(value) && value.length) {
+        value.forEach((item, i) => {
+          const row = jsonObject(item);
+          if (!row) { wrapper.push([key, i]); return; }
+          for (const [field, detail] of Object.entries(row))
+            if (field !== "objective" || typeof detail !== "string") wrapper.push([key, i, field]);
+        });
+      } else wrapper.push([key]);
+    }
     return {valid: projected.valid, paths: [
-      ...Object.keys(context).filter(key => key !== "context").map(key => [key]),
+      ...wrapper,
       ...projected.paths.map(path => ["context", ...path]),
     ]};
   }

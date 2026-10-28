@@ -882,6 +882,7 @@ export function planInteractionWorkContext(request: JsonObject): JsonObject {
       && packet.effective_action !== EffectiveAction.HEARTBEAT_SETTLED_SKIP};
 }
 
+
 export function assertGoalContextDelivered(channel: JsonObject): void {
   const reads = Array.isArray(channel.required_reads) ? channel.required_reads : [];
   if (reads.some(read => jsonObject(read)?.source === "goal_state")) {
