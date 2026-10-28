@@ -22,9 +22,9 @@ from loopx.control_plane.projects.registry_codec import (
 from loopx.control_plane.turn_driver.codex_cli import (
     CODEX_CLI_SESSION_SCHEMA_VERSION,
     CODEX_STDIO_MCP_SERVER_SCHEMA_VERSION,
+    CodexFailureObservation,
     _diagnostic_failure_category,
     _event_failure_categories,
-    _event_failure_category,
     _prompt,
     _select_failure_category,
     codex_cli_result_schema,
@@ -331,9 +331,9 @@ def test_codex_cli_failure_envelopes_match_real_protocol_shapes() -> None:
     assert fixture["schema_version"] == "loopx_codex_failure_envelopes_v1"
     for case in fixture["cases"]:
         assert case["source"]
-        assert _event_failure_category(case["event"]) == case["expected"], case[
-            "name"
-        ]
+        observer = CodexFailureObservation()
+        observer.observe_event(case["event"])
+        assert observer.category() == (case["expected"] or "exit_nonzero"), case["name"]
 
 
 def test_codex_cli_unknown_structured_code_blocks_message_fallback() -> None:
@@ -345,7 +345,9 @@ def test_codex_cli_unknown_structured_code_blocks_message_fallback() -> None:
         },
     }
 
-    assert _event_failure_category(event) == "unknown"
+    observer = CodexFailureObservation()
+    observer.observe_event(event)
+    assert observer.category() == "unknown"
 
 
 @pytest.mark.parametrize("event_type", ["error", "turn.failed"])
@@ -353,12 +355,18 @@ def test_codex_cli_unknown_structured_code_blocks_message_fallback() -> None:
 def test_codex_cli_message_only_subscription_limit_is_not_a_transient_retry(event_type, apostrophe) -> None:
     message = f"You{apostrophe}ve hit your usage limit. Try again after the reset."
     event = {"type": event_type, "error": {"message": message}}
-    assert _event_failure_category(event) == "quota_exhausted"
+    observer = CodexFailureObservation()
+    observer.observe_event(event)
+    assert observer.category() == "quota_exhausted"
     # A present discriminator still wins over familiar prose.
     event["error"]["code"] = "future_provider_failure"
-    assert _event_failure_category(event) == "unknown"
+    observer = CodexFailureObservation()
+    observer.observe_event(event)
+    assert observer.category() == "unknown"
     event["error"]["code"] = "rate_limit_exceeded"
-    assert _event_failure_category(event) == "rate_limited"
+    observer = CodexFailureObservation()
+    observer.observe_event(event)
+    assert observer.category() == "rate_limited"
 
 
 @pytest.mark.parametrize(
@@ -418,7 +426,9 @@ def test_codex_cli_specific_quota_code_wins_over_http_429() -> None:
         },
     }
 
-    assert _event_failure_category(event) == "quota_exhausted"
+    observer = CodexFailureObservation()
+    observer.observe_event(event)
+    assert observer.category() == "quota_exhausted"
 
 
 def test_codex_cli_prompt_isolates_subagent_instructions_to_enabled_request() -> None:

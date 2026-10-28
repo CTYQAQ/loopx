@@ -382,20 +382,6 @@ def codex_cli_event_session_id(event: Mapping[str, Any]) -> str | None:
     return None
 
 
-def codex_cli_session_id_from_jsonl(value: str) -> str | None:
-    """Return the first opaque Codex thread id from an exec JSONL stream."""
-
-    for line in value.splitlines():
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(event, Mapping):
-            if session_id := codex_cli_event_session_id(event):
-                return session_id
-    return None
-
-
 def _diagnostic_failure_category(line: str) -> str | None:
     text = line.lower().replace("’", "'")
     if any(
@@ -619,13 +605,6 @@ def _event_failure_categories(
                 if category is not None:
                     return None, category
     return None, None
-
-
-def _event_failure_category(event: Mapping[str, Any]) -> str | None:
-    """Classify one error event without retaining its provider prose."""
-
-    structured, diagnostic = _event_failure_categories(event)
-    return structured or diagnostic
 
 
 def _select_failure_category(categories: list[str]) -> str | None:
