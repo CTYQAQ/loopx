@@ -1,3 +1,4 @@
+import {createHash} from "node:crypto";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {JsonObject} from "../../loopx/control_plane/effect_program.ts";
@@ -184,6 +185,36 @@ function inline(delivery: JsonObject, path: (string | number)[]): unknown {
     node = ((node.changed ?? node.items) as Record<string | number, JsonObject>)?.[path[i]];
   }
 }
+
+test("complete original Goal text reuses the same integrity witness as Host dispatch", () => {
+  const goal = {state_file: "goal.md", text: long, full_source: true,
+    revision: `sha256:${createHash("sha256").update(long, "utf8").digest("hex")}`};
+  const value = {complete: true, sources: [{source: "goal_state", content: goal}]};
+  const baseline = full(value);
+  const delta = warm(value, baseline);
+  assert.equal(delta.mode, "delta");
+  assert.ok(!JSON.stringify(delta.changes).includes(long), "A verified complete Goal is already in the retained input");
+  assert.equal(inline(delta, ["sources", 0, "content", "full_source"]), true);
+  assert.equal(inline(delta, ["sources", 0, "content", "revision"]), goal.revision);
+  assert.deepEqual(recover(delta, baseline, value).context, value);
+  for (const changed of [
+    {...goal, text: long + "Corrected final stop."},
+    {...goal, revision: `sha256:${"a".repeat(64)}`},
+    {...goal, read_complete: false}, {...goal, full_source: false},
+  ]) {
+    const current = {complete: true, sources: [{source: "goal_state", content: changed}]};
+    const wire = warm(current, baseline);
+    const text = wire.mode === "full"
+      ? ((wire.context as JsonObject).sources as JsonObject[])[0].content as JsonObject
+      : {text: inline(wire, ["sources", 0, "content", "text"])};
+    assert.equal(text.text, changed.text);
+    assert.deepEqual(recover(wire, baseline, current).context, current);
+  }
+  const corrected = {...goal, text: long + "Corrected final stop."};
+  corrected.revision = `sha256:${createHash("sha256").update(corrected.text, "utf8").digest("hex")}`;
+  const current = {complete: true, sources: [{source: "goal_state", content: corrected}]};
+  assert.deepEqual(recover(warm(current, baseline), baseline, current).context, current);
+});
 
 test("full first; unsupported or uncertain retention never becomes an Agent gate", () => {
   const original = context(), saved = structuredClone(original), baseline = full(original);
